@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+//option go_package = "github.com/lebedev_k/txmlconnector";
+
+package transaqConnector;
+
+message DataRequest {
+}
+
+message DataResponse {
+  string message = 1;
+}
+
+message SendCommandRequest {
+  string message = 1;
+}
+
+message SendCommandResponse {
+  string message = 1;
+}
+
+service ConnectService {
+  rpc FetchResponseData(DataRequest) returns (stream DataResponse) {}
+  rpc SendCommand(SendCommandRequest) returns (SendCommandResponse) {}
+}
