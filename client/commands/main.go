@@ -12,6 +12,11 @@ type ServerStatus struct {
 	Build     int      `xml:"build,attr,omitempty"`     // билд сервера
 }
 
+type Command struct {
+	XMLName xml.Name `xml:"command"`
+	Id      string   `xml:"id,attr"`
+}
+
 type Connect struct {
 	XMLName        xml.Name `xml:"command"`
 	Id             string   `xml:"id,attr"`

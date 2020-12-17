@@ -4,8 +4,6 @@
 // 	protoc        v3.14.0
 // source: connect.proto
 
-//option go_package = "github.com/lebedev_k/txmlconnector";
-
 package transaqConnector
 
 import (

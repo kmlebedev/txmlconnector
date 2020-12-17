@@ -3,14 +3,11 @@
 // https://github.com/ivanantipin/transaqgrpc/blob/master/tqgrpcserver/XmlConnector.cs
 package main
 
-/*
-#include <stdlib.h>
-*/
 import "C"
-
 import (
 	"context"
 	"fmt"
+	"github.com/kmlebedev/txmlconnector/proto"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"net"
@@ -18,9 +15,13 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-	"txmlconnector/proto"
 	"unsafe"
 )
+
+/*
+#include <stdlib.h>
+*/
+import "C"
 
 var (
 	txmlconnector    = syscall.NewLazyDLL("txmlconnector64.dll")
@@ -38,30 +39,39 @@ type server struct {
 	transaqConnector.UnimplementedConnectServiceServer
 }
 
-func init() {
-	log.Println("Initialize txmlconnector")
-	_, _, err := procInitialize.Call(uintptr(unsafe.Pointer(C.CString("logs"))), uintptr(3))
+//export receiveData
+func receiveData(cmsg *C.char) (ret uintptr) {
+	msg := C.GoString(cmsg)
+	fmt.Printf("Go.receiveData(): called with arg = %s\n", msg)
+	defer procFreeMemory.Call(uintptr(unsafe.Pointer(cmsg)))
+	Messages <- msg
+	ok := true
+	return uintptr(unsafe.Pointer(&ok))
+}
 
+func init() {
+	ll := log.InfoLevel
+	if lvl, ok := os.LookupEnv("TC_LOG_LEVEL"); ok {
+		if level, err := log.ParseLevel(lvl); err == nil {
+			ll = level
+		}
+	}
+	log.SetLevel(ll)
+	log.Infoln("Initialize txmlconnector")
+	_, _, err := procInitialize.Call(uintptr(unsafe.Pointer(C.CString("logs"))), uintptr(3))
 	if err != syscall.Errno(0) {
 		log.Panic("Initialize error: ", err)
 	}
+
 	_, _, err = procSetCallback.Call(syscall.NewCallback(receiveData))
 	if err != syscall.Errno(0) {
 		log.Panic("Set callback fn error: ", err)
 	}
 }
 
-//export receiveData
-func receiveData(cmsg *C.char) (ret uintptr) {
-	msg := C.GoString(cmsg)
-	fmt.Printf("Go.receiveData(): called with arg = %s\n", msg)
-	defer C.free(unsafe.Pointer(cmsg))
-	Messages <- msg
-	return 0
-}
-
 func main() {
-	log.Println("Server running ...")
+	defer procUnInitialize.Call()
+	log.Infoln("Server running ...")
 
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
@@ -73,7 +83,7 @@ func main() {
 	SetupCloseHandler(srv)
 
 	transaqConnector.RegisterConnectServiceServer(srv, &server{})
-	log.Println("Press CRTL+C to stop the server...")
+	log.Infoln("Press CRTL+C to stop the server...")
 	log.Fatalln(srv.Serve(lis))
 }
 
@@ -82,7 +92,7 @@ func SetupCloseHandler(srv *grpc.Server) {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
-		fmt.Println("\r- Ctrl+C pressed in Terminal")
+		log.Info("\r- Ctrl+C pressed in Terminal")
 		srv.GracefulStop()
 		close(Messages)
 		Done <- true
@@ -90,16 +100,24 @@ func SetupCloseHandler(srv *grpc.Server) {
 	}()
 }
 
-func (s *server) SendCommand(ctx context.Context, request *transaqConnector.SendCommandRequest) (*transaqConnector.SendCommandResponse, error) {
-	log.Println("Request: ", request.Message)
-	reqData := C.CString(request.Message)
+func txmlSendCommand(msg string) (data *string) {
+	log.Debug("txmlSendCommand() Call: ", msg)
+	reqData := C.CString(msg)
 	resp, _, err := procSendCommand.Call(uintptr(unsafe.Pointer(reqData)))
 	if err != syscall.Errno(0) {
-		return nil, err
+		log.Error("txmlSendCommand() ", err)
+		return nil
 	}
-	resData := C.GoString((*C.char)(unsafe.Pointer(resp)))
-	log.Println("SendCommand response: ", resData)
-	return &transaqConnector.SendCommandResponse{Message: resData}, nil
+	respPointer := unsafe.Pointer(resp)
+	respData := C.GoString((*C.char)(respPointer))
+	defer procFreeMemory.Call(resp)
+	log.Debug("SendCommand Data: ", respData)
+	return &respData
+}
+
+func (s *server) SendCommand(ctx context.Context, request *transaqConnector.SendCommandRequest) (*transaqConnector.SendCommandResponse, error) {
+	resData := txmlSendCommand(request.Message)
+	return &transaqConnector.SendCommandResponse{Message: *resData}, nil
 }
 
 func (s *server) FetchResponseData(in *transaqConnector.DataRequest, srv transaqConnector.ConnectService_FetchResponseDataServer) error {
@@ -114,8 +132,9 @@ func (s *server) FetchResponseData(in *transaqConnector.DataRequest, srv transaq
 				log.Error("send error %v", err)
 			}
 		case <-ctx.Done():
-			fmt.Println("Done loop")
-			return ctx.Err()
+			fmt.Println("Done loop ", ctx.Err())
+			txmlSendCommand("<command id=\"disconnect\"/>")
+			return nil
 		case done := <-Done:
 			if done {
 				fmt.Println("Stop loop")

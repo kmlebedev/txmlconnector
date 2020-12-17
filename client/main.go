@@ -8,8 +8,9 @@ import (
 	"google.golang.org/grpc"
 	"io"
 	"os"
-	"txmlconnector/client/commands"
-	"txmlconnector/proto"
+
+	. "github.com/kmlebedev/txmlconnector/client/commands"
+	pb "github.com/kmlebedev/txmlconnector/proto"
 )
 
 // Encodes the request into XML format.
@@ -18,6 +19,16 @@ func encodeRequest(request interface{}) string {
 	e := xml.NewEncoder(&bytesBuffer)
 	e.Encode(request)
 	return bytesBuffer.String()
+}
+
+func init() {
+	ll := log.InfoLevel
+	if lvl, ok := os.LookupEnv("TC_LOG_LEVEL"); ok {
+		if level, err := log.ParseLevel(lvl); err == nil {
+			ll = level
+		}
+	}
+	log.SetLevel(ll)
 }
 
 func main() {
@@ -33,29 +44,32 @@ func main() {
 	}
 	defer conn.Close()
 
-	client := transaqConnector.NewConnectServiceClient(conn)
-	req := commands.Connect{
+	client := pb.NewConnectServiceClient(conn)
+	req := Connect{
 		Id:             "connect",
 		Login:          os.Getenv("TC_LOGIN"),
 		Password:       os.Getenv("TC_PASSWORD"),
 		Host:           os.Getenv("TC_HOST"),
 		Port:           os.Getenv("TC_PORT"),
 		Rqdelay:        100,
-		SessionTimeout: 1000,
-		RequestTimeout: 1000,
+		SessionTimeout: 10,
+		RequestTimeout: 5,
+		PushUlimits:    0,
+		PushPosEquity:  0,
+		Language:       "en",
+		Autopos:        true,
 	}
-	request := &transaqConnector.SendCommandRequest{Message: encodeRequest(req)}
+	request := &pb.SendCommandRequest{Message: encodeRequest(req)}
 
-	//ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	//defer cancel()
 	ctx := context.Background()
 	response, err := client.SendCommand(ctx, request)
 	if err != nil {
 		log.Error("SendCommand: ", err)
 	}
-	log.Println("res ", response.GetMessage())
+	log.Info("res ", response.GetMessage())
+	defer client.SendCommand(ctx, &pb.SendCommandRequest{Message: encodeRequest(Command{Id: "disconnect"})})
 
-	stream, err := client.FetchResponseData(ctx, &transaqConnector.DataRequest{})
+	stream, err := client.FetchResponseData(ctx, &pb.DataRequest{})
 	if err != nil {
 		log.Fatalf("open stream error %v", err)
 	}
@@ -65,16 +79,16 @@ func main() {
 		for {
 			resp, err := stream.Recv()
 			if err == io.EOF {
-				log.Printf("Resp received: %s", resp.Message)
+				log.Debug("Resp received: %s", resp.Message)
 				done <- true //means stream is finished
 				return
 			}
 			if err != nil {
-				log.Fatalf("cannot receive %v", err)
+				log.Panicf("stream.Recv() cannot receive %v", err)
 			}
-			log.Printf("Resp received: %s", resp.Message)
+			log.Debugf("Resp received: %s", resp.Message)
 		}
 	}()
 	<-done //we will wait until all response is received
-	log.Printf("finished")
+	log.Info("finished")
 }
