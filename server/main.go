@@ -23,14 +23,19 @@ import (
 */
 import "C"
 
+const (
+	txml_dll_name     = "txmlconnector64"
+	txml_dll_ver_demo = "6.19.2.21.6"
+	txml_dll_ver_main = "6.17.2.21.2"
+)
+
 var (
-	txmlconnector    = syscall.NewLazyDLL("txmlconnector64.dll")
-	procSetCallback  = txmlconnector.NewProc("SetCallback")
-	procSendCommand  = txmlconnector.NewProc("SendCommand")
-	procFreeMemory   = txmlconnector.NewProc("FreeMemory")
-	procInitialize   = txmlconnector.NewProc("Initialize")
-	procUnInitialize = txmlconnector.NewProc("UnInitialize")
-	procSetLogLevel  = txmlconnector.NewProc("SetLogLevel")
+	txmlconnector    = &syscall.LazyDLL{}
+	procSetCallback  = &syscall.LazyProc{}
+	procSendCommand  = &syscall.LazyProc{}
+	procFreeMemory   = &syscall.LazyProc{}
+	procInitialize   = &syscall.LazyProc{}
+	procUnInitialize = &syscall.LazyProc{}
 	Messages         = make(chan string)
 	Done             = make(chan bool)
 )
@@ -57,7 +62,23 @@ func init() {
 		}
 	}
 	log.SetLevel(ll)
-	log.Infoln("Initialize txmlconnector")
+	var dllPath string
+	if _, ok := os.LookupEnv("TC_DEMO"); ok {
+		dllPath = fmt.Sprintf("%s-%s.dll", txml_dll_name, txml_dll_ver_demo)
+	} else if ver, ok := os.LookupEnv("TC_DLL_VER"); ok {
+		dllPath = fmt.Sprintf("%s-%s.dll", txml_dll_name, ver)
+	} else if path, ok := os.LookupEnv("TC_DLL_PATH"); ok {
+		dllPath = path
+	} else {
+		dllPath = fmt.Sprintf("%s-%s.dll", txml_dll_name, txml_dll_ver_main)
+	}
+	txmlconnector = syscall.NewLazyDLL(dllPath)
+	log.Infof("Initialize module: %s", dllPath)
+	procSetCallback = txmlconnector.NewProc("SetCallback")
+	procSendCommand = txmlconnector.NewProc("SendCommand")
+	procFreeMemory = txmlconnector.NewProc("FreeMemory")
+	procInitialize = txmlconnector.NewProc("Initialize")
+	procUnInitialize = txmlconnector.NewProc("UnInitialize")
 	_, _, err := procInitialize.Call(uintptr(unsafe.Pointer(C.CString("logs"))), uintptr(3))
 	if err != syscall.Errno(0) {
 		log.Panic("Initialize error: ", err)
@@ -108,16 +129,16 @@ func txmlSendCommand(msg string) (data *string) {
 		log.Error("txmlSendCommand() ", err)
 		return nil
 	}
-	respPointer := unsafe.Pointer(resp)
-	respData := C.GoString((*C.char)(respPointer))
+	respData := C.GoString((*C.char)(unsafe.Pointer(resp)))
 	defer procFreeMemory.Call(resp)
 	log.Debug("SendCommand Data: ", respData)
 	return &respData
 }
 
 func (s *server) SendCommand(ctx context.Context, request *transaqConnector.SendCommandRequest) (*transaqConnector.SendCommandResponse, error) {
-	resData := txmlSendCommand(request.Message)
-	return &transaqConnector.SendCommandResponse{Message: *resData}, nil
+	return &transaqConnector.SendCommandResponse{
+		Message: *txmlSendCommand(request.Message),
+	}, nil
 }
 
 func (s *server) FetchResponseData(in *transaqConnector.DataRequest, srv transaqConnector.ConnectService_FetchResponseDataServer) error {
@@ -132,7 +153,7 @@ func (s *server) FetchResponseData(in *transaqConnector.DataRequest, srv transaq
 				log.Error("send error %v", err)
 			}
 		case <-ctx.Done():
-			fmt.Println("Done loop ", ctx.Err())
+			fmt.Println("Done loop", ctx.Err())
 			txmlSendCommand("<command id=\"disconnect\"/>")
 			return nil
 		case done := <-Done:

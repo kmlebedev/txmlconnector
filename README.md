@@ -37,19 +37,28 @@ service ConnectService {
 ```
 
 ### Starting server in Linux/MacOSX
-#### MacOSX
+#### Requirements
+##### MacOSX
 
 ```shell
 brew install mingw-w64 
 brew cask install wine-stable
 ```
-#### Debian/Ubintu
+##### Debian/Ubintu
 
 ```shell
 sudo apt install wine64
 ```
 
+#### Set environment variables
+
+```shell
+export TC_LOG_LEVEL=debug
+export TC_DLL_PATH=txmlconnector64-6.17.2.21.2.dll
+```
+
 #### Example output:
+
 ```bash
 make server
 CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" GOOS=windows GOARCH=amd64 go build -race -ldflags "-s -w" -o bin/server.exe server/main.go
@@ -91,3 +100,5 @@ INFO[0001] res <result success="true"/>
  - [Creating a simplegRPC client and server application with Golang](http://www.inanzzz.com/index.php/post/fczr/creating-a-simple-grpc-client-and-server-application-with-golang)
  - [Using Go to call Windows API](https://medium.com/@justen.walker/breaking-all-the-rules-using-go-to-call-windows-api-2cbfd8c79724)
  - [How to Set Up gRPC Server-Side Streaming with Go](https://www.freecodecamp.org/news/grpc-server-side-streaming-with-go/)
+ - [BB](https://www.investopedia.com/terms/b/bollingerbands.asp)
+ 
