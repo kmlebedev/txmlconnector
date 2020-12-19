@@ -7,6 +7,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	cmds "github.com/kmlebedev/txmlconnector/client/commands"
 	"github.com/kmlebedev/txmlconnector/proto"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -47,7 +48,7 @@ type server struct {
 //export receiveData
 func receiveData(cmsg *C.char) (ret uintptr) {
 	msg := C.GoString(cmsg)
-	fmt.Printf("Go.receiveData(): called with arg = %s\n", msg)
+	log.Debugf("Go.receiveData(): called with arg = %s\n", msg)
 	defer procFreeMemory.Call(uintptr(unsafe.Pointer(cmsg)))
 	Messages <- msg
 	ok := true
@@ -122,7 +123,7 @@ func SetupCloseHandler(srv *grpc.Server) {
 }
 
 func txmlSendCommand(msg string) (data *string) {
-	log.Debug("txmlSendCommand() Call: ", msg)
+	log.Info("txmlSendCommand() Call: ", msg)
 	reqData := C.CString(msg)
 	resp, _, err := procSendCommand.Call(uintptr(unsafe.Pointer(reqData)))
 	if err != syscall.Errno(0) {
@@ -131,7 +132,7 @@ func txmlSendCommand(msg string) (data *string) {
 	}
 	respData := C.GoString((*C.char)(unsafe.Pointer(resp)))
 	defer procFreeMemory.Call(resp)
-	log.Debug("SendCommand Data: ", respData)
+	log.Info("SendCommand Data: ", respData)
 	return &respData
 }
 
@@ -147,14 +148,14 @@ func (s *server) FetchResponseData(in *transaqConnector.DataRequest, srv transaq
 	for {
 		select {
 		case msg := <-Messages:
-			fmt.Println("received message", msg)
+			log.Debug("Received message", msg)
 			resp := transaqConnector.DataResponse{Message: msg}
 			if err := srv.Send(&resp); err != nil {
-				log.Error("send error %v", err)
+				log.Error("Sending error %s", err)
 			}
 		case <-ctx.Done():
-			fmt.Println("Done loop", ctx.Err())
-			txmlSendCommand("<command id=\"disconnect\"/>")
+			fmt.Println("Loop done", ctx.Err())
+			txmlSendCommand(cmds.EncodeRequest(cmds.Command{Id: "disconnect"}))
 			return nil
 		case done := <-Done:
 			if done {
