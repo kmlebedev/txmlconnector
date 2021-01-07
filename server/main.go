@@ -163,7 +163,8 @@ func (s *server) FetchResponseData(in *transaqConnector.DataRequest, srv transaq
 			}
 			return nil
 		case t := <-ticker.C:
-			fmt.Println("no message received, Tick at", t)
+			//txmlSendCommand(cmds.EncodeRequest(cmds.Command{Id: "server_status"}))
+			log.Infoln("no message received, Tick at", t)
 		}
 	}
 }

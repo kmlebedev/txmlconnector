@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/xml"
+	"fmt"
 )
 
 type ServerStatus struct {
@@ -18,6 +19,8 @@ type ServerStatus struct {
 type Command struct {
 	XMLName xml.Name `xml:"command"`
 	Id      string   `xml:"id,attr"`
+	Union   string   `xml:"union,attr,omitempty"`
+	Client  string   `xml:"client,attr,omitempty"`
 }
 
 type Connect struct {
@@ -166,11 +169,19 @@ type MoneyPosition struct {
 	Comission float64 `xml:"comission"`          // Сумма списанной комиссии
 }
 
+func (p MoneyPosition) StringT() string {
+	return fmt.Sprintf("%s\t%.2f\t%.2f", p.Shortname, p.Saldoin, p.Saldo)
+}
+
 type SecPosition struct {
 	Position
 	SecInfo
 	Amount float64 `xml:"amount"` // Текущая оценка стоимости позиции, в валюте инструмента
 	Equity float64 `xml:"equity"` // Текущая оценка стоимости позиции, в рублях
+}
+
+func (p SecPosition) StringT() string {
+	return fmt.Sprintf("%s\t%.2f\t%.2f", p.Shortname, p.Saldoin, p.Amount)
 }
 
 type Forts struct {
@@ -235,15 +246,109 @@ type UnitedLimits struct {
 }
 
 type Positions struct {
-	MoneyPosition    MoneyPosition    `xml:"money_position,omitempty"`
-	SecPosition      SecPosition      `xml:"sec_position,omitempty"`
+	MoneyPosition    []MoneyPosition  `xml:"money_position,omitempty"`
+	SecPositions     []SecPosition    `xml:"sec_position,omitempty"`
 	FortsPosition    FortsPosition    `xml:"forts_position,omitempty"`
 	FortsMoney       FortsMoney       `xml:"forts_money,omitempty"`       // деньги ФОРТС
 	FortsCollaterals FortsCollaterals `xml:"forts_collaterals,omitempty"` // залоги ФОРТС
 	SpotLimit        SpotLimit        `xml:"spot_limit,omitempty"`
-	UnitedLimits     UnitedLimits     `xml:"united_limits,omitempty"` //
+	UnitedLimits     []UnitedLimits   `xml:"united_limits,omitempty"` //
 }
 
+type valuePart struct {
+	OpenBalance float64 `xml:"open_balance"` // Входящая денежная позиция
+	Bought      float64 `xml:"bought"`       // Затрачено на покупки
+	Sold        float64 `xml:"sold"`         // Выручено от продаж
+	Settled     float64 `xml:"settled"`      // Исполнено
+	Balance     float64 `xml:"balance"`      // Текущая денежная позиция
+
+}
+type UnitedPortfolio struct {
+	XMLName    xml.Name `xml:"united_portfolio"`
+	Union      string   `xml:"union,attr"`  // код юниона
+	OpenEquity float64  `xml:"open_equity"` // Входящая оценка стоимости единого портфеля
+	Equity     float64  `xml:"equity"`      // Текущая оценка стоимости единого портфеля
+	ChrgoffIr  float64  `xml:"chrgoff_ir"`  // Корреляционный вычет планового риска
+	InitReq    float64  `xml:"init_req"`    // Плановый риск (размер начальных требований)
+	ChrgoffMr  float64  `xml:"chrgoff_mr"`  // Корреляционный вычет минимальных требований
+	MaintReq   float64  `xml:"maint_req"`   // Размер минимальных требований
+	RegEquity  float64  `xml:"reg_equity"`  // Размер минимальных требований
+	RegIr      float64  `xml:"reg_ir"`      // Размер минимальных требований
+	RegMr      float64  `xml:"reg_mr"`      // Размер минимальных требований
+	Vm         float64  `xml:"vm"`          // Вариационная маржа FORTS
+	FinRes     float64  `xml:"finres"`      // Финансовый результат последнего клиринга FORTS
+	Go         float64  `xml:"go"`          // Размер требуемого ГО, посчитанный биржей FORTS
+	VmMma      float64  `xml:"vm_mma"`      // Вариационная маржа FORTS MMA
+	Money      []struct {
+		Name string `xml:"name,attr"`
+		valuePart
+		Tax       float64 `xml:"tax"` // Уплачено комиссии
+		ValuePart []struct {
+			Register string `xml:"register,attr"`
+			valuePart
+		} `xml:"value_part,omitempty"`
+	} `xml:"money,omitempty"`
+	Asset []struct {
+		Code       string  `xml:"code,attr"`
+		Name       string  `xml:"name,attr"`
+		SetoffRate float64 `xml:"setoff_rate"` // Размер минимальных требований
+		InitReq    float64 `xml:"init_req"`    // Плановый риск (размер начальных требований)
+		MaintReq   float64 `xml:"maint_req"`   // Размер минимальных требований
+		Security   []struct {
+			Secid         int     `xml:"secid,attr"`
+			Market        int     `xml:"market"`
+			SecCode       string  `xml:"seccode"`
+			Price         float64 `xml:"price"`
+			OpenBalance   int     `xml:"open_balance"`   // Входящая нетто-позиция, штук
+			Bought        int     `xml:"bought"`         // Куплено, штук
+			Sold          int     `xml:"sold"`           // Продано, штук
+			Balance       int     `xml:"balance"`        // Текущая нетто-позиция, штук
+			BalancePrc    float64 `xml:"balance_prc"`    // Балансовая цена
+			UnrealizedPnl float64 `xml:"unrealized_pnl"` // Нереализованные прибыли/убытки
+			Buying        int     `xml:"buying"`         // Продано, штук
+			Selling       int     `xml:"selling"`        // Заявлено купить, штук
+			Equity        float64 `xml:"equity"`         // Заявлено продать, штук
+			RegEquity     float64 `xml:"reg_equity"`     // Стоимость в обеспечении портфеля нормативная
+			RiskrateLong  float64 `xml:"riskrate_long"`
+			RiskrateShort float64 `xml:"riskrate_short"`
+			ReserateLong  float64 `xml:"reserate_long"`
+			ReserateShort float64 `xml:"reserate_short"`
+			Pl            float64 `xml:"pl"`
+			PnlIncome     float64 `xml:"pnl_income"`
+			PnlIntraday   float64 `xml:"pnl_intraday"`
+			MaxBuy        int     `xml:"maxbuy"`
+			MaxSell       int     `xml:"maxsell"`
+			ValuePart     []struct {
+				Register    string `xml:"register,attr"`
+				OpenBalance int    `xml:"open_balance"` // Входящая нетто-позиция, штук
+				Bought      int    `xml:"bought"`       // Куплено, штук
+				Sold        int    `xml:"sold"`         // Продано, штук
+				Settled     int    `xml:"settled"`      // Исполнено, штук
+				Balance     int    `xml:"balance"`      // Текущая нетто-позиция, штук
+				Buying      int    `xml:"buying"`       // Продано, штук
+				Selling     int    `xml:"selling"`      // Заявлено купить, штук
+			} `xml:"value_part,omitempty"`
+		} `xml:"security,omitempty"`
+	} `xml:"asset,omitempty"`
+}
+
+type UnitedEquity struct {
+	XMLName xml.Name `xml:"united_equity"`
+	Union   string   `xml:"union,attr"` // код юниона
+	Equity  float64  `xml:"equity"`     // Текущая оценка стоимости единого портфеля
+}
+
+/*
+func (p Positions) StringT() string {
+	out := []string{
+		fmt.Sprintf("%s Оценка портфеля: %.2f Свободно: %.2f Прибыль, день: %.2f", p.UnitedLimits.Union, p.UnitedLimits.Equity, p.UnitedLimits.Free, p.UnitedLimits.OpenEquity - p.UnitedLimits.Equity),
+		//fmt.Sprintf("Инструмент\tПозиция\tКотировка\tОценка\tМаржа\tОбеспечение\tСредняя\tПрибыль,день\tПрибыль"),
+		p.MoneyPosition.StringT(),
+		p.SecPosition.StringT(),
+	}
+	return strings.Join(out, "\n")
+}
+*/
 // Клиентские счета
 type Client struct {
 	XMLName  xml.Name `xml:"client"`
@@ -259,6 +364,7 @@ type Client struct {
 // Юнионы, находящиеся в управлении клиента
 type Union struct {
 	XMLName xml.Name `xml:"union"`
+	Id      string   `xml:"id,attr"`     //код юниона
 	Remove  string   `xml:"remove,attr"` // true/false
 }
 
@@ -271,6 +377,14 @@ type Result struct {
 	XMLName xml.Name `xml:"result"`
 	Success string   `xml:"success,attr"` // true/false
 	Message string   `xml:"message"`      // error message
+}
+
+type NewsHeader struct {
+	XMLName   xml.Name `xml:"news_header"`
+	Id        int      `xml:"id"`              // порядковый номер новости
+	TimeStamp string   `xml:"time_stamp"`      // дата-время новости (от источника)
+	Source    string   `xml:"source,charData"` // источник новости
+	Title     string   `xml:"title,charData"`  // заголовок новости
 }
 
 // Encodes the request into XML format.
