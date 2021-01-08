@@ -21,6 +21,10 @@ type Command struct {
 	Id      string   `xml:"id,attr"`
 	Union   string   `xml:"union,attr,omitempty"`
 	Client  string   `xml:"client,attr,omitempty"`
+	SecId   int      `xml:"secid,attr,omitempty"`
+	Period  int      `xml:"period,attr,omitempty"`
+	Count   int      `xml:"count,attr,omitempty"`
+	Reset   bool     `xml:"reset,attr,omitempty"`
 }
 
 type Connect struct {
@@ -50,7 +54,7 @@ type Markets struct {
 	} `xml:"market"`
 }
 
-type Candlekinds struct {
+type CandleKinds struct {
 	XMLName xml.Name `xml:"candlekinds"`
 	Items   []struct {
 		ID     int    `xml:"id"`
@@ -246,13 +250,13 @@ type UnitedLimits struct {
 }
 
 type Positions struct {
-	MoneyPosition    []MoneyPosition  `xml:"money_position,omitempty"`
-	SecPositions     []SecPosition    `xml:"sec_position,omitempty"`
-	FortsPosition    FortsPosition    `xml:"forts_position,omitempty"`
-	FortsMoney       FortsMoney       `xml:"forts_money,omitempty"`       // деньги ФОРТС
-	FortsCollaterals FortsCollaterals `xml:"forts_collaterals,omitempty"` // залоги ФОРТС
-	SpotLimit        SpotLimit        `xml:"spot_limit,omitempty"`
-	UnitedLimits     []UnitedLimits   `xml:"united_limits,omitempty"` //
+	MoneyPosition    []MoneyPosition    `xml:"money_position,omitempty"`
+	SecPositions     []SecPosition      `xml:"sec_position,omitempty"`
+	FortsPosition    []FortsPosition    `xml:"forts_position,omitempty"`
+	FortsMoney       []FortsMoney       `xml:"forts_money,omitempty"`       // деньги ФОРТС
+	FortsCollaterals []FortsCollaterals `xml:"forts_collaterals,omitempty"` // залоги ФОРТС
+	SpotLimit        []SpotLimit        `xml:"spot_limit,omitempty"`
+	UnitedLimits     []UnitedLimits     `xml:"united_limits,omitempty"`
 }
 
 type valuePart struct {

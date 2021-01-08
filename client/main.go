@@ -22,10 +22,10 @@ type TCClient struct {
 		ServerStatus    ServerStatus
 		Markets         Markets
 		Boards          Boards
-		Candlekinds     Candlekinds
+		CandleKinds     CandleKinds
 		Securities      Securities
 		Pits            Pits
-		Positions       Positions
+		Positions       *Positions
 		UnitedPortfolio *UnitedPortfolio
 		UnitedEquity    UnitedEquity
 		SecInfoUpd      SecInfoUpd
@@ -172,7 +172,7 @@ func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchRespons
 				log.Error("Decode boards ", err, " msg:", resp.Message)
 			}
 		case "candlekinds":
-			if err := xml.Unmarshal(msgData, &tc.Data.Candlekinds); err != nil {
+			if err := xml.Unmarshal(msgData, &tc.Data.CandleKinds); err != nil {
 				log.Error("Decode candlekinds ", err, " msg:", resp.Message)
 			}
 		case "securities":
@@ -184,10 +184,13 @@ func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchRespons
 				log.Error("Decode pits ", err, " msg:", resp.Message)
 			}
 		case "positions":
-			if err := xml.Unmarshal(msgData, &tc.Data.Positions); err != nil {
+			data := Positions{}
+			if err := xml.Unmarshal(msgData, &data); err != nil {
 				log.Error("Decode positions ", err, " msg:", resp.Message)
+			} else {
+				tc.Data.Positions = &data
+				tc.ResponseChannel <- startElement.Name.Local
 			}
-			log.Debug(resp.Message)
 		case "united_portfolio":
 			data := UnitedPortfolio{}
 			if err := xml.Unmarshal(msgData, &data); err != nil {
