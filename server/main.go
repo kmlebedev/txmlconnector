@@ -1,7 +1,7 @@
-//+build windows,amd64
 package main
 
-// https://github.com/ivanantipin/transaqgrpc/blob/master/tqgrpcserver/XmlConnector.cs
+//+build windows,amd64
+//https://github.com/ivanantipin/transaqgrpc/blob/master/tqgrpcserver/XmlConnector.cs
 
 import "C"
 import (
