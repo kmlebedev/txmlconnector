@@ -26,6 +26,6 @@ jobs:
           goos: windows
           goarch: amd64
           overwrite: true
-          #project_path: server
-          binary_name: txmlconnector-server-
+          project_path: "./server"
+          binary_name: "txmlconnector-server-"
           asset_name: "txmlconnector-server-${{ env.BUILD_TIME }}-${{ matrix.goos }}-${{ matrix.goarch }}"
