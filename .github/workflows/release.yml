@@ -1,10 +1,10 @@
 name: Release
 
-#on: workflow_dispatch
+on: workflow_dispatch
 
-on:
-  release:
-    types: [created]
+#on:
+#  release:
+#    types: [created]
 
 jobs:
   build:
@@ -23,9 +23,9 @@ jobs:
           goos: windows
           goarch: amd64
           #overwrite: true
-          #release_tag: dev
+          release_tag: dev
           project_path: server
           extra_files: txmlconnector64-6.19.2.21.6.dll
           binary_name: "txmlconnector-server"
-          pre_command: "apt-get update && apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64"
+          pre_command: "sh -c 'apt-get update;apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64'"
           build_command: "export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc && go buid"
