@@ -28,4 +28,4 @@ jobs:
           overwrite: true
           #release_tag: dev
           project_path: server
-          binary_name: "txmlconnector-server-"
+          binary_name: "txmlconnector-server"
