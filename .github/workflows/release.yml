@@ -28,4 +28,4 @@ jobs:
           overwrite: true
           pre_command: "pwd"
           binary_name: "txmlconnector-server-"
-          build_command: "CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build server/main.go"
+          build_command: "go build server/main.go"

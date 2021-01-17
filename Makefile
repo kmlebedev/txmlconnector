@@ -12,7 +12,7 @@ client: ## Build and run client.
 	go build -race -ldflags "-s -w" -o bin/client client/main.go
 	bin/client
 
-.PHONY: client
+.PHONY: tgbot
 tgbot: ## Build and run telegram bot app.
 	go build -race -ldflags "-s -w" -o bin/tgbot examples/telegram-bot/main.go
 	bin/tgbot
