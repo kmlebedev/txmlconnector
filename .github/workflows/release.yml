@@ -25,7 +25,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: windows
           goarch: amd64
-          overwrite: true
+          #overwrite: true
           #release_tag: dev
           project_path: server
           binary_name: "txmlconnector-server"
