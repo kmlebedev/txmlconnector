@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build:
+    name: Build server
+    runs-on: self-hosted
+
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v2
+
+      - name: Wait for the deletion
+        uses: jakejarvis/wait-action@master
+        with:
+          time: '30s'
+
+      - name: Set BUILD_TIME env
+        run: echo BUILD_TIME=$(date -u +%Y-%m-%d-%H-%M) >> ${GITHUB_ENV}
+
+      - name: Go Release Binaries
+        uses: wangyoucao577/go-release-action@feature/asset-name
+        with:
+          goversion: https://golang.org/dl/go1.15.6.linux-amd64.tar.gz
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          goos: windows
+          goarch: amd64
+          release_tag: dev
+          overwrite: true
+          # Where to run `go build .`
+          project_path: server
+          binary_name: txmlconnector-server-
+          asset_name: "txmlconnector-server-${{ env.BUILD_TIME }}-${{ matrix.goos }}-${{ matrix.goarch }}"
