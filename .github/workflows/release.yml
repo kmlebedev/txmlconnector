@@ -27,4 +27,5 @@ jobs:
           project_path: server
           extra_files: txmlconnector64-6.19.2.21.6.dll
           binary_name: "txmlconnector-server"
-          pre_command: "apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64;export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc"
+          pre_command: "apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64"
+          build_command: "export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc && go buid"
