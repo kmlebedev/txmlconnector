@@ -25,6 +25,6 @@ jobs:
           goarch: amd64
           overwrite: true
           # Where to run `go build .`
-          project_path: server
+          project_path: ./server
           binary_name: txmlconnector-server-
           asset_name: "txmlconnector-server-${{ env.BUILD_TIME }}-${{ matrix.goos }}-${{ matrix.goarch }}"
