@@ -21,7 +21,6 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: windows
           goarch: amd64
-          release_tag: dev
           overwrite: true
           # Where to run `go build .`
           project_path: server
