@@ -1,8 +1,10 @@
 name: Release
 
-on:
-  release:
-    types: [created]
+on: workflow_dispatch
+
+#on:
+#  release:
+#    types: [created]
 
 jobs:
   build:
@@ -14,20 +16,16 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Set BUILD_TIME env
-        run: ls
-
-      - name: Set BUILD_TIME env
         run: echo BUILD_TIME=$(date -u +%Y-%m-%d-%H-%M) >> ${GITHUB_ENV}
 
       - name: Go Release server
-        uses: wangyoucao577/go-release-action@feature/asset-name
+        uses: wangyoucao577/go-release-action@v1.13
         with:
           goversion: https://golang.org/dl/go1.15.6.linux-amd64.tar.gz
           github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: windows
           goarch: amd64
           overwrite: true
-          # Where to run `go build .`
-          project_path: txmlconnector/server
+          project_path: server
           binary_name: txmlconnector-server-
           asset_name: "txmlconnector-server-${{ env.BUILD_TIME }}-${{ matrix.goos }}-${{ matrix.goarch }}"
