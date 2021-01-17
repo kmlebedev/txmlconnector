@@ -27,4 +27,4 @@ jobs:
           project_path: server
           extra_files: txmlconnector64-6.19.2.21.6.dll
           binary_name: "txmlconnector-server"
-          build_command: "CGO_ENABLED=1 go build"
+          pre_command: "CGO_ENABLED=1"
