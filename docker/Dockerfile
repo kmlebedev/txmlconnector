@@ -12,8 +12,9 @@ RUN \
     wget -P /tmp https://github.com/$(curl -s -L https://github.com/kmlebedev/txmlconnector/releases/latest | egrep -o "kmlebedev/txmlconnector/releases/download/.*/windows_$ARCH.tar.gz") && \
     tar -C /usr/bin/ -xzvf /tmp/windows_$ARCH.tar.gz && \
     apk del build-dependencies && \
+    rm -fr /var/cache/apk/*
     rm -rf /tmp/*
 
 COPY txmlconnector64-6.17.2.21.2.dll /usr/bin/
 
-ENTRYPOINT ["wine /usr/bin/txmlconnector-server.exe"]
+ENTRYPOINT ["wine64 /usr/bin/txmlconnector-server.exe"]
