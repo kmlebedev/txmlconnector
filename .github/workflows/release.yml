@@ -28,4 +28,5 @@ jobs:
           #overwrite: true
           #release_tag: dev
           project_path: server
+          extra_files: txmlconnector64-6.19.2.21.6.dll
           binary_name: "txmlconnector-server"
