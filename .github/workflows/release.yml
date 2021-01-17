@@ -26,6 +26,5 @@ jobs:
           goos: windows
           goarch: amd64
           overwrite: true
-          pre_command: "pwd"
+          project_path: server
           binary_name: "txmlconnector-server-"
-          build_command: "go build server/main.go"
