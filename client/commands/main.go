@@ -74,6 +74,29 @@ type Boards struct {
 	} `xml:"board"`
 }
 
+type Candle struct {
+	Date   string  `xml:"date,attr"`
+	Open   float64 `xml:"open,attr"`
+	Close  float64 `xml:"close,attr"`
+	High   float64 `xml:"high,attr"`
+	Low    float64 `xml:"low,attr"`
+	Volume int64   `xml:"volume,attr"`
+}
+
+// Свечи
+type Candles struct {
+	XMLName xml.Name `xml:"candles"`
+	SecId   int      `xml:"secid,attr"`   // внутренний код
+	Board   string   `xml:"board,attr"`   // Идентификатор режима торгов
+	SecCode string   `xml:"seccode,attr"` // Код инструмента
+	Period  int      `xml:"period,attr"`
+	Items   []Candle `xml:"candle"`
+	Status  int      `xml:"status,attr"` // 0 - данных больше нет (дочерпали до дна)
+	// 1 - заказанное количество выдано, если нужны еще данные – можно выполнять еще команду
+	// 2 - продолжение следует, будет еще порция данных по этой команде
+	// 3 - требуемые данные недоступны (есть смысл попробовать запросить позже)
+}
+
 type OpMask struct {
 	UseCredit string `xml:"usecredit,attr"` // yes/no
 	ByMarket  string `xml:"bymarket,attr"`  // yes/no

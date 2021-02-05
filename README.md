@@ -36,7 +36,13 @@ service ConnectService {
 }
 ```
 
+### Starting server in docker
+```
+docker run kmlebedev/txmlconnector:6.19.2.21.6
+```
+
 ### Starting server in Linux/MacOSX
+
 #### Requirements
 ##### MacOSX
 
@@ -72,6 +78,7 @@ time="2020-12-17T20:57:01+05:00" level=info msg="Server running ..."
 00ea:fixme:winsock:set_dont_fragment IP_DONTFRAGMENT for IPv6 not supported in this platform
 time="2020-12-17T20:57:01+05:00" level=info msg="Press CRTL+C to stop the server..."
 ```
+
 ### Starting client in Linux/MacOSX
 
 #### Set environment variables
@@ -102,4 +109,5 @@ INFO[0001] res <result success="true"/>
  - [Using Go to call Windows API](https://medium.com/@justen.walker/breaking-all-the-rules-using-go-to-call-windows-api-2cbfd8c79724)
  - [How to Set Up gRPC Server-Side Streaming with Go](https://www.freecodecamp.org/news/grpc-server-side-streaming-with-go/)
  - [BB](https://www.investopedia.com/terms/b/bollingerbands.asp)
+- https://iqsignal.net/coint
  

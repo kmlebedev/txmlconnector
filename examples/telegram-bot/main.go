@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -41,6 +42,9 @@ func main() {
 	}
 	chatId := int64(0)
 	positions := commands.Positions{}
+	postmarket := make(map[string]commands.Candle)
+	secs := make(map[string]commands.Security)
+	total := make(map[string]float64)
 	go func() {
 		for {
 			select {
@@ -84,6 +88,15 @@ func main() {
 						positions.SpotLimit = tc.Data.Positions.SpotLimit
 					}
 					log.Debugf(fmt.Sprintf("Positions: \n%+v\n", tc.Data.Positions))
+				case "candles":
+					for _, candle := range tc.Data.Candles.Items {
+						if candle.Date == "29.01.2021 18:45:00" {
+							log.Infof(fmt.Sprintf("candle: \n%s %+v\n", tc.Data.Candles.SecCode, candle))
+							postmarket[tc.Data.Candles.SecCode] = candle
+							total[tc.Data.Candles.SecCode] = candle.Open * float64(candle.Volume*int64(secs[tc.Data.Candles.SecCode].LotSize))
+							break
+						}
+					}
 				default:
 					msg.Text = fmt.Sprintf("receive %s", resp)
 				}
@@ -153,6 +166,29 @@ func main() {
 				getHistoryDataDict[update.Message.MessageID] = &GetHistoryData{}
 				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(btnsSec, btnsPeriod)
 				msg.ReplyToMessageID = update.Message.MessageID
+			case "postmarket":
+				for _, sec := range tc.Data.Securities.Items {
+					if sec.Board != "TQBR" {
+						continue
+					}
+					if sec.SecId == 0 {
+						continue
+					}
+					secs[sec.SecCode] = sec
+					tc.SendCommand(commands.Command{
+						Id:     "gethistorydata",
+						Period: 1,
+						SecId:  sec.SecId,
+						Count:  400,
+						Reset:  true,
+					})
+				}
+				time.Sleep(5 * time.Second)
+				o := ""
+				for k, t := range total {
+					o = o + fmt.Sprintf("%s %f\n", k, t)
+				}
+				msg.Text = fmt.Sprintf("postmarket %+v", o)
 			case "orders":
 				msg.Text = "orders"
 			case "deals":
@@ -160,6 +196,7 @@ func main() {
 			}
 		}
 
+		// Buttons
 		if update.CallbackQuery != nil && update.CallbackQuery.Data != "" {
 			log.Debugf("CallbackQuery: %s", update.CallbackQuery.Data)
 			data := strings.Split(update.CallbackQuery.Data, ":")

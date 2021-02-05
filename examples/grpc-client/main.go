@@ -22,6 +22,7 @@ var (
 	markets          = Markets{}
 	boards           = Boards{}
 	candleKinds      = Candlekinds{}
+	candles          = Candles{}
 	securities       = Securities{}
 	pits             = Pits{}
 	positions        = Positions{}
@@ -149,6 +150,10 @@ func LoopReadingFromStream(stream *pb.ConnectService_FetchResponseDataClient, do
 		case "boards":
 			if err := xml.Unmarshal(msgData, &boards); err != nil {
 				log.Error("Decode boards ", err, " msg:", resp.Message)
+			}
+		case "candles":
+			if err := xml.Unmarshal(msgData, &candles); err != nil {
+				log.Error("Decode candles ", err, " msg:", resp.Message)
 			}
 		case "candlekinds":
 			if err := xml.Unmarshal(msgData, &candleKinds); err != nil {

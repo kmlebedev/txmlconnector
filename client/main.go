@@ -24,6 +24,7 @@ type TCClient struct {
 		Boards          Boards
 		CandleKinds     CandleKinds
 		Securities      Securities
+		Candles         Candles
 		Pits            Pits
 		Positions       *Positions
 		UnitedPortfolio *UnitedPortfolio
@@ -178,6 +179,14 @@ func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchRespons
 		case "securities":
 			if err := xml.Unmarshal(msgData, &tc.Data.Securities); err != nil {
 				log.Error("Decode securities ", err, " msg:", resp.Message)
+			}
+		case "candles":
+			date := Candles{}
+			if err := xml.Unmarshal(msgData, &date); err != nil {
+				log.Error("Decode candles ", err, " msg:", resp.Message)
+			} else {
+				tc.Data.Candles = date
+				tc.ResponseChannel <- startElement.Name.Local
 			}
 		case "pits":
 			if err := xml.Unmarshal(msgData, &tc.Data.Pits); err != nil {

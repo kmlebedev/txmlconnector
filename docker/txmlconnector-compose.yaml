@@ -1,0 +1,8 @@
+version: '2'
+
+services:
+  server:
+    image: kmlebedev/txmlconnector:6.19.2.21.6
+    ports:
+      - 3900:3900
+    command: "server"
