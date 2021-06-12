@@ -38,7 +38,12 @@ service ConnectService {
 
 ### Starting server in docker
 ```
-docker run kmlebedev/txmlconnector:6.19.2.21.6
+docker run kmlebedev/txmlconnector server
+```
+
+### Start server and client
+```
+docker-compose -f docker/txmlconnector-compose.yaml -p txmlconnector up
 ```
 
 ### Starting server in Linux/MacOSX
@@ -60,7 +65,7 @@ sudo apt install wine64
 
 ```shell
 export TC_LOG_LEVEL=debug
-export TC_DLL_PATH=txmlconnector64-6.17.2.21.2.dll
+export TC_DLL_PATH=txmlconnector64-6.19.2.21.8.dll
 ```
 
 #### Example output:
@@ -109,5 +114,6 @@ INFO[0001] res <result success="true"/>
  - [Using Go to call Windows API](https://medium.com/@justen.walker/breaking-all-the-rules-using-go-to-call-windows-api-2cbfd8c79724)
  - [How to Set Up gRPC Server-Side Streaming with Go](https://www.freecodecamp.org/news/grpc-server-side-streaming-with-go/)
  - [BB](https://www.investopedia.com/terms/b/bollingerbands.asp)
-- https://iqsignal.net/coint
+ - https://iqsignal.net/coint
+ - https://www.gonum.org/post/intro_to_gonum/
  

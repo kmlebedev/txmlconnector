@@ -24,4 +24,8 @@ case "$1" in
 	  shift
 	  exec /usr/bin/wine64-stable /usr/bin/txmlconnector-server.exe $@
 	;;
+	'client')
+	  shift
+	  exec /usr/bin/txmlconnector-client $@
+	;;
 esac

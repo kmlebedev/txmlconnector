@@ -1,31 +1,31 @@
-FROM golang:1.15-alpine as builder
+FROM golang:1.16-alpine as builder
+ENV GO111MODULE=on \
+    GOARCH=amd64
 
 COPY ./client /go/src/github.com/kmlebedev/txmlconnector/client
+COPY ./examples/grpc-client /go/src/github.com/kmlebedev/txmlconnector/examples/grpc-client
 COPY ./server /go/src/github.com/kmlebedev/txmlconnector/server
 COPY ./proto /go/src/github.com/kmlebedev/txmlconnector/proto
 COPY ./go.mod /go/src/github.com/kmlebedev/txmlconnector/go.mod
+COPY ./go.sum /go/src/github.com/kmlebedev/txmlconnector/go.sum
 
 WORKDIR /go/src/github.com/kmlebedev/txmlconnector
 
-RUN \
-    apk add --no-cache --virtual build-dependencies --update mingw-w64-gcc gcc mingw-w64-gcc libc-dev musl-dev && \
-    export CGO_ENABLED=1 && \
-    export CC="x86_64-w64-mingw32-gcc" && \
-    export GOOS=windows && \
-    export GOARCH=amd64 && \
+RUN apk add --no-cache --virtual build-dependencies --update mingw-w64-gcc gcc mingw-w64-gcc libc-dev musl-dev && \
     go mod download && \
-    cd server && \
-    go install -race -ldflags "-s -w"
-    cd ..
+    CC="x86_64-w64-mingw32-gcc" GOOS=windows CGO_ENABLED=1 go build -race -ldflags "-extldflags -static -s -w" -o /go/bin/server.exe github.com/kmlebedev/txmlconnector/server && \
+    GOOS=linux CGO_ENABLED=0 go build -ldflags "-extldflags -static" -o /go/bin/client github.com/kmlebedev/txmlconnector/examples/grpc-client && \
+    ls -R /go/bin/
 
 FROM ubuntu:20.04 AS final
-COPY --from=builder /go/bin/windows_amd64/server.exe /usr/bin/txmlconnector-server.exe
-COPY ./txmlconnector64-6.19.2.21.6.dll /usr/bin/
+COPY --from=builder /go/bin/server.exe /usr/bin/txmlconnector-server.exe
+COPY --from=builder /go/bin/client /usr/bin/txmlconnector-client
+COPY ./txmlconnector64-6.19.2.21.8.dll /usr/bin/
 COPY ./docker/entrypoint.sh /entrypoint.sh
 
-ENV TC_DLL_PATH=/usr/bin/txmlconnector64-6.19.2.21.6.dll
+ENV TC_DLL_PATH=/usr/bin/txmlconnector64-6.19.2.21.8.dll
 
-RUN chmod +x /entrypoint.sh && \
+RUN chmod +x /entrypoint.sh /usr/bin/txmlconnector-client && \
     apt-get update && \
     apt-get install -y --no-install-recommends wine64 && \
     apt-get clean

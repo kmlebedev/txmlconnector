@@ -21,7 +21,7 @@ var (
 	serverStatus     = ServerStatus{}
 	markets          = Markets{}
 	boards           = Boards{}
-	candleKinds      = Candlekinds{}
+	candleKinds      = CandleKinds{}
 	candles          = Candles{}
 	securities       = Securities{}
 	pits             = Pits{}

@@ -16,16 +16,15 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Go Release server
-        uses: wangyoucao577/go-release-action@v1.13
+        uses: wangyoucao577/go-release-action@v1.18
         with:
           goversion: https://golang.org/dl/go1.15.6.linux-amd64.tar.gz
           github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: windows
           goarch: amd64
-          #overwrite: true
           release_tag: dev
           project_path: server
-          extra_files: txmlconnector64-6.19.2.21.6.dll
+          extra_files: txmlconnector64-6.19.2.21.8.dll
           binary_name: "txmlconnector-server"
-          pre_command: "apt-get update apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64"
-          build_command: "export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc && go buid"
+          pre_command: "apt-get update && apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64 && export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc"
+          build_command: "go build"

@@ -15,6 +15,6 @@ RUN \
     rm -fr /var/cache/apk/*
     rm -rf /tmp/*
 
-COPY txmlconnector64-6.17.2.21.2.dll /usr/bin/
+COPY txmlconnector64-6.19.2.21.8.dll /usr/bin/
 
 ENTRYPOINT ["wine64 /usr/bin/txmlconnector-server.exe"]
