@@ -4,7 +4,7 @@ compile: ## Compile the proto file.
 
 .PHONY: server
 server: ## Build and run server. brew install mingw-w64
-	CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" GOOS=windows GOARCH=amd64 go build -race -ldflags "-s -w" -o bin/server.exe server/main.go
+	CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -race -ldflags "-extldflags -static -s -w" -o bin/server.exe server/main.go
 	wine64 bin/server.exe
 
 .PHONY: client

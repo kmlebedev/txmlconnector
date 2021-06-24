@@ -26,7 +26,7 @@ import "C"
 
 const (
 	txml_dll_name     = "txmlconnector64"
-	txml_dll_ver_main = "6.19.2.21.6"
+	txml_dll_ver_main = "6.19.2.21.8"
 )
 
 var (
@@ -79,14 +79,16 @@ func init() {
 	procFreeMemory = txmlconnector.NewProc("FreeMemory")
 	procInitialize = txmlconnector.NewProc("Initialize")
 	procUnInitialize = txmlconnector.NewProc("UnInitialize")
-	_, _, err := procInitialize.Call(uintptr(unsafe.Pointer(C.CString("logs"))), uintptr(3))
-	if err != syscall.Errno(0) {
-		log.Panic("Initialize error: ", err)
+	logPathPtr := uintptr(unsafe.Pointer(C.CString("logs")))
+	logLevelPtr := uintptr(2)
+	_, _, err := procInitialize.Call(logPathPtr, logLevelPtr)
+	if err != syscall.Errno(0) && err != nil {
+		log.Panic("Initialize error: ", err.Error())
 	}
 
 	_, _, err = procSetCallback.Call(syscall.NewCallback(receiveData))
-	if err != syscall.Errno(0) {
-		log.Panic("Set callback fn error: ", err)
+	if err != syscall.Errno(0) && err != nil {
+		log.Panic("Set callback fn error: ", err.Error())
 	}
 }
 
@@ -113,7 +115,7 @@ func SetupCloseHandler(srv *grpc.Server) {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
-		log.Info("\r- Ctrl+C pressed in Terminal")
+		log.Info("\r Ctrl+C pressed in Terminal")
 		srv.GracefulStop()
 		close(Messages)
 		Done <- true
@@ -125,8 +127,8 @@ func txmlSendCommand(msg string) (data *string) {
 	log.Info("txmlSendCommand() Call: ", msg)
 	reqData := C.CString(msg)
 	resp, _, err := procSendCommand.Call(uintptr(unsafe.Pointer(reqData)))
-	if err != syscall.Errno(0) {
-		log.Error("txmlSendCommand() ", err)
+	if err != syscall.Errno(0) && err != nil {
+		log.Error("txmlSendCommand() ", err.Error())
 		return nil
 	}
 	respData := C.GoString((*C.char)(unsafe.Pointer(resp)))
