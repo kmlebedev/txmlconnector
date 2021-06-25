@@ -3,6 +3,7 @@ module github.com/kmlebedev/txmlconnector
 go 1.16
 
 require (
+	github.com/ClickHouse/clickhouse-go v1.4.5 // indirect
 	github.com/galeone/tfgo v0.0.0-20201116112556-4089c60ef77a // indirect
 	github.com/go-gota/gota v0.10.1 // indirect
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
