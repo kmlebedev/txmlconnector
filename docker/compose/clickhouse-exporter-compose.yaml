@@ -2,17 +2,29 @@ version: '2'
 
 services:
   server:
-    image: kmlebedev/txmlconnector:6.19.2.21.8
+    image: kmlebedev/txmlconnector:local
     ports:
-      - 3900:3900
+      - 50051:50051
     command: "server"
+  clickhouse:
+    image: yandex/clickhouse-server
+    ports:
+      - 9000:9000
+      - 8123:8123
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
   exporter:
     image: kmlebedev/transaq-clickhouse-exporter:local
     environment:
-      TC_LOGIN: "TCNN9981"
-      TC_PASSWORD: "F3JuS6"
+      CLICKHOUSE_URL: "tcp://clickhouse:9000"
+      LOG_LEVEL: "DEBUG"
+      TC_LOGIN: "TCNN9979"
+      TC_PASSWORD: "n3Z4W4"
       TC_HOST: "tr1-demo5.finam.ru"
       TC_PORT: "3939"
       TC_LOG_LEVEL: "DEBUG"
+      TC_TARGET: "server:50051"
     depends_on:
       - server

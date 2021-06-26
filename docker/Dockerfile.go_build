@@ -29,6 +29,6 @@ RUN mkdir logs && \
     apk add --no-cache wine
 
 # server gprc port
-EXPOSE 3900
+EXPOSE 50051
 
 ENTRYPOINT ["/entrypoint.sh"]

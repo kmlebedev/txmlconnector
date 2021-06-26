@@ -31,6 +31,6 @@ RUN mkdir logs && \
     apt-get clean
 
 # server gprc port
-EXPOSE 3900
+EXPOSE 50051
 
 ENTRYPOINT ["/entrypoint.sh"]

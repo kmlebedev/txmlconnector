@@ -17,29 +17,28 @@ const (
 )
 
 func main() {
+	var err error
 	if lvl, err := log.ParseLevel(os.Getenv(EnvKeyLogLevel)); err == nil {
 		log.SetLevel(lvl)
 	}
-	tc, err := tcClient.NewTCClient()
-	if err != nil {
-		log.Panic(err)
+	clickhouseUrl := "tcp://127.0.0.1:9000"
+	if chUrl := os.Getenv("CLICKHOUSE_URL"); chUrl != "" {
+		clickhouseUrl = chUrl
 	}
-	defer tc.Disconnect()
-
-	connect, err := sql.Open("clickhouse", "tcp://127.0.0.1:9000")
-	if err != nil {
-		log.Panic(err)
-	}
-	if err != nil {
-		log.Fatal(err)
-	}
-	if err := connect.Ping(); err != nil {
-		if exception, ok := err.(*clickhouse.Exception); ok {
-			fmt.Printf("[%d] %s \n%s\n", exception.Code, exception.Message, exception.StackTrace)
-		} else {
-			fmt.Println(err)
+	var connect *sql.DB
+	for i := 0; i < 10; i++ {
+		log.Infof("Try connect to clickhouse %s", clickhouseUrl)
+		if connect, err = sql.Open("clickhouse", clickhouseUrl); err != nil {
+			log.Fatal(err)
 		}
-		return
+		if err := connect.Ping(); err != nil {
+			if exception, ok := err.(*clickhouse.Exception); ok {
+				log.Infof("[%d] %s \n%s\n", exception.Code, exception.Message, exception.StackTrace)
+				break
+			}
+			log.Warn(err)
+		}
+		time.Sleep(10 * time.Second)
 	}
 	_, err = connect.Exec(`
 		CREATE TABLE IF NOT EXISTS candles (
@@ -56,6 +55,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	tc, err := tcClient.NewTCClient()
+	if err != nil {
+		log.Panic(err)
+	}
+	defer tc.Disconnect()
 	positions := commands.Positions{}
 	go func() {
 		for {

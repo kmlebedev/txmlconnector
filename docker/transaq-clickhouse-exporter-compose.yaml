@@ -4,15 +4,39 @@ services:
   server:
     image: kmlebedev/txmlconnector:6.19.2.21.8
     ports:
-      - 3900:3900
+      - 50051:50051
     command: "server"
-  exporter:
-    image: kmlebedev/transaq-clickhouse-exporter:0.1
+  clickhouse:
+    image: yandex/clickhouse-server
+    ports:
+      - 9000:9000
+      - 8123:8123
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+  grafana:
+    image: grafana/grafana:8.0.3
+    ports:
+      - "3000:3000"
     environment:
-      TC_LOGIN: "TCNN9981"
-      TC_PASSWORD: "F3JuS6"
+      # ilgizar-candlestick-panel
+      GF_INSTALL_PLUGINS: "grafana-piechart-panel,vertamedia-clickhouse-datasource"
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: "vertamedia-clickhouse-datasource"
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "admin"
+    depends_on:
+      - clickhouse
+  exporter:
+    image: kmlebedev/transaq-clickhouse-exporter:0.2
+    environment:
+      CLICKHOUSE_URL: "tcp://clickhouse:9000"
+      TC_LOGIN: "TCNN9979"
+      TC_PASSWORD: "n3Z4W4"
       TC_HOST: "tr1-demo5.finam.ru"
       TC_PORT: "3939"
       TC_LOG_LEVEL: "DEBUG"
+      TC_TARGET: "server:50051"
     depends_on:
       - server
+      - clickhouse

@@ -4,7 +4,7 @@ services:
   server:
     image: kmlebedev/txmlconnector:local
     ports:
-      - 3900:3900
+      - 50051:50051
     command: "server"
   client:
     image: kmlebedev/txmlconnector:6.19.2.21.8
@@ -15,5 +15,6 @@ services:
       TC_HOST: "tr1-demo5.finam.ru"
       TC_PORT: "3939"
       TC_LOG_LEVEL: "DEBUG"
+      TC_TARGET: "server:50051"
     depends_on:
       - server

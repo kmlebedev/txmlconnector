@@ -31,11 +31,11 @@ type Command struct {
 }
 
 type SubSecurity struct {
-	SecId    int `xml:"secid,omitempty"`
-	Security struct {
-		Board   string `xml:"board,omitempty"`
-		SecCode string `xml:"seccode,omitempty"`
-	} `xml:"security,omitempty"`
+	SecId int `xml:"secid,omitempty"`
+	//Security struct {
+	//	Board   string `xml:"board,omitempty"`
+	//	SecCode string `xml:"seccode,omitempty"`
+	//} `xml:"security,omitempty"`
 }
 
 type Connect struct {
