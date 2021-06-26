@@ -16,3 +16,15 @@ client: ## Build and run client.
 tgbot: ## Build and run telegram bot app.
 	go build -race -ldflags "-s -w" -o bin/tgbot examples/telegram-bot/main.go
 	bin/tgbot
+
+build:
+	docker build --no-cache -t kmlebedev/txmlconnector:local -f docker/Dockerfile.go_build .
+
+exporter_build:
+	docker build --no-cache -t kmlebedev/transaq-clickhouse-exporter:local -f docker/Dockerfile.clickhouse-exporter .
+
+dev: build
+	docker-compose -f docker/compose/local-dev-compose.yml -p transaq up
+
+exporter: build exporter_build
+	docker-compose -f docker/compose/clickhouse-exporter-compose.yaml -p transaq up

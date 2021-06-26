@@ -118,14 +118,25 @@ func NewTCClient() (*TCClient, error) {
 	return NewTCClientWithConn(client)
 }
 
-func (tc *TCClient) Disconnect() (*pb.SendCommandResponse, error) {
+func (tc *TCClient) Disconnect() error {
 	return tc.SendCommand(Command{Id: "disconnect"})
 }
 
-func (tc *TCClient) SendCommand(cmd Command) (*pb.SendCommandResponse, error) {
-	return tc.Client.SendCommand(context.Background(),
+func (tc *TCClient) SendCommand(cmd Command) error {
+	result := Result{}
+	response, err := tc.Client.SendCommand(context.Background(),
 		&pb.SendCommandRequest{Message: EncodeRequest(cmd)},
 	)
+	if err != nil {
+		return fmt.Errorf("SendCommand ", err)
+	}
+	if err := xml.Unmarshal([]byte(response.GetMessage()), &result); err != nil {
+		return fmt.Errorf("Unmarshal(Result) ", err, response.GetMessage())
+	}
+	if result.Success != "true" {
+		return fmt.Errorf("Result: ", result.Message)
+	}
+	return nil
 }
 
 func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchResponseDataClient) {

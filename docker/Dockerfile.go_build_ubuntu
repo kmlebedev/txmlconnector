@@ -15,7 +15,7 @@ RUN apk add --no-cache --virtual build-dependencies --update mingw-w64-gcc gcc m
     GOOS=windows CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -race -ldflags "-extldflags -static -s -w" -o /go/bin/server.exe github.com/kmlebedev/txmlconnector/server && \
     GOOS=linux CGO_ENABLED=0 go build -ldflags "-extldflags -static" -o /go/bin/client github.com/kmlebedev/txmlconnector/examples/grpc-client
 
-FROM alpine AS final
+FROM ubuntu:20.04 AS final
 
 ENV TC_DLL_VER=6.19.2.21.8
 COPY --from=builder /go/bin/server.exe /usr/bin/txmlconnector-server.exe
@@ -26,7 +26,9 @@ COPY ./docker/entrypoint.sh /entrypoint.sh
 ENV TC_DLL_PATH=/usr/bin/txmlconnector64-${TC_DLL_VER}.dll
 
 RUN mkdir logs && \
-    apk add --no-cache wine
+    apt-get update && \
+    apt-get install -y --no-install-recommends wine64 && \
+    apt-get clean
 
 # server gprc port
 EXPOSE 3900

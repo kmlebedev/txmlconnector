@@ -106,6 +106,14 @@ INFO[0000] Client running ...
 INFO[0001] res <result success="true"/> 
 ```
 
+### Example apps
+#### Clickhouse-exporter
+Historical Moscow Exchange stock quote prices exporting to [clickhouse server](https://clickhouse.tech/) through transaq 
+#### Starting
+```
+docker-compose -f docker/transaq-clickhouse-exporter-compose.yaml -p transaq up
+```
+
 ### Links
  - [TRANSAQ Connector Forum](http://www.transaq.ru/forum/index.php?board=6.0)
  - [TransaqConnector Linux Finam Forum](https://forum.finam.ru/posts/t109457-TransaqConnector-Linux)

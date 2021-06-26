@@ -7,7 +7,7 @@ services:
       - 3900:3900
     command: "server"
   client:
-    image: kmlebedev/txmlconnector:local
+    image: kmlebedev/txmlconnector:6.19.2.21.8
     command: "client"
     environment:
       TC_LOGIN: "TCNN9979"

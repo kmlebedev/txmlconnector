@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/xml"
 	"fmt"
 	"github.com/ClickHouse/clickhouse-go"
 	"github.com/kmlebedev/txmlconnector/client"
@@ -13,7 +12,8 @@ import (
 )
 
 const (
-	EnvKeyLogLevel = "LOG_LEVEL"
+	EnvKeyLogLevel      = "LOG_LEVEL"
+	GetHistoryDataCount = 1000
 )
 
 func main() {
@@ -26,7 +26,7 @@ func main() {
 	}
 	defer tc.Disconnect()
 
-	connect, err := sql.Open("clickhouse", "tcp://127.0.0.1:9000?debug=true")
+	connect, err := sql.Open("clickhouse", "tcp://127.0.0.1:9000")
 	if err != nil {
 		log.Panic(err)
 	}
@@ -43,14 +43,15 @@ func main() {
 	}
 	_, err = connect.Exec(`
 		CREATE TABLE IF NOT EXISTS candles (
-		    sec_code FixedString(5),
-		    date   DateTime,
-		    open   Float32,
-		    close  Float32,
-		    high   Float32,
-		    low    Float32,
-			volume UInt64
-		) engine=Memory
+		   date   DateTime,
+		   sec_code FixedString(5),
+		   open   Float32,
+		   close  Float32,
+		   high   Float32,
+		   low    Float32,
+		   volume UInt64
+		) ENGINE = ReplacingMergeTree()
+		ORDER BY (date, sec_code)
 	`)
 	if err != nil {
 		log.Fatal(err)
@@ -97,16 +98,14 @@ func main() {
 					}
 					log.Debugf(fmt.Sprintf("Positions: \n%+v\n", tc.Data.Positions))
 				case "candles":
-					var (
-						tx, _   = connect.Begin()
-						stmt, _ = tx.Prepare("INSERT INTO candles (sec_code, date, open, close, high, low, volume) VALUES (?, ?, ?, ?, ?, ?, ?)")
-					)
+					var tx, _ = connect.Begin()
+					var stmt, _ = tx.Prepare("INSERT INTO candles (date, sec_code, open, close, high, low, volume) VALUES (?, ?, ?, ?, ?, ?, ?)")
 					defer stmt.Close()
 					for _, candle := range tc.Data.Candles.Items {
 						candleDate, _ := time.Parse("02.01.2006 15:04:05", candle.Date)
 						if _, err := stmt.Exec(
-							tc.Data.Candles.SecCode,
 							fmt.Sprint(candleDate.Format("2006-01-02 15:04:05")),
+							tc.Data.Candles.SecCode,
 							candle.Open,
 							candle.Close,
 							candle.High,
@@ -115,7 +114,6 @@ func main() {
 						); err != nil {
 							log.Fatal(err)
 						}
-
 					}
 					if err := tx.Commit(); err != nil {
 						log.Fatal(err)
@@ -142,6 +140,8 @@ func main() {
 		}
 		time.Sleep(5 * time.Second)
 	}
+	// Get History data for all sec
+	quotations := []commands.SubSecurity{}
 	for _, sec := range tc.Data.Securities.Items {
 		if sec.Board != "TQBR" {
 			continue
@@ -149,25 +149,24 @@ func main() {
 		if sec.SecId == 0 {
 			continue
 		}
-		log.Infof(fmt.Sprintf("sec %s", sec.SecCode))
-		response, err := tc.SendCommand(commands.Command{
+		quotations = append(quotations, commands.SubSecurity{SecId: sec.SecId})
+		log.Debugf(fmt.Sprintf("gethistorydata sec %s", sec.SecCode))
+		if err = tc.SendCommand(commands.Command{
 			Id:     "gethistorydata",
 			Period: 1,
 			SecId:  sec.SecId,
-			Count:  400,
+			Count:  GetHistoryDataCount,
 			Reset:  true,
-		})
-		if err != nil {
-			log.Error("SendCommand: ", err)
-
+		}); err != nil {
+			log.Error(err)
 		}
-		result := commands.Result{}
-		if err := xml.Unmarshal([]byte(response.GetMessage()), &result); err != nil {
-			log.Error("Unmarshal(Result) ", err, response.GetMessage())
-		}
-		if result.Success != "true" {
-			log.Error("Result: ", result.Message)
-		}
+	}
+	// Get subscribe on all sec
+	if err = tc.SendCommand(commands.Command{
+		Id:         "subscribe",
+		Quotations: quotations,
+	}); err != nil {
+		log.Error("SendCommand: ", err)
 	}
 	<-tc.ShutdownChannel
 }

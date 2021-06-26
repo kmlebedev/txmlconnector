@@ -22,7 +22,7 @@ isArgPassed() {
 case "$1" in
 	'server')
 	  shift
-	  exec /usr/bin/wine64-stable /usr/bin/txmlconnector-server.exe $@
+	  exec /usr/bin/wine64 /usr/bin/txmlconnector-server.exe $@
 	;;
 	'client')
 	  shift

@@ -2,16 +2,15 @@ version: '2'
 
 services:
   server:
-    image: kmlebedev/txmlconnector:local
+    image: kmlebedev/txmlconnector:6.19.2.21.8
     ports:
       - 3900:3900
     command: "server"
-  client:
-    image: kmlebedev/txmlconnector:local
-    command: "client"
+  exporter:
+    image: kmlebedev/transaq-clickhouse-exporter:0.1
     environment:
-      TC_LOGIN: "TCNN9979"
-      TC_PASSWORD: "n3Z4W4"
+      TC_LOGIN: "TCNN9981"
+      TC_PASSWORD: "F3JuS6"
       TC_HOST: "tr1-demo5.finam.ru"
       TC_PORT: "3939"
       TC_LOG_LEVEL: "DEBUG"

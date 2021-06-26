@@ -17,14 +17,25 @@ type ServerStatus struct {
 }
 
 type Command struct {
-	XMLName xml.Name `xml:"command"`
-	Id      string   `xml:"id,attr"`
-	Union   string   `xml:"union,attr,omitempty"`
-	Client  string   `xml:"client,attr,omitempty"`
-	SecId   int      `xml:"secid,attr,omitempty"`
-	Period  int      `xml:"period,attr,omitempty"`
-	Count   int      `xml:"count,attr,omitempty"`
-	Reset   bool     `xml:"reset,attr,omitempty"`
+	XMLName    xml.Name      `xml:"command"`
+	Id         string        `xml:"id,attr"`
+	Union      string        `xml:"union,attr,omitempty"`
+	Client     string        `xml:"client,attr,omitempty"`
+	SecId      int           `xml:"secid,attr,omitempty"`
+	Period     int           `xml:"period,attr,omitempty"`
+	Count      int           `xml:"count,attr,omitempty"`
+	Reset      bool          `xml:"reset,attr,omitempty"`
+	Alltrades  []SubSecurity `xml:"alltrades,omitempty"`  // подписка на сделки рынка
+	Quotations []SubSecurity `xml:"quotations,omitempty"` // подписка на изменения показателей торгов
+	Quotes     []SubSecurity `xml:"quotes,omitempty"`     // подписка на изменения «стакана»
+}
+
+type SubSecurity struct {
+	SecId    int `xml:"secid,omitempty"`
+	Security struct {
+		Board   string `xml:"board,omitempty"`
+		SecCode string `xml:"seccode,omitempty"`
+	} `xml:"security,omitempty"`
 }
 
 type Connect struct {
@@ -412,6 +423,15 @@ type NewsHeader struct {
 	TimeStamp string   `xml:"time_stamp"`      // дата-время новости (от источника)
 	Source    string   `xml:"source,charData"` // источник новости
 	Title     string   `xml:"title,charData"`  // заголовок новости
+}
+
+// <quotations><quotation secid="36116"><board>FUT</board><seccode>SiU9</seccode><last>63384</last><change>210</change><priceminusprevwaprice>210</priceminusprevwaprice><biddepth>38</biddepth><biddeptht>32115</biddeptht><offerdepth>33</offerdepth><offerdeptht>60513</offerdeptht><voltoday>519036</voltoday><numtrades>77015</numtrades><valtoday>32873.706</valtoday><openpositions>2273956</openpositions><deltapositions>14836</deltapositions></quotation></quotations>
+type Quotation struct {
+	XMLName xml.Name `xml:"quotation"`
+	SecId   int      `xml:"secid,attr"`     // внутренний код
+	Board   string   `xml:"board,attr"`     // Идентификатор режима торгов
+	SecCode string   `xml:"seccode,attr"`   // Код инструмента
+	Last    float64  `xml:"last,omitempty"` // Текущая оценка стоимости единого портфеля
 }
 
 // Encodes the request into XML format.
