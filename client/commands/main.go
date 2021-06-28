@@ -425,13 +425,54 @@ type NewsHeader struct {
 	Title     string   `xml:"title,charData"`  // заголовок новости
 }
 
+type Quotations struct {
+	XMLName xml.Name    `xml:"quotations"`
+	Items   []Quotation `xml:"quotation"`
+}
+
 // <quotations><quotation secid="36116"><board>FUT</board><seccode>SiU9</seccode><last>63384</last><change>210</change><priceminusprevwaprice>210</priceminusprevwaprice><biddepth>38</biddepth><biddeptht>32115</biddeptht><offerdepth>33</offerdepth><offerdeptht>60513</offerdeptht><voltoday>519036</voltoday><numtrades>77015</numtrades><valtoday>32873.706</valtoday><openpositions>2273956</openpositions><deltapositions>14836</deltapositions></quotation></quotations>
 type Quotation struct {
-	XMLName xml.Name `xml:"quotation"`
-	SecId   int      `xml:"secid,attr"`     // внутренний код
-	Board   string   `xml:"board,attr"`     // Идентификатор режима торгов
-	SecCode string   `xml:"seccode,attr"`   // Код инструмента
-	Last    float64  `xml:"last,omitempty"` // Текущая оценка стоимости единого портфеля
+	XMLName               xml.Name `xml:"quotation"`
+	SecId                 int      `xml:"secid,attr"`                      // внутренний код
+	Board                 string   `xml:"board,omitempty"`                 // Идентификатор режима торгов
+	SecCode               string   `xml:"seccode,omitempty"`               // Код инструмента
+	Open                  float64  `xml:"open,omitempty"`                  // Цена первой сделки
+	WapPice               float64  `xml:"waprice,omitempty"`               // Средневзвешенная цена
+	Last                  float64  `xml:"last,omitempty"`                  // Цена последней сделки
+	Quantity              int      `xml:"quantity,omitempty"`              // Объем последней сделки, в лотах
+	Time                  string   `xml:"time,omitempty"`                  // Время заключения последней сделки
+	Change                float64  `xml:"change,omitempty"`                // Абсолютное изменение цены последней сделки по отношению к цене последней сделки предыдущего торгового дня
+	PriceMinusPrevwaPrice float64  `xml:"priceminusprevwaprice,omitempty"` // Цена последней сделки к оценке предыдущего дня
+	Bid                   float64  `xml:"bid,omitempty"`                   // Лучшая цена на покупку
+	BidDepth              int      `xml:"biddepth,omitempty"`              // Кол-во лотов на покупку по лучшей цене
+	BidDeptht             int      `xml:"biddeptht,omitempty"`             // Совокупный спрос
+	NumBids               int      `xml:"numbids,omitempty"`               // Заявок на покупку
+	OfferDepth            int      `xml:"offerdepth,omitempty"`            // Кол-во лотов на продажу по лучшей цене
+	OfferDeptht           int      `xml:"offerdeptht,omitempty"`           // Совокупное предложение
+	NumOffers             int      `xml:"numoffers,omitempty"`             // Заявок на продажу
+	NumTrades             int      `xml:"numtrades,omitempty"`             // Сделок
+	VolToday              int      `xml:"voltoday,omitempty"`              // Объем совершенных сделок в лотах
+	OpenPositions         int      `xml:"openpositions,omitempty"`         // Общее количество открытых позиций(FORTS)
+	DeltaPositions        int      `xml:"deltapositions,omitempty"`        // Изм.открытых позиций(FORTS)
+	ValToday              float64  `xml:"valtoday,omitempty"`              // Объем совершенных сделок, млн. руб
+	Yield                 float64  `xml:"yield,omitempty"`                 // Доходность, по цене последней сделки
+	YieldatwaPrice        float64  `xml:"yieldatwaprice,omitempty"`        // Доходность по средневзвешенной цене
+	MarketPriceToday      float64  `xml:"marketpricetoday,omitempty"`      // Рыночная цена по результатам торгов сегодняшнего дня
+	HighBid               float64  `xml:"highbid,omitempty"`               // Наибольшая цена спроса в течение торговой сессии
+	LowOffer              float64  `xml:"lowoffer,omitempty"`              // Наименьшая цена предложения в течение торговой сессии
+	High                  float64  `xml:"high,omitempty"`                  // Максимальная цена сделки
+	Low                   float64  `xml:"low,omitempty"`                   // Минимальная цена сделки
+	ClosePrice            float64  `xml:"closeprice,omitempty"`            // Цена закрытия
+	CloseYield            float64  `xml:"closeyield,omitempty"`            // Доходность по цене закрытия
+	Status                string   `xml:"status,omitempty"`                // Статус «торговые операции разрешены/запрещены»
+	TradingStatus         string   `xml:"tradingstatus,omitempty"`         // Состояние торговой сессии по инструменту
+	BuyDeposit            float64  `xml:"buydeposit,omitempty"`            // ГО покупок/покр
+	SellDeposit           float64  `xml:"selldeposit,omitempty"`           // ГО продаж/непокр
+	Volatility            float64  `xml:"volatility,omitempty"`            // Волатильность
+	TheoreticalPrice      float64  `xml:"theoreticalprice,omitempty"`      // Теоретическая цена
+	BgoBuy                float64  `xml:"bgo_buy,omitempty"`               // Базовое ГО под покупку маржируемого опциона
+	PointCost             float64  `xml:"point_cost,omitempty"`            // Стоимость пункта цены
+	LCurrentPrice         float64  `xml:"lcurrentprice,omitempty"`         // Официальная текущая цена Биржи
 }
 
 // Encodes the request into XML format.

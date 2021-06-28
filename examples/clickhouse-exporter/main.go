@@ -8,12 +8,14 @@ import (
 	"github.com/kmlebedev/txmlconnector/client/commands"
 	log "github.com/sirupsen/logrus"
 	"os"
+	"strings"
 	"time"
 )
 
 const (
 	EnvKeyLogLevel      = "LOG_LEVEL"
 	GetHistoryDataCount = 1000
+	ChInsertQuery       = "INSERT INTO candles (date, sec_code, period, open, close, high, low, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 func main() {
@@ -44,13 +46,14 @@ func main() {
 		CREATE TABLE IF NOT EXISTS candles (
 		   date   DateTime,
 		   sec_code FixedString(5),
+		   period UInt8,
 		   open   Float32,
 		   close  Float32,
 		   high   Float32,
 		   low    Float32,
 		   volume UInt64
 		) ENGINE = ReplacingMergeTree()
-		ORDER BY (date, sec_code)
+		ORDER BY (date, sec_code, period)
 	`)
 	if err != nil {
 		log.Fatal(err)
@@ -61,6 +64,7 @@ func main() {
 	}
 	defer tc.Disconnect()
 	positions := commands.Positions{}
+	quotationCandles := make(map[int]commands.Candle)
 	go func() {
 		for {
 			select {
@@ -103,13 +107,14 @@ func main() {
 					log.Debugf(fmt.Sprintf("Positions: \n%+v\n", tc.Data.Positions))
 				case "candles":
 					var tx, _ = connect.Begin()
-					var stmt, _ = tx.Prepare("INSERT INTO candles (date, sec_code, open, close, high, low, volume) VALUES (?, ?, ?, ?, ?, ?, ?)")
+					var stmt, _ = tx.Prepare(ChInsertQuery)
 					defer stmt.Close()
 					for _, candle := range tc.Data.Candles.Items {
 						candleDate, _ := time.Parse("02.01.2006 15:04:05", candle.Date)
 						if _, err := stmt.Exec(
 							fmt.Sprint(candleDate.Format("2006-01-02 15:04:05")),
 							tc.Data.Candles.SecCode,
+							tc.Data.Candles.Period,
 							candle.Open,
 							candle.Close,
 							candle.High,
@@ -120,7 +125,53 @@ func main() {
 						}
 					}
 					if err := tx.Commit(); err != nil {
-						log.Fatal(err)
+						log.Error(err)
+					}
+				case "quotations":
+					timeNow := time.Now()
+					var tx, _ = connect.Begin()
+					var stmt, _ = tx.Prepare(ChInsertQuery)
+					defer stmt.Close()
+					for _, quotation := range tc.Data.Quotations.Items {
+						quotationCandle, quotationCandleExist := quotationCandles[quotation.SecId]
+						if strings.HasSuffix(quotation.Time, ":00") && quotation.Last > 0 && quotationCandleExist {
+							if _, err := stmt.Exec(
+								fmt.Sprintf("%s %s", timeNow.Format("2006-01-02"), quotation.Time),
+								quotation.SecCode,
+								1,
+								quotationCandles[quotation.SecId].Open,
+								quotation.Last, // Close
+								quotationCandles[quotation.SecId].High,
+								quotationCandles[quotation.SecId].Low,
+								quotationCandles[quotation.SecId].Volume,
+							); err != nil {
+								log.Fatal(err)
+							}
+							quotationCandles[quotation.SecId] = commands.Candle{}
+						} else {
+							if quotationCandleExist {
+								if quotationCandle.Open == 0 && quotation.Open != 0 {
+									quotationCandle.Open = quotation.Open
+								}
+								if quotation.Last > quotationCandle.High {
+									quotationCandle.High = quotation.Last
+								}
+								if quotation.Last < quotationCandle.Low || quotationCandle.Low == 0 {
+									quotationCandle.Low = quotation.Last
+								}
+								quotationCandle.Volume += int64(quotation.Quantity)
+							} else {
+								quotationCandles[quotation.SecId] = commands.Candle{
+									Open:   quotation.Last,
+									Low:    quotation.Last,
+									High:   quotation.Last,
+									Volume: int64(quotation.Quantity),
+								}
+							}
+						}
+					}
+					if err := tx.Commit(); err != nil {
+						log.Error(err)
 					}
 				default:
 					log.Debugf(fmt.Sprintf("receive %s", resp))
@@ -154,17 +205,20 @@ func main() {
 			continue
 		}
 		quotations = append(quotations, commands.SubSecurity{SecId: sec.SecId})
-		log.Debugf(fmt.Sprintf("gethistorydata sec %s", sec.SecCode))
-		if err = tc.SendCommand(commands.Command{
-			Id:     "gethistorydata",
-			Period: 1,
-			SecId:  sec.SecId,
-			Count:  GetHistoryDataCount,
-			Reset:  true,
-		}); err != nil {
-			log.Error(err)
+		for _, kind := range tc.Data.CandleKinds.Items {
+			log.Debugf(fmt.Sprintf("gethistorydata sec %s period %s", sec.SecCode, kind.Name))
+			if err = tc.SendCommand(commands.Command{
+				Id:     "gethistorydata",
+				Period: kind.ID,
+				SecId:  sec.SecId,
+				Count:  GetHistoryDataCount,
+				Reset:  true,
+			}); err != nil {
+				log.Error(err)
+			}
 		}
 	}
+	// receive <quotations><quotation secid="21"><board>TQBR</board><seccode>GMKN</seccode><last>24954</last><quantity>4</quantity><time>11:24:00</time><change>220</change><priceminusprevwaprice>432</priceminusprevwaprice><bid>24950</bid><biddepth>35</biddepth><biddeptht>16188</biddeptht><numbids>1563</numbids><offer>24962</offer><offerdepth>51</offerdepth><offerdeptht>25222</offerdeptht><numoffers>1154</numoffers><voltoday>54772</voltoday><numtrades>6273</numtrades><valtoday>1364.723</valtoday></quotation></quotations>
 	// Get subscribe on all sec
 	if err = tc.SendCommand(commands.Command{
 		Id:         "subscribe",
