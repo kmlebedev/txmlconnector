@@ -8,14 +8,17 @@ import (
 	"github.com/kmlebedev/txmlconnector/client/commands"
 	log "github.com/sirupsen/logrus"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	EnvKeyLogLevel      = "LOG_LEVEL"
-	GetHistoryDataCount = 1000
-	ChInsertQuery       = "INSERT INTO candles (date, sec_code, period, open, close, high, low, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+	EnvKeyLogLevel       = "LOG_LEVEL"
+	ExportCandleCount    = 1000
+	ChCandlesInsertQuery = "INSERT INTO candles (date, sec_code, period, open, close, high, low, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+	//ChSecuritiesInsertQuery = "INSERT INTO securities (secid, seccode) VALUES (?, ?)"
+	ChSecuritiesInsertQuery = "INSERT INTO securities (secid, seccode, instrclass, board, market, shortname, decimals, minstep, lotsize, point_cost, opmask_usecredit, opmask_bymarket, sectype, sec_tz, quotestype, MIC, ticker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 func main() {
@@ -36,16 +39,17 @@ func main() {
 		if err := connect.Ping(); err != nil {
 			if exception, ok := err.(*clickhouse.Exception); ok {
 				log.Infof("[%d] %s \n%s\n", exception.Code, exception.Message, exception.StackTrace)
-				break
 			}
 			log.Warn(err)
+		} else {
+			break
 		}
 		time.Sleep(10 * time.Second)
 	}
 	_, err = connect.Exec(`
 		CREATE TABLE IF NOT EXISTS candles (
 		   date   DateTime,
-		   sec_code FixedString(5),
+		   sec_code FixedString(4),
 		   period UInt8,
 		   open   Float32,
 		   close  Float32,
@@ -53,8 +57,31 @@ func main() {
 		   low    Float32,
 		   volume UInt64
 		) ENGINE = ReplacingMergeTree()
-		ORDER BY (date, sec_code, period)
-	`)
+		ORDER BY (date, sec_code, period)`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = connect.Exec(`
+		CREATE TABLE IF NOT EXISTS securities (
+			secid   UInt16,
+			seccode FixedString(4),
+			instrclass String,
+			board String,
+			market UInt8,
+			shortname String,
+			decimals UInt8,
+			minstep Float32,
+			lotsize UInt8,
+			point_cost Float32,
+			opmask_usecredit String,
+		    opmask_bymarket String,
+			sectype String,
+			sec_tz String,
+			quotestype UInt8,
+			MIC String,
+			ticker String
+		) ENGINE = ReplacingMergeTree()
+		ORDER BY (secid, seccode, board)`)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -72,7 +99,7 @@ func main() {
 				{
 					if status.Connected != "true" {
 						// Todo try reconect
-						log.Fatalf("txmlconnector not connected %+v", status)
+						log.Warnf("txmlconnector not connected %+v", status)
 					}
 				}
 			case resp := <-tc.ResponseChannel:
@@ -107,8 +134,7 @@ func main() {
 					log.Debugf(fmt.Sprintf("Positions: \n%+v\n", tc.Data.Positions))
 				case "candles":
 					var tx, _ = connect.Begin()
-					var stmt, _ = tx.Prepare(ChInsertQuery)
-					defer stmt.Close()
+					var stmt, _ = tx.Prepare(ChCandlesInsertQuery)
 					for _, candle := range tc.Data.Candles.Items {
 						candleDate, _ := time.Parse("02.01.2006 15:04:05", candle.Date)
 						if _, err := stmt.Exec(
@@ -130,8 +156,7 @@ func main() {
 				case "quotations":
 					timeNow := time.Now()
 					var tx, _ = connect.Begin()
-					var stmt, _ = tx.Prepare(ChInsertQuery)
-					defer stmt.Close()
+					var stmt, _ = tx.Prepare(ChCandlesInsertQuery)
 					for _, quotation := range tc.Data.Quotations.Items {
 						quotationCandle, quotationCandleExist := quotationCandles[quotation.SecId]
 						if strings.HasSuffix(quotation.Time, ":00") && quotation.Last > 0 && quotationCandleExist {
@@ -197,26 +222,83 @@ func main() {
 	}
 	// Get History data for all sec
 	quotations := []commands.SubSecurity{}
+	exportCandleCount := ExportCandleCount
+	if eCandleCount, err := strconv.Atoi(os.Getenv("EXPORT_CANDLE_COUNT")); err == nil && eCandleCount > 0 {
+		exportCandleCount = eCandleCount
+	}
+	exportSecBoards := []string{"TQBR"}
+	if eSecBoards := os.Getenv("EXPORT_SEC_BOARDS"); eSecBoards != "" {
+		exportSecBoards = strings.Split(eSecBoards, ",")
+	}
+	exportSecCodes := []string{}
+	if eSecCodes := os.Getenv("EXPORT_SEC_CODES"); eSecCodes != "" {
+		exportSecCodes = strings.Split(eSecCodes, ",")
+	}
+	exportPeriodSeconds := []string{}
+	if ePeriodSeconds := os.Getenv("EXPORT_PERIOD_SECONDS"); ePeriodSeconds != "" {
+		exportPeriodSeconds = strings.Split(ePeriodSeconds, ",")
+	}
+	var txSec, _ = connect.Begin()
+	var stmtSec, _ = txSec.Prepare(ChSecuritiesInsertQuery)
 	for _, sec := range tc.Data.Securities.Items {
-		if sec.Board != "TQBR" {
+		exportSecBoardFound := false
+		for _, exportSecBoard := range exportSecBoards {
+			if exportSecBoard == sec.Board {
+				exportSecBoardFound = true
+				break
+			}
+		}
+		if !exportSecBoardFound {
 			continue
+		}
+		if len(exportSecCodes) > 0 {
+			exportSecCodeFound := false
+			for _, exportSecCode := range exportSecCodes {
+				if exportSecCode == sec.SecCode {
+					exportSecCodeFound = true
+					break
+				}
+			}
+			if !exportSecCodeFound {
+				continue
+			}
 		}
 		if sec.SecId == 0 {
 			continue
 		}
+		//                           secid,    seccode,     instrclass,    board,    market, shortname,      decimals,     minstep,     lotsize,      point_cost,    opmask,    sectype,     sec_tz,     quotestype,     MIC,    ticker
+		log.Debugf("%+v", sec)
+		if res, err := stmtSec.Exec(sec.SecId, sec.SecCode, sec.InstrClass, sec.Board, sec.Market, sec.ShortName, sec.Decimals, sec.MinStep, sec.LotSize, sec.PointCost, sec.OpMask.UseCredit, sec.OpMask.ByMarket, sec.SecType, sec.SecTZ.Name, sec.QuotesType, sec.MIC, sec.Ticker); err != nil {
+			//if res, err := stmtSec.Exec(sec.SecId, sec.SecCode); err != nil {
+			log.Error(res, err)
+		}
 		quotations = append(quotations, commands.SubSecurity{SecId: sec.SecId})
 		for _, kind := range tc.Data.CandleKinds.Items {
-			log.Debugf(fmt.Sprintf("gethistorydata sec %s period %s", sec.SecCode, kind.Name))
+			if len(exportPeriodSeconds) > 0 {
+				exportPeriodSecondFound := false
+				for _, exportPeriodSecond := range exportPeriodSeconds {
+					if exportPeriodSecond == strconv.Itoa(kind.Period) {
+						exportPeriodSecondFound = true
+					}
+				}
+				if !exportPeriodSecondFound {
+					continue
+				}
+			}
+			log.Debugf(fmt.Sprintf("gethistorydata sec %s period %s seconds %d", sec.SecCode, kind.Name, kind.Period))
 			if err = tc.SendCommand(commands.Command{
 				Id:     "gethistorydata",
 				Period: kind.ID,
 				SecId:  sec.SecId,
-				Count:  GetHistoryDataCount,
+				Count:  exportCandleCount,
 				Reset:  true,
 			}); err != nil {
 				log.Error(err)
 			}
 		}
+	}
+	if err := txSec.Commit(); err != nil {
+		log.Error(err)
 	}
 	// receive <quotations><quotation secid="21"><board>TQBR</board><seccode>GMKN</seccode><last>24954</last><quantity>4</quantity><time>11:24:00</time><change>220</change><priceminusprevwaprice>432</priceminusprevwaprice><bid>24950</bid><biddepth>35</biddepth><biddeptht>16188</biddeptht><numbids>1563</numbids><offer>24962</offer><offerdepth>51</offerdepth><offerdeptht>25222</offerdeptht><numoffers>1154</numoffers><voltoday>54772</voltoday><numtrades>6273</numtrades><valtoday>1364.723</valtoday></quotation></quotations>
 	// Get subscribe on all sec

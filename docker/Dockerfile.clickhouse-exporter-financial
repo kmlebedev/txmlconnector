@@ -1,0 +1,18 @@
+FROM golang:1.17-rc-alpine as builder
+
+COPY ./examples/clickhouse-exporter/financial /go/src/github.com/kmlebedev/txmlconnector/examples/clickhouse-exporter/financial
+COPY ./go.mod /go/src/github.com/kmlebedev/txmlconnector/go.mod
+COPY ./go.sum /go/src/github.com/kmlebedev/txmlconnector/go.sum
+
+WORKDIR /go/src/github.com/kmlebedev/txmlconnector/examples/clickhouse-exporter/financial
+
+RUN go mod download && \
+    CGO_ENABLED=0 go build -ldflags "-extldflags -static" -o /go/bin/clickhouse-exporter-financial
+
+FROM alpine
+ENV FINANCIAL_DATA_DIR=/var/lib/clickhouse-exporter-financial
+
+COPY --from=builder /go/bin/clickhouse-exporter-financial /usr/bin/clickhouse-exporter-financial
+COPY ./examples/clickhouse-exporter/financial/data /var/lib/clickhouse-exporter-financial
+
+ENTRYPOINT ["/usr/bin/clickhouse-exporter-financial"]

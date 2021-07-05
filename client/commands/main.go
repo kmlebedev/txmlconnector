@@ -126,7 +126,7 @@ type Security struct {
 	SecCode    string      `xml:"seccode"`     // Код инструмента
 	InstrClass string      `xml:"instrclass"`  // Символ категории (класса) инструмента
 	Board      string      `xml:"board"`       // Идентификатор режима торгов по умолчанию
-	Market     string      `xml:"market"`      // Идентификатор рынка
+	Market     int         `xml:"market"`      // Идентификатор рынка
 	ShortName  string      `xml:"shortname"`   // Наименование бумаги
 	Decimals   int         `xml:"decimals"`    // Количество десятичных знаков в цене
 	MinStep    float64     `xml:"minstep"`     // Шаг цены

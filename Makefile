@@ -23,8 +23,17 @@ build:
 exporter_build:
 	docker build --no-cache -t kmlebedev/transaq-clickhouse-exporter:local -f docker/Dockerfile.clickhouse-exporter .
 
+exporter_financial_build:
+	docker build --no-cache -t kmlebedev/clickhouse-exporter-financial:local -f docker/Dockerfile.clickhouse-exporter-financial .
+
+grafana_build:
+	docker build --no-cache -t kmlebedev/grafana-financial:local -f docker/Dockerfile.grafana .
+
 dev: build
 	docker-compose -f docker/compose/local-dev-compose.yml -p transaq up
 
 exporter: build exporter_build
 	docker-compose -f docker/compose/clickhouse-exporter-compose.yaml -p transaq up
+
+exporter_financial: exporter_financial_build
+	docker-compose -f docker/compose/clickhouse-exporter-financial-compose.yaml -p financial up

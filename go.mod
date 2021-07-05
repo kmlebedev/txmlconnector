@@ -3,7 +3,10 @@ module github.com/kmlebedev/txmlconnector
 go 1.16
 
 require (
+	github.com/360EntSecGroup-Skylar/excelize/v2 v2.4.0 // indirect
 	github.com/ClickHouse/clickhouse-go v1.4.5 // indirect
+	github.com/extrame/ole2 v0.0.0-20160812065207-d69429661ad7 // indirect
+	github.com/extrame/xls v0.0.1 // indirect
 	github.com/galeone/tfgo v0.0.0-20201116112556-4089c60ef77a // indirect
 	github.com/go-gota/gota v0.10.1 // indirect
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
@@ -15,8 +18,11 @@ require (
 	github.com/gonum/matrix v0.0.0-20181209220409-c518dec07be9 // indirect
 	github.com/gonum/stat v0.0.0-20181125101827-41a0da705a5b // indirect
 	github.com/kniren/gota v0.10.1 // indirect
+	github.com/pbnjay/grate v0.0.0-20210225210708-9f1c3fa15fbb // indirect
 	github.com/sdcoffey/techan v0.12.0 // indirect
+	github.com/shakinm/xlsReader v0.9.10 // indirect
 	github.com/sirupsen/logrus v1.8.1
+	github.com/tealeg/xlsx v1.0.5 // indirect
 	github.com/technoweenie/multipartstreamer v1.0.1 // indirect
 	go.oneofone.dev/ta v0.0.7 // indirect
 	golang.org/x/net v0.0.0-20210610132358-84b48f89b13b // indirect

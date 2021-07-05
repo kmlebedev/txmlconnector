@@ -16,13 +16,14 @@ services:
         soft: 262144
         hard: 262144
   grafana:
-    image: grafana/grafana:8.0.3
+    image: grafana/grafana:8.0.4
     ports:
       - "3000:3000"
+    volumes:
+      - ./compose/grafana:/etc/grafana
     environment:
-      # ilgizar-candlestick-panel
-      GF_INSTALL_PLUGINS: "grafana-piechart-panel,vertamedia-clickhouse-datasource"
-      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: "vertamedia-clickhouse-datasource"
+      GF_INSTALL_PLUGINS: "https://github.com/ilgizar/ilgizar-candlestick-panel/raw/master/pack/ilgizar-candlestick-panel.zip;ilgizar-candlestick-panel,https://github.com/gipong/grafana-groupedbarchart-panel/archive/master.zip;grafana-groupedbarchart-panel,vertamedia-clickhouse-datasource"
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: "grafana-groupedbarchart-panel,vertamedia-clickhouse-datasource,ilgizar-candlestick-panel"
       GF_SECURITY_ADMIN_USER: "admin"
       GF_SECURITY_ADMIN_PASSWORD: "admin"
     depends_on:
