@@ -29,6 +29,8 @@ func init() {
 	investingDataCodes["Hot Rolled Coil Futures"] = "SHHCc1"
 	investingDataPaths["Iron Ore CFR China 62% Fe"] = investingDataBasePath + "/62% Fe CFR SGXIOSc1.xlsx"
 	investingDataCodes["Iron Ore CFR China 62% Fe"] = "SGXIOSc1"
+	investingDataPaths["Coal DJMc1"] = investingDataBasePath + "/Coal DJMc1.xlsx"
+	investingDataCodes["Coal DJMc1"] = "DJMc1"
 }
 
 func loadInvestingData(conn *sql.DB) error {

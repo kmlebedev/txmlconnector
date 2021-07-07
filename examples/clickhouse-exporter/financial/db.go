@@ -9,6 +9,9 @@ import (
 )
 
 var (
+	TableColumnNums = map[string]int{
+		"consolidated_sales_for_products": 5,
+	}
 	// lme_closing_prices
 	createTableLmeClosingPrices = `
 		CREATE TABLE IF NOT EXISTS lme_closing_prices (
