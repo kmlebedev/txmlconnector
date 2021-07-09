@@ -11,7 +11,7 @@ services:
         soft: 262144
         hard: 262144
   grafana:
-    image: grafana/grafana:8.0.4
+    image: grafana/grafana:latest
     ports:
       - "3000:3000"
     volumes:

@@ -22,8 +22,9 @@ var (
 
 func init() {
 	exportTables["Operational results"] = map[string]string{
-		"Sales volumes, thousands of tonnes": "consolidated_sales_for_products",
-		"Sales price, $/tonne":               "prices_for_products",
+		"SUMMARY OF KEY PRODUCTION, SALES VOLUMES":                   "consolidated_sales_for_products",
+		"SEVERSTAL’S CONSOLIDATED SALES (NET OF INTERCOMPANY SALES)": "consolidated_sales_for_products",
+		"Sales price, $/tonne":                                       "prices_for_products",
 	}
 	exportTables["PL"] = map[string]string{
 		"Consolidated income statements": "financial_highlights",

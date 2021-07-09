@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1625468186031,
+  "iteration": 1625763921652,
   "links": [],
   "panels": [
     {
@@ -182,6 +182,30 @@
         },
         "overrides": [
           {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "EV/EBITDA"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          },
+          {
             "matcher": {
               "id": "byName",
               "options": "CAPEX"
@@ -210,6 +234,18 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "EV/EBITDA"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
           }
         ]
       },
@@ -221,15 +257,15 @@
       },
       "id": 8,
       "options": {
-        "barWidth": 1,
-        "groupWidth": 0.95,
+        "barWidth": 0.95,
+        "groupWidth": 1,
         "legend": {
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom"
         },
         "orientation": "auto",
-        "showValue": "auto",
+        "showValue": "always",
         "text": {},
         "tooltip": {
           "mode": "single"
@@ -246,9 +282,9 @@
           "format": "table",
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "intervalFactor": 1,
-          "query": "select quarter_name,\n       last_value(multiIf(equals(indicator,'CAPEX'), value, NULL)) as CAPEX,\n       last_value(multiIf(equals(indicator,'EBITDA'), value, NULL)) as EBITDA,\n       last_value(multiIf(equals(indicator,'Revenue'), value, NULL)) as Revenue\nfrom $table\ngroup by quarter_name, $dateCol\norder by $dateCol\n\n",
+          "query": "select quarter_name,CAPEX,EBITDA,Revenue,Revenue/EBITDA as \"EV/EBITDA\" from (\nselect $dateCol q, quarter_name,\n       last_value(multiIf(equals(indicator,'CAPEX'), value, NULL)) as CAPEX,\n       last_value(multiIf(equals(indicator,'EBITDA'), value, NULL)) as EBITDA,\n       last_value(multiIf(equals(indicator,'Revenue'), value, NULL)) as Revenue\nfrom $table \nwhere sec_code == '$sec_code'\ngroup by quarter_name, q\norder by q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q,'Q2 2021' as quarter_name, -250, 1035, 2800))\norder by q\n",
           "queryType": "randomWalk",
-          "rawQuery": "select quarter_name,\n       last_value(multiIf(equals(indicator,'CAPEX'), value, NULL)) as CAPEX,\n       last_value(multiIf(equals(indicator,'EBITDA'), value, NULL)) as EBITDA,\n       last_value(multiIf(equals(indicator,'Revenue'), value, NULL)) as Revenue\nfrom default.financial_highlights\ngroup by quarter_name, quarter\norder by quarter",
+          "rawQuery": "select quarter_name,CAPEX,EBITDA,Revenue,Revenue/EBITDA as \"EV/EBITDA\" from (\nselect quarter q, quarter_name,\n       last_value(multiIf(equals(indicator,'CAPEX'), value, NULL)) as CAPEX,\n       last_value(multiIf(equals(indicator,'EBITDA'), value, NULL)) as EBITDA,\n       last_value(multiIf(equals(indicator,'Revenue'), value, NULL)) as Revenue\nfrom default.financial_highlights \nwhere sec_code == 'MAGN'\ngroup by quarter_name, q\norder by q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q,'Q2 2021' as quarter_name, -250, 1035, 2800))\norder by q",
           "refId": "A",
           "round": "0s",
           "skip_comments": true,
@@ -297,6 +333,30 @@
           "unit": "currencyUSD"
         },
         "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "FCF"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byName",
@@ -1612,9 +1672,200 @@
       ],
       "title": "Корреляция индекса ЖРС и железной части кеш-кост сляба",
       "type": "timeseries"
+    },
+    {
+      "datasource": "ClickHouse",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "HCC FOB Australia",
+                  "Coal domestics",
+                  "Coal in Slab"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "DJMc1"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyJPY"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 52
+      },
+      "id": 28,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select\n    toDate(toStartOfQuarter(date_add(month, $price_lag_months, date))) as q,\n    avg(close) as DJMc1\nfrom $table\nWHERE code == 'DJMc1'\nGROUP BY q\nORDER BY q\n",
+          "rawQuery": "select\n    toDate(toStartOfQuarter(date_add(month, 2, date))) as q,\n    avg(close) as DJMc1\nfrom default.stock_prices\nWHERE code == 'DJMc1'\nGROUP BY q\nORDER BY q",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "stock_prices",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    $dateCol as q,\n    last_value(price) as \"HCC FOB Australia\"\nFROM $table\nWHERE product == 'HCC FOB'\nGROUP BY q\nORDER BY q\n",
+          "rawQuery": "SELECT\n    quarter as q,\n    last_value(price) as \"HCC FOB Australia\"\nFROM default.fob_prices\nWHERE product == 'HCC FOB'\nGROUP BY q\nORDER BY q",
+          "refId": "C",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "fob_prices",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "intervalFactor": 1,
+          "query": "SELECT q, sum(perc) as \"Coal in Slab\" FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE structure == 'Coal concentrate'\n   and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nORDER BY q",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT q, sum(perc) as \"Coal in Slab\" FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE structure == 'Coal concentrate'\n   and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nORDER BY q",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "material_cost_structure",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select\n    toDate(toStartOfQuarter(date_add(month, $price_lag_months, date))) as q,\n    avg(close) as \"Coal domestics\"\nfrom $table\nWHERE name == 'coal_finanz'\nGROUP BY q\nORDER BY q\n",
+          "rawQuery": "select\n    toDate(toStartOfQuarter(date_add(month, 2, date))) as q,\n    avg(close) as \"Coal domestics\"\nfrom default.csv_closing_prices\nWHERE name == 'coal_finanz'\nGROUP BY q\nORDER BY q",
+          "refId": "D",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "csv_closing_prices",
+          "tableLoading": false
+        }
+      ],
+      "title": "Корреляция угля к части кеш-кост сляба",
+      "type": "timeseries"
     }
   ],
-  "refresh": false,
+  "refresh": "",
   "schemaVersion": 30,
   "style": "dark",
   "tags": [],
@@ -1630,7 +1881,25 @@
         "datasource": "ClickHouse",
         "definition": "SELECT seccode FROM securities",
         "description": null,
-        "error": null,
+        "error": {
+          "config": {
+            "headers": {
+              "X-Grafana-Org-Id": 1
+            },
+            "hideFromInspector": false,
+            "method": "GET",
+            "retry": 0,
+            "url": "api/datasources/proxy/1/?query=SELECT%20seccode%20FROM%20securities%20FORMAT%20JSON"
+          },
+          "data": {
+            "error": "Not Found",
+            "message": "Code: 60, e.displayText() = DB::Exception: Table default.securities doesn't exist (version 21.6.5.37 (official build))\n",
+            "response": "Code: 60, e.displayText() = DB::Exception: Table default.securities doesn't exist (version 21.6.5.37 (official build))\n"
+          },
+          "message": "Code: 60, e.displayText() = DB::Exception: Table default.securities doesn't exist (version 21.6.5.37 (official build))\n",
+          "status": 404,
+          "statusText": "Not Found"
+        },
         "hide": 0,
         "includeAll": false,
         "label": "sec_code",
@@ -1774,12 +2043,12 @@
     ]
   },
   "time": {
-    "from": "now-30d",
+    "from": "now-5y",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "Transaq Stock Market",
   "uid": "ZCYAJwknk",
-  "version": 21
+  "version": 6
 }

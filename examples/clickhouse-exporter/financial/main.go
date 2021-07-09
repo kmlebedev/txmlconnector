@@ -122,6 +122,13 @@ func main() {
 	conn := initDB()
 	log.Debugf("connected %+v", conn.Stats())
 
+	if err := loadChmfData(conn); err != nil {
+		log.Error(err)
+	}
+	return
+	if err := loadCSV(conn); err != nil {
+		log.Error(err)
+	}
 	if err := loadLmeData(conn); err != nil {
 		log.Error(err)
 	}
@@ -129,9 +136,6 @@ func main() {
 		log.Error(err)
 	}
 	if err := loadMagnData(conn); err != nil {
-		log.Error(err)
-	}
-	if err := loadChmfData(conn); err != nil {
 		log.Error(err)
 	}
 }

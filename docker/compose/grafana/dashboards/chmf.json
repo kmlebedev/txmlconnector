@@ -15,8 +15,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "id": 2,
-  "iteration": 1625599693531,
+  "id": 3,
+  "iteration": 1625771804030,
   "links": [],
   "panels": [
     {
@@ -510,13 +510,108 @@
       "type": "timeseries"
     },
     {
+      "datasource": "ClickHouse",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": 28,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    quarter as q,\n    trim(TRAILING '*' from product) as product,\n    last_value(sales.value)*last_value(prices.price) as perc\nFROM consolidated_sales_for_products as sales\n       LEFT JOIN prices_for_products as prices ON\n          sales.quarter == prices.quarter\n      and sales.sec_code == prices.sec_code\n      and trim(TRAILING '*' from prices.product) == trim(TRAILING '*' from sales.product)\nWHERE sales.sec_code == 'CHMF' and has(array('Semi-finished products',\n     'Hot-rolled coil',\n     'Hot-rolled plate',\n     'Hot - rolled coil and plate',\n     'Cold-rolled coil',\n     'Colour coated coil',\n     'Long products',\n     'Metalware products',\n     'Large diameter pipes',\n     'Other tubes, pipes, formed shapes'), trim(TRAILING '*' from sales.product)) == 1\nGROUP BY q, product\nORDER BY q",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT\n    quarter as q,\n    trim(TRAILING '*' from product) as product,\n    last_value(sales.value)*last_value(prices.price) as perc\nFROM consolidated_sales_for_products as sales\n       LEFT JOIN prices_for_products as prices ON\n          sales.quarter == prices.quarter\n      and sales.sec_code == prices.sec_code\n      and trim(TRAILING '*' from prices.product) == trim(TRAILING '*' from sales.product)\nWHERE sales.sec_code == 'CHMF' and has(array('Semi-finished products',\n     'Hot-rolled coil',\n     'Hot-rolled plate',\n     'Hot - rolled coil and plate',\n     'Cold-rolled coil',\n     'Colour coated coil',\n     'Long products',\n     'Metalware products',\n     'Large diameter pipes',\n     'Other tubes, pipes, formed shapes'), trim(TRAILING '*' from sales.product)) == 1\nGROUP BY q, product\nORDER BY q",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "financial_ratios",
+          "tableLoading": false
+        }
+      ],
+      "title": "Струпктура  выручки",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 34
       },
       "id": 11,
       "panels": [],
@@ -606,7 +701,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 35
       },
       "id": 17,
       "options": {
@@ -777,7 +872,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 43
       },
       "id": 15,
       "options": {
@@ -979,7 +1074,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 51
       },
       "id": 19,
       "panels": [],
@@ -1043,7 +1138,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 44
+        "y": 52
       },
       "id": 21,
       "options": {
@@ -1264,7 +1359,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 44
+        "y": 52
       },
       "id": 23,
       "options": {
@@ -1538,7 +1633,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 60
       },
       "id": 25,
       "options": {
@@ -1792,12 +1887,12 @@
     ]
   },
   "time": {
-    "from": "now-30d",
+    "from": "now-5y",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "SeverStal Forecast",
-  "uid": "ABzWGkmnk",
-  "version": 4
+  "uid": "chmf",
+  "version": 2
 }
