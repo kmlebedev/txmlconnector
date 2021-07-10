@@ -122,7 +122,10 @@ func main() {
 	conn := initDB()
 	log.Debugf("connected %+v", conn.Stats())
 
-	if err := loadChmfData(conn); err != nil {
+	if err := loadChmfData(conn, "Q1_2021-Financial_and_operational_data-Severstal_Final.xlsx"); err != nil {
+		log.Error(err)
+	}
+	if err := loadChmfData(conn, "CHMF_revenue_structure.xlsx"); err != nil {
 		log.Error(err)
 	}
 	return
@@ -135,7 +138,7 @@ func main() {
 	if err := loadInvestingData(conn); err != nil {
 		log.Error(err)
 	}
-	if err := loadMagnData(conn); err != nil {
+	if err := loadMagnData(conn, "MMK_operating_e_financial_data_Q1_2021.xls"); err != nil {
 		log.Error(err)
 	}
 }

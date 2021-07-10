@@ -10,15 +10,15 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	EnvKeyLogLevel       = "LOG_LEVEL"
-	ExportCandleCount    = 1000
-	ChCandlesInsertQuery = "INSERT INTO candles (date, sec_code, period, open, close, high, low, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-	//ChSecuritiesInsertQuery = "INSERT INTO securities (secid, seccode) VALUES (?, ?)"
-	ChSecuritiesInsertQuery = "INSERT INTO securities (secid, seccode, instrclass, board, market, shortname, decimals, minstep, lotsize, point_cost, opmask_usecredit, opmask_bymarket, sectype, sec_tz, quotestype, MIC, ticker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+	EnvKeyLogLevel          = "LOG_LEVEL"
+	ExportCandleCount       = 1000
+	ChCandlesInsertQuery    = "INSERT INTO candles (date, sec_code, period, open, close, high, low, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+	ChSecuritiesInsertQuery = "INSERT INTO securities (*) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 func main() {
@@ -73,13 +73,8 @@ func main() {
 			minstep Float32,
 			lotsize UInt8,
 			point_cost Float32,
-			opmask_usecredit String,
-		    opmask_bymarket String,
 			sectype String,
-			sec_tz String,
-			quotestype UInt8,
-			MIC String,
-			ticker String
+			quotestype UInt8
 		) ENGINE = ReplacingMergeTree()
 		ORDER BY (secid, seccode, board)`)
 	if err != nil {
@@ -92,6 +87,8 @@ func main() {
 	defer tc.Disconnect()
 	positions := commands.Positions{}
 	quotationCandles := make(map[int]commands.Candle)
+	dataCandleCount := ExportCandleCount
+	dataCandleCountLock := sync.RWMutex{}
 	go func() {
 		for {
 			select {
@@ -135,6 +132,9 @@ func main() {
 				case "candles":
 					var tx, _ = connect.Begin()
 					var stmt, _ = tx.Prepare(ChCandlesInsertQuery)
+					dataCandleCountLock.Lock()
+					dataCandleCount = len(tc.Data.Candles.Items)
+					dataCandleCountLock.Unlock()
 					for _, candle := range tc.Data.Candles.Items {
 						candleDate, _ := time.Parse("02.01.2006 15:04:05", candle.Date)
 						if _, err := stmt.Exec(
@@ -223,7 +223,7 @@ func main() {
 	// Get History data for all sec
 	quotations := []commands.SubSecurity{}
 	exportCandleCount := ExportCandleCount
-	if eCandleCount, err := strconv.Atoi(os.Getenv("EXPORT_CANDLE_COUNT")); err == nil && eCandleCount > 0 {
+	if eCandleCount, err := strconv.Atoi(os.Getenv("EXPORT_CANDLE_COUNT")); err == nil && eCandleCount > -2 {
 		exportCandleCount = eCandleCount
 	}
 	exportSecBoards := []string{"TQBR"}
@@ -268,8 +268,7 @@ func main() {
 		}
 		//                           secid,    seccode,     instrclass,    board,    market, shortname,      decimals,     minstep,     lotsize,      point_cost,    opmask,    sectype,     sec_tz,     quotestype,     MIC,    ticker
 		log.Debugf("%+v", sec)
-		if res, err := stmtSec.Exec(sec.SecId, sec.SecCode, sec.InstrClass, sec.Board, sec.Market, sec.ShortName, sec.Decimals, sec.MinStep, sec.LotSize, sec.PointCost, sec.OpMask.UseCredit, sec.OpMask.ByMarket, sec.SecType, sec.SecTZ.Name, sec.QuotesType, sec.MIC, sec.Ticker); err != nil {
-			//if res, err := stmtSec.Exec(sec.SecId, sec.SecCode); err != nil {
+		if res, err := stmtSec.Exec(sec.SecId, sec.SecCode, sec.InstrClass, sec.Board, sec.Market, sec.ShortName, sec.Decimals, sec.MinStep, sec.LotSize, sec.PointCost, sec.SecType, sec.QuotesType); err != nil {
 			log.Error(res, err)
 		}
 		quotations = append(quotations, commands.SubSecurity{SecId: sec.SecId})
@@ -285,16 +284,38 @@ func main() {
 					continue
 				}
 			}
-			log.Debugf(fmt.Sprintf("gethistorydata sec %s period %s seconds %d", sec.SecCode, kind.Name, kind.Period))
-			if err = tc.SendCommand(commands.Command{
-				Id:     "gethistorydata",
-				Period: kind.ID,
-				SecId:  sec.SecId,
-				Count:  exportCandleCount,
-				Reset:  true,
-			}); err != nil {
-				log.Error(err)
+			log.Debugf(fmt.Sprintf("gethistorydata sec %s period %d name %s seconds %d", sec.SecCode, kind.ID, kind.Name, kind.Period))
+			if exportCandleCount > 0 {
+				if err = tc.SendCommand(commands.Command{
+					Id:     "gethistorydata",
+					Period: kind.ID,
+					SecId:  sec.SecId,
+					Count:  exportCandleCount,
+					Reset:  "true",
+				}); err != nil {
+					log.Error(err)
+				}
+				// Export All Candles
+			} else {
+				for ExportCandleCount == dataCandleCount {
+					log.Debugf("loop get history %d == %d", ExportCandleCount, dataCandleCount)
+					if err = tc.SendCommand(commands.Command{
+						Id:     "gethistorydata",
+						Period: kind.ID,
+						SecId:  sec.SecId,
+						Count:  ExportCandleCount,
+						Reset:  "false",
+					}); err != nil {
+						log.Error(err)
+					}
+					time.Sleep(2 * time.Second)
+				}
+				log.Debugf("exit loop get history %d == %d", ExportCandleCount, dataCandleCount)
+				dataCandleCountLock.Lock()
+				dataCandleCount = ExportCandleCount
+				dataCandleCountLock.Unlock()
 			}
+
 		}
 	}
 	if err := txSec.Commit(); err != nil {

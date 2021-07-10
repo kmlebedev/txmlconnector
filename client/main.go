@@ -6,10 +6,9 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
-	"strings"
-
 	"io"
 	"os"
+	"strings"
 
 	. "github.com/kmlebedev/txmlconnector/client/commands"
 	pb "github.com/kmlebedev/txmlconnector/proto"

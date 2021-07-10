@@ -5,15 +5,16 @@ import (
 	"github.com/shakinm/xlsReader/xls"
 	log "github.com/sirupsen/logrus"
 	"os"
+	"path"
 )
 
-func loadMagnData(conn *sql.DB) error {
+func loadMagnData(conn *sql.DB, fileName string) error {
 	secCode := "MAGN"
 	dataBasePath := "data"
 	if dir := os.Getenv("FINANCIAL_DATA_DIR"); dir != "" {
 		dataBasePath = dir
 	}
-	workbook, err := xls.OpenFile(dataBasePath + "/MMK_operating_e_financial_data_Q1_2021.xls")
+	workbook, err := xls.OpenFile(path.Join(dataBasePath, fileName))
 	if err != nil {
 		return err
 	}

@@ -15,8 +15,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "id": 3,
-  "iteration": 1625771804030,
+  "id": 1,
+  "iteration": 1625948864505,
   "links": [],
   "panels": [
     {
@@ -246,9 +246,9 @@
           "format": "table",
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "intervalFactor": 1,
-          "query": "select quarter_name,\n       last_value(multiIf(equals(has(array('CAPEX','Net cash (used in)/from investing activities - continuing operations '), indicator), 1), value, NULL)) as CAPEX,\n       last_value(multiIf(equals(has(array('EBITDA','Gross profit '), indicator), 1), value, NULL)) as EBITDA,\n       last_value(multiIf(equals(has(array('Revenue','Revenue - third parties'), indicator), 1), value, NULL)) as Revenue\nfrom $table\nwhere sec_code == '$sec_code'\ngroup by quarter_name, $dateCol\norder by $dateCol\n\n",
+          "query": "select quarter_name,\n       last_value(multiIf(equals(has(array('CAPEX','Net cash (used in)/from investing activities - continuing operations'), indicator), 1), value, NULL)) as CAPEX,\n       last_value(multiIf(equals(has(array('EBITDA','Gross profit'), indicator), 1), value, NULL)) as EBITDA,\n       last_value(multiIf(equals(has(array('Revenue','Revenue - third parties'), indicator), 1), value, NULL)) as Revenue\nfrom $table\nwhere sec_code == '$sec_code'\ngroup by quarter_name, $dateCol\norder by $dateCol\n\n",
           "queryType": "randomWalk",
-          "rawQuery": "select quarter_name,\n       last_value(multiIf(equals(has(array('CAPEX','Net cash (used in)/from investing activities - continuing operations '), indicator), 1), value, NULL)) as CAPEX,\n       last_value(multiIf(equals(has(array('EBITDA','Gross profit '), indicator), 1), value, NULL)) as EBITDA,\n       last_value(multiIf(equals(has(array('Revenue','Revenue - third parties'), indicator), 1), value, NULL)) as Revenue\nfrom default.financial_highlights\nwhere sec_code == 'CHMF'\ngroup by quarter_name, quarter\norder by quarter",
+          "rawQuery": "select quarter_name,\n       last_value(multiIf(equals(has(array('CAPEX','Net cash (used in)/from investing activities - continuing operations'), indicator), 1), value, NULL)) as CAPEX,\n       last_value(multiIf(equals(has(array('EBITDA','Gross profit'), indicator), 1), value, NULL)) as EBITDA,\n       last_value(multiIf(equals(has(array('Revenue','Revenue - third parties'), indicator), 1), value, NULL)) as Revenue\nfrom default.financial_highlights\nwhere sec_code == 'CHMF'\ngroup by quarter_name, quarter\norder by quarter",
           "refId": "A",
           "round": "0s",
           "skip_comments": true,
@@ -362,9 +362,9 @@
           "format": "table",
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "intervalFactor": 1,
-          "query": "select quarter_name,\n       last_value(multiIf(equals(indicator,'Free-cash flow (FCF)'), value, NULL)) as FCF,\n       last_value(multiIf(equals(indicator,'Dividends paid'), value, NULL)) as Dividends\nfrom $table\ngroup by quarter_name,$dateCol\norder by $dateCol\n\n\n",
+          "query": "select quarter_name,\n       last_value(multiIf(equals(indicator,'Profit before financing and taxation'), value, NULL)) as FCF,\n       last_value(multiIf(equals(indicator,'Dividends paid'), value, NULL)) as Dividends\nfrom $table\ngroup by quarter_name,$dateCol\norder by $dateCol\n\n\n",
           "queryType": "randomWalk",
-          "rawQuery": "select quarter_name,\n       last_value(multiIf(equals(indicator,'Free-cash flow (FCF)'), value, NULL)) as FCF,\n       last_value(multiIf(equals(indicator,'Dividends paid'), value, NULL)) as Dividends\nfrom default.financial_highlights\ngroup by quarter_name,quarter\norder by quarter",
+          "rawQuery": "select quarter_name,\n       last_value(multiIf(equals(indicator,'Profit before financing and taxation'), value, NULL)) as FCF,\n       last_value(multiIf(equals(indicator,'Dividends paid'), value, NULL)) as Dividends\nfrom default.financial_highlights\ngroup by quarter_name,quarter\norder by quarter",
           "refId": "A",
           "round": "0s",
           "skip_comments": true,
@@ -427,7 +427,33 @@
           },
           "unit": "currencyUSD"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Income tax paid",
+                  "Interest paid"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -438,9 +464,12 @@
       "id": 27,
       "options": {
         "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "right"
         },
         "tooltip": {
           "mode": "single"
@@ -458,32 +487,13 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT\n    $dateCol as q,\n    last_value(value) as \"EBITDA per tonne\"\nFROM $table\nc\nWHERE indicator == 'EBITDA per tonne* (USD/t)'\n\nGROUP BY q\n\nORDER BY q\n\n",
+          "query": "SELECT q, sum(value) as Revenue\nFROM (SELECT\n    $dateCol as q,\n    indicator,\n    last_value(value) as value\nFROM $table\nWHERE sec_code == '$sec_code' and has(array('Revenue - third parties', 'Revenue - related parties'),indicator ) == 1\nGROUP BY q, indicator)\nGROUP BY q\nORDER BY q\n",
           "queryType": "randomWalk",
-          "rawQuery": "SELECT\n    quarter as q,\n    last_value(value) as \"EBITDA per tonne\"\nFROM default.financial_ratios\nc\nWHERE indicator == 'EBITDA per tonne* (USD/t)'\n\nGROUP BY q\n\nORDER BY q",
+          "rawQuery": "SELECT q, sum(value) as Revenue\nFROM (SELECT\n    quarter as q,\n    indicator,\n    last_value(value) as value\nFROM default.financial_highlights\nWHERE sec_code == 'CHMF' and has(array('Revenue - third parties', 'Revenue - related parties'),indicator ) == 1\nGROUP BY q, indicator)\nGROUP BY q\nORDER BY q",
           "refId": "B",
           "round": "0s",
           "skip_comments": true,
-          "table": "financial_ratios",
-          "tableLoading": false
-        },
-        {
-          "database": "default",
-          "dateColDataType": "quarter",
-          "dateLoading": false,
-          "dateTimeType": "DATETIME",
-          "datetimeLoading": false,
-          "extrapolate": true,
-          "format": "time_series",
-          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
-          "intervalFactor": 1,
-          "query": "SELECT\n    $dateCol as q,\n    last_value(value) as \"Slab cash-cost\"\nFROM $table\nWHERE indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , $forecast_Slab)",
-          "queryType": "randomWalk",
-          "rawQuery": "SELECT\n    quarter as q,\n    last_value(value) as \"Slab cash-cost\"\nFROM default.financial_ratios\nWHERE indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 447.9)",
-          "refId": "A",
-          "round": "0s",
-          "skip_comments": true,
-          "table": "financial_ratios",
+          "table": "financial_highlights",
           "tableLoading": false
         },
         {
@@ -497,16 +507,97 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT\n    $dateCol as q,\n    last_value(price) as ConsolidateWeightedAverage\nFROM $table\nWHERE product == 'Sales of finished products, including:'\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , $forecast_PriceAverage)",
-          "rawQuery": "SELECT\n    quarter as q,\n    last_value(price) as ConsolidateWeightedAverage\nFROM default.consolidated_prices_for_products\nWHERE product == 'Sales of finished products, including:'\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 916)",
+          "query": "SELECT q, sum(value) as Cost\nFROM (SELECT\n    $dateCol as q,\n    indicator,\n    last_value(multiIf(equals(indicator,'Profit from operations'), -value, value)) as value\nFROM $table\nWHERE sec_code == '$sec_code' and has(array('Revenue - third parties', 'Revenue - related parties', 'Profit from operations'),indicator ) == 1\nGROUP BY q, indicator)\nGROUP BY q\nORDER BY q",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT q, sum(value) as Cost\nFROM (SELECT\n    quarter as q,\n    indicator,\n    last_value(multiIf(equals(indicator,'Profit from operations'), -value, value)) as value\nFROM default.financial_highlights\nWHERE sec_code == 'CHMF' and has(array('Revenue - third parties', 'Revenue - related parties', 'Profit from operations'),indicator ) == 1\nGROUP BY q, indicator)\nGROUP BY q\nORDER BY q",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "financial_highlights",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT q, sum(value) as Amortisation\nFROM (SELECT\n    $dateCol as q,\n    indicator,\n    last_value(value) as value\nFROM $table\nWHERE sec_code == '$sec_code' and has(array('Depreciation and amortisation'),indicator ) == 1\nGROUP BY q, indicator)\nGROUP BY q\nORDER BY q\n",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT q, sum(value) as Amortisation\nFROM (SELECT\n    quarter as q,\n    indicator,\n    last_value(value) as value\nFROM default.financial_highlights\nWHERE sec_code == 'CHMF' and has(array('Depreciation and amortisation'),indicator ) == 1\nGROUP BY q, indicator)\nGROUP BY q\nORDER BY q",
           "refId": "C",
           "round": "0s",
           "skip_comments": true,
-          "table": "consolidated_prices_for_products",
+          "table": "financial_highlights",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT q, sum(value) as \"Interest paid\"\nFROM (SELECT\n    $dateCol as q,\n    indicator,\n    last_value(value) as value\nFROM $table\nWHERE sec_code == '$sec_code' and has(array('Interest paid'),indicator ) == 1\nGROUP BY q, indicator)\nGROUP BY q\nORDER BY q\n",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT q, sum(value) as \"Interest paid\"\nFROM (SELECT\n    quarter as q,\n    indicator,\n    last_value(value) as value\nFROM default.financial_highlights\nWHERE sec_code == 'CHMF' and has(array('Interest paid'),indicator ) == 1\nGROUP BY q, indicator)\nGROUP BY q\nORDER BY q",
+          "refId": "D",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "financial_highlights",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT q, sum(value) as \"Income tax paid\"\nFROM (SELECT\n    $dateCol as q,\n    indicator,\n    last_value(value) as value\nFROM $table\nWHERE sec_code == '$sec_code' and has(array('Income tax paid'),indicator ) == 1\nGROUP BY q, indicator)\nGROUP BY q\nORDER BY q\n",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT q, sum(value) as \"Income tax paid\"\nFROM (SELECT\n    quarter as q,\n    indicator,\n    last_value(value) as value\nFROM default.financial_highlights\nWHERE sec_code == 'CHMF' and has(array('Income tax paid'),indicator ) == 1\nGROUP BY q, indicator)\nGROUP BY q\nORDER BY q",
+          "refId": "E",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "financial_highlights",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT \n   q,\n   value-neighbor(value, -1) as \"NWC change\",\n   value as NWC\nFROM (SELECT\n    $dateCol as q,\n    last_value(value) as value\n    FROM $table WHERE sec_code == '$sec_code' and indicator == 'Net cash from operating activities' \n    GROUP BY q, indicator ORDER BY q)\nORDER BY q\n",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT \n   q,\n   value-neighbor(value, -1) as \"NWC change\",\n   value as NWC\nFROM (SELECT\n    quarter as q,\n    last_value(value) as value\n    FROM default.financial_highlights WHERE sec_code == 'CHMF' and indicator == 'Net cash from operating activities' \n    GROUP BY q, indicator ORDER BY q)\nORDER BY q",
+          "refId": "F",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "financial_highlights",
           "tableLoading": false
         }
       ],
-      "title": "EBITDA/т и цена реализации металлопродукции USD/т",
+      "title": "Выручка и затраты",
       "type": "timeseries"
     },
     {
@@ -601,7 +692,243 @@
           "tableLoading": false
         }
       ],
-      "title": "Струпктура  выручки",
+      "title": "Структура стальной выручки",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "ClickHouse",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "id": 29,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    quarter as q,\n    structure,\n    avg(value)\nFROM $table\nWHERE sec_code == '$sec_code' and has(array('Iron ore pellets and concentrate',\n     'Coking and Steam coal',\n     'Transport and storage services'\n), structure) == 1\nGROUP BY q, structure \nORDER BY q",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT\n    quarter as q,\n    structure,\n    avg(value)\nFROM default.revenue_structure\nWHERE sec_code == 'CHMF' and has(array('Iron ore pellets and concentrate',\n     'Coking and Steam coal',\n     'Transport and storage services'\n), structure) == 1\nGROUP BY q, structure \nORDER BY q",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "revenue_structure",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    q,\n    sum(v) as \"Rolled products\"\nFROM\n(\n    SELECT\n        quarter as q,\n        structure,\n        last_value(value) as v\n    FROM $table\n\n    WHERE\n        sec_code == '$sec_code'\n        and has(array('Hot - rolled coil and plate', 'Galvanised and metallic coated coil', 'Cold-rolled coil', 'Colour coated coil', 'Long products'), structure) == 1\n    GROUP BY\n        q,\n        structure\n)\nGROUP BY q\n\nORDER BY q\n",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT\n    q,\n    sum(v) as \"Rolled products\"\nFROM\n(\n    SELECT\n        quarter as q,\n        structure,\n        last_value(value) as v\n    FROM default.revenue_structure\n\n    WHERE\n        sec_code == 'CHMF'\n        and has(array('Hot - rolled coil and plate', 'Galvanised and metallic coated coil', 'Cold-rolled coil', 'Colour coated coil', 'Long products'), structure) == 1\n    GROUP BY\n        q,\n        structure\n)\nGROUP BY q\n\nORDER BY q",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "revenue_structure",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    q,\n    sum(v) as \"Downstream products\"\nFROM\n(\n    SELECT\n        quarter as q,\n        structure,\n        last_value(value) as v\n    FROM $table\n\n    WHERE\n        sec_code == '$sec_code'\n        and has(array('Metalware products', 'Large diameter pipes', 'Other tubes, pipes, formed shapes'), structure) == 1\n    GROUP BY\n        q,\n        structure\n)\nGROUP BY q\n\nORDER BY q\n",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT\n    q,\n    sum(v) as \"Downstream products\"\nFROM\n(\n    SELECT\n        quarter as q,\n        structure,\n        last_value(value) as v\n    FROM default.revenue_structure\n\n    WHERE\n        sec_code == 'CHMF'\n        and has(array('Metalware products', 'Large diameter pipes', 'Other tubes, pipes, formed shapes'), structure) == 1\n    GROUP BY\n        q,\n        structure\n)\nGROUP BY q\n\nORDER BY q",
+          "refId": "C",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "revenue_structure",
+          "tableLoading": false
+        }
+      ],
+      "title": "Структура польной выручки",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "ClickHouse",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "masst"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "id": 30,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    quarter as q,\n    product,\n    last_value(value) as ton\nFROM $table\nWHERE sec_code == '$sec_code' and has(array(\n'Coal',\n'Iron ore',\n'Rolled products',\n'Downstream products'), product) == 1\nGROUP BY q, product \nORDER BY q, product",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT\n    quarter as q,\n    product,\n    last_value(value) as ton\nFROM default.consolidated_sales_for_products\nWHERE sec_code == 'CHMF' and has(array(\n'Coal',\n'Iron ore',\n'Rolled products',\n'Downstream products'), product) == 1\nGROUP BY q, product \nORDER BY q, product",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "consolidated_sales_for_products",
+          "tableLoading": false
+        }
+      ],
+      "title": "Структура продаж в тоннах",
       "type": "timeseries"
     },
     {
@@ -611,7 +938,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 50
       },
       "id": 11,
       "panels": [],
@@ -669,46 +996,23 @@
           },
           "unit": "currencyUSD"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "ConsolidateWeightedAverage",
-                  "HRC_FOB_CHINA"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 51
       },
       "id": 17,
       "options": {
         "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "right"
         },
         "tooltip": {
           "mode": "single"
@@ -726,8 +1030,8 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT\n    $dateCol as q,\n    last_value(price) as FlatHotRolled\nFROM $table\nWHERE product == 'Flat hot-rolled products'\nGROUP BY q\nORDER BY q\n",
-          "rawQuery": "SELECT\n    quarter as q,\n    last_value(price) as FlatHotRolled\nFROM default.prices_for_products\nWHERE product == 'Flat hot-rolled products'\nGROUP BY q\nORDER BY q",
+          "query": "select * FROM (\nSELECT\n    q,\n    last_value(multiIf(equals(rolled, 0), coil, rolled)) as \"Hot-Rolled price\"\n    FROM (\n      SELECT $dateCol as q,\n      max(multiIf(equals('Hot - rolled coil and plate', product), price, 0)) as rolled,\n      max(multiIf(equals('Hot-rolled coil', product), price, 0)) as coil,\n      max(multiIf(equals('Hot-rolled plate', product), price, 0)) as plate\n      FROM $table\n      WHERE sec_code == '$sec_code' and product LIKE 'Hot%' GROUP BY q)\nGROUP BY q    \nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , $forecast_PriceAverage))\nORDER BY q",
+          "rawQuery": "select * FROM (\nSELECT\n    q,\n    last_value(multiIf(equals(rolled, 0), coil, rolled)) as \"Hot-Rolled price\"\n    FROM (\n      SELECT quarter as q,\n      max(multiIf(equals('Hot - rolled coil and plate', product), price, 0)) as rolled,\n      max(multiIf(equals('Hot-rolled coil', product), price, 0)) as coil,\n      max(multiIf(equals('Hot-rolled plate', product), price, 0)) as plate\n      FROM default.prices_for_products\n      WHERE sec_code == 'CHMF' and product LIKE 'Hot%' GROUP BY q)\nGROUP BY q    \nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 825))\nORDER BY q",
           "refId": "B",
           "round": "0s",
           "skip_comments": true,
@@ -735,27 +1039,21 @@
           "tableLoading": false
         },
         {
-          "database": "default",
-          "dateColDataType": "quarter",
-          "dateLoading": false,
           "dateTimeType": "DATETIME",
-          "datetimeLoading": false,
           "extrapolate": true,
           "format": "time_series",
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT\n    $dateCol as q,\n    last_value(price) as ConsolidateWeightedAverage\nFROM $table\nWHERE product == 'Sales of finished products, including:'\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , $forecast_PriceAverage)",
-          "queryType": "randomWalk",
-          "rawQuery": "SELECT\n    quarter as q,\n    last_value(price) as ConsolidateWeightedAverage\nFROM default.consolidated_prices_for_products\nWHERE product == 'Sales of finished products, including:'\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 916)",
+          "query": "SELECT * FROM (SELECT\n  quarter as q,\n  floor(revenue.value/sales.value * 1000) as \"Rolled price\"\nFROM consolidated_sales_for_products as sales\nLEFT JOIN (SELECT sec_code, q, sum(v) as value\n           FROM (\n                SELECT\n                    sec_code,\n                    quarter as q,\n                    structure,\n                    last_value(value) as v\n                FROM default.revenue_structure\n                WHERE sec_code == 'CHMF'\n                  and has(array('Hot - rolled coil and plate', 'Galvanised and metallic coated coil', 'Cold-rolled coil', 'Colour coated coil', 'Long products'), structure) == 1\n                GROUP BY q, structure, sec_code)\n           GROUP BY q, sec_code\n) as revenue\nON revenue.sec_code = sales.sec_code and revenue.q = sales.quarter\nwhere sales.product == 'Rolled products'\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , $forecast_PriceAverage - 36)\n)\nORDER BY q\n",
+          "rawQuery": "SELECT * FROM (SELECT\n  quarter as q,\n  floor(revenue.value/sales.value * 1000) as \"Rolled price\"\nFROM consolidated_sales_for_products as sales\nLEFT JOIN (SELECT sec_code, q, sum(v) as value\n           FROM (\n                SELECT\n                    sec_code,\n                    quarter as q,\n                    structure,\n                    last_value(value) as v\n                FROM default.revenue_structure\n                WHERE sec_code == 'CHMF'\n                  and has(array('Hot - rolled coil and plate', 'Galvanised and metallic coated coil', 'Cold-rolled coil', 'Colour coated coil', 'Long products'), structure) == 1\n                GROUP BY q, structure, sec_code)\n           GROUP BY q, sec_code\n) as revenue\nON revenue.sec_code = sales.sec_code and revenue.q = sales.quarter\nwhere sales.product == 'Rolled products'\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 825 - 36)\n)\nORDER BY q",
           "refId": "A",
           "round": "0s",
-          "skip_comments": true,
-          "table": "consolidated_prices_for_products",
-          "tableLoading": false
+          "skip_comments": true
         },
         {
           "database": "default",
-          "dateColDataType": "quarter",
+          "dateColDataType": "date",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
           "datetimeLoading": false,
@@ -764,17 +1062,108 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT\n    $dateCol as q,\n    last_value(price) as ExportAverage\nFROM $table\nWHERE product == 'Export'\nGROUP BY q\nORDER BY q\n",
-          "rawQuery": "SELECT\n    quarter as q,\n    last_value(price) as ExportAverage\nFROM default.prices_for_products\nWHERE product == 'Export'\nGROUP BY q\nORDER BY q",
+          "query": "SELECT\n    toDate(toStartOfQuarter(date_add(month, $price_lag_months, date))) as q,\n    avg(close) as HRC_FOB_CHINA\nFROM $table\nWHERE code == 'MHCc1'\nGROUP BY q\nORDER BY q",
+          "rawQuery": "SELECT\n    toDate(toStartOfQuarter(date_add(month, 2, date))) as q,\n    avg(close) as HRC_FOB_CHINA\nFROM default.stock_prices\nWHERE code == 'MHCc1'\nGROUP BY q\nORDER BY q",
           "refId": "C",
           "round": "0s",
           "skip_comments": true,
-          "table": "prices_for_products",
+          "table": "stock_prices",
           "tableLoading": false
         },
         {
+          "dateTimeType": "DATETIME",
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT * FROM (SELECT\n  quarter as q,\n  floor(revenue.value/sales.value * 1000) as \"Downstream price\"\nFROM consolidated_sales_for_products as sales\nLEFT JOIN (SELECT sec_code, q, sum(v) as value\n           FROM (\n                SELECT\n                    sec_code,\n                    quarter as q,\n                    structure,\n                    last_value(value) as v\n                FROM default.revenue_structure\n                WHERE sec_code == 'CHMF'\n                  and has(array('Metalware products', 'Large diameter pipes', 'Other tubes, pipes, formed shapes'), structure) == 1\n                GROUP BY q, structure, sec_code)\n           GROUP BY q, sec_code\n) as revenue\nON revenue.sec_code = sales.sec_code and revenue.q = sales.quarter\nwhere sales.product == 'Downstream products'\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , $forecast_PriceAverage + 198)\n)\nORDER BY q\n",
+          "rawQuery": "SELECT * FROM (SELECT\n  quarter as q,\n  floor(revenue.value/sales.value * 1000) as \"Downstream price\"\nFROM consolidated_sales_for_products as sales\nLEFT JOIN (SELECT sec_code, q, sum(v) as value\n           FROM (\n                SELECT\n                    sec_code,\n                    quarter as q,\n                    structure,\n                    last_value(value) as v\n                FROM default.revenue_structure\n                WHERE sec_code == 'CHMF'\n                  and has(array('Metalware products', 'Large diameter pipes', 'Other tubes, pipes, formed shapes'), structure) == 1\n                GROUP BY q, structure, sec_code)\n           GROUP BY q, sec_code\n) as revenue\nON revenue.sec_code = sales.sec_code and revenue.q = sales.quarter\nwhere sales.product == 'Downstream products'\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 825 + 198)\n)\nORDER BY q",
+          "refId": "D",
+          "round": "0s",
+          "skip_comments": true
+        }
+      ],
+      "title": "Цены прокатной продукции за тонну",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "ClickHouse",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 59
+      },
+      "id": 32,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
           "database": "default",
-          "dateColDataType": "quarter",
+          "dateColDataType": "date",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
           "datetimeLoading": false,
@@ -783,15 +1172,102 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT\n    $dateCol as q,\n    last_value(price) as ConsolidateFlatHotRolled\nFROM $table\nWHERE product == 'Flat hot-rolled products'\nGROUP BY q\nORDER BY q",
-          "queryType": "randomWalk",
-          "rawQuery": "SELECT\n    quarter as q,\n    last_value(price) as ConsolidateFlatHotRolled\nFROM default.consolidated_prices_for_products\nWHERE product == 'Flat hot-rolled products'\nGROUP BY q\nORDER BY q",
-          "refId": "D",
+          "query": "select\n    toDate(toStartOfQuarter(date_add(month, $price_lag_months, date))) as q,\n    avg(close) as \"Iron Ore CFR China 62% Fe\"\nfrom $table\nWHERE code == 'SGXIOSc1'\nGROUP BY q\nORDER BY q",
+          "rawQuery": "select\n    toDate(toStartOfQuarter(date_add(month, 2, date))) as q,\n    avg(close) as \"Iron Ore CFR China 62% Fe\"\nfrom default.stock_prices\nWHERE code == 'SGXIOSc1'\nGROUP BY q\nORDER BY q",
+          "refId": "C",
           "round": "0s",
           "skip_comments": true,
-          "table": "consolidated_prices_for_products",
+          "table": "stock_prices",
           "tableLoading": false
         },
+        {
+          "dateTimeType": "DATETIME",
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT * FROM (SELECT\n  quarter as q,\n  floor(revenue.value/sales.value * 1000) as \"Iron ore price\"\nFROM consolidated_sales_for_products as sales\nLEFT JOIN (SELECT sec_code, q, sum(v) as value\n           FROM (\n                SELECT\n                    sec_code,\n                    quarter as q,\n                    structure,\n                    last_value(value) as v\n                FROM default.revenue_structure\n                WHERE sec_code == 'CHMF' and structure == 'Iron ore pellets and concentrate'\n                GROUP BY q, structure, sec_code)\n           GROUP BY q, sec_code\n) as revenue\nON revenue.sec_code = sales.sec_code and revenue.q = sales.quarter\nwhere sales.product == 'Iron ore'\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q ,  218)\n)\nORDER BY q\n",
+          "rawQuery": "SELECT * FROM (SELECT\n  quarter as q,\n  floor(revenue.value/sales.value * 1000) as \"Iron ore price\"\nFROM consolidated_sales_for_products as sales\nLEFT JOIN (SELECT sec_code, q, sum(v) as value\n           FROM (\n                SELECT\n                    sec_code,\n                    quarter as q,\n                    structure,\n                    last_value(value) as v\n                FROM default.revenue_structure\n                WHERE sec_code == 'CHMF' and structure == 'Iron ore pellets and concentrate'\n                GROUP BY q, structure, sec_code)\n           GROUP BY q, sec_code\n) as revenue\nON revenue.sec_code = sales.sec_code and revenue.q = sales.quarter\nwhere sales.product == 'Iron ore'\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q ,  218)\n)\nORDER BY q",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true
+        }
+      ],
+      "title": "Цены ЖРС продукции за тонну",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "ClickHouse",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 67
+      },
+      "id": 31,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
         {
           "database": "default",
           "dateColDataType": "",
@@ -803,16 +1279,54 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT\n    toDate(toStartOfQuarter(date_add(month, $price_lag_months, date))) as q,\n    avg(close) as HRC_FOB_CHINA\nFROM $table\n\nWHERE code == 'MHCc1'\n\nGROUP BY q\n\nORDER BY q\n",
-          "rawQuery": "SELECT\n    toDate(toStartOfQuarter(date_add(month, 2, date))) as q,\n    avg(close) as HRC_FOB_CHINA\nFROM default.stock_prices\n\nWHERE code == 'MHCc1'\n\nGROUP BY q\n\nORDER BY q",
-          "refId": "E",
+          "query": "select\n    toDate(toStartOfQuarter(date_add(month, $price_lag_months, date))) as q,\n    avg(close) as 62PercFe\nfrom $table\nWHERE code == 'SGXIOSc1'\nGROUP BY q\nORDER BY q\n",
+          "rawQuery": false,
+          "refId": "B",
           "round": "0s",
           "skip_comments": true,
           "table": "stock_prices",
           "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    $dateCol as q,\n    last_value(price) as Index62Fe\nFROM $table\nWHERE product == 'Fe'\nGROUP BY q\nORDER BY q\n",
+          "rawQuery": "SELECT\n    quarter as q,\n    last_value(price) as Index62Fe\nFROM default.fob_prices\nWHERE product == 'Fe'\nGROUP BY q\nORDER BY q",
+          "refId": "C",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "fob_prices",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "intervalFactor": 1,
+          "query": "SELECT q, sum(perc) as IronSlab FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE (structure == 'Pellets'\n   or structure == 'Iron ore & concentrate'\n   or structure == 'Metal scrap')\n   and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , $forecast_IronSlab)",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT q, sum(perc) as IronSlab FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE (structure == 'Pellets'\n   or structure == 'Iron ore & concentrate'\n   or structure == 'Metal scrap')\n   and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 244)",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "material_cost_structure",
+          "tableLoading": false
         }
       ],
-      "title": "Цены за тонну продукции",
+      "title": "Корреляция индекса ЖРС и железной части кеш-кост сляба",
       "type": "timeseries"
     },
     {
@@ -866,13 +1380,38 @@
           },
           "unit": "currencyUSD"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "MMK_BLACK_SEA"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 77
       },
       "id": 15,
       "options": {
@@ -1074,7 +1613,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 85
       },
       "id": 19,
       "panels": [],
@@ -1138,7 +1677,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 86
       },
       "id": 21,
       "options": {
@@ -1359,7 +1898,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 86
       },
       "id": 23,
       "options": {
@@ -1633,7 +2172,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 94
       },
       "id": 25,
       "options": {
@@ -1709,7 +2248,7 @@
       "type": "timeseries"
     }
   ],
-  "refresh": false,
+  "refresh": "",
   "schemaVersion": 30,
   "style": "dark",
   "tags": [],
@@ -1725,25 +2264,7 @@
         "datasource": "ClickHouse",
         "definition": "SELECT seccode FROM securities",
         "description": null,
-        "error": {
-          "config": {
-            "headers": {
-              "X-Grafana-Org-Id": 1
-            },
-            "hideFromInspector": false,
-            "method": "GET",
-            "retry": 0,
-            "url": "api/datasources/proxy/1/?query=SELECT%20seccode%20FROM%20securities%20FORMAT%20JSON"
-          },
-          "data": {
-            "error": "Not Found",
-            "message": "Code: 60, e.displayText() = DB::Exception: Table default.securities doesn't exist (version 21.6.5.37 (official build))\n",
-            "response": "Code: 60, e.displayText() = DB::Exception: Table default.securities doesn't exist (version 21.6.5.37 (official build))\n"
-          },
-          "message": "Code: 60, e.displayText() = DB::Exception: Table default.securities doesn't exist (version 21.6.5.37 (official build))\n",
-          "status": 404,
-          "statusText": "Not Found"
-        },
+        "error": null,
         "hide": 0,
         "includeAll": false,
         "label": "sec_code",
@@ -1851,12 +2372,12 @@
         "options": [
           {
             "selected": true,
-            "text": "916",
-            "value": "916"
+            "text": "825",
+            "value": "825"
           }
         ],
-        "query": "916",
-        "queryValue": "926",
+        "query": "825",
+        "queryValue": "",
         "skipUrlSync": false,
         "type": "custom"
       },
@@ -1894,5 +2415,5 @@
   "timezone": "",
   "title": "SeverStal Forecast",
   "uid": "chmf",
-  "version": 2
+  "version": 7
 }

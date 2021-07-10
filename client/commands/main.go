@@ -24,7 +24,7 @@ type Command struct {
 	SecId      int           `xml:"secid,attr,omitempty"`
 	Period     int           `xml:"period,attr,omitempty"`
 	Count      int           `xml:"count,attr,omitempty"`
-	Reset      bool          `xml:"reset,attr,omitempty"`
+	Reset      string        `xml:"reset,attr,omitempty"`
 	Alltrades  []SubSecurity `xml:"alltrades,omitempty"`  // подписка на сделки рынка
 	Quotations []SubSecurity `xml:"quotations,omitempty"` // подписка на изменения показателей торгов
 	Quotes     []SubSecurity `xml:"quotes,omitempty"`     // подписка на изменения «стакана»
