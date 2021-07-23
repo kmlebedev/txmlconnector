@@ -37,24 +37,37 @@ func isQuarterRow(tableRowIdx int, row int) bool {
 	return false
 }
 
-func getTableRowInx(sheet xls.Sheet, tableName string) int {
+func getTableRowInx(sheet xls.Sheet, tableName string) (int, int) {
+	quarterIdx := 0
 	for i, row := range sheet.GetRows() {
+		if nextCell, _ := row.GetCol(1); strings.HasPrefix(nextCell.GetString(), "Q") {
+			quarterIdx = i
+		}
 		if cell, err := row.GetCol(0); err == nil && cell.GetString() == tableName {
 			nextRow, _ := sheet.GetRow(i + 1)
 			if nextCell, _ := nextRow.GetCol(1); strings.HasPrefix(nextCell.GetString(), "Q") {
-				return i
+				return i + 2, i + 1
+			} else if quarterIdx > 0 {
+				return i, quarterIdx
 			}
 			continue
 		}
 	}
-	return -1
+	return -1, -1
 }
 
 func getTable(sheet xls.Sheet, tableName string) *map[string]map[string]float64 {
 	table := make(map[string]map[string]float64)
 	quarters := map[int]string{}
-	tableRowIdx := getTableRowInx(sheet, tableName)
+	tableRowIdx, quarterIdx := getTableRowInx(sheet, tableName)
 	blankRowFound := false
+	quarterRow, _ := sheet.GetRow(quarterIdx)
+	for az, cel := range quarterRow.GetCols() {
+		if strings.HasPrefix(cel.GetString(), "Q") {
+			log.Debugf("quarter %s", cel.GetString())
+			quarters[az] = cel.GetString()
+		}
+	}
 	for n := tableRowIdx + 1; n <= sheet.GetNumberRows(); n++ {
 		row, err := sheet.GetRow(n)
 		if err != nil {
@@ -72,20 +85,17 @@ func getTable(sheet xls.Sheet, tableName string) *map[string]map[string]float64 
 		for az, cel := range row.GetCols() {
 			if az == 0 {
 				if cel.GetString() != "" {
-					tableKey = cel.GetString()
-					table[cel.GetString()] = make(map[string]float64)
-					log.Debugf("table kye name %s", cel.GetString())
-				}
-				continue
-			} else if isQuarterRow(tableRowIdx, n) {
-				if strings.HasPrefix(cel.GetString(), "Q") {
-					log.Debugf("quarter %s", cel.GetString())
-					quarters[az] = cel.GetString()
+					tableKey = strings.Trim(strings.Replace(cel.GetString(), "including", "", 1), ", *:")
+					table[tableKey] = make(map[string]float64)
+					log.Debugf("table key name %s", cel.GetString())
 				}
 				continue
 			}
 			if az > 0 && isBlankCell(cel) {
 				break
+			}
+			if _, ok := quarters[az]; !ok {
+				continue
 			}
 			table[tableKey][quarters[az]] = cel.GetFloat64()
 		}
@@ -122,10 +132,13 @@ func main() {
 	conn := initDB()
 	log.Debugf("connected %+v", conn.Stats())
 
-	if err := loadChmfData(conn, "Q1_2021-Financial_and_operational_data-Severstal_Final.xlsx"); err != nil {
+	if err := loadMagnData(conn, "MMK_operating_m_financial_data_Q2_2021.xls"); err != nil {
 		log.Error(err)
 	}
-	if err := loadChmfData(conn, "CHMF_revenue_structure.xlsx"); err != nil {
+	if err := loadMagnData(conn, "MMK_operating_e_financial_data_Q1_2021.xls"); err != nil {
+		log.Error(err)
+	}
+	if err := loadInvestingData(conn); err != nil {
 		log.Error(err)
 	}
 	return
@@ -135,10 +148,14 @@ func main() {
 	if err := loadLmeData(conn); err != nil {
 		log.Error(err)
 	}
-	if err := loadInvestingData(conn); err != nil {
+	if err := loadChmfData(conn, "Q1_2021-Financial_and_operational_data-Severstal_Final.xlsx"); err != nil {
 		log.Error(err)
 	}
-	if err := loadMagnData(conn, "MMK_operating_e_financial_data_Q1_2021.xls"); err != nil {
+	if err := loadChmfData(conn, "CHMF_revenue_structure.xlsx"); err != nil {
 		log.Error(err)
 	}
+	if err := loadNlmkData(conn, "financial_and_operating_data_1q_2021.xlsx"); err != nil {
+		log.Error(err)
+	}
+
 }

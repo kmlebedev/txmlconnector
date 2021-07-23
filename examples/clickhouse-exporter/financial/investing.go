@@ -21,8 +21,8 @@ func init() {
 	if dir := os.Getenv("FINANCIAL_DATA_DIR"); dir != "" {
 		investingDataBasePath = dir
 	}
-	investingDataPaths["STEEL HRC FOB CHINA Futures"] = investingDataBasePath + "/STEEL HRC FOB CHINA Futures.xlsx"
-	investingDataCodes["STEEL HRC FOB CHINA Futures"] = "MHCc1"
+	investingDataPaths["STEEL HRC FOB"] = investingDataBasePath + "/STEEL HRC FOB CHINA Futures.xlsx"
+	investingDataCodes["STEEL HRC FOB"] = "MHCc1"
 	investingDataPaths["US Midwest Domestic Hot-Rolled "] = investingDataBasePath + "/US Midwest Domestic Hot-Rolled Coil Steel Futures.xlsx"
 	investingDataCodes["US Midwest Domestic Hot-Rolled "] = "HRCc1"
 	investingDataPaths["Hot Rolled Coil Futures"] = investingDataBasePath + "/Hot Rolled Coil Futures SHHCc1.xlsx"
