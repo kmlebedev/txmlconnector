@@ -132,6 +132,9 @@ func main() {
 	conn := initDB()
 	log.Debugf("connected %+v", conn.Stats())
 
+	if err := craw(conn, "yuzd", " Погрузка на Южно-Уральской железной дороге"); err != nil {
+		log.Error(err)
+	}
 	if err := loadMagnData(conn, "MMK_operating_m_financial_data_Q2_2021.xls"); err != nil {
 		log.Error(err)
 	}
@@ -141,7 +144,6 @@ func main() {
 	if err := loadInvestingData(conn); err != nil {
 		log.Error(err)
 	}
-	return
 	if err := loadCSV(conn); err != nil {
 		log.Error(err)
 	}

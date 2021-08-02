@@ -10,6 +10,7 @@ require (
 	github.com/galeone/tfgo v0.0.0-20201116112556-4089c60ef77a // indirect
 	github.com/go-gota/gota v0.10.1 // indirect
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
+	github.com/gocolly/colly/v2 v2.1.0 // indirect
 	github.com/golang/protobuf v1.5.2
 	github.com/gonum/blas v0.0.0-20181208220705-f22b278b28ac // indirect
 	github.com/gonum/floats v0.0.0-20181209220543-c233463c7e82 // indirect
