@@ -3,6 +3,8 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"github.com/kmlebedev/txmlconnector/examples/clickhouse-exporter/financial/exporter"
+	_ "github.com/kmlebedev/txmlconnector/examples/clickhouse-exporter/financial/exporter"
 	"github.com/shakinm/xlsReader/xls"
 	"github.com/shakinm/xlsReader/xls/structure"
 	log "github.com/sirupsen/logrus"
@@ -131,11 +133,27 @@ func main() {
 	}
 	conn := initDB()
 	log.Debugf("connected %+v", conn.Stats())
-
+	// Q2_2021-Financial_and_operational_data-Severstal_Final
+	if err := loadChmfData(conn, "Q2_2021-Financial_and_operational_data-Severstal_Final.xlsx"); err != nil {
+		log.Error(err)
+	}
+	if err := loadChmfData(conn, "CHMF_revenue_structure.xlsx"); err != nil {
+		log.Error(err)
+	}
+	return
+	if err := craw(conn, "szd", "5319", "Погрузка на Северной железной дороге"); err != nil {
+		//if err := craw(conn, "szd", "5319", "Погрузка на железной дороге в Вологодской области"); err != nil {
+		log.Error(err)
+	}
+	for code, _ := range exporter.CodeToId {
+		if err := exporter.LoadHistoricalData(conn, code, "07/07/2014", time.Now().Format("01/02/2006"), "Daily"); err != nil {
+			log.Error(err)
+		}
+	}
 	if err := loadInvestingData(conn); err != nil {
 		log.Error(err)
 	}
-	if err := craw(conn, "yuzd", " Погрузка на Южно-Уральской железной дороге"); err != nil {
+	if err := craw(conn, "yuzd", "6194", " Погрузка на Южно-Уральской железной дороге"); err != nil {
 		log.Error(err)
 	}
 	if err := loadMagnData(conn, "MMK_operating_m_financial_data_Q2_2021.xls"); err != nil {
@@ -153,11 +171,7 @@ func main() {
 	if err := loadChmfData(conn, "Q1_2021-Financial_and_operational_data-Severstal_Final.xlsx"); err != nil {
 		log.Error(err)
 	}
-	if err := loadChmfData(conn, "CHMF_revenue_structure.xlsx"); err != nil {
-		log.Error(err)
-	}
 	if err := loadNlmkData(conn, "financial_and_operating_data_1q_2021.xlsx"); err != nil {
 		log.Error(err)
 	}
-
 }

@@ -7,6 +7,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -24,7 +25,7 @@ var (
 
 func init() {
 	exportTables["Operational results"] = map[string]string{
-		"SUMMARY OF KEY PRODUCTION, SALES VOLUMES":                   "export_sales_for_products",
+		"SUMMARY OF KEY PRODUCTION, SALES VOLUMES":                   "productions",
 		"SEVERSTAL’S CONSOLIDATED SALES (NET OF INTERCOMPANY SALES)": "consolidated_sales_for_products",
 		"Sales price, $/tonne":                                       "prices_for_products",
 	}
@@ -66,8 +67,9 @@ func getTableFromRows(rows *[][]string, name string) *map[string]map[string]floa
 				for j := 1; j < len(row); j++ {
 					for q, m := range quarterToMonths {
 						if strings.HasPrefix(row[j], m) {
-							log.Debugf("%s quarter %s To Months %s", row[j], q, m)
-							quarters[j] = fmt.Sprintf("%s %s", q, row[j][len(m)+1:len(m)+5])
+							quarterStr := strings.Trim(row[j], " *")
+							log.Debugf("%s quarter %s To Months %s", quarterStr, q, m)
+							quarters[j] = fmt.Sprintf("%s %s", q, quarterStr[len(m)+1:len(m)+5])
 							quarterIdxs = append(quarterIdxs, j)
 						}
 					}
@@ -77,7 +79,7 @@ func getTableFromRows(rows *[][]string, name string) *map[string]map[string]floa
 			}
 			if isQuarter(row[1]) {
 				for j := 1; j < len(row); j++ {
-					quarter := row[j]
+					quarter := strings.Trim(row[j], " *")
 					if len(row[j]) < 7 || !isQuarter(quarter) {
 						continue
 					}
@@ -107,6 +109,8 @@ func getTableFromRows(rows *[][]string, name string) *map[string]map[string]floa
 		log.Debugf("row %s", field)
 		table[field] = make(map[string]float64)
 		for n, j := range quarterIdxs {
+			rq := regexp.MustCompile("^(Q[1-4]\\s+\\d+)")
+			rqFind := rq.FindStringSubmatch(quarters[j])
 			quarter := quarters[j][0:7]
 			if len(row) < quarterIdxs[len(quarterIdxs)-1] {
 				continue
@@ -130,10 +134,14 @@ func getTableFromRows(rows *[][]string, name string) *map[string]map[string]floa
 							valQ1, _ := strconv.ParseFloat(row[quarterIdxs[n+3]], 32)
 							table[field][quarter] = val - valQ3 - valQ2 - valQ1
 						}
+					} else if name == "Consolidated income statements" && strings.HasPrefix(quarter, "Q2 2021") {
+						valQ1, _ := strconv.ParseFloat(row[quarterIdxs[n+1]], 32)
+						table[field][quarter] = val - valQ1
 					} else {
 						table[field][quarter] = val
 					}
-				} else {
+				} else if len(rqFind) > 0 {
+					quarter := rqFind[1]
 					log.Debugf("quarter %s", quarter)
 					if strings.HasPrefix(quarter, "Q1") {
 						table[field][quarter] = val
@@ -149,9 +157,8 @@ func getTableFromRows(rows *[][]string, name string) *map[string]map[string]floa
 					}
 				}
 			} else {
-				log.Debugf("Failed parse %s", value)
+				log.Debugf("Failed parse %s", quarters[j])
 			}
-
 		}
 	}
 	log.Debugf("table %+v", table)

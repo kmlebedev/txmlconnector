@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/360EntSecGroup-Skylar/excelize/v2 v2.4.0 // indirect
 	github.com/ClickHouse/clickhouse-go v1.4.5 // indirect
+	github.com/PuerkitoBio/goquery v1.7.1 // indirect
 	github.com/extrame/ole2 v0.0.0-20160812065207-d69429661ad7 // indirect
 	github.com/extrame/xls v0.0.1 // indirect
 	github.com/galeone/tfgo v0.0.0-20201116112556-4089c60ef77a // indirect
@@ -26,7 +27,6 @@ require (
 	github.com/tealeg/xlsx v1.0.5 // indirect
 	github.com/technoweenie/multipartstreamer v1.0.1 // indirect
 	go.oneofone.dev/ta v0.0.7 // indirect
-	golang.org/x/net v0.0.0-20210610132358-84b48f89b13b // indirect
 	golang.org/x/sys v0.0.0-20210611083646-a4fc73990273 // indirect
 	gonum.org/v1/gonum v0.8.2 // indirect
 	google.golang.org/genproto v0.0.0-20210611144927-798beca9d670 // indirect
