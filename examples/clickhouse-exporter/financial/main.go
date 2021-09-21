@@ -62,6 +62,7 @@ func getTable(sheet xls.Sheet, tableName string) *map[string]map[string]float64 
 	table := make(map[string]map[string]float64)
 	quarters := map[int]string{}
 	tableRowIdx, quarterIdx := getTableRowInx(sheet, tableName)
+	log.Debugf("tableName %s, idx: %d", tableName, tableRowIdx)
 	blankRowFound := false
 	quarterRow, _ := sheet.GetRow(quarterIdx)
 	for az, cel := range quarterRow.GetCols() {
@@ -70,7 +71,7 @@ func getTable(sheet xls.Sheet, tableName string) *map[string]map[string]float64 
 			quarters[az] = cel.GetString()
 		}
 	}
-	for n := tableRowIdx + 1; n <= sheet.GetNumberRows(); n++ {
+	for n := tableRowIdx; n <= sheet.GetNumberRows(); n++ {
 		row, err := sheet.GetRow(n)
 		if err != nil {
 			log.Warn(err)
@@ -89,7 +90,7 @@ func getTable(sheet xls.Sheet, tableName string) *map[string]map[string]float64 
 				if cel.GetString() != "" {
 					tableKey = strings.Trim(strings.Replace(cel.GetString(), "including", "", 1), ", *:")
 					table[tableKey] = make(map[string]float64)
-					log.Debugf("table key name %s", cel.GetString())
+					log.Debugf("table key %s, name %s", tableKey, cel.GetString())
 				}
 				continue
 			}
@@ -133,16 +134,17 @@ func main() {
 	}
 	conn := initDB()
 	log.Debugf("connected %+v", conn.Stats())
-	// Q2_2021-Financial_and_operational_data-Severstal_Final
-	if err := loadChmfData(conn, "Q2_2021-Financial_and_operational_data-Severstal_Final.xlsx"); err != nil {
-		log.Error(err)
-	}
-	if err := loadChmfData(conn, "CHMF_revenue_structure.xlsx"); err != nil {
+	if err := loadNlmkData(conn, "F13_Financial_and_operating_data_2q_2021.xlsx"); err != nil {
 		log.Error(err)
 	}
 	return
-	if err := craw(conn, "szd", "5319", "Погрузка на Северной железной дороге"); err != nil {
-		//if err := craw(conn, "szd", "5319", "Погрузка на железной дороге в Вологодской области"); err != nil {
+	if err := crawExports(conn); err != nil {
+		log.Error(err)
+	}
+	//if err := loadMagnData(conn, "MMK_operating_e_financial_data_Q1_2021.xls"); err != nil {
+	//	log.Error(err)
+	//}
+	if err := loadMagnData(conn, "MMK_operating_m_financial_data_Q2_2021.xls"); err != nil {
 		log.Error(err)
 	}
 	for code, _ := range exporter.CodeToId {
@@ -150,16 +152,25 @@ func main() {
 			log.Error(err)
 		}
 	}
+	//if err := craw(conn, "yuzd", "6194", "Погрузка на железной дороге в Челябинской области"); err != nil {
+	//	log.Error(err)
+	//}
+	if err := craw(conn, "yuzd", "6194", "Погрузка на Южно-Уральской железной дороге"); err != nil {
+		log.Error(err)
+	}
+	return
+	// Q2_2021-Financial_and_operational_data-Severstal_Final
+	if err := loadChmfData(conn, "Q2_2021-Financial_and_operational_data-Severstal_Final.xlsx"); err != nil {
+		log.Error(err)
+	}
+	if err := loadChmfData(conn, "CHMF_revenue_structure.xlsx"); err != nil {
+		log.Error(err)
+	}
+	if err := craw(conn, "szd", "5319", "Погрузка на Северной железной дороге"); err != nil {
+		//if err := craw(conn, "szd", "5319", "Погрузка на железной дороге в Вологодской области"); err != nil {
+		log.Error(err)
+	}
 	if err := loadInvestingData(conn); err != nil {
-		log.Error(err)
-	}
-	if err := craw(conn, "yuzd", "6194", " Погрузка на Южно-Уральской железной дороге"); err != nil {
-		log.Error(err)
-	}
-	if err := loadMagnData(conn, "MMK_operating_m_financial_data_Q2_2021.xls"); err != nil {
-		log.Error(err)
-	}
-	if err := loadMagnData(conn, "MMK_operating_e_financial_data_Q1_2021.xls"); err != nil {
 		log.Error(err)
 	}
 	if err := loadCSV(conn); err != nil {
@@ -169,9 +180,6 @@ func main() {
 		log.Error(err)
 	}
 	if err := loadChmfData(conn, "Q1_2021-Financial_and_operational_data-Severstal_Final.xlsx"); err != nil {
-		log.Error(err)
-	}
-	if err := loadNlmkData(conn, "financial_and_operating_data_1q_2021.xlsx"); err != nil {
 		log.Error(err)
 	}
 }

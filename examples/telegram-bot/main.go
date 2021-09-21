@@ -90,7 +90,7 @@ func main() {
 					log.Debugf(fmt.Sprintf("Positions: \n%+v\n", tc.Data.Positions))
 				case "candles":
 					for _, candle := range tc.Data.Candles.Items {
-						if candle.Date == "29.01.2021 18:45:00" {
+						if candle.Date == fmt.Sprintf("%s 18:45:00", time.Now().Format("02.01.2006")) {
 							log.Infof(fmt.Sprintf("candle: \n%s %+v\n", tc.Data.Candles.SecCode, candle))
 							postmarket[tc.Data.Candles.SecCode] = candle
 							total[tc.Data.Candles.SecCode] = candle.Open * float64(candle.Volume*int64(secs[tc.Data.Candles.SecCode].LotSize))
@@ -180,7 +180,7 @@ func main() {
 						Period: 1,
 						SecId:  sec.SecId,
 						Count:  400,
-						Reset:  true,
+						Reset:  "true",
 					})
 				}
 				time.Sleep(5 * time.Second)
@@ -236,7 +236,7 @@ func main() {
 						Period: getHistoryDataDict[msgId].period,
 						SecId:  getHistoryDataDict[msgId].secid,
 						Count:  1000,
-						Reset:  true,
+						Reset:  "true",
 					})
 					log.Debugf("SendCommand gethistorydata")
 				}

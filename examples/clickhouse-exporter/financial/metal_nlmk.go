@@ -17,16 +17,47 @@ var (
 )
 
 func init() {
-	exportQuarter["Consolidated sales"] = "NLMK Group"
-	exportQuarter["Key Indicators"] = "KEY INDICATORS"
+	//exportQuarter["Consolidated sales"] = "NLMK Group"
+	//exportQuarter["Key Indicators"] = "KEY INDICATORS"
+	exportQuarter = map[string]string{
+		"Consolidated sales": "NLMK Group",
+		"Key Indicators":     "KEY INDICATORS",
+		"CashFlow":           "Consolidated statement of cash flows (in M'USD)",
+		"P&L":                "Consolidated statement of profit or loss (in M'USD)",
+		"Balance Sheet":      "Consolidated statement of financial position (in M'USD)",
+		"RFP":                "RUSSIAN FLAT PRODUCTS",
+	}
 	exportNLMKTables["Consolidated sales"] = map[string]string{
 		"SALES BY PRODUCT":   "consolidated_sales_for_products",
 		"SALES BY REGION":    "consolidated_sales_for_products",
 		"REVENUE BY PRODUCT": "revenue_structure",
 		"REVENUE BY REGION":  "revenue_structure",
 	}
+	exportNLMKTables["CashFlow"] = map[string]string{
+		"MULTIPLIES & OTHER INDICATORS":                                "financial_highlights",
+		"CASH FLOWS FROM INVESTING ACTIVITIES":                         "financial_highlights",
+		"Payments from settlement of derivative financial instruments": "financial_highlights",
+		"Changes in operating assets and liabilities":                  "financial_highlights",
+	}
+	exportNLMKTables["P&L"] = map[string]string{
+		"MULTIPLIES & OTHER INDICATORS": "financial_highlights",
+		"PROFIT AND LOSS":               "financial_highlights",
+		"EBITDA":                        "financial_highlights",
+		"Sales volume, '000 t":          "financial_ratios",
+	}
 	exportNLMKTables["Key Indicators"] = map[string]string{
 		"Profitability": "financial_ratios",
+		"Multiples":     "operational_highlights",
+	}
+	exportNLMKTables["Balance Sheet"] = map[string]string{
+		"Current assets": "financial_ratios",
+	}
+	exportNLMKTables["RFP"] = map[string]string{
+		"COST OF SALES": "cost_of_sales_structure",
+		"SEGMENT SALES": "revenue_structure",
+	}
+	exportNLMKTables["Current assets"] = map[string]string{
+		"Current assets": "financial_ratios",
 	}
 }
 

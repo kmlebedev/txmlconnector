@@ -12,6 +12,16 @@ var (
 	TableColumnNums = map[string]int{
 		"consolidated_sales_for_products": 5,
 	}
+	createExportGoodsStats = `
+		CREATE TABLE IF NOT EXISTS export_goods (
+		   code LowCardinality(String),
+           name LowCardinality(String),
+		   month Date,
+		   quantity Float32,
+           value Float32
+		) ENGINE = ReplacingMergeTree()
+		ORDER BY (code, month)
+	`
 	createTableRzd = `
 		CREATE TABLE IF NOT EXISTS loading_rzd (
 		   name FixedString(4),
@@ -218,7 +228,7 @@ func initDB() *sql.DB {
 	if connect == nil {
 		log.Fatal(err)
 	}
-	for _, query := range []string{createTableRzd, createTableRevenue, createTableCsvClosingPrices, createTableFinancialRatios, createTableSlabStructure, createTableFobPrices, createTableStockPrices, createTablePriceProducts, createTableProductions, createTableLmeClosingPrices, createTableCostSales, createTableMaterialCostSales, createTableExportSales, createTableSales, createTablePrices, createTableOperationalHighlights, createTableFinancialHighlights} {
+	for _, query := range []string{createExportGoodsStats, createTableRzd, createTableRevenue, createTableCsvClosingPrices, createTableFinancialRatios, createTableSlabStructure, createTableFobPrices, createTableStockPrices, createTablePriceProducts, createTableProductions, createTableLmeClosingPrices, createTableCostSales, createTableMaterialCostSales, createTableExportSales, createTableSales, createTablePrices, createTableOperationalHighlights, createTableFinancialHighlights} {
 		if _, err := connect.Exec(query); err != nil {
 			log.Fatal(err)
 		}
