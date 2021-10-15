@@ -144,22 +144,15 @@ func main() {
 	if err := loadMagnData(conn, "MMK_operating_m_financial_data_Q2_2021.xls"); err != nil {
 		log.Error(err)
 	}
-	return
 	if err := craw(conn, "yuzd", "chel", "6194", "Погрузка на железной дороге в Челябинской области"); err != nil {
 		log.Error(err)
 	}
 	if err := craw(conn, "yuzd", "yuzd", "6194", "Погрузка на Южно-Уральской железной дороге"); err != nil {
 		log.Error(err)
 	}
-	for code, _ := range exporter.CodeToId {
-		if err := exporter.LoadHistoricalData(conn, code, "07/07/2014", time.Now().Format("01/02/2006"), "Daily"); err != nil {
-			log.Error(err)
-		}
-	}
 	if err := loadInvestingData(conn); err != nil {
 		log.Error(err)
 	}
-	return
 	if err := craw(conn, "szd", "szd", "5319", "Погрузка на Северной железной дороге"); err != nil {
 		//if err := craw(conn, "szd", "5319", "Погрузка на железной дороге в Вологодской области"); err != nil {
 		log.Error(err)
@@ -186,5 +179,11 @@ func main() {
 	}
 	if err := loadChmfData(conn, "Q1_2021-Financial_and_operational_data-Severstal_Final.xlsx"); err != nil {
 		log.Error(err)
+	}
+	return
+	for code, _ := range exporter.CodeToId {
+		if err := exporter.LoadHistoricalData(conn, code, "07/07/2014", time.Now().Format("01/02/2006"), "Daily"); err != nil {
+			log.Error(err)
+		}
 	}
 }

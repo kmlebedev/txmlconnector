@@ -22,7 +22,7 @@ services:
     depends_on:
       - clickhouse
   financial:
-    image: kmlebedev/clickhouse-exporter-financial:v0.0.1
+    image: kmlebedev/clickhouse-exporter-financial:v0.0.2
     environment:
       CLICKHOUSE_URL: http://clickhouse:9000
     depends_on:
