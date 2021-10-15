@@ -49,7 +49,7 @@ func main() {
 	_, err = connect.Exec(`
 		CREATE TABLE IF NOT EXISTS candles (
 		   date   DateTime,
-		   sec_code FixedString(4),
+		   sec_code FixedString(11),
 		   period UInt8,
 		   open   Float32,
 		   close  Float32,
@@ -64,7 +64,7 @@ func main() {
 	_, err = connect.Exec(`
 		CREATE TABLE IF NOT EXISTS securities (
 			secid   UInt16,
-			seccode FixedString(4),
+			seccode FixedString(11),
 			instrclass String,
 			board String,
 			market UInt8,
@@ -243,7 +243,7 @@ func main() {
 	for _, sec := range tc.Data.Securities.Items {
 		exportSecBoardFound := false
 		for _, exportSecBoard := range exportSecBoards {
-			if exportSecBoard == sec.Board {
+			if exportSecBoard == sec.Board || exportSecBoard == "ALL" {
 				exportSecBoardFound = true
 				break
 			}
@@ -254,7 +254,7 @@ func main() {
 		if len(exportSecCodes) > 0 {
 			exportSecCodeFound := false
 			for _, exportSecCode := range exportSecCodes {
-				if exportSecCode == sec.SecCode {
+				if exportSecCode == sec.SecCode || strings.Contains(sec.SecCode, exportSecCode) || exportSecCode == sec.ShortName || exportSecCode == "ALL" {
 					exportSecCodeFound = true
 					break
 				}
@@ -284,8 +284,10 @@ func main() {
 					continue
 				}
 			}
-			log.Debugf(fmt.Sprintf("gethistorydata sec %s period %d name %s seconds %d", sec.SecCode, kind.ID, kind.Name, kind.Period))
-			if exportCandleCount > 0 {
+			if exportCandleCount == 0 {
+				continue
+			} else if exportCandleCount > 0 {
+				log.Debugf(fmt.Sprintf("gethistorydata sec %s period %d name %s seconds %d", sec.SecCode, kind.ID, kind.Name, kind.Period))
 				if err = tc.SendCommand(commands.Command{
 					Id:     "gethistorydata",
 					Period: kind.ID,

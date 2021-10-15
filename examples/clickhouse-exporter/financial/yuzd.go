@@ -35,7 +35,7 @@ func (p TimeSlice) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 }
 
-func craw(conn *sql.DB, name string, id string, search string) error {
+func craw(conn *sql.DB, name string, region string, id string, search string) error {
 	loading := make(map[time.Time]float32)
 	c := colly.NewCollector()
 	c.OnHTML(".news-card", func(e *colly.HTMLElement) {
@@ -67,6 +67,7 @@ func craw(conn *sql.DB, name string, id string, search string) error {
 				loading[t] = float32(s) / 1000
 			}
 		}
+		log.Infof("%s %s %f", t, value, loading[t])
 	})
 	c.OnHTML(".search-results__heading", func(e *colly.HTMLElement) {
 		link := e.Attr("href")
@@ -94,10 +95,18 @@ func craw(conn *sql.DB, name string, id string, search string) error {
 		} else if loading[k] > loading[keys[i-1]] {
 			loadingDiff = loading[k] - loading[keys[i-1]]
 		} else {
-			log.Debugf("Погрузка на начало года %d", loading[k])
+			log.Debugf("Погрузка на начало %s года %f", region, loading[k])
 			loadingDiff = loading[k]
 		}
-		if _, err := stmt.Exec(name, t, loadingDiff); err != nil {
+		tdiff := k.Sub(keys[i-1])
+		if tdiff.Hours() > time.Duration(time.Hour*1000).Hours() {
+			loadingDiff = loadingDiff / 2
+			after := t.AddDate(0, -1, 0)
+			if _, err := stmt.Exec(region, after, loadingDiff); err != nil {
+				return err
+			}
+		}
+		if _, err := stmt.Exec(region, t, loadingDiff); err != nil {
 			return err
 		}
 	}

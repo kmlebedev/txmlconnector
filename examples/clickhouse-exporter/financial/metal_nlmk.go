@@ -150,7 +150,7 @@ func loadNlmkData(conn *sql.DB, fileName string) error {
 			for i := 0; i < TableColumnNums[table]; i++ {
 				vals = append(vals, "?")
 			}
-			if err := insertToDB(conn, secCode,
+			if err := insertToDB(conn, secCode, "",
 				fmt.Sprintf("INSERT INTO %s (*) VALUES (%s)", table, strings.Join(vals, ",")),
 				getElasticTableFromRows(&rows, name, exportQuarter[sheet]),
 			); err != nil {

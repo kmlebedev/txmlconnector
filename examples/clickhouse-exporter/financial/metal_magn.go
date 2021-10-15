@@ -32,9 +32,10 @@ func init() {
 		"MMK GROUP: MATERIAL COSTS STRUCTURE": "material_cost_structure",
 	}
 	exportMAGNTables["Production breakdown"] = map[string]string{
-		"PJSC MMK PRODUCTION":                   "productions",
-		"COAL MINING SEGMENT PRODUCTION":        "productions",
-		"PJSC MMK PRICES FOR FINISHED PRODUCTS": "prices_for_products",
+		"PJSC MMK PRODUCTION":                     "productions",
+		"COAL MINING SEGMENT PRODUCTION":          "productions",
+		"MMK METALURJI (STEEL TURKEY) PRODUCTION": "productions",
+		"PJSC MMK PRICES FOR FINISHED PRODUCTS":   "prices_for_products",
 	}
 	exportMAGNTables["Ratios"] = map[string]string{
 		"FINANCIAL RATIOS": "financial_ratios",
@@ -67,12 +68,22 @@ func loadMagnData(conn *sql.DB, fileName string) error {
 			if table == "fob_prices" {
 				secCodeIns = ""
 			}
-			if err := insertToDB(conn, secCodeIns,
-				fmt.Sprintf("INSERT INTO %s (*) VALUES (%s)", table, "?"),
-				tableData,
-			); err != nil {
-				log.Debug(tableData)
-				return err
+			if table == "productions" {
+				if err := insertToDB(conn, secCodeIns, tableName,
+					fmt.Sprintf("INSERT INTO %s (*) VALUES (%s)", table, "?"),
+					tableData,
+				); err != nil {
+					log.Debug(tableData)
+					return err
+				}
+			} else {
+				if err := insertToDB(conn, secCodeIns, "",
+					fmt.Sprintf("INSERT INTO %s (*) VALUES (%s)", table, "?"),
+					tableData,
+				); err != nil {
+					log.Debug(tableData)
+					return err
+				}
 			}
 		}
 	}

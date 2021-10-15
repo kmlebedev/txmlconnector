@@ -192,7 +192,7 @@ func loadChmfData(conn *sql.DB, fileName string) error {
 			for i := 0; i < TableColumnNums[table]; i++ {
 				vals = append(vals, "?")
 			}
-			if err := insertToDB(conn, secCode,
+			if err := insertToDB(conn, secCode, "",
 				fmt.Sprintf("INSERT INTO %s (*) VALUES (%s)", table, strings.Join(vals, ",")),
 				getTableFromRows(&rows, name),
 			); err != nil {

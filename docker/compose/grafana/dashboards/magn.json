@@ -15,8 +15,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "id": 4,
-  "iteration": 1632121881490,
+  "id": 5,
+  "iteration": 1634295260312,
   "links": [],
   "panels": [
     {
@@ -863,7 +863,7 @@
               }
             ]
           },
-          "unit": "currencyUSD"
+          "unit": "masst"
         },
         "overrides": []
       },
@@ -872,6 +872,163 @@
         "w": 24,
         "x": 0,
         "y": 54
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    sales.quarter as q,\n    last_value(prod_mmk.value) - last_value(sales.value) as \"crude steel - sales products\"\nFROM $table as sales\nLEFT JOIN productions as prod_mmk ON sales.quarter == prod_mmk.quarter and sales.sec_code == prod_mmk.sec_code\nWHERE sales.product == 'Sales of finished products' and sales.sec_code == '$sec_code' \nand prod_mmk.production = 'Crude steel' and prod_mmk.division = 'PJSC MMK PRODUCTION' \nGROUP BY q\nORDER BY q",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT\n    sales.quarter as q,\n    last_value(prod_mmk.value) - last_value(sales.value) as \"crude steel - sales products\"\nFROM default.consolidated_sales_for_products as sales\nLEFT JOIN productions as prod_mmk ON sales.quarter == prod_mmk.quarter and sales.sec_code == prod_mmk.sec_code\nWHERE sales.product == 'Sales of finished products' and sales.sec_code == 'MAGN' \nand prod_mmk.production = 'Crude steel' and prod_mmk.division = 'PJSC MMK PRODUCTION' \nGROUP BY q\nORDER BY q",
+          "refId": "D",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "consolidated_sales_for_products",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    sales.quarter as q,\n    last_value(prod_mmk.value) + last_value(prod_tur.value) - last_value(sales.value) as \"not sales finished products\"\nFROM $table as sales\nLEFT JOIN productions as prod_mmk ON sales.quarter == prod_mmk.quarter and sales.sec_code == prod_mmk.sec_code\nLEFT JOIN productions as prod_tur ON sales.quarter == prod_tur.quarter and sales.sec_code == prod_tur.sec_code and prod_tur.production == prod_mmk.production\nWHERE sales.product == 'Sales of finished products' and sales.sec_code == '$sec_code' \nand prod_mmk.production = 'Finished products, incl.' and prod_mmk.division = 'PJSC MMK PRODUCTION' \nand prod_tur.division = 'MMK METALURJI (STEEL TURKEY) PRODUCTION'\nGROUP BY q\nORDER BY q",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT\n    sales.quarter as q,\n    last_value(prod_mmk.value) + last_value(prod_tur.value) - last_value(sales.value) as \"not sales finished products\"\nFROM default.consolidated_sales_for_products as sales\nLEFT JOIN productions as prod_mmk ON sales.quarter == prod_mmk.quarter and sales.sec_code == prod_mmk.sec_code\nLEFT JOIN productions as prod_tur ON sales.quarter == prod_tur.quarter and sales.sec_code == prod_tur.sec_code and prod_tur.production == prod_mmk.production\nWHERE sales.product == 'Sales of finished products' and sales.sec_code == 'MAGN' \nand prod_mmk.production = 'Finished products, incl.' and prod_mmk.division = 'PJSC MMK PRODUCTION' \nand prod_tur.division = 'MMK METALURJI (STEEL TURKEY) PRODUCTION'\nGROUP BY q\nORDER BY q",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "consolidated_sales_for_products",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    prod.quarter,\n    last_value(prod_mmk.value) - last_value(prod.value) as \"not productions crude steel\"\nFROM productions as prod\nLEFT JOIN productions as prod_mmk ON prod.quarter == prod_mmk.quarter and prod.sec_code == prod_mmk.sec_code\nWHERE prod.production = 'Finished products, incl.' and prod.sec_code = '$sec_code' and prod.division = 'PJSC MMK PRODUCTION' \nand prod_mmk.production = 'Crude steel' and prod_mmk.division = 'PJSC MMK PRODUCTION' \nGROUP BY prod.quarter\nORDER BY prod.quarter",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT\n    prod.quarter,\n    last_value(prod_mmk.value) - last_value(prod.value) as \"not productions crude steel\"\nFROM productions as prod\nLEFT JOIN productions as prod_mmk ON prod.quarter == prod_mmk.quarter and prod.sec_code == prod_mmk.sec_code\nWHERE prod.production = 'Finished products, incl.' and prod.sec_code = 'MAGN' and prod.division = 'PJSC MMK PRODUCTION' \nand prod_mmk.production = 'Crude steel' and prod_mmk.division = 'PJSC MMK PRODUCTION' \nGROUP BY prod.quarter\nORDER BY prod.quarter",
+          "refId": "C",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "consolidated_sales_for_products",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    $dateCol as q,\n    last_value(inv.value)*1000/last_value(prices.price)/4 as \"Inventories in HRC\"\nFROM $table as inv\nLEFT JOIN prices_for_products as prices ON prices.quarter == inv.quarter\nWHERE inv.indicator == 'Inventories' and prices.product == 'Flat hot-rolled products' and inv.sec_code == '$sec_code'\nGROUP BY q\nORDER BY q\n",
+          "rawQuery": false,
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "financial_ratios",
+          "tableLoading": false
+        }
+      ],
+      "title": "Разница между консолидированными продажами и производством сырой стали  ,  тыс. тон",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "ClickHouse",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 62
       },
       "id": 32,
       "options": {
@@ -1027,7 +1184,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 62
+        "y": 70
       },
       "id": 29,
       "options": {
@@ -1112,7 +1269,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 78
       },
       "id": 11,
       "panels": [],
@@ -1244,7 +1401,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 71
+        "y": 79
       },
       "id": 17,
       "options": {
@@ -1453,7 +1610,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 79
+        "y": 87
       },
       "id": 30,
       "options": {
@@ -1480,8 +1637,8 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT\n    $dateCol as q,\n    product,\n    last_value(value)\nFROM $table\nWHERE sec_code == '$sec_code' and has(array('Premium products, including:','Long products', 'Flat hot-rolled products'), product) == 1\nGROUP BY q, product\nORDER BY q\n",
-          "rawQuery": "SELECT\n    quarter as q,\n    product,\n    last_value(value)\nFROM default.consolidated_sales_for_products\nWHERE sec_code == '$sec_code' and has(array('Premium products, including:','Long products', 'Flat hot-rolled products'), product) == 1\nGROUP BY q, product\nORDER BY q",
+          "query": "SELECT\n    $dateCol as q,\n    product,\n    last_value(value)\nFROM $table\nWHERE sec_code == '$sec_code' and has(array('Premium products','Long products', 'Flat hot-rolled products'), product) == 1\nGROUP BY q, product\nORDER BY q\n",
+          "rawQuery": "SELECT\n    quarter as q,\n    product,\n    last_value(value)\nFROM default.consolidated_sales_for_products\nWHERE sec_code == 'MAGN' and has(array('Premium products','Long products', 'Flat hot-rolled products'), product) == 1\nGROUP BY q, product\nORDER BY q",
           "refId": "B",
           "round": "0s",
           "skip_comments": true,
@@ -1568,7 +1725,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 87
+        "y": 95
       },
       "id": 31,
       "options": {
@@ -1711,7 +1868,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 95
+        "y": 103
       },
       "id": 15,
       "options": {
@@ -1916,7 +2073,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 103
+        "y": 111
       },
       "id": 19,
       "panels": [],
@@ -1980,7 +2137,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 104
+        "y": 112
       },
       "id": 21,
       "options": {
@@ -2177,7 +2334,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 104
+        "y": 112
       },
       "id": 23,
       "options": {
@@ -2460,7 +2617,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 112
+        "y": 120
       },
       "id": 25,
       "options": {
@@ -2596,7 +2753,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 112
+        "y": 120
       },
       "id": 28,
       "options": {
@@ -2691,7 +2848,25 @@
         "datasource": "ClickHouse",
         "definition": "SELECT seccode FROM securities",
         "description": null,
-        "error": null,
+        "error": {
+          "config": {
+            "headers": {
+              "X-Grafana-Org-Id": 1
+            },
+            "hideFromInspector": false,
+            "method": "GET",
+            "retry": 0,
+            "url": "api/datasources/proxy/1/?query=SELECT%20seccode%20FROM%20securities%20FORMAT%20JSON"
+          },
+          "data": {
+            "error": "Not Found",
+            "message": "Code: 60, e.displayText() = DB::Exception: Table default.securities doesn't exist (version 21.6.5.37 (official build))\n",
+            "response": "Code: 60, e.displayText() = DB::Exception: Table default.securities doesn't exist (version 21.6.5.37 (official build))\n"
+          },
+          "message": "Code: 60, e.displayText() = DB::Exception: Table default.securities doesn't exist (version 21.6.5.37 (official build))\n",
+          "status": 404,
+          "statusText": "Not Found"
+        },
         "hide": 0,
         "includeAll": false,
         "label": "sec_code",
@@ -2811,9 +2986,10 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": "472.9",
-          "value": "472.9"
+          "text": "None",
+          "value": ""
         },
         "datasource": "ClickHouse",
         "definition": "SELECT floor(sum(perc)+$forecast_IronSlab,1) as Slab\nFROM (\n      SELECT last_value(quarter) as q,\n             last_value(slab_cash_cost_structure.value) * last_value(financial_ratios.value) as perc\n      FROM slab_cash_cost_structure\n               LEFT JOIN financial_ratios ON\n              financial_ratios.quarter == slab_cash_cost_structure.quarter\n              and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\n      WHERE (structure == 'Pellets'\n   or structure == 'Iron ore & concentrate'\n   or structure == 'Metal scrap')\n        and indicator == 'Slab Cash cost (USD/t)'\n      GROUP BY structure)\nGROUP BY q\nORDER BY q",
@@ -2932,12 +3108,12 @@
     ]
   },
   "time": {
-    "from": "now-3y-4M",
+    "from": "now-4y+5M",
     "to": "now+1M"
   },
   "timepicker": {},
   "timezone": "",
   "title": "MAGN Forecast",
   "uid": "magn",
-  "version": 13
+  "version": 2
 }

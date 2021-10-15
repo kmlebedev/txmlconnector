@@ -85,12 +85,13 @@ var (
 	createTableProductions = `
 		CREATE TABLE IF NOT EXISTS productions (
 		   sec_code FixedString(4),
-		   quarter Date,
+		   division LowCardinality(String), 
+           quarter Date,
 		   quarter_name LowCardinality(String),
 		   production LowCardinality(String),
 		   value Float32
 		) ENGINE = ReplacingMergeTree()
-		ORDER BY (sec_code, quarter, production)
+		ORDER BY (sec_code, division, quarter, production)
 	`
 	createTablePriceProducts = `
 		CREATE TABLE IF NOT EXISTS prices_for_products (
