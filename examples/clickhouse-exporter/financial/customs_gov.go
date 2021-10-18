@@ -37,6 +37,8 @@ func loadCustomsGov(conn *sql.DB, sheetUrl string, date time.Time) error {
 	if err != nil {
 		return err
 	}
+	log.Info(sheetUrl)
+
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	reader := bytes.NewReader(body)
@@ -48,25 +50,33 @@ func loadCustomsGov(conn *sql.DB, sheetUrl string, date time.Time) error {
 	if err != nil {
 		return err
 	}
-	var tx, _ = conn.Begin()
-	var stmt, _ = tx.Prepare("INSERT INTO export_goods (*) VALUES (?, ?, ?, ?, ?)")
+	var tx_goods, _ = conn.Begin()
+	var tx_regions, _ = conn.Begin()
+	var stmt_goods, _ = tx_goods.Prepare("INSERT INTO export_goods (*) VALUES (?, ?, ?, ?, ?)")
+	var stmt_regions, _ = tx_regions.Prepare("INSERT INTO export_regions (*) VALUES (?, ?, ?, ?)")
 	for _, row := range rows {
-		if row[0] == "" || row[1] == "" || row[6] == "" || row[7] == "" {
+		if len(row) < 8 || row[0] == "" || row[1] == "" || row[2] == "" || row[6] == "" || row[7] == "" {
 			continue
 		}
-		quantity, err := strconv.ParseFloat(row[6], 32)
-		if err != nil {
-			continue
+		export, eerr := strconv.ParseFloat(row[1], 32)
+		cis, cerr := strconv.ParseFloat(row[2], 32)
+		if eerr == nil && cerr == nil {
+			if _, err := stmt_regions.Exec(strings.TrimSpace(row[0]), date, export, cis); err != nil {
+				return err
+			}
 		}
-		value, err := strconv.ParseFloat(row[7], 32)
-		if err != nil {
-			continue
-		}
-		if _, err := stmt.Exec(row[0], row[1], date, quantity, value); err != nil {
-			return err
+		quantity, qerr := strconv.ParseFloat(row[6], 32)
+		value, verr := strconv.ParseFloat(row[7], 32)
+		if qerr == nil && verr == nil {
+			if _, err := stmt_goods.Exec(strings.TrimSpace(row[0]), strings.TrimSpace(row[1]), date, quantity, value); err != nil {
+				return err
+			}
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx_goods.Commit(); err != nil {
+		return err
+	}
+	if err := tx_regions.Commit(); err != nil {
 		return err
 	}
 	return nil

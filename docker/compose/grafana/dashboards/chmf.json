@@ -8,16 +8,24 @@
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
         "type": "dashboard"
       }
     ]
   },
   "editable": true,
+  "fiscalYearStartMonth": 0,
   "gnetId": null,
   "graphTooltip": 0,
   "id": 6,
-  "iteration": 1628401725319,
+  "iteration": 1634457548712,
   "links": [],
+  "liveNow": false,
   "panels": [
     {
       "collapsed": false,
@@ -285,6 +293,7 @@
         },
         "orientation": "auto",
         "showValue": "auto",
+        "stacking": "none",
         "text": {},
         "tooltip": {
           "mode": "single"
@@ -401,6 +410,7 @@
         },
         "orientation": "auto",
         "showValue": "always",
+        "stacking": "none",
         "text": {},
         "tooltip": {
           "mode": "single"
@@ -2431,10 +2441,107 @@
       ],
       "title": "Корреляция индекса ЖРС и железной части кеш-кост сляба",
       "type": "timeseries"
+    },
+    {
+      "datasource": "ClickHouse",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 119
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    $dateCol as q,\n    last_value(if(runningDifference(export)>0,runningDifference(export),export)) as Export,\n    last_value(if(runningDifference(cis)>0,runningDifference(cis), cis)) as \"CIS\"\nFROM $table\n\nwhere name = 'ВОЛОГОДСКАЯ ОБЛАСТЬ'\nGROUP BY q\nORDER BY q",
+          "rawQuery": "SELECT\n    month as q,\n    last_value(if(runningDifference(export)>0,runningDifference(export),export)) as Export,\n    last_value(if(runningDifference(cis)>0,runningDifference(cis), cis)) as \"CIS\"\nFROM default.export_regions\n\nwhere name = 'ВОЛОГОДСКАЯ ОБЛАСТЬ'\nGROUP BY q\nORDER BY q",
+          "refId": "C",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "export_regions",
+          "tableLoading": false
+        }
+      ],
+      "title": "Экспорт ВОЛОГОДСКАЯ область, млн. долл. США",
+      "type": "timeseries"
     }
   ],
   "refresh": "",
-  "schemaVersion": 30,
+  "schemaVersion": 31,
   "style": "dark",
   "tags": [],
   "templating": {
@@ -2443,8 +2550,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "CHMF",
-          "value": "CHMF"
+          "text": "MAGN",
+          "value": "MAGN"
         },
         "datasource": "ClickHouse",
         "definition": "SELECT seccode FROM securities",
@@ -2479,7 +2586,7 @@
         "name": "price_lag_months",
         "options": [
           {
-            "selected": false,
+            "selected": true,
             "text": "0",
             "value": "0"
           },
@@ -2556,7 +2663,7 @@
         "name": "forecast_PriceAverage",
         "options": [
           {
-            "selected": false,
+            "selected": true,
             "text": "825",
             "value": "825"
           }
@@ -2569,9 +2676,10 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": "447.9",
-          "value": "447.9"
+          "text": "None",
+          "value": ""
         },
         "datasource": "ClickHouse",
         "definition": "SELECT floor(sum(perc)+$forecast_IronSlab,1) as Slab\nFROM (\n      SELECT last_value(quarter) as q,\n             last_value(slab_cash_cost_structure.value) * last_value(financial_ratios.value) as perc\n      FROM slab_cash_cost_structure\n               LEFT JOIN financial_ratios ON\n              financial_ratios.quarter == slab_cash_cost_structure.quarter\n              and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\n      WHERE (structure == 'Pellets'\n   or structure == 'Iron ore & concentrate'\n   or structure == 'Metal scrap')\n        and indicator == 'Slab Cash cost (USD/t)'\n      GROUP BY structure)\nGROUP BY q\nORDER BY q",
@@ -2606,7 +2714,7 @@
         "name": "forecast_price",
         "options": [
           {
-            "selected": false,
+            "selected": true,
             "text": "1900",
             "value": "1900"
           }
@@ -2626,5 +2734,5 @@
   "timezone": "",
   "title": "SeverStal Forecast",
   "uid": "chmf",
-  "version": 6
+  "version": 2
 }

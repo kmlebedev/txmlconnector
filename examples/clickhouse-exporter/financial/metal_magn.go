@@ -14,6 +14,9 @@ var (
 )
 
 func init() {
+	exportMAGNTables["Production & Sales"] = map[string]string{
+		"MMK GROUP: CONSOLIDATED SALES": "operational_highlights",
+	}
 	exportMAGNTables["Highlights"] = map[string]string{
 		"OPERATIONAL HIGHLIGHTS": "operational_highlights",
 		"FINANCIAL HIGHLIGHTS":   "financial_highlights",

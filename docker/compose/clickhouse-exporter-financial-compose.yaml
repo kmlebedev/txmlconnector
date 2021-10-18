@@ -11,7 +11,7 @@ services:
         soft: 262144
         hard: 262144
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:8.2.1
     ports:
       - "3000:3000"
     volumes:
@@ -24,10 +24,10 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: "admin"
     depends_on:
       - clickhouse
-  financial:
-    image: kmlebedev/clickhouse-exporter-financial:local
-    environment:
-      CLICKHOUSE_URL: http://clickhouse:9000
-    depends_on:
-      - grafana
-      - clickhouse
+  #financial:
+  #  image: kmlebedev/clickhouse-exporter-financial:local
+  #  environment:
+  #    CLICKHOUSE_URL: http://clickhouse:9000
+  #  depends_on:
+  #    - grafana
+  #    - clickhouse
