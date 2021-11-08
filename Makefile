@@ -3,9 +3,19 @@ compile: ## Compile the proto file.
 	protoc -I proto proto/connect.proto --go_out=plugins=grpc:proto/
 
 .PHONY: server
-server: ## Build and run server. brew install mingw-w64
-	CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -race -ldflags "-extldflags -static -s -w" -o bin/server.exe server/main.go
+
+server_build:
+	CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -race -ldflags "-extldflags -static -s -w" -o bin/server.exe main.go
+
+## Build and run server. brew install mingw-w64
+server: server_build
 	wine64 bin/server.exe
+
+queues_build:
+	CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -race -ldflags "-extldflags -static -s -w" -o bin/queues.exe examples/queues/main.go
+
+queues: queues_build
+	wine64 bin/queues.exe
 
 .PHONY: client
 client: ## Build and run client.

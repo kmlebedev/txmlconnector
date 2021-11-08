@@ -1,5 +1,5 @@
 //+build windows,amd64
-package main
+package tcServer
 
 // https://github.com/ivanantipin/transaqgrpc/blob/master/tqgrpcserver/XmlConnector.cs
 
@@ -92,7 +92,7 @@ func init() {
 	}
 }
 
-func main() {
+func Run() {
 	defer procUnInitialize.Call()
 	log.Infoln("Server running ...")
 
@@ -123,7 +123,7 @@ func SetupCloseHandler(srv *grpc.Server) {
 	}()
 }
 
-func txmlSendCommand(msg string) (data *string) {
+func TxmlSendCommand(msg string) (data *string) {
 	log.Info("txmlSendCommand() Call: ", msg)
 	reqData := C.CString(msg)
 	resp, _, err := procSendCommand.Call(uintptr(unsafe.Pointer(reqData)))
@@ -139,7 +139,7 @@ func txmlSendCommand(msg string) (data *string) {
 
 func (s *server) SendCommand(ctx context.Context, request *transaqConnector.SendCommandRequest) (*transaqConnector.SendCommandResponse, error) {
 	return &transaqConnector.SendCommandResponse{
-		Message: *txmlSendCommand(request.Message),
+		Message: *TxmlSendCommand(request.Message),
 	}, nil
 }
 
@@ -156,7 +156,7 @@ func (s *server) FetchResponseData(in *transaqConnector.DataRequest, srv transaq
 			}
 		case <-ctx.Done():
 			fmt.Println("Loop done", ctx.Err())
-			txmlSendCommand(cmds.EncodeRequest(cmds.Command{Id: "disconnect"}))
+			TxmlSendCommand(cmds.EncodeRequest(cmds.Command{Id: "disconnect"}))
 			return nil
 		case done := <-Done:
 			if done {
