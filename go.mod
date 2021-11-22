@@ -3,6 +3,7 @@ module github.com/kmlebedev/txmlconnector
 go 1.16
 
 require (
+	cloud.google.com/go/pubsub v1.17.1 // indirect
 	github.com/360EntSecGroup-Skylar/excelize/v2 v2.4.0 // indirect
 	github.com/ClickHouse/clickhouse-go v1.4.5 // indirect
 	github.com/PuerkitoBio/goquery v1.7.1 // indirect
@@ -12,6 +13,7 @@ require (
 	github.com/go-gota/gota v0.10.1 // indirect
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/gocolly/colly/v2 v2.1.0 // indirect
+	github.com/golang/glog v1.0.0 // indirect
 	github.com/golang/protobuf v1.5.2
 	github.com/gonum/blas v0.0.0-20181208220705-f22b278b28ac // indirect
 	github.com/gonum/floats v0.0.0-20181209220543-c233463c7e82 // indirect
@@ -24,12 +26,13 @@ require (
 	github.com/sdcoffey/techan v0.12.0 // indirect
 	github.com/shakinm/xlsReader v0.9.10 // indirect
 	github.com/sirupsen/logrus v1.8.1
+	github.com/streadway/amqp v1.0.0 // indirect
 	github.com/tealeg/xlsx v1.0.5 // indirect
 	github.com/technoweenie/multipartstreamer v1.0.1 // indirect
 	go.oneofone.dev/ta v0.0.7 // indirect
-	golang.org/x/sys v0.0.0-20210611083646-a4fc73990273 // indirect
+	gocloud.dev v0.24.0 // indirect
+	gocloud.dev/pubsub/rabbitpubsub v0.24.0 // indirect
 	gonum.org/v1/gonum v0.8.2 // indirect
-	google.golang.org/genproto v0.0.0-20210611144927-798beca9d670 // indirect
-	google.golang.org/grpc v1.38.0
-	google.golang.org/protobuf v1.26.0
+	google.golang.org/grpc v1.40.0
+	google.golang.org/protobuf v1.27.1
 )

@@ -29,6 +29,17 @@ var (
 		"октябрь":  time.October,
 		"ноябрь":   time.November,
 		"декабрь":  time.December,
+		"янв":      time.January,
+		"фев":      time.February,
+		"мар":      time.March,
+		"апр":      time.April,
+		"июн":      time.June,
+		"июл":      time.July,
+		"авг":      time.August,
+		"сен":      time.September,
+		"окт":      time.October,
+		"ноя":      time.November,
+		"дек":      time.December,
 	}
 )
 

@@ -1,0 +1,1085 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": 7,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stock price"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "solid"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select if(msfo.v == 0, rsbu.month, msfo.month) as month, msfo.v as \"Чистая прибыль(МСФО)\" , rsbu.v as \"Чистая прибыль(РСБУ)\" from (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'МСФО' and category ==  'Ключевые показатели P&L' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name)\n    group by month\n    order by month\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-05-30')) as month, 25.0 as v)\n                                                                                                                                   ) as msfo\nFULL JOIN (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'РСБУ' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1\n    group by month\n    order by month) as rsbu on (msfo.month == rsbu.month)\norder by month",
+          "rawQuery": "select if(msfo.v == 0, rsbu.month, msfo.month) as month, msfo.v as \"Чистая прибыль(МСФО)\" , rsbu.v as \"Чистая прибыль(РСБУ)\" from (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'МСФО' and category ==  'Ключевые показатели P&L' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name)\n    group by month\n    order by month\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-05-30')) as month, 25.0 as v)\n                                                                                                                                   ) as msfo\nFULL JOIN (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'РСБУ' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1\n    group by month\n    order by month) as rsbu on (msfo.month == rsbu.month)\norder by month",
+          "refId": "D",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": true,
+          "intervalFactor": 1,
+          "query": "select $dateCol, last_value(value) as \"Чистая прибыль(МСФО)\"\nfrom $table\nwhere code == 'VTBR' and standard == 'МСФО'  and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1   and category ==  'Ключевые показатели P&L'\ngroup by $dateCol\norder by $dateCol\n\n",
+          "rawQuery": "select month, last_value(value) as \"Чистая прибыль(МСФО)\"\nfrom default.finance_results\nwhere code == 'VTBR' and standard == 'МСФО'  and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1   and category ==  'Ключевые показатели P&L'\ngroup by month\norder by month",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": true,
+          "intervalFactor": 1,
+          "query": "SELECT\n    $timeSeries as t,\n    avgWeighted(close*1000, volume)/1000 as \"Stock price\"\nFROM $table\n\nWHERE\n    $timeFilter\n    and sec_code = 'VTBR' and period = '6'\nGROUP BY t\nORDER BY t",
+          "rawQuery": "SELECT\n    (intDiv(toUInt32(date), 43200) * 43200) * 1000 as t,\n    avgWeighted(close*1000, volume)/1000 as \"Stock price\"\nFROM default.candles\n\nWHERE\n    date >= toDateTime(1542869672) AND date <= toDateTime(1637564072)\n    and sec_code = 'VTBR' and period = '6'\nGROUP BY t\nORDER BY t",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "candles",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted(close*1000, volume)/1000 as \"Stock price\"\nFROM $table\nWHERE\n    date >= toDate($from) AND date <= toDate($to)\n    and sec_code == 'VTBR' and period == '5' \nGROUP BY t\nORDER BY t",
+          "rawQuery": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted(close*1000, volume)/1000 as \"Stock price\"\nFROM default.candles\nWHERE\n    date >= toDate(1542874073) AND date <= toDate(1637568473)\n    and sec_code == 'VTBR' and period == '5' \nGROUP BY t\nORDER BY t",
+          "refId": "C",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "candles",
+          "tableLoading": false
+        }
+      ],
+      "title": "Чистая прибыль, млрд. руб.",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 6,
+      "panels": [],
+      "title": "Ключевые показатели P&L по МСФО",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Расходы"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select $dateCol,\nlast_value(multiIf(equals(name,'ЧОД до резервов'), value, NULL)) as \"ЧОД\",\n       last_value(multiIf(equals(name,'Чистые процентные доходы'), value, NULL)) as \"ЧПД\",\n       last_value(multiIf(equals(name,'Чистые комиссионные доходы'), value, NULL)) as \"ЧКД\",\n       last_value(multiIf(equals(name,'Прочие операционные доходы'), value, NULL)) as \"ПОД\",\n       last_value(multiIf(has(array('Создание резервов под кредитные убытки и прочие резервы', 'Создание резерва под обесценение', 'Создание резерва под кредитные убытки и прочие резервы'), name) == 1, value, NULL)) as \"Резервы\",\n       last_value(multiIf(equals(name,'Расходы на содержание персонала и административные расходы'), value, NULL)) as \"Расходы\"\nfrom $table\nwhere code == 'VTBR' and standard == 'МСФО' and category ==  'Ключевые показатели P&L'\ngroup by $dateCol\norder by $dateCol",
+          "rawQuery": "select month,\nlast_value(multiIf(equals(name,'ЧОД до резервов'), value, NULL)) as \"ЧОД\",\n       last_value(multiIf(equals(name,'Чистые процентные доходы'), value, NULL)) as \"ЧПД\",\n       last_value(multiIf(equals(name,'Чистые комиссионные доходы'), value, NULL)) as \"ЧКД\",\n       last_value(multiIf(equals(name,'Прочие операционные доходы'), value, NULL)) as \"ПОД\",\n       last_value(multiIf(has(array('Создание резервов под кредитные убытки и прочие резервы', 'Создание резерва под обесценение', 'Создание резерва под кредитные убытки и прочие резервы'), name) == 1, value, NULL)) as \"Резервы\",\n       last_value(multiIf(equals(name,'Расходы на содержание персонала и административные расходы'), value, NULL)) as \"Расходы\"\nfrom default.finance_results\nwhere code == 'VTBR' and standard == 'МСФО' and category ==  'Ключевые показатели P&L'\ngroup by month\norder by month",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        }
+      ],
+      "title": "ЧОД до резервов, млрд. руб.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select $dateCol,\n       last_value(multiIf(has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1, value, NULL)) as \"Чистая прибыль\",\n       last_value(multiIf(equals(name,'ЧОД до резервов'), value, NULL)) as \"ЧОД\",\n       last_value(multiIf(has(array('Создание резервов под кредитные убытки и прочие резервы', 'Создание резерва под обесценение', 'Создание резерва под кредитные убытки и прочие резервы'), name) == 1, value, NULL)) as \"Резервы\"\nfrom $table\nwhere code == 'VTBR' and standard == 'МСФО'   and category ==  'Ключевые показатели P&L'\ngroup by $dateCol\norder by $dateCol\n",
+          "rawQuery": "select month,\n       last_value(multiIf(has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1, value, NULL)) as \"Чистая прибыль\",\n       last_value(multiIf(equals(name,'ЧОД до резервов'), value, NULL)) as \"ЧОД\",\n       last_value(multiIf(has(array('Создание резервов под кредитные убытки и прочие резервы', 'Создание резерва под обесценение', 'Создание резерва под кредитные убытки и прочие резервы'), name) == 1, value, NULL)) as \"Резервы\"\nfrom default.finance_results\nwhere code == 'VTBR' and standard == 'МСФО'   and category ==  'Ключевые показатели P&L'\ngroup by month\norder by month",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        }
+      ],
+      "title": "Чистая прибыль, млрд. руб.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Итого"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select month, name, runningDifference(last_value(value))\nfrom default.finance_results\nwhere code == 'VTBR' and standard == 'МСФО'  and has(array('Прочие операционные доходы', 'Прочие операционные доходы и расходы'), category) == 1\ngroup by month, name\norder by month",
+          "rawQuery": "select month, name, runningDifference(last_value(value))\nfrom default.finance_results\nwhere code == 'VTBR' and standard == 'МСФО'  and has(array('Прочие операционные доходы', 'Прочие операционные доходы и расходы'), category) == 1\ngroup by month, name\norder by month",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        }
+      ],
+      "title": "Прочие операционные доходы, млрд. руб.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Розничный\nбизнес"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select month, name, runningDifference(last_value(value))\nfrom default.finance_results\nwhere code == 'VTBR' and standard == 'МСФО'  and has(array('Чистые комиссионные доходы'), category) == 1\ngroup by month, name\norder by month",
+          "rawQuery": "select month, name, runningDifference(last_value(value))\nfrom default.finance_results\nwhere code == 'VTBR' and standard == 'МСФО'  and has(array('Чистые комиссионные доходы'), category) == 1\ngroup by month, name\norder by month",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        }
+      ],
+      "title": "Чистые комиссионные доходы, млрд. руб.",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 8,
+      "panels": [],
+      "title": "Ключевые показатели P&L по РСБУ",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select $dateCol,\n       last_value(multiIf(equals(name,'Чистые процентные доходы'), value, NULL)) as \"ЧПД\",\n       last_value(multiIf(equals(name,'Чистые комиссионные доходы'), value, NULL)) as \"ЧКД\",\n       last_value(multiIf(equals(name,'Прочие чистые операционные доходы'), value, NULL)) as \"ПОД\",\n       last_value(multiIf(has(array('Создание резервов под обесценение', 'Операционные расходы'), name) == 1, value, NULL)) as \"Резерв\"\nfrom $table\nwhere code == 'VTBR' and standard == 'РСБУ'\ngroup by $dateCol\norder by $dateCol\n",
+          "rawQuery": "select month,\n       last_value(multiIf(equals(name,'Чистые процентные доходы'), value, NULL)) as \"ЧПД\",\n       last_value(multiIf(equals(name,'Чистые комиссионные доходы'), value, NULL)) as \"ЧКД\",\n       last_value(multiIf(equals(name,'Прочие чистые операционные доходы'), value, NULL)) as \"ПОД\",\n       last_value(multiIf(has(array('Создание резервов под обесценение', 'Операционные расходы'), name) == 1, value, NULL)) as \"Резерв\"\nfrom default.finance_results\nwhere code == 'VTBR' and standard == 'РСБУ'\ngroup by month\norder by month",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        }
+      ],
+      "title": "ЧОД до резервов, млрд. руб.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select $dateCol,\n       last_value(multiIf(equals(name,'Чистая прибыль'), value, NULL)) as \"Чистая прибыль\",\n       last_value(multiIf(equals(name,'Прибыль до налогообложения'), value, NULL)) as \"Прибыль\"\nfrom $table\nwhere code == 'VTBR' and standard == 'РСБУ'\ngroup by $dateCol\norder by $dateCol\n",
+          "rawQuery": "select month,\n       last_value(multiIf(equals(name,'Чистая прибыль'), value, NULL)) as \"Чистая прибыль\",\n       last_value(multiIf(equals(name,'Прибыль до налогообложения'), value, NULL)) as \"Прибыль\"\nfrom default.finance_results\nwhere code == 'VTBR' and standard == 'РСБУ'\ngroup by month\norder by month",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select $dateCol, sum(value) as \"Доход-расход\"\nfrom $table\nwhere code == 'VTBR' and standard == 'РСБУ' and has(array('Чистые процентные доходы','Чистые комиссионные доходы','Прочие чистые операционные доходы','Создание резервов под обесценение','Расходы на содержание персонала и \n  административные расходы', 'Операционные расходы'), name) == 1\ngroup by $dateCol\norder by $dateCol\n",
+          "rawQuery": "select month, sum(value) as \"Доход-расход\"\nfrom default.finance_results\nwhere code == 'VTBR' and standard == 'РСБУ' and has(array('Чистые процентные доходы','Чистые комиссионные доходы','Прочие чистые операционные доходы','Создание резервов под обесценение','Расходы на содержание персонала и \n  административные расходы', 'Операционные расходы'), name) == 1\ngroup by month\norder by month",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        }
+      ],
+      "title": "Прибыль по РСБУ, млрд. руб.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select $dateCol, last_value(value) as ROE\nfrom $table\nwhere code == 'VTBR' and standard == 'РСБУ' and name == 'Рентабельность капитала (ROE)'\ngroup by $dateCol\norder by $dateCol\n",
+          "rawQuery": "select month, last_value(value) as ROE\nfrom default.finance_results\nwhere code == 'VTBR' and standard == 'РСБУ' and name == 'Рентабельность капитала (ROE)'\ngroup by month\norder by month",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        }
+      ],
+      "title": "Рентабельность капитала (ROE)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": false,
+  "schemaVersion": 33,
+  "style": "dark",
+  "tags": [],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-5y",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "VTB finance results",
+  "uid": "vtbr",
+  "version": 14,
+  "weekStart": ""
+}
