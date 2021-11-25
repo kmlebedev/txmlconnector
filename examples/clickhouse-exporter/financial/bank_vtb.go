@@ -156,7 +156,7 @@ func crawFinanceResults(conn *sql.DB) error {
 		if err != nil {
 			log.Error(err)
 		}
-		t := time.Date(y, time.Month(m), -1, 0, 0, 0, 0, time.UTC)
+		t := time.Date(y, time.Month(m+1), -1, 0, 0, 0, 0, time.UTC)
 		if m == 2 && dateFind[1] == "МСФО" {
 			double = true
 		}

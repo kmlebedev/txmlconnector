@@ -93,7 +93,11 @@
               {
                 "id": "custom.lineStyle",
                 "value": {
-                  "fill": "solid"
+                  "dash": [
+                    0,
+                    10
+                  ],
+                  "fill": "dot"
                 }
               }
             ]
@@ -135,9 +139,9 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "select if(msfo.v == 0, rsbu.month, msfo.month) as month, msfo.v as \"Чистая прибыль(МСФО)\" , rsbu.v as \"Чистая прибыль(РСБУ)\" from (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'МСФО' and category ==  'Ключевые показатели P&L' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name)\n    group by month\n    order by month\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-05-30')) as month, 25.0 as v)\n                                                                                                                                   ) as msfo\nFULL JOIN (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'РСБУ' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1\n    group by month\n    order by month) as rsbu on (msfo.month == rsbu.month)\norder by month",
-          "rawQuery": "select if(msfo.v == 0, rsbu.month, msfo.month) as month, msfo.v as \"Чистая прибыль(МСФО)\" , rsbu.v as \"Чистая прибыль(РСБУ)\" from (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'МСФО' and category ==  'Ключевые показатели P&L' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name)\n    group by month\n    order by month\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-05-30')) as month, 25.0 as v)\n                                                                                                                                   ) as msfo\nFULL JOIN (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'РСБУ' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1\n    group by month\n    order by month) as rsbu on (msfo.month == rsbu.month)\norder by month",
-          "refId": "D",
+          "query": "select if(msfo.v == 0, rsbu.month, msfo.month) as month, msfo.v as \"Чистая прибыль(МСФО)\" , rsbu.v as \"Чистая прибыль(РСБУ)\"\nfrom (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'МСФО' and category ==  'Ключевые показатели P&L' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name)\n    group by month\n    order by month\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-06-29')) as month, 33.2 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-09-29')) as month, 26.3 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-10-30')) as month, 34 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-11-30')) as month, 35 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-12-30')) as month, 36 as v)\n) as msfo\nFULL JOIN (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'РСБУ' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1\n    group by month\n    order by month) as rsbu on (toDate(toStartOfMonth(msfo.month)) == toDate(toStartOfMonth(rsbu.month)))\norder by month",
+          "rawQuery": "select if(msfo.v == 0, rsbu.month, msfo.month) as month, msfo.v as \"Чистая прибыль(МСФО)\" , rsbu.v as \"Чистая прибыль(РСБУ)\"\nfrom (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'МСФО' and category ==  'Ключевые показатели P&L' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name)\n    group by month\n    order by month\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-06-29')) as month, 33.2 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-09-29')) as month, 26.3 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-10-30')) as month, 34 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-11-30')) as month, 35 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-12-30')) as month, 36 as v)\n) as msfo\nFULL JOIN (select month, last_value(value) as v\n    from default.finance_results\n    where standard == 'РСБУ' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1\n    group by month\n    order by month) as rsbu on (toDate(toStartOfMonth(msfo.month)) == toDate(toStartOfMonth(rsbu.month)))\norder by month",
+          "refId": "E",
           "round": "0s",
           "skip_comments": true,
           "table": "finance_results",
@@ -207,7 +211,7 @@
           "hide": false,
           "intervalFactor": 1,
           "query": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted(close*1000, volume)/1000 as \"Stock price\"\nFROM $table\nWHERE\n    date >= toDate($from) AND date <= toDate($to)\n    and sec_code == 'VTBR' and period == '5' \nGROUP BY t\nORDER BY t",
-          "rawQuery": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted(close*1000, volume)/1000 as \"Stock price\"\nFROM default.candles\nWHERE\n    date >= toDate(1542874073) AND date <= toDate(1637568473)\n    and sec_code == 'VTBR' and period == '5' \nGROUP BY t\nORDER BY t",
+          "rawQuery": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted(close*1000, volume)/1000 as \"Stock price\"\nFROM default.candles\nWHERE\n    date >= toDate(1480059140) AND date <= toDate(1637825540)\n    and sec_code == 'VTBR' and period == '5' \nGROUP BY t\nORDER BY t",
           "refId": "C",
           "round": "0s",
           "skip_comments": true,
@@ -219,12 +223,312 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "always",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Stock \\w+ price"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    0,
+                    10
+                  ],
+                  "fill": "dot"
+                }
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "never"
+              }
+            ]
+          },
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Чистая прибыль(МСФО)"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": true,
+          "intervalFactor": 1,
+          "query": "select if(msfo.v == 0, rsbu.month, msfo.month) as month, msfo.v as \"Чистая прибыль(МСФО)\" , rsbu.v as \"Чистая прибыль(РСБУ)\"\nfrom (select publish as month, last_value(value) as v\n    from default.finance_results\n    where standard == 'МСФО' and category ==  'Ключевые показатели P&L' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name)\n    group by month\n    order by month\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-07-29')) as month, 33.2 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-10-28')) as month, 26.3 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-11-30')) as month, 34 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-12-30')) as month, 35 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2022-01-30')) as month, 36 as v)\n) as msfo\nFULL JOIN (select publish as month, last_value(value) as v\n    from default.finance_results\n    where standard == 'РСБУ' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1\n    group by month\n    order by month) as rsbu on (toDate(toStartOfMonth(msfo.month)) == toDate(toStartOfMonth(rsbu.month)))\norder by month",
+          "rawQuery": "select if(msfo.v == 0, rsbu.month, msfo.month) as month, msfo.v as \"Чистая прибыль(МСФО)\" , rsbu.v as \"Чистая прибыль(РСБУ)\"\nfrom (select publish as month, last_value(value) as v\n    from default.finance_results\n    where standard == 'МСФО' and category ==  'Ключевые показатели P&L' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name)\n    group by month\n    order by month\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-07-29')) as month, 33.2 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-10-28')) as month, 26.3 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-11-30')) as month, 34 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-12-30')) as month, 35 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2022-01-30')) as month, 36 as v)\n) as msfo\nFULL JOIN (select publish as month, last_value(value) as v\n    from default.finance_results\n    where standard == 'РСБУ' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1\n    group by month\n    order by month) as rsbu on (toDate(toStartOfMonth(msfo.month)) == toDate(toStartOfMonth(rsbu.month)))\norder by month",
+          "refId": "D",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select msfo.publish, msfo.v as \"Чистая прибыль(МСФО)\" from (select publish, last_value(value) as v\nfrom default.finance_results\n    where standard == 'МСФО' and category ==  'Ключевые показатели P&L' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name)\n    group by publish\n    order by publish\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-10-27')) as month, 33.2 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-07-30')) as month, 26.3 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-04-30')) as month, 26.7 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-02-28')) as month, 29.2 as v)\n) as msfo\norder by msfo.publish",
+          "rawQuery": "select msfo.publish, msfo.v as \"Чистая прибыль(МСФО)\" from (select publish, last_value(value) as v\nfrom default.finance_results\n    where standard == 'МСФО' and category ==  'Ключевые показатели P&L' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name)\n    group by publish\n    order by publish\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-10-27')) as month, 33.2 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-07-30')) as month, 26.3 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-04-30')) as month, 26.7 as v)\n    UNION ALL (SELECT toDate(parseDateTimeBestEffortOrNull('2021-02-28')) as month, 29.2 as v)\n) as msfo\norder by msfo.publish",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": true,
+          "intervalFactor": 1,
+          "query": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    min(low*1000)/1000 as \"Stock low price\"\nFROM $table\nWHERE\n    date >= toDate($from) AND date <= toDate($to)\n    and sec_code == 'VTBR' and period == '4' \nGROUP BY t\nORDER BY t",
+          "rawQuery": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    min(low*1000)/1000 as \"Stock low price\"\nFROM default.candles\nWHERE\n    date >= toDate(1609441200) AND date <= toDate(1640977199)\n    and sec_code == 'VTBR' and period == '4' \nGROUP BY t\nORDER BY t",
+          "refId": "C",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "candles",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": true,
+          "intervalFactor": 1,
+          "query": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    max(high*1000)/1000 as \"Stock high price\"\nFROM $table\nWHERE\n    date >= toDate($from) AND date <= toDate($to)\n    and sec_code == 'VTBR' and period == '4' \nGROUP BY t\nORDER BY t",
+          "rawQuery": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    max(high*1000)/1000 as \"Stock high price\"\nFROM default.candles\nWHERE\n    date >= toDate(1609441200) AND date <= toDate(1640977199)\n    and sec_code == 'VTBR' and period == '4' \nGROUP BY t\nORDER BY t",
+          "refId": "E",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "candles",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted((low+high)/2*1000, volume)/1000 as \"Stock VTBR price\"\nFROM $table\nWHERE\n    date >= toDate($from) AND date <= toDate($to)\n    and sec_code == 'VTBR' and period == '5' \nGROUP BY t\nORDER BY t",
+          "rawQuery": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted((low+high)/2*1000, volume)/1000 as \"Stock VTBR price\"\nFROM default.candles\nWHERE\n    date >= toDate(1609638407) AND date <= toDate(1637825292)\n    and sec_code == 'VTBR' and period == '5' \nGROUP BY t\nORDER BY t",
+          "refId": "F",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "candles",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": true,
+          "intervalFactor": 1,
+          "query": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted((low+high)/2, volume)/7200 as \"Stock SBER price\"\nFROM $table\nWHERE\n    date >= toDate($from) AND date <= toDate($to)\n    and sec_code == 'SBER' and period == '4' \nGROUP BY t\nORDER BY t",
+          "rawQuery": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted((low+high)/2, volume)/7200 as \"Stock SBER price\"\nFROM default.candles\nWHERE\n    date >= toDate(1609441200) AND date <= toDate(1640977199)\n    and sec_code == 'SBER' and period == '4' \nGROUP BY t\nORDER BY t",
+          "refId": "G",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "candles",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select rsbu.publish, rsbu.v as \"Чистая прибыль(РСБУ)\" from (select publish, last_value(value) as v\nfrom default.finance_results\n    where standard == 'РСБУ' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1\n    group by publish\n    order by publish\n) as rsbu\norder by rsbu.publish",
+          "rawQuery": "select rsbu.publish, rsbu.v as \"Чистая прибыль(РСБУ)\" from (select publish, last_value(value) as v\nfrom default.finance_results\n    where standard == 'РСБУ' and has(array('Чистая прибыль / (убыток)', 'Чистая прибыль'), name) == 1\n    group by publish\n    order by publish\n) as rsbu\norder by rsbu.publish",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "finance_results",
+          "tableLoading": false
+        }
+      ],
+      "title": "Чистая прибыль на дату публикации, млрд. руб.",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 16
       },
       "id": 6,
       "panels": [],
@@ -293,7 +597,7 @@
               "options": {
                 "mode": "exclude",
                 "names": [
-                  "Расходы"
+                  "ЧПД"
                 ],
                 "prefix": "All except:",
                 "readOnly": true
@@ -316,7 +620,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 17
       },
       "id": 2,
       "options": {
@@ -420,7 +724,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 17
       },
       "id": 3,
       "options": {
@@ -548,7 +852,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 16
+        "y": 24
       },
       "id": 4,
       "options": {
@@ -676,7 +980,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 16
+        "y": 24
       },
       "id": 14,
       "options": {
@@ -725,7 +1029,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 31
       },
       "id": 8,
       "panels": [],
@@ -786,13 +1090,38 @@
           },
           "unit": "currencyRUB"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "ЧПД"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 32
       },
       "id": 10,
       "options": {
@@ -895,7 +1224,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 32
       },
       "id": 11,
       "options": {
@@ -1021,7 +1350,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 31
+        "y": 39
       },
       "id": 12,
       "options": {
@@ -1080,6 +1409,6 @@
   "timezone": "",
   "title": "VTB finance results",
   "uid": "vtbr",
-  "version": 14,
+  "version": 23,
   "weekStart": ""
 }
