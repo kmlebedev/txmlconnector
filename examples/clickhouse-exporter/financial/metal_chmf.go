@@ -23,21 +23,39 @@ var (
 	twelveMonths = "Twelve months"
 )
 
+var (
+	exportCHMFQuarter = map[string]string{}
+	exportCHMFTables  = map[string]map[string]string{}
+)
+
 func init() {
-	exportTables["Operating results"] = map[string]string{
-		"SUMMARY OF KEY PRODUCTION, SALES VOLUMES":                   "productions",
-		"SEVERSTAL’S CONSOLIDATED SALES (NET OF INTERCOMPANY SALES)": "consolidated_sales_for_products",
-		"Sales price, $/tonne":                                       "prices_for_products",
+	exportCHMFQuarter = map[string]string{
+		"revenue results":   "consolidated_revenue_for_products",
+		"Operating results": "Sales volumes, thousands of tonnes",
+		"PL":                "Consolidated income statements",
+		"CF":                "Consolidated statements of cash flows",
+		"BS":                "Consolidated statements of financial position",
+		"Sales Structure":   "'Product Group\\Posting period",
 	}
-	exportTables["PL"] = map[string]string{
-		"Consolidated income statements": "financial_highlights",
+	exportCHMFTables["Operating results"] = map[string]string{
+		"Production, thousands of tonnes":     "productions",
+		"Sales volumes, thousands of tonnes":  "consolidated_sales_for_products",
+		"Total steel products (Consolidated)": "consolidated_sales_for_products",
+		"Sales price, $/tonne":                "prices_for_products",
 	}
-	exportTables["CF"] = map[string]string{
-		"Consolidated statements of cash flows": "financial_highlights",
+	exportCHMFTables["BS"] = map[string]string{
+		"Total current assets":       "financial_highlights",
+		"Total current liabilities ": "financial_highlights",
+		"EBITDA":                     "financial_highlights",
 	}
-	exportTables["revenue results"] = map[string]string{
+	exportCHMFTables["PL"] = map[string]string{
+		"Revenue": "financial_highlights",
+	}
+	exportCHMFTables["CF"] = map[string]string{
+		"Operating activites:": "financial_highlights",
+	}
+	exportCHMFTables["revenue results"] = map[string]string{
 		"consolidated_revenue_for_products": "revenue_structure",
-		"consolidated_revenue_for_export":   "revenue_structure",
 	}
 }
 
@@ -176,7 +194,7 @@ func loadChmfData(conn *sql.DB, fileName string) error {
 	if err != nil {
 		return err
 	}
-	for sheet, tableNames := range exportTables {
+	for sheet, tableNames := range exportCHMFTables {
 		rows, err := xlsxFile.GetRows(sheet)
 		if err != nil {
 			if strings.HasSuffix(err.Error(), "is not exist") {
@@ -188,13 +206,17 @@ func loadChmfData(conn *sql.DB, fileName string) error {
 			return fmt.Errorf("In table %s not enough row < 2", tableNames)
 		}
 		for name, table := range tableNames {
+			division := ""
 			vals := make([]string, TableColumnNums[table])
 			for i := 0; i < TableColumnNums[table]; i++ {
 				vals = append(vals, "?")
 			}
-			if err := insertToDB(conn, secCode, "",
+			if table == "productions" {
+				division = "SUMMARY"
+			}
+			if err := insertToDB(conn, secCode, division,
 				fmt.Sprintf("INSERT INTO %s (*) VALUES (%s)", table, strings.Join(vals, ",")),
-				getTableFromRows(&rows, name),
+				getElasticTableFromRows(&rows, name, exportCHMFQuarter[sheet]),
 			); err != nil {
 				return err
 			}

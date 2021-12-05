@@ -132,6 +132,14 @@ func insertToDB(conn *sql.DB, secCode string, name string, query string, table *
 	return nil
 }
 
+func loadAllInvestingData(conn *sql.DB) {
+	for code, _ := range exporter.CodeToId {
+		if err := exporter.LoadHistoricalData(conn, code, "07/07/2014", time.Now().Format("01/02/2006"), "Daily"); err != nil {
+			log.Error(err)
+		}
+	}
+}
+
 func main() {
 	if lvl, err := log.ParseLevel(os.Getenv("LOG_LEVEL")); err == nil {
 		log.SetLevel(lvl)
@@ -142,25 +150,40 @@ func main() {
 	//if err := loadMagnData(conn, "MMK_operating_e_financial_data_Q1_2021.xls"); err != nil {
 	//	log.Error(err)
 	//}
+	if ticker == "VTBR" {
+		if err := crawFinanceResults(conn); err != nil {
+			log.Error(err)
+		}
+		if err := crawCbr(conn); err != nil {
+			log.Error(err)
+		}
+		if err := loadCSV(conn); err != nil {
+			log.Error(err)
+		}
+	}
 	if ticker == "CHMF" {
 		// Financial and Operating data SVST 3Q_21.xlsx
 		// https://www.severstal.com/files/74962/Financial%20and%20Operating%20data%20SVST%203Q_21.xlsx
 		if err := loadChmfData(conn, "Financial and Operating data SVST 3Q_21.xlsx"); err != nil {
 			log.Error(err)
 		}
-		if err := loadChmfData(conn, "CHMF_revenue_structure.xlsx"); err != nil {
-			log.Error(err)
-		}
+		// Данные из отчета
+		//if err := loadChmfData(conn, "CHMF_revenue_structure.xlsx"); err != nil {
+		//	log.Error(err)
+		//}
+		//loadAllInvestingData(conn)
 	}
 	if ticker == "MAGN" {
 		if err := loadMagnData(conn, "MMK_operating_m_financial_data_Q2_2021.xls"); err != nil {
 			log.Error(err)
 		}
+		loadAllInvestingData(conn)
 	}
 	if ticker == "NLMK" {
-		if err := loadNlmkData(conn, "F13_Financial_and_operating_data_2q_2021.xlsx"); err != nil {
+		if err := loadNlmkData(conn, "financial_and_operating_data_3q_2021.xlsx"); err != nil {
 			log.Error(err)
 		}
+		loadAllInvestingData(conn)
 	}
 	if ticker == "" {
 		if err := crawExports(conn); err != nil {
@@ -182,11 +205,6 @@ func main() {
 		}
 		if err := craw(conn, "szd", "szd", "5319", "Погрузка на Северной железной дороге"); err != nil {
 			//if err := craw(conn, "szd", "5319", "Погрузка на железной дороге в Вологодской области"); err != nil {
-			log.Error(err)
-		}
-
-		// Q2_2021-Financial_and_operational_data-Severstal_Final
-		if err := loadCSV(conn); err != nil {
 			log.Error(err)
 		}
 		if err := loadLmeData(conn); err != nil {

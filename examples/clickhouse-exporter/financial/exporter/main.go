@@ -27,6 +27,7 @@ var (
 	historicalDataUrl = fmt.Sprintf("https://%s/instruments/HistoricalDataAjax", host)
 	signIn            = false
 	CodeToId          = map[string][]string{
+		"SSCc1":    {"996703", "301419"}, // Scrap
 		"MHCc1":    {"1128865", "27886385"},
 		"SHHCc1":   {"996735", "301529"},
 		"SGXIOSc1": {"992748", "301009"},
