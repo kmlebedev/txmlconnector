@@ -2,7 +2,7 @@ version: '2'
 
 services:
   clickhouse:
-    image: yandex/clickhouse-server
+    image: yandex/clickhouse-server:latest
     ports:
       - 9000:9000
       - 8123:8123
@@ -11,7 +11,7 @@ services:
         soft: 262144
         hard: 262144
   grafana:
-    image: grafana/grafana:8.3.0-beta1
+    image: grafana/grafana:latest
     ports:
       - "3000:3000"
     volumes:

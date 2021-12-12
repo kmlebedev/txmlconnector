@@ -174,10 +174,16 @@ func main() {
 		//loadAllInvestingData(conn)
 	}
 	if ticker == "MAGN" {
-		if err := loadMagnData(conn, "MMK_operating_m_financial_data_Q2_2021.xls"); err != nil {
+		if err := loadMagnData(conn, "MMK_operating_financial_data_Q3_2021.xls"); err != nil {
 			log.Error(err)
 		}
 		loadAllInvestingData(conn)
+		if err := craw(conn, "yuzd", "yuzd", "6194", "Погрузка на Южно-Уральской железной дороге"); err != nil {
+			log.Error(err)
+		}
+		if err := craw(conn, "yuzd", "chel", "6194", "Погрузка на железной дороге в Челябинской области"); err != nil {
+			log.Error(err)
+		}
 	}
 	if ticker == "NLMK" {
 		if err := loadNlmkData(conn, "financial_and_operating_data_3q_2021.xlsx"); err != nil {
@@ -193,12 +199,6 @@ func main() {
 			if err := exporter.LoadHistoricalData(conn, code, "07/07/2014", time.Now().Format("01/02/2006"), "Daily"); err != nil {
 				log.Error(err)
 			}
-		}
-		if err := craw(conn, "yuzd", "chel", "6194", "Погрузка на железной дороге в Челябинской области"); err != nil {
-			log.Error(err)
-		}
-		if err := craw(conn, "yuzd", "yuzd", "6194", "Погрузка на Южно-Уральской железной дороге"); err != nil {
-			log.Error(err)
 		}
 		if err := loadInvestingData(conn); err != nil {
 			log.Error(err)

@@ -20,16 +20,14 @@
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "gnetId": null,
   "graphTooltip": 0,
   "id": 2,
-  "iteration": 1634580418372,
+  "iteration": 1639318999676,
   "links": [],
   "liveNow": false,
   "panels": [
     {
       "collapsed": false,
-      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -42,7 +40,10 @@
       "type": "row"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -186,7 +187,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -347,7 +351,6 @@
     },
     {
       "collapsed": false,
-      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -360,7 +363,10 @@
       "type": "row"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -455,11 +461,16 @@
         },
         "tooltip": {
           "mode": "single"
-        }
+        },
+        "xTickLabelRotation": 0
       },
       "targets": [
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -470,7 +481,7 @@
           "intervalFactor": 1,
           "query": "select quarter_name, CAPEX, EBITDA, Revenue from (select $dateCol as q,\n       last_value(multiIf(equals(indicator,'CAPEX'), value, NULL)) as CAPEX,\n       last_value(multiIf(equals(indicator,'EBITDA'), value, NULL)) as EBITDA,\n       last_value(multiIf(equals(indicator,'Revenue'), value, NULL)) as Revenue,\n       quarter_name\n       \nfrom $table where sec_code == '$sec_code' and $dateCol >= toDate($from) and $dateCol <= toDate($to)\ngroup by quarter_name, $dateCol\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , -250, 1291, 2918, 'Q3 2021' as quarter_name)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 6, now()))) as q , -250, 1072, 2720, 'Q4 2021' as quarter_name)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 9, now()))) as q , -250, 900, 2500, 'Q1 2022' as quarter_name)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 9, now()))) as q , -200, 850, 2200, 'Q2 2022' as quarter_name)\n)\norder by q\n",
           "queryType": "randomWalk",
-          "rawQuery": "select quarter_name, CAPEX, EBITDA, Revenue from (select quarter as q,\n       last_value(multiIf(equals(indicator,'CAPEX'), value, NULL)) as CAPEX,\n       last_value(multiIf(equals(indicator,'EBITDA'), value, NULL)) as EBITDA,\n       last_value(multiIf(equals(indicator,'Revenue'), value, NULL)) as Revenue,\n       quarter_name\n       \nfrom default.financial_highlights where sec_code == 'MAGN' and quarter >= toDate(1521134199) and quarter <= toDate(1657905399)\ngroup by quarter_name, quarter\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , -250, 1291, 2918, 'Q3 2021' as quarter_name)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 6, now()))) as q , -250, 1072, 2720, 'Q4 2021' as quarter_name)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 9, now()))) as q , -250, 900, 2500, 'Q1 2022' as quarter_name)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 9, now()))) as q , -200, 850, 2200, 'Q2 2022' as quarter_name)\n)\norder by q",
+          "rawQuery": "select quarter_name, CAPEX, EBITDA, Revenue from (select quarter as q,\n       last_value(multiIf(equals(indicator,'CAPEX'), value, NULL)) as CAPEX,\n       last_value(multiIf(equals(indicator,'EBITDA'), value, NULL)) as EBITDA,\n       last_value(multiIf(equals(indicator,'Revenue'), value, NULL)) as Revenue,\n       quarter_name\n       \nfrom default.financial_highlights where sec_code == 'MAGN' and quarter >= toDate(1523563942) and quarter <= toDate(1642018342)\ngroup by quarter_name, quarter\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , -250, 1291, 2918, 'Q3 2021' as quarter_name)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 6, now()))) as q , -250, 1072, 2720, 'Q4 2021' as quarter_name)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 9, now()))) as q , -250, 900, 2500, 'Q1 2022' as quarter_name)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 9, now()))) as q , -200, 850, 2200, 'Q2 2022' as quarter_name)\n)\norder by q",
           "refId": "A",
           "round": "0s",
           "skip_comments": true,
@@ -483,7 +494,10 @@
       "type": "barchart"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -572,7 +586,8 @@
         "text": {},
         "tooltip": {
           "mode": "single"
-        }
+        },
+        "xTickLabelRotation": 0
       },
       "targets": [
         {
@@ -600,7 +615,10 @@
       "type": "barchart"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -650,7 +668,32 @@
           },
           "unit": "masst"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Premium products"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -665,8 +708,8 @@
             "last",
             "mean"
           ],
-          "displayMode": "table",
-          "placement": "right"
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "single"
@@ -675,6 +718,10 @@
       "targets": [
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -684,10 +731,164 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT\n    $dateCol as q,\n    production as p,\n    last_value(value) as v\nFROM $table\nWHERE sec_code == '$sec_code' and $dateCol >= toDate($from) and $dateCol <= toDate($to) and has(array('Pig iron', 'Crude steel', 'Finished products, incl.', 'Premium products'), p) == 1\nGROUP BY q, p\nORDER BY q\n",
+          "query": "SELECT\n    $dateCol as q,\n    production as p,\n    last_value(value) as v\nFROM $table\nWHERE sec_code == '$sec_code' and $dateCol >= toDate($from) and $dateCol <= toDate($to) and has(array('Iron ore production', 'Crude steel production', 'Coking coal concentrate production', 'Pig iron production'), p) == 1\nGROUP BY q, p\nORDER BY q\n",
           "queryType": "randomWalk",
-          "rawQuery": "SELECT\n    quarter as q,\n    production as p,\n    last_value(value) as v\nFROM default.productions\nWHERE sec_code == 'MAGN' and quarter >= toDate(1552855802) and quarter <= toDate(1634503802) and has(array('Pig iron', 'Crude steel', 'Finished products, incl.', 'Premium products'), p) == 1\nGROUP BY q, p\nORDER BY q",
+          "rawQuery": "SELECT\n    quarter as q,\n    production as p,\n    last_value(value) as v\nFROM default.productions\nWHERE sec_code == 'MAGN' and quarter >= toDate(1526137605) and quarter <= toDate(1634051205) and has(array('Iron ore production', 'Crude steel production', 'Coking coal concentrate production', 'Pig iron production'), p) == 1\nGROUP BY q, p\nORDER BY q",
           "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "productions",
+          "tableLoading": false
+        }
+      ],
+      "title": "Производственные показатели консолидированные,  тыс. тон",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "masst"
+        },
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Premium products"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "id": 39,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select q, sum(v) as \"Premium products\" FROM (\nSELECT\n    $dateCol as q,\n    production as p,\n    last_value(value) as v,\n    division\nFROM $table\nWHERE sec_code == '$sec_code' and $dateCol >= toDate($from) and $dateCol <= toDate($to) and has(array('Premium products, of which', 'Premium products'), p) == 1\nGROUP BY q, p, division)\nGROUP BY q\nORDER BY q\n",
+          "queryType": "randomWalk",
+          "rawQuery": "select q, sum(v) as \"Premium products\" FROM (\nSELECT\n    quarter as q,\n    production as p,\n    last_value(value) as v,\n    division\nFROM default.productions\nWHERE sec_code == 'MAGN' and quarter >= toDate(1526139180) and quarter <= toDate(1634052780) and has(array('Premium products, of which', 'Premium products'), p) == 1\nGROUP BY q, p, division)\nGROUP BY q\nORDER BY q",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "productions",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select q, p, sum(v) FROM (\nSELECT\n    $dateCol as q,\n    production as p,\n    last_value(value) as v,\n    division\nFROM $table\nWHERE sec_code == '$sec_code' and $dateCol >= toDate($from) and $dateCol <= toDate($to) and has(array('Pig iron', 'Crude steel', 'Finished products, incl.'), p) == 1\nGROUP BY q, p, division)\nGROUP BY q, p\nORDER BY q\n",
+          "queryType": "randomWalk",
+          "rawQuery": "select q, p, sum(v) FROM (\nSELECT\n    quarter as q,\n    production as p,\n    last_value(value) as v,\n    division\nFROM default.productions\nWHERE sec_code == 'MAGN' and quarter >= toDate(1526139180) and quarter <= toDate(1634052780) and has(array('Pig iron', 'Crude steel', 'Finished products, incl.'), p) == 1\nGROUP BY q, p, division)\nGROUP BY q, p\nORDER BY q",
+          "refId": "A",
           "round": "0s",
           "skip_comments": true,
           "table": "productions",
@@ -698,7 +899,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -770,6 +974,24 @@
                 "value": 1
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Loading.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              }
+            ]
           }
         ]
       },
@@ -777,7 +999,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 59
       },
       "id": 33,
       "options": {
@@ -796,6 +1018,10 @@
       "targets": [
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "month",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -805,8 +1031,8 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "select t, avg(LoadingRZD*1000) as \"Loading RZD avg\" FROM (SELECT $dateCol as t, last_value(value) as LoadingRZD FROM $table WHERE name == 'yuzd' GROUP BY t\nUNION ALL (SELECT toDate(toStartOfMonth(date_add(month, -1, $dateCol))) as t, last_value(value) as LoadingRZD FROM $table WHERE name == 'yuzd' GROUP BY t))\nGROUP BY t\nORDER BY t\n",
-          "rawQuery": "select t, avg(LoadingRZD*1000) as \"Loading RZD avg\" FROM (SELECT month as t, last_value(value) as LoadingRZD FROM default.loading_rzd WHERE name == 'yuzd' GROUP BY t\nUNION ALL (SELECT toDate(toStartOfMonth(date_add(month, -1, month))) as t, last_value(value) as LoadingRZD FROM default.loading_rzd WHERE name == 'yuzd' GROUP BY t))\nGROUP BY t\nORDER BY t",
+          "query": "select t, avg(LoadingRZD*1000) as \"Loading yuzd avg\" FROM (SELECT $dateCol as t, last_value(value) as LoadingRZD FROM $table WHERE name == 'yuzd' GROUP BY t\nUNION ALL (SELECT toDate(toStartOfMonth(date_add(month, -1, $dateCol))) as t, last_value(value) as LoadingRZD FROM $table WHERE name == 'yuzd' GROUP BY t))\nGROUP BY t\nORDER BY t\n",
+          "rawQuery": "select t, avg(LoadingRZD*1000) as \"Loading yuzd avg\" FROM (SELECT month as t, last_value(value) as LoadingRZD FROM default.loading_rzd WHERE name == 'yuzd' GROUP BY t\nUNION ALL (SELECT toDate(toStartOfMonth(date_add(month, -1, month))) as t, last_value(value) as LoadingRZD FROM default.loading_rzd WHERE name == 'yuzd' GROUP BY t))\nGROUP BY t\nORDER BY t",
           "refId": "C",
           "round": "0s",
           "skip_comments": true,
@@ -815,6 +1041,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "month",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -824,8 +1054,8 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": true,
           "intervalFactor": 1,
-          "query": "SELECT\n    $dateCol as t,\n    last_value(value)*1000 as \"Loading RZD last\"\nFROM $table WHERE name == 'yuzd'\nGROUP BY t\nORDER BY t\n",
-          "rawQuery": "SELECT\n    month as t,\n    last_value(value)*1000 as \"Loading RZD last\"\nFROM default.loading_rzd WHERE name == 'yuzd'\nGROUP BY t\nORDER BY t",
+          "query": "SELECT\n    $dateCol as t,\n    last_value(value)*1000 as \"Loading RZD last\"\nFROM $table WHERE name == 'chel'\nGROUP BY t\nORDER BY t\n",
+          "rawQuery": "SELECT\n    month as t,\n    last_value(value)*1000 as \"Loading RZD last\"\nFROM default.loading_rzd WHERE name == 'chel'\nGROUP BY t\nORDER BY t",
           "refId": "D",
           "round": "0s",
           "skip_comments": true,
@@ -834,6 +1064,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -843,9 +1077,9 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "select q,p,last_value(v) FROM (SELECT\n    $dateCol as q,\n    product as p,\n    last_value(value) as v\nFROM $table\nWHERE has(array('Premium products', 'Flat hot-rolled products', 'Long products'), p) == 1 and sec_code == '$sec_code'\nGROUP BY q, p\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Long products' as p, 320 as value)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Premium products' as p, 1400 as value)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Flat hot-rolled products' as p, 1600 as value)\n)\nGROUP BY q,p\nORDER BY q",
+          "query": "select q,p,last_value(v) FROM (SELECT\n    $dateCol as q,\n    product as p,\n    last_value(value) as v\nFROM $table\nWHERE has(array('Premium products', 'Flat hot-rolled products', 'Long products'), p) == 1 and sec_code == '$sec_code'\nGROUP BY q, p\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Long products' as p, 270 as value)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Premium products' as p, 1300 as value)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Flat hot-rolled products' as p, 1658 as value)\n)\nGROUP BY q,p\nORDER BY q",
           "queryType": "randomWalk",
-          "rawQuery": "select q,p,last_value(v) FROM (SELECT\n    quarter as q,\n    product as p,\n    last_value(value) as v\nFROM default.consolidated_sales_for_products\nWHERE has(array('Premium products', 'Flat hot-rolled products', 'Long products'), p) == 1 and sec_code == 'MAGN'\nGROUP BY q, p\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Long products' as p, 320 as value)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Premium products' as p, 1400 as value)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Flat hot-rolled products' as p, 1600 as value)\n)\nGROUP BY q,p\nORDER BY q",
+          "rawQuery": "select q,p,last_value(v) FROM (SELECT\n    quarter as q,\n    product as p,\n    last_value(value) as v\nFROM default.consolidated_sales_for_products\nWHERE has(array('Premium products', 'Flat hot-rolled products', 'Long products'), p) == 1 and sec_code == 'MAGN'\nGROUP BY q, p\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Long products' as p, 270 as value)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Premium products' as p, 1300 as value)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 'Flat hot-rolled products' as p, 1658 as value)\n)\nGROUP BY q,p\nORDER BY q",
           "refId": "B",
           "round": "0s",
           "skip_comments": true,
@@ -854,6 +1088,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -870,13 +1108,39 @@
           "skip_comments": true,
           "table": "financial_ratios",
           "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "month",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "select t, avg(LoadingRZD*1000) as \"Loading chelzd avg\" FROM (SELECT $dateCol as t, last_value(value) as LoadingRZD FROM $table WHERE name == 'chel' GROUP BY t\nUNION ALL (SELECT toDate(toStartOfMonth(date_add(month, -1, $dateCol))) as t, last_value(value) as LoadingRZD FROM $table WHERE name == 'chel' GROUP BY t))\nGROUP BY t\nORDER BY t\n",
+          "rawQuery": "select t, avg(LoadingRZD*1000) as \"Loading chelzd avg\" FROM (SELECT month as t, last_value(value) as LoadingRZD FROM default.loading_rzd WHERE name == 'chel' GROUP BY t\nUNION ALL (SELECT toDate(toStartOfMonth(date_add(month, -1, month))) as t, last_value(value) as LoadingRZD FROM default.loading_rzd WHERE name == 'chel' GROUP BY t))\nGROUP BY t\nORDER BY t",
+          "refId": "E",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "loading_rzd",
+          "tableLoading": false
         }
       ],
       "title": "Консолидированные продажи по видам продукции,  тыс. тон",
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -907,7 +1171,7 @@
               "mode": "none"
             },
             "thresholdsStyle": {
-              "mode": "off"
+              "mode": "line"
             }
           },
           "mappings": [],
@@ -917,6 +1181,10 @@
               {
                 "color": "green",
                 "value": null
+              },
+              {
+                "color": "red",
+                "value": 0
               }
             ]
           },
@@ -934,6 +1202,30 @@
                 "value": "percentunit"
               }
             ]
+          },
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "crude steel - sales products"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
           }
         ]
       },
@@ -941,7 +1233,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 67
       },
       "id": 35,
       "options": {
@@ -951,8 +1243,8 @@
             "mean",
             "sum"
           ],
-          "displayMode": "table",
-          "placement": "right"
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "single"
@@ -1063,7 +1355,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1135,32 +1430,6 @@
                 "value": "short"
               }
             ]
-          },
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "Stock price max",
-                  "Stock price",
-                  "EBITDA per tonne"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
           }
         ]
       },
@@ -1168,7 +1437,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 67
+        "y": 75
       },
       "id": 32,
       "options": {
@@ -1187,6 +1456,10 @@
       "targets": [
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -1196,9 +1469,9 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT * FROM (SELECT\n    $dateCol as q,\n    last_value(value) as \"EBITDA per tonne\"\nFROM $table\nWHERE indicator == 'EBITDA per tonne* (USD/t)'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 427.5))\nORDER BY q",
+          "query": "SELECT * FROM (SELECT\n    $dateCol as q,\n    last_value(value) as \"EBITDA per tonne\"\nFROM $table\nWHERE indicator == 'EBITDA per tonne* (USD/t)'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 381.4))\nORDER BY q",
           "queryType": "randomWalk",
-          "rawQuery": "SELECT * FROM (SELECT\n    quarter as q,\n    last_value(value) as \"EBITDA per tonne\"\nFROM default.financial_ratios\nWHERE indicator == 'EBITDA per tonne* (USD/t)'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 427.5))\nORDER BY q",
+          "rawQuery": "SELECT * FROM (SELECT\n    quarter as q,\n    last_value(value) as \"EBITDA per tonne\"\nFROM default.financial_ratios\nWHERE indicator == 'EBITDA per tonne* (USD/t)'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 381.4))\nORDER BY q",
           "refId": "B",
           "round": "0s",
           "skip_comments": true,
@@ -1207,6 +1480,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -1216,9 +1493,9 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT\n    $dateCol as q,\n    last_value(value) as \"Slab Cash cost\"\nFROM $table\nWHERE indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , $forecast_Slab)",
+          "query": "SELECT\n    $dateCol as q,\n    last_value(value) as \"Slab Cash cost\"\nFROM $table\nWHERE indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , $forecast_Slab)",
           "queryType": "randomWalk",
-          "rawQuery": "SELECT\n    quarter as q,\n    last_value(value) as \"Slab Cash cost\"\nFROM default.financial_ratios\nWHERE indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 418.5)",
+          "rawQuery": "SELECT\n    quarter as q,\n    last_value(value) as \"Slab Cash cost\"\nFROM default.financial_ratios\nWHERE indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q\nORDER BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 372.6)",
           "refId": "A",
           "round": "0s",
           "skip_comments": true,
@@ -1227,6 +1504,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -1237,7 +1518,7 @@
           "hide": false,
           "intervalFactor": 1,
           "query": "SELECT * FROM (SELECT\n    $dateCol as q,\n    last_value(price) as ConsolidateWeightedAverage\nFROM $table\nWHERE product == 'Sales of finished products'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , $forecast_PriceAverage))\nORDER BY q\n",
-          "rawQuery": "SELECT * FROM (SELECT\n    quarter as q,\n    last_value(price) as ConsolidateWeightedAverage\nFROM default.consolidated_prices_for_products\nWHERE product == 'Sales of finished products'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 980))\nORDER BY q",
+          "rawQuery": "SELECT * FROM (SELECT\n    quarter as q,\n    last_value(price) as ConsolidateWeightedAverage\nFROM default.consolidated_prices_for_products\nWHERE product == 'Sales of finished products'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 965))\nORDER BY q",
           "refId": "C",
           "round": "0s",
           "skip_comments": true,
@@ -1246,6 +1527,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -1255,8 +1540,8 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT p.quarter, last_value(p.price) - last_value(e.value) - last_value(s.value) as \"Other production\"\nFROM consolidated_prices_for_products as p\nLEFT JOIN financial_ratios as e on e.quarter == p.quarter and e.sec_code == p.sec_code\nLEFT JOIN financial_ratios as s on s.quarter == p.quarter and s.sec_code == p.sec_code\nWHERE p.sec_code == '$sec_code' and p.product == 'Sales of finished products' and e.indicator == 'EBITDA per tonne* (USD/t)' and s.indicator == 'Slab Cash cost (USD/t)'\nGROUP BY p.quarter\nORDER BY p.quarter",
-          "rawQuery": "SELECT p.quarter, last_value(p.price) - last_value(e.value) - last_value(s.value) as \"Other production\"\nFROM consolidated_prices_for_products as p\nLEFT JOIN financial_ratios as e on e.quarter == p.quarter and e.sec_code == p.sec_code\nLEFT JOIN financial_ratios as s on s.quarter == p.quarter and s.sec_code == p.sec_code\nWHERE p.sec_code == 'MAGN' and p.product == 'Sales of finished products' and e.indicator == 'EBITDA per tonne* (USD/t)' and s.indicator == 'Slab Cash cost (USD/t)'\nGROUP BY p.quarter\nORDER BY p.quarter",
+          "query": "SELECT * FROM (\nSELECT p.quarter, last_value(p.price) - last_value(e.value) - last_value(s.value) as \"Other production\"\nFROM consolidated_prices_for_products as p\nLEFT JOIN financial_ratios as e on e.quarter == p.quarter and e.sec_code == p.sec_code\nLEFT JOIN financial_ratios as s on s.quarter == p.quarter and s.sec_code == p.sec_code\nWHERE p.sec_code == '$sec_code' and p.product == 'Sales of finished products' and e.indicator == 'EBITDA per tonne* (USD/t)' and s.indicator == 'Slab Cash cost (USD/t)'\nGROUP BY p.quarter\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 211))\nORDER BY p.quarter",
+          "rawQuery": "SELECT * FROM (\nSELECT p.quarter, last_value(p.price) - last_value(e.value) - last_value(s.value) as \"Other production\"\nFROM consolidated_prices_for_products as p\nLEFT JOIN financial_ratios as e on e.quarter == p.quarter and e.sec_code == p.sec_code\nLEFT JOIN financial_ratios as s on s.quarter == p.quarter and s.sec_code == p.sec_code\nWHERE p.sec_code == 'MAGN' and p.product == 'Sales of finished products' and e.indicator == 'EBITDA per tonne* (USD/t)' and s.indicator == 'Slab Cash cost (USD/t)'\nGROUP BY p.quarter\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 211))\nORDER BY p.quarter",
           "refId": "D",
           "round": "0s",
           "skip_comments": true,
@@ -1265,6 +1550,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "",
           "dateLoading": false,
           "dateTimeColDataType": "date",
@@ -1273,10 +1562,10 @@
           "extrapolate": true,
           "format": "time_series",
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
-          "hide": false,
+          "hide": true,
           "intervalFactor": 1,
           "query": "SELECT\n    toDate(toStartOfQuarter(date_add(day, 44 , date))) as q,\n    avgWeighted(close, volume) as \"Stock price\"\nFROM $table\nWHERE\n    $timeFilter\n    and sec_code == '$sec_code' and period == 5\nGROUP BY q\nORDER BY q",
-          "rawQuery": "SELECT\n    toDate(toStartOfQuarter(date_add(day, 44 , date))) as q,\n    avgWeighted(close, volume) as \"Stock price\"\nFROM default.candles\nWHERE\n    date >= toDateTime(1521396467) AND date <= toDateTime(1637258867)\n    and sec_code == 'MAGN' and period == 5\nGROUP BY q\nORDER BY q",
+          "rawQuery": "SELECT\n    toDate(toStartOfQuarter(date_add(day, 44 , date))) as q,\n    avgWeighted(close, volume) as \"Stock price\"\nFROM default.candles\nWHERE\n    date >= toDateTime(1523561690) AND date <= toDateTime(1642016090)\n    and sec_code == 'MAGN' and period == 5\nGROUP BY q\nORDER BY q",
           "refId": "E",
           "round": "0s",
           "skip_comments": true,
@@ -1285,6 +1574,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "",
           "dateLoading": false,
           "dateTimeColDataType": "date",
@@ -1293,10 +1586,10 @@
           "extrapolate": true,
           "format": "time_series",
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
-          "hide": false,
+          "hide": true,
           "intervalFactor": 1,
           "query": "SELECT\n    toDate(toStartOfQuarter(date_add(day, 44 , date))) as q,\n    max(close) as \"Stock price\"\nFROM $table\nWHERE\n    $timeFilter\n    and sec_code == '$sec_code' and period == 5\nGROUP BY q\nORDER BY q",
-          "rawQuery": "SELECT\n    toDate(toStartOfQuarter(date_add(day, 44 , date))) as q,\n    max(close) as \"Stock price\"\nFROM default.candles\nWHERE\n    date >= toDateTime(1521396467) AND date <= toDateTime(1637258867)\n    and sec_code == 'MAGN' and period == 5\nGROUP BY q\nORDER BY q",
+          "rawQuery": "SELECT\n    toDate(toStartOfQuarter(date_add(day, 44 , date))) as q,\n    max(close) as \"Stock price\"\nFROM default.candles\nWHERE\n    date >= toDateTime(1523561691) AND date <= toDateTime(1642016091)\n    and sec_code == 'MAGN' and period == 5\nGROUP BY q\nORDER BY q",
           "refId": "F",
           "round": "0s",
           "skip_comments": true,
@@ -1305,6 +1598,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "",
           "dateLoading": false,
           "dateTimeColDataType": "date",
@@ -1313,10 +1610,10 @@
           "extrapolate": true,
           "format": "time_series",
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
-          "hide": false,
+          "hide": true,
           "intervalFactor": 1,
           "query": "SELECT\n    toDate(toStartOfQuarter(date_add(day, 44 , date))) as q,\n    min(close) as \"Stock price\"\nFROM $table\nWHERE\n    $timeFilter\n    and sec_code == '$sec_code' and period == 5\nGROUP BY q\nORDER BY q",
-          "rawQuery": "SELECT\n    toDate(toStartOfQuarter(date_add(day, 44 , date))) as q,\n    min(close) as \"Stock price\"\nFROM default.candles\nWHERE\n    date >= toDateTime(1521396467) AND date <= toDateTime(1637258867)\n    and sec_code == 'MAGN' and period == 5\nGROUP BY q\nORDER BY q",
+          "rawQuery": "SELECT\n    toDate(toStartOfQuarter(date_add(day, 44 , date))) as q,\n    min(close) as \"Stock price\"\nFROM default.candles\nWHERE\n    date >= toDateTime(1523561693) AND date <= toDateTime(1642016093)\n    and sec_code == 'MAGN' and period == 5\nGROUP BY q\nORDER BY q",
           "refId": "G",
           "round": "0s",
           "skip_comments": true,
@@ -1328,7 +1625,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1384,7 +1684,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 83
       },
       "id": 29,
       "options": {
@@ -1464,12 +1764,11 @@
     },
     {
       "collapsed": false,
-      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 83
+        "y": 91
       },
       "id": 11,
       "panels": [],
@@ -1477,7 +1776,10 @@
       "type": "row"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1601,7 +1903,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 84
+        "y": 92
       },
       "id": 17,
       "options": {
@@ -1754,7 +2056,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1810,13 +2115,14 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 92
+        "y": 100
       },
       "id": 30,
       "options": {
         "legend": {
           "calcs": [
-            "last"
+            "last",
+            "mean"
           ],
           "displayMode": "list",
           "placement": "bottom"
@@ -1850,7 +2156,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1925,7 +2234,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 100
+        "y": 108
       },
       "id": 31,
       "options": {
@@ -1985,7 +2294,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2004,6 +2316,13 @@
               "viz": false
             },
             "lineInterpolation": "smooth",
+            "lineStyle": {
+              "dash": [
+                10,
+                10
+              ],
+              "fill": "dash"
+            },
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
@@ -2035,13 +2354,28 @@
           },
           "unit": "currencyUSD"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "HRC FOB CHINA"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "solid"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 108
+        "y": 116
       },
       "id": 15,
       "options": {
@@ -2060,6 +2394,10 @@
       "targets": [
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2069,8 +2407,8 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT * FROM (\nSELECT\n    $dateCol as q,\n    last_value(price) as \"MMK HRC\"\nFROM $table\nWHERE product == 'Flat hot-rolled products'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 950))\nORDER BY q",
-          "rawQuery": "SELECT * FROM (\nSELECT\n    quarter as q,\n    last_value(price) as \"MMK HRC\"\nFROM default.prices_for_products\nWHERE product == 'Flat hot-rolled products'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 950))\nORDER BY q",
+          "query": "SELECT * FROM (\nSELECT\n    $dateCol as q,\n    last_value(price) as \"HRC MMK price\"\nFROM $table\nWHERE product == 'Flat hot-rolled products' and sec_code == '$sec_code'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , $forecast_PriceAverage/1.12))\nORDER BY q",
+          "rawQuery": "SELECT * FROM (\nSELECT\n    quarter as q,\n    last_value(price) as \"HRC MMK price\"\nFROM default.prices_for_products\nWHERE product == 'Flat hot-rolled products' and sec_code == 'MAGN'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 965/1.12))\nORDER BY q",
           "refId": "G",
           "round": "0s",
           "skip_comments": true,
@@ -2079,6 +2417,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "date",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2099,6 +2441,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "date",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2119,6 +2465,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "date",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2139,6 +2489,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "date",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2159,6 +2513,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2168,8 +2526,8 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT * FROM (\nSELECT\n    $dateCol as q,\n    last_value(price) as \"Consolidate\"\nFROM $table\nWHERE product == 'Sales of finished products'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , $forecast_PriceAverage))\nORDER BY q\n",
-          "rawQuery": "SELECT * FROM (\nSELECT\n    quarter as q,\n    last_value(price) as \"Consolidate\"\nFROM default.consolidated_prices_for_products\nWHERE product == 'Sales of finished products'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 980))\nORDER BY q",
+          "query": "SELECT * FROM (\nSELECT\n    $dateCol as q,\n    last_value(price) as \"Average cons\"\nFROM $table\nWHERE product == 'Sales of finished products'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , $forecast_PriceAverage))\nORDER BY q\n",
+          "rawQuery": "SELECT * FROM (\nSELECT\n    quarter as q,\n    last_value(price) as \"Average cons\"\nFROM default.consolidated_prices_for_products\nWHERE product == 'Sales of finished products'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 965))\nORDER BY q",
           "refId": "C",
           "round": "0s",
           "skip_comments": true,
@@ -2178,6 +2536,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "date",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2198,6 +2560,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2217,6 +2583,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2233,6 +2603,29 @@
           "skip_comments": true,
           "table": "fob_prices",
           "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": false,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT * FROM (\nSELECT\n    $dateCol as q,\n    last_value(price) as \"HRC cons\"\nFROM $table\nWHERE product == 'Flat hot-rolled products'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , $forecast_PriceAverage/1.12))\nORDER BY q\n",
+          "rawQuery": "SELECT * FROM (\nSELECT\n    quarter as q,\n    last_value(price) as \"HRC cons\"\nFROM default.consolidated_prices_for_products\nWHERE product == 'Flat hot-rolled products'\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 965/1.12))\nORDER BY q",
+          "refId": "J",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "consolidated_prices_for_products",
+          "tableLoading": false
         }
       ],
       "title": "Динамика цен на г/к прокат в дол. США",
@@ -2241,12 +2634,11 @@
     },
     {
       "collapsed": false,
-      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 116
+        "y": 124
       },
       "id": 19,
       "panels": [],
@@ -2254,7 +2646,10 @@
       "type": "row"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2310,7 +2705,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 117
+        "y": 125
       },
       "id": 21,
       "options": {
@@ -2451,7 +2846,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2507,7 +2905,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 117
+        "y": 125
       },
       "id": 23,
       "options": {
@@ -2708,7 +3106,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2790,7 +3191,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 125
+        "y": 133
       },
       "id": 25,
       "options": {
@@ -2809,6 +3210,10 @@
       "targets": [
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2828,6 +3233,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2837,9 +3246,9 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "select * FROM (\nSELECT q, sum(perc) as IronSlab FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE (structure == 'Pellets'\n   or structure == 'Iron ore & concentrate'\n   or structure == 'Metal scrap')\n   and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , $forecast_IronSlab)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 6, now()))) as q , 204))\nORDER BY q",
+          "query": "select * FROM (\nSELECT q, sum(perc) as IronSlab FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE (structure == 'Pellets'\n   or structure == 'Iron ore & concentrate'\n   or structure == 'Metal scrap')\n   and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , $forecast_IronSlab))\nORDER BY q",
           "queryType": "randomWalk",
-          "rawQuery": "select * FROM (\nSELECT q, sum(perc) as IronSlab FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE (structure == 'Pellets'\n   or structure == 'Iron ore & concentrate'\n   or structure == 'Metal scrap')\n   and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 269)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 6, now()))) as q , 204))\nORDER BY q",
+          "rawQuery": "select * FROM (\nSELECT q, sum(perc) as IronSlab FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE (structure == 'Pellets'\n   or structure == 'Iron ore & concentrate'\n   or structure == 'Metal scrap')\n   and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 152))\nORDER BY q",
           "refId": "A",
           "round": "0s",
           "skip_comments": true,
@@ -2848,6 +3257,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2870,7 +3283,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2926,7 +3342,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 125
+        "y": 133
       },
       "id": 28,
       "options": {
@@ -2945,6 +3361,10 @@
       "targets": [
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2955,7 +3375,7 @@
           "hide": false,
           "intervalFactor": 1,
           "query": "select\n    toDate(toStartOfQuarter(date_add(week, $price_lag_weeks, date))) as q,\n    avg(close)/17.4 as \"Coking Coal CHINA\"\nfrom $table\nWHERE code == 'DJMc1'\nGROUP BY q\nORDER BY q\n",
-          "rawQuery": false,
+          "rawQuery": "select\n    toDate(toStartOfQuarter(date_add(week, 18, date))) as q,\n    avg(close)/17.4 as \"Coking Coal CHINA\"\nfrom default.stock_prices\nWHERE code == 'DJMc1'\nGROUP BY q\nORDER BY q",
           "refId": "B",
           "round": "0s",
           "skip_comments": true,
@@ -2964,6 +3384,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2983,6 +3407,10 @@
         },
         {
           "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
           "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
@@ -2991,9 +3419,9 @@
           "format": "time_series",
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "intervalFactor": 1,
-          "query": "SELECT * FROM(\nSELECT q, sum(perc) as \"Coal in Slab\" FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE structure == 'Coal concentrate' and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 79))\nORDER BY q",
+          "query": "SELECT * FROM(\nSELECT q, sum(perc) as \"Coal in Slab\" FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE structure == 'Coal concentrate' and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 138))\nORDER BY q",
           "queryType": "randomWalk",
-          "rawQuery": "SELECT * FROM(\nSELECT q, sum(perc) as \"Coal in Slab\" FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE structure == 'Coal concentrate' and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 79))\nORDER BY q",
+          "rawQuery": "SELECT * FROM(\nSELECT q, sum(perc) as \"Coal in Slab\" FROM (\nSELECT\n    quarter as q,\n    last_value(slab_cash_cost_structure.value)*last_value(financial_ratios.value) as perc\nFROM slab_cash_cost_structure\n       LEFT JOIN financial_ratios ON\n           financial_ratios.quarter == slab_cash_cost_structure.quarter\n        and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\nWHERE structure == 'Coal concentrate' and indicator == 'Slab Cash cost (USD/t)'\nGROUP BY q, structure)\nGROUP BY q\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 3, now()))) as q , 138))\nORDER BY q",
           "refId": "A",
           "round": "0s",
           "skip_comments": true,
@@ -3005,7 +3433,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3061,7 +3492,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 133
+        "y": 141
       },
       "id": 37,
       "options": {
@@ -3102,7 +3533,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": "ClickHouse",
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3158,7 +3592,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 141
+        "y": 149
       },
       "id": 38,
       "options": {
@@ -3218,22 +3652,23 @@
       "type": "timeseries"
     }
   ],
-  "refresh": "",
-  "schemaVersion": 31,
+  "refresh": false,
+  "schemaVersion": 33,
   "style": "dark",
   "tags": [],
   "templating": {
     "list": [
       {
-        "allValue": null,
         "current": {
           "selected": false,
           "text": "MAGN",
           "value": "MAGN"
         },
-        "datasource": "ClickHouse",
+        "datasource": {
+          "type": "vertamedia-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
         "definition": "SELECT seccode FROM securities",
-        "description": null,
         "error": {
           "config": {
             "headers": {
@@ -3246,10 +3681,10 @@
           },
           "data": {
             "error": "Not Found",
-            "message": "Code: 60. DB::Exception: Table default.securities doesn't exist. (UNKNOWN_TABLE) (version 21.9.4.35 (official build))\n",
-            "response": "Code: 60. DB::Exception: Table default.securities doesn't exist. (UNKNOWN_TABLE) (version 21.9.4.35 (official build))\n"
+            "message": "Code: 60. DB::Exception: Table default.securities doesn't exist. (UNKNOWN_TABLE) (version 21.11.6.7 (official build))\n",
+            "response": "Code: 60. DB::Exception: Table default.securities doesn't exist. (UNKNOWN_TABLE) (version 21.11.6.7 (official build))\n"
           },
-          "message": "Code: 60. DB::Exception: Table default.securities doesn't exist. (UNKNOWN_TABLE) (version 21.9.4.35 (official build))\n",
+          "message": "Code: 60. DB::Exception: Table default.securities doesn't exist. (UNKNOWN_TABLE) (version 21.11.6.7 (official build))\n",
           "status": 404,
           "statusText": "Not Found"
         },
@@ -3267,22 +3702,18 @@
         "type": "query"
       },
       {
-        "allValue": null,
         "current": {
           "selected": false,
-          "text": "4",
-          "value": "4"
+          "text": "3",
+          "value": "3"
         },
-        "description": null,
-        "error": null,
         "hide": 0,
         "includeAll": false,
-        "label": null,
         "multi": false,
         "name": "price_lag_months",
         "options": [
           {
-            "selected": true,
+            "selected": false,
             "text": "0",
             "value": "0"
           },
@@ -3313,19 +3744,16 @@
           }
         ],
         "query": "0,1,1.25,1.5,1.75,2",
-        "queryValue": "4",
+        "queryValue": "3",
         "skipUrlSync": false,
         "type": "custom"
       },
       {
-        "allValue": null,
         "current": {
           "selected": false,
-          "text": "269",
-          "value": "269"
+          "text": "152",
+          "value": "152"
         },
-        "description": null,
-        "error": null,
         "hide": 0,
         "includeAll": false,
         "label": "",
@@ -3333,56 +3761,52 @@
         "name": "forecast_IronSlab",
         "options": [
           {
-            "selected": true,
+            "selected": false,
             "text": "244",
             "value": "244"
           }
         ],
         "query": "244",
-        "queryValue": "269",
+        "queryValue": "152",
         "skipUrlSync": false,
         "type": "custom"
       },
       {
-        "allValue": null,
         "current": {
           "selected": false,
-          "text": "980",
-          "value": "980"
+          "text": "965",
+          "value": "965"
         },
-        "description": null,
-        "error": null,
         "hide": 0,
         "includeAll": false,
-        "label": null,
         "multi": false,
         "name": "forecast_PriceAverage",
         "options": [
           {
-            "selected": true,
+            "selected": false,
             "text": "916",
             "value": "916"
           }
         ],
         "query": "916",
-        "queryValue": "980",
+        "queryValue": "965",
         "skipUrlSync": false,
         "type": "custom"
       },
       {
-        "allValue": null,
         "current": {
           "selected": false,
-          "text": "418.5",
-          "value": "418.5"
+          "text": "372.6",
+          "value": "372.6"
         },
-        "datasource": "ClickHouse",
+        "datasource": {
+          "type": "vertamedia-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
         "definition": "SELECT floor(sum(perc)+$forecast_IronSlab,1) as Slab\nFROM (\n      SELECT last_value(quarter) as q,\n             last_value(slab_cash_cost_structure.value) * last_value(financial_ratios.value) as perc\n      FROM slab_cash_cost_structure\n               LEFT JOIN financial_ratios ON\n              financial_ratios.quarter == slab_cash_cost_structure.quarter\n              and financial_ratios.sec_code == slab_cash_cost_structure.sec_code\n      WHERE (structure == 'Pellets'\n   or structure == 'Iron ore & concentrate'\n   or structure == 'Metal scrap')\n        and indicator == 'Slab Cash cost (USD/t)'\n      GROUP BY structure)\nGROUP BY q\nORDER BY q",
         "description": "",
-        "error": null,
         "hide": 0,
         "includeAll": false,
-        "label": null,
         "multi": false,
         "name": "forecast_Slab",
         "options": [],
@@ -3394,17 +3818,13 @@
         "type": "query"
       },
       {
-        "allValue": null,
         "current": {
           "selected": false,
           "text": "3320",
           "value": "3320"
         },
-        "description": null,
-        "error": null,
         "hide": 0,
         "includeAll": false,
-        "label": null,
         "multi": false,
         "name": "forecast_sales",
         "options": [
@@ -3419,17 +3839,13 @@
         "type": "custom"
       },
       {
-        "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": "18",
           "value": "18"
         },
-        "description": null,
-        "error": null,
         "hide": 0,
         "includeAll": false,
-        "label": null,
         "multi": false,
         "name": "price_lag_weeks",
         "options": [
@@ -3465,17 +3881,13 @@
         "type": "custom"
       },
       {
-        "allValue": null,
         "current": {
           "selected": false,
           "text": "69",
           "value": "69"
         },
-        "description": null,
-        "error": null,
         "hide": 0,
         "includeAll": false,
-        "label": null,
         "multi": false,
         "name": "forecast_price",
         "options": [
@@ -3493,12 +3905,13 @@
     ]
   },
   "time": {
-    "from": "now-4y+5M",
+    "from": "now-4y+4M",
     "to": "now+1M"
   },
   "timepicker": {},
   "timezone": "",
   "title": "MAGN Forecast",
   "uid": "magn",
-  "version": 2
+  "version": 7,
+  "weekStart": ""
 }
