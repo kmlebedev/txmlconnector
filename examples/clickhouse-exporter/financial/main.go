@@ -150,6 +150,11 @@ func main() {
 	//if err := loadMagnData(conn, "MMK_operating_e_financial_data_Q1_2021.xls"); err != nil {
 	//	log.Error(err)
 	//}
+	if ticker == "MOEX" {
+		if err := crawFinanceResults(conn); err != nil {
+			log.Error(err)
+		}
+	}
 	if ticker == "VTBR" {
 		if err := crawFinanceResults(conn); err != nil {
 			log.Error(err)
@@ -174,6 +179,9 @@ func main() {
 		//loadAllInvestingData(conn)
 	}
 	if ticker == "MAGN" {
+		//if err := loadMagnData(conn, "MMK_operating_m_financial_data_Q2_2021.xls"); err != nil {
+		//	log.Error(err)
+		//}
 		if err := loadMagnData(conn, "MMK_operating_financial_data_Q3_2021.xls"); err != nil {
 			log.Error(err)
 		}
