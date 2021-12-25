@@ -1,0 +1,368 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": 8,
+  "iteration": 1639740303573,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "axisSoftMin": 0,
+            "fillOpacity": 80,
+            "gradientMode": "hue",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "buy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 8,
+      "options": {
+        "barWidth": 0.97,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "vertical",
+        "showValue": "auto",
+        "stacking": "none",
+        "text": {
+          "valueSize": 14
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "xTickLabelRotation": 0
+      },
+      "pluginVersion": "8.3.2",
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "table",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "intervalFactor": 1,
+          "query": "SELECT sum(if(c.open > c.close,(c.high+c.low)*c.volume*sec.lotsize/2, 0)) as sell, sum(if(c.close > c.open,(c.high+c.low)*c.volume*sec.lotsize/2, 0)) as buy, sec_code\nFROM $table as c\nJOIN securities as sec on (securities.seccode = $table.sec_code)\nWHERE $timeFilter and sec_code in ($sec_code)\nGROUP BY c.sec_code\nORDER BY sell desc\nLIMIT 10\n",
+          "rawQuery": "SELECT sum(if(c.open > c.close,(c.high+c.low)*c.volume*sec.lotsize/2, 0)) as sell, sum(if(c.close > c.open,(c.high+c.low)*c.volume*sec.lotsize/2, 0)) as buy, sec_code\nFROM default.candles as c\nJOIN securities as sec on (securities.seccode = default.candles.sec_code)\nWHERE date >= toDateTime(1639447140) AND date <= toDateTime(1639449359) and sec_code in ('GMKN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TATN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TATNP\u0000\u0000\u0000\u0000\u0000\u0000','SIBN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KROTP\u0000\u0000\u0000\u0000\u0000\u0000','MFGS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MFGSP\u0000\u0000\u0000\u0000\u0000\u0000','SNGS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','OMZZP\u0000\u0000\u0000\u0000\u0000\u0000','MGNZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SNGSP\u0000\u0000\u0000\u0000\u0000\u0000','KZOSP\u0000\u0000\u0000\u0000\u0000\u0000','YKEN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','NAUK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','YKENP\u0000\u0000\u0000\u0000\u0000\u0000','MGTSP\u0000\u0000\u0000\u0000\u0000\u0000','MGTS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','APTK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RUSI\u0000\u0000\u0000\u0000\u0000\u0000\u0000','LSNG\u0000\u0000\u0000\u0000\u0000\u0000\u0000','LSNGP\u0000\u0000\u0000\u0000\u0000\u0000','LKOH\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KROT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MSNG\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KUBE\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RTKM\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RTKMP\u0000\u0000\u0000\u0000\u0000\u0000','ZVEZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','UTAR\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MTSS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','AFLT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KMAZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','IRKT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','JNOS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','JNOSP\u0000\u0000\u0000\u0000\u0000\u0000','RSTI\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RSTIP\u0000\u0000\u0000\u0000\u0000\u0000','AVAN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GAZC\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GAZS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GAZT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GTSS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','HIMC\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KMTZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KRKO\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KSGR\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KZMS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MISBP\u0000\u0000\u0000\u0000\u0000\u0000','UCSS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','VSMO\u0000\u0000\u0000\u0000\u0000\u0000\u0000','NPOF\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RDRB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SVAV\u0000\u0000\u0000\u0000\u0000\u0000\u0000','CHMF\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TASB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TASBP\u0000\u0000\u0000\u0000\u0000\u0000','LPSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KTSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KTSBP\u0000\u0000\u0000\u0000\u0000\u0000','KLSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MISB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','YRSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','YRSBP\u0000\u0000\u0000\u0000\u0000\u0000','MRSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ASSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RZSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','VGSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','VGSBP\u0000\u0000\u0000\u0000\u0000\u0000','DZRD\u0000\u0000\u0000\u0000\u0000\u0000\u0000','DZRDP\u0000\u0000\u0000\u0000\u0000\u0000','VRSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','VRSBP\u0000\u0000\u0000\u0000\u0000\u0000','NNSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','NNSBP\u0000\u0000\u0000\u0000\u0000\u0000','MAGN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RTSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RTSBP\u0000\u0000\u0000\u0000\u0000\u0000','TORS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TORSP\u0000\u0000\u0000\u0000\u0000\u0000','GAZP\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ROSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','PMSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','PMSBP\u0000\u0000\u0000\u0000\u0000\u0000','MSRS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','NLMK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MGNT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','PLZL\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ISKJ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','VLHZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ROSN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','NVTK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','AKRN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TGKB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RBCM\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RASP\u0000\u0000\u0000\u0000\u0000\u0000\u0000','INGR\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TGKN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TGKBP\u0000\u0000\u0000\u0000\u0000\u0000','TGKD\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TTLK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TGKA\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TGKDP\u0000\u0000\u0000\u0000\u0000\u0000','TRMK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','POGR\u0000\u0000\u0000\u0000\u0000\u0000\u0000','VTBR\u0000\u0000\u0000\u0000\u0000\u0000\u0000','PIKK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','OGKB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SBER\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SBERP\u0000\u0000\u0000\u0000\u0000\u0000','WTCM\u0000\u0000\u0000\u0000\u0000\u0000\u0000','WTCMP\u0000\u0000\u0000\u0000\u0000\u0000','MVID\u0000\u0000\u0000\u0000\u0000\u0000\u0000','URKA\u0000\u0000\u0000\u0000\u0000\u0000\u0000','NMTP\u0000\u0000\u0000\u0000\u0000\u0000\u0000','LSRG\u0000\u0000\u0000\u0000\u0000\u0000\u0000','AFKS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','DVEC\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TRNFP\u0000\u0000\u0000\u0000\u0000\u0000','KBSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KCHE\u0000\u0000\u0000\u0000\u0000\u0000\u0000','BSPB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','STSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','STSBP\u0000\u0000\u0000\u0000\u0000\u0000','NKNC\u0000\u0000\u0000\u0000\u0000\u0000\u0000','NKNCP\u0000\u0000\u0000\u0000\u0000\u0000','ARSA\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MRKP\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GCHE\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MRKC\u0000\u0000\u0000\u0000\u0000\u0000\u0000','HYDR\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MRKV\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RUAL\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MRKZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RKKE\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MRKS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MRKU\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MRKK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KCHEP\u0000\u0000\u0000\u0000\u0000\u0000','FEES\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ROST\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MRKY\u0000\u0000\u0000\u0000\u0000\u0000\u0000','AMEZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','FESH\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KOGK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RUSP\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TUZA\u0000\u0000\u0000\u0000\u0000\u0000\u0000','UKUZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MDMG\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KRSB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KRSBP\u0000\u0000\u0000\u0000\u0000\u0000','CHEP\u0000\u0000\u0000\u0000\u0000\u0000\u0000','CHKZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','CHMK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','CNTL\u0000\u0000\u0000\u0000\u0000\u0000\u0000','LNZL\u0000\u0000\u0000\u0000\u0000\u0000\u0000','IRAO\u0000\u0000\u0000\u0000\u0000\u0000\u0000','LNZLP\u0000\u0000\u0000\u0000\u0000\u0000','DIOD\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RTGZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SPBE\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MTLR\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RUGR\u0000\u0000\u0000\u0000\u0000\u0000\u0000','UNAC\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MFON\u0000\u0000\u0000\u0000\u0000\u0000\u0000','LVHK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','BLNG\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SARE\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SAREP\u0000\u0000\u0000\u0000\u0000\u0000','MTLRP\u0000\u0000\u0000\u0000\u0000\u0000','KMEZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','PRMB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ALRS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ENPG\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KUZB\u0000\u0000\u0000\u0000\u0000\u0000\u0000','NFAZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KZOS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SELG\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ALNU\u0000\u0000\u0000\u0000\u0000\u0000\u0000','IGST\u0000\u0000\u0000\u0000\u0000\u0000\u0000','IGSTP\u0000\u0000\u0000\u0000\u0000\u0000','KRKN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KRKNP\u0000\u0000\u0000\u0000\u0000\u0000','PAZA\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MOEX\u0000\u0000\u0000\u0000\u0000\u0000\u0000','QIWI\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ABRD\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GEMA\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SELGP\u0000\u0000\u0000\u0000\u0000\u0000','URKZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','BRZL\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KRKOP\u0000\u0000\u0000\u0000\u0000\u0000','MSTT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','YAKG\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ZILL\u0000\u0000\u0000\u0000\u0000\u0000\u0000','UNKL\u0000\u0000\u0000\u0000\u0000\u0000\u0000','BISV\u0000\u0000\u0000\u0000\u0000\u0000\u0000','BISVP\u0000\u0000\u0000\u0000\u0000\u0000','TRCN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MAGE\u0000\u0000\u0000\u0000\u0000\u0000\u0000','MAGEP\u0000\u0000\u0000\u0000\u0000\u0000','NSVZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','LIFE\u0000\u0000\u0000\u0000\u0000\u0000\u0000','CHGZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ELTZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','HIMCP\u0000\u0000\u0000\u0000\u0000\u0000','KAZT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KAZTP\u0000\u0000\u0000\u0000\u0000\u0000','MORI\u0000\u0000\u0000\u0000\u0000\u0000\u0000','NKSH\u0000\u0000\u0000\u0000\u0000\u0000\u0000','USBN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','VJGZ\u0000\u0000\u0000\u0000\u0000\u0000\u0000','VJGZP\u0000\u0000\u0000\u0000\u0000\u0000','VSYD\u0000\u0000\u0000\u0000\u0000\u0000\u0000','VSYDP\u0000\u0000\u0000\u0000\u0000\u0000','KGKC\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GAZA\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GAZAP\u0000\u0000\u0000\u0000\u0000\u0000','AQUA\u0000\u0000\u0000\u0000\u0000\u0000\u0000','PHOR\u0000\u0000\u0000\u0000\u0000\u0000\u0000','POLY\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RGSS\u0000\u0000\u0000\u0000\u0000\u0000\u0000','KGKCP\u0000\u0000\u0000\u0000\u0000\u0000','ROLO\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SAGO\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SAGOP\u0000\u0000\u0000\u0000\u0000\u0000','CNTLP\u0000\u0000\u0000\u0000\u0000\u0000','VKCO\u0000\u0000\u0000\u0000\u0000\u0000\u0000','YNDX\u0000\u0000\u0000\u0000\u0000\u0000\u0000','BANE\u0000\u0000\u0000\u0000\u0000\u0000\u0000','BANEP\u0000\u0000\u0000\u0000\u0000\u0000','OKEY\u0000\u0000\u0000\u0000\u0000\u0000\u0000','VEON-RX\u0000\u0000\u0000\u0000','LENT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','LNTA\u0000\u0000\u0000\u0000\u0000\u0000\u0000','AGRO\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ENRU\u0000\u0000\u0000\u0000\u0000\u0000\u0000','HMSG\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SVET\u0000\u0000\u0000\u0000\u0000\u0000\u0000','UPRO\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GLTR\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SMLT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TNSE\u0000\u0000\u0000\u0000\u0000\u0000\u0000','CBOM\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RAVN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','CIAN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','NKHP\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RNFT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SLEN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','DSKY\u0000\u0000\u0000\u0000\u0000\u0000\u0000','HHRU\u0000\u0000\u0000\u0000\u0000\u0000\u0000','FLOT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SGZH\u0000\u0000\u0000\u0000\u0000\u0000\u0000','DERZP\u0000\u0000\u0000\u0000\u0000\u0000','ACKO\u0000\u0000\u0000\u0000\u0000\u0000\u0000','BELU\u0000\u0000\u0000\u0000\u0000\u0000\u0000','EELT\u0000\u0000\u0000\u0000\u0000\u0000\u0000','EM44\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GEMC\u0000\u0000\u0000\u0000\u0000\u0000\u0000','BSPBP\u0000\u0000\u0000\u0000\u0000\u0000','SFIN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TRFM\u0000\u0000\u0000\u0000\u0000\u0000\u0000','FIVE\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SFTL\u0000\u0000\u0000\u0000\u0000\u0000\u0000','RENI\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ETLN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','ORUP\u0000\u0000\u0000\u0000\u0000\u0000\u0000','FIXP\u0000\u0000\u0000\u0000\u0000\u0000\u0000','OZON\u0000\u0000\u0000\u0000\u0000\u0000\u0000','TCSG\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GTRK\u0000\u0000\u0000\u0000\u0000\u0000\u0000','POSI\u0000\u0000\u0000\u0000\u0000\u0000\u0000')\nGROUP BY c.sec_code\nORDER BY sell desc\nLIMIT 10",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "candles",
+          "tableLoading": false
+        }
+      ],
+      "title": "TOP 10 объемов",
+      "type": "barchart"
+    },
+    {
+      "cards": {},
+      "color": {
+        "cardColor": "#b4ff00",
+        "colorScale": "sqrt",
+        "colorScheme": "interpolateRdYlGn",
+        "exponent": 0.5,
+        "mode": "spectrum"
+      },
+      "dataFormat": "timeseries",
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "heatmap": {},
+      "hideZeroBuckets": true,
+      "highlightCards": true,
+      "id": 6,
+      "legend": {
+        "show": true
+      },
+      "reverseYBuckets": false,
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "intervalFactor": 1,
+          "query": "SELECT (intDiv(toUInt32(toDateTime(date, 'Europe/Moscow')), 60) * 60) * 1000 as t, if(close - open> 0, (high+low)*volume*sec.lotsize/2 , -(high+low)*volume*sec.lotsize/2) as eq\nFROM $table\nJOIN securities as sec on (securities.seccode = $table.sec_code) and sec_code not in ($sec_code)\nWHERE $timeFilter\nORDER BY t\n",
+          "rawQuery": "SELECT (intDiv(toUInt32(toDateTime(date, 'Europe/Moscow')), 60) * 60) * 1000 as t, if(close - open> 0, (high+low)*volume*sec.lotsize/2 , -(high+low)*volume*sec.lotsize/2) as eq\nFROM default.candles\nJOIN securities as sec on (securities.seccode = default.candles.sec_code) and sec_code not in ('GMKN\u0000\u0000\u0000\u0000\u0000\u0000\u0000','LKOH\u0000\u0000\u0000\u0000\u0000\u0000\u0000','GAZP\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SBER\u0000\u0000\u0000\u0000\u0000\u0000\u0000','SBERP\u0000\u0000\u0000\u0000\u0000\u0000','NLMK\u0000\u0000\u0000\u0000\u0000\u0000\u0000')\nWHERE date >= toDateTime(1639447140) AND date <= toDateTime(1639449359)\nORDER BY t",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "candles",
+          "tableLoading": false
+        }
+      ],
+      "title": "Тепловая карта движения объемов $sec_code",
+      "tooltip": {
+        "show": true,
+        "showHistogram": true
+      },
+      "type": "heatmap",
+      "xAxis": {
+        "show": true
+      },
+      "yAxis": {
+        "format": "currencyRUB",
+        "logBase": 1,
+        "show": true
+      },
+      "yBucketBound": "auto"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 2,
+      "panels": [],
+      "title": "Row title",
+      "type": "row"
+    },
+    {
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisGridShow": true,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 4,
+      "options": {
+        "candleStyle": "candles",
+        "colorStrategy": "open-close",
+        "colors": {
+          "down": "red",
+          "up": "green"
+        },
+        "fields": {
+          "close": "close",
+          "high": "high",
+          "low": "low",
+          "open": "open",
+          "volume": "volume"
+        },
+        "includeAllFields": false,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "mode": "candles"
+      },
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "intervalFactor": 1,
+          "query": "SELECT (intDiv(toUInt32(toDateTime(date, 'Europe/Moscow')), 60) * 60) * 1000 as t, avg(open) as open, avg(high) as high, avg(low) as low, avg(close) as close, avg(volume) as volume\nFROM $table\n\nWHERE $timeFilter and sec_code in ($sec_code)\nGROUP BY t, sec_code\nORDER BY t\n",
+          "rawQuery": "SELECT (intDiv(toUInt32(toDateTime(date, 'Europe/Moscow')), 60) * 60) * 1000 as t, avg(open) as open, avg(high) as high, avg(low) as low, avg(close) as close, avg(volume) as volume\nFROM default.candles\n\nWHERE date >= toDateTime(1639447140) AND date <= toDateTime(1639449359) and sec_code in ('LKOH\u0000\u0000\u0000\u0000\u0000\u0000\u0000')\nGROUP BY t, sec_code\nORDER BY t",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "candles",
+          "tableLoading": false
+        }
+      ],
+      "title": "Котировки $sec_code",
+      "type": "candlestick"
+    }
+  ],
+  "refresh": false,
+  "schemaVersion": 33,
+  "style": "dark",
+  "tags": [],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": [
+            "LKOH\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+          ],
+          "value": [
+            "LKOH\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+          ]
+        },
+        "definition": "select seccode from securities",
+        "hide": 0,
+        "includeAll": false,
+        "multi": true,
+        "name": "sec_code",
+        "options": [],
+        "query": "select seccode from securities",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "2021-12-14T01:59:00.000Z",
+    "to": "2021-12-14T02:35:59.000Z"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Margin call",
+  "uid": "margin-call",
+  "version": 8,
+  "weekStart": ""
+}

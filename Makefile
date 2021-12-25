@@ -9,6 +9,7 @@ server_build:
 
 ## Build and run server. brew install mingw-w64
 server: server_build
+	mkdir -p logs
 	wine64 bin/server.exe
 
 queues_build:
