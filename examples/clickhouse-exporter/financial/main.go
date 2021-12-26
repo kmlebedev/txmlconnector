@@ -151,9 +151,20 @@ func main() {
 	//	log.Error(err)
 	//}
 	if ticker == "MOEX" {
-		if err := crawFinanceResults(conn); err != nil {
-			log.Error(err)
+		//var m moexDataBook
+		var t tradingVolumes
+		if err := t.Initialize(conn, "trading-volumes-2021-nov.xlsx"); err != nil {
+			log.Fatal(err)
 		}
+		if err := t.ImportToClickhouse(); err != nil {
+			log.Fatal(err)
+		}
+		//if err := m.Initialize(conn); err != nil {
+		//	log.Fatal(err)
+		//}
+		//if err := m.ImportToClickhouse(); err != nil {
+		//	log.Fatal(err)
+		//}
 	}
 	if ticker == "VTBR" {
 		if err := crawFinanceResults(conn); err != nil {

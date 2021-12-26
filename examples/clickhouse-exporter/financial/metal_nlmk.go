@@ -7,6 +7,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -74,9 +75,27 @@ func getQuarters(rows *[][]string, quarterRowsName string) (map[int]string, []in
 				quarterRowsFound = true
 				continue
 			}
+
 			if quarterRowsFound && isQuarter(cell) {
 				quarters[j] = strings.Trim(cell, " *")
 				quarterIdxs = append(quarterIdxs, j)
+			} else {
+				re, _ := regexp.Compile("([0-9]M|FY) [0-9]{4}")
+				var quarter string
+				if re.MatchString(cell) {
+					switch cell[0:2] {
+					case "3M":
+						quarter = "Q1"
+					case "6M":
+						quarter = "Q2"
+					case "9M":
+						quarter = "Q3"
+					case "FY":
+						quarter = "Q4"
+					}
+					quarters[j] = quarter + " " + cell[3:]
+					quarterIdxs = append(quarterIdxs, j)
+				}
 			}
 		}
 		//if quarterRowsFound {
@@ -86,7 +105,7 @@ func getQuarters(rows *[][]string, quarterRowsName string) (map[int]string, []in
 	return quarters, quarterIdxs
 }
 
-func getElasticTableFromRows(rows *[][]string, tableName string, quarterRowsName string) *map[string]map[string]float64 {
+func getElasticTableFromRows(rows *[][]string, tableName string, quarterRowsName string, diff bool) *map[string]map[string]float64 {
 	table := make(map[string]map[string]float64)
 	quarters, quarterIdxs := getQuarters(rows, quarterRowsName)
 	if len(quarterIdxs) == 0 {
@@ -118,8 +137,20 @@ func getElasticTableFromRows(rows *[][]string, tableName string, quarterRowsName
 			//continue
 		}
 		if tableNameFound && len(tableField) > 0 {
-			for idx, quarterName := range quarters {
+			valOld := float64(0)
+			for _, idx := range quarterIdxs {
+				quarterName := quarters[idx]
 				val, _ := strconv.ParseFloat(row[idx], 32)
+				if diff {
+					valNew := val
+					if quarterName[0:2] != "Q1" {
+						val = valNew - valOld
+						log.Debugf("%s =  %d - %d", quarterName, int(valNew), int(valOld))
+					} else {
+						log.Debugf("%s =  %d", quarterName, int(val))
+					}
+					valOld = valNew
+				}
 				table[tableField][quarterName] = val
 			}
 		}
@@ -155,7 +186,7 @@ func loadNlmkData(conn *sql.DB, fileName string) error {
 			}
 			if err := insertToDB(conn, secCode, "",
 				fmt.Sprintf("INSERT INTO %s (*) VALUES (%s)", table, strings.Join(vals, ",")),
-				getElasticTableFromRows(&rows, name, exportQuarter[sheet]),
+				getElasticTableFromRows(&rows, name, exportQuarter[sheet], false),
 			); err != nil {
 				return err
 			}
