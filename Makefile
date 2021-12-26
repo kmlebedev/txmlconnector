@@ -48,3 +48,6 @@ exporter: build exporter_build
 
 exporter_financial: exporter_financial_build
 	docker-compose -f docker/compose/clickhouse-exporter-financial-compose.yaml -p financial up
+
+dev_financial:
+	docker-compose -f docker/compose/clickhouse-exporter-financial-compose.yaml -p financial up

@@ -12,6 +12,27 @@ var (
 	TableColumnNums = map[string]int{
 		"consolidated_sales_for_products": 5,
 	}
+	createTradingVolumes = `
+		CREATE TABLE IF NOT EXISTS trading_volumes (
+		   category LowCardinality(String),
+		   subcategory LowCardinality(String),
+		   date Date,
+ 		   name LowCardinality(String),
+           value Float32
+		) ENGINE = ReplacingMergeTree()
+		ORDER BY (category, subcategory, date, name)
+	`
+	createDataBook = `
+		CREATE TABLE IF NOT EXISTS databook (
+		   code LowCardinality(String),
+		   content LowCardinality(String),
+		   quarter Date,
+		   quarter_name LowCardinality(String),
+ 		   name LowCardinality(String),
+           value Float32
+		) ENGINE = ReplacingMergeTree()
+		ORDER BY (code, content, quarter, name)
+	`
 	createCbrRates = `
 		CREATE TABLE IF NOT EXISTS cbr_rates (
 		   date Date,
@@ -257,7 +278,7 @@ func initDB() *sql.DB {
 	if connect == nil {
 		log.Fatal(err)
 	}
-	for _, query := range []string{createCbrRates, createfinanceResults, createExportGoodsStats, createExportRegionsStats, createTableRzd, createTableRevenue, createTableCsvClosingPrices, createTableFinancialRatios, createTableSlabStructure, createTableFobPrices, createTableStockPrices, createTablePriceProducts, createTableProductions, createTableLmeClosingPrices, createTableCostSales, createTableMaterialCostSales, createTableExportSales, createTableSales, createTablePrices, createTableOperationalHighlights, createTableFinancialHighlights} {
+	for _, query := range []string{createTradingVolumes, createDataBook, createCbrRates, createfinanceResults, createExportGoodsStats, createExportRegionsStats, createTableRzd, createTableRevenue, createTableCsvClosingPrices, createTableFinancialRatios, createTableSlabStructure, createTableFobPrices, createTableStockPrices, createTablePriceProducts, createTableProductions, createTableLmeClosingPrices, createTableCostSales, createTableMaterialCostSales, createTableExportSales, createTableSales, createTablePrices, createTableOperationalHighlights, createTableFinancialHighlights} {
 		if _, err := connect.Exec(query); err != nil {
 			log.Fatal(err)
 		}

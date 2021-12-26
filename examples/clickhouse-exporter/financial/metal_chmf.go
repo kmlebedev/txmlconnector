@@ -216,7 +216,7 @@ func loadChmfData(conn *sql.DB, fileName string) error {
 			}
 			if err := insertToDB(conn, secCode, division,
 				fmt.Sprintf("INSERT INTO %s (*) VALUES (%s)", table, strings.Join(vals, ",")),
-				getElasticTableFromRows(&rows, name, exportCHMFQuarter[sheet]),
+				getElasticTableFromRows(&rows, name, exportCHMFQuarter[sheet], false),
 			); err != nil {
 				return err
 			}
