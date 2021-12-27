@@ -21,17 +21,419 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 8,
+  "id": 3,
   "links": [],
   "liveNow": false,
   "panels": [
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Net growth"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    0,
+                    10
+                  ],
+                  "fill": "dot"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stock price"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    0,
+                    10
+                  ],
+                  "fill": "dot"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "8.3.2",
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted(close*1000, volume)/1000 as \"Stock price\"\nFROM $table\nWHERE\n    date >= toDate($from) AND date <= toDate($to)\n    and sec_code == 'MOEX' and period == '5' \nGROUP BY t\nORDER BY t",
+          "rawQuery": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted(close*1000, volume)/1000 as \"Stock price\"\nFROM default.candles\nWHERE\n    date >= toDate(1364390864) AND date <= toDate(1651069664)\n    and sec_code == 'MOEX' and period == '5' \nGROUP BY t\nORDER BY t",
+          "refId": "C",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "candles",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT date_add(day, 30 , quarter) as q, last_value(value), name\nFROM $table\nWHERE q >= toDateTime($from) and q < toDateTime($to) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name in ('Net profit')\nGROUP BY q, name\nORDER BY q, sum(value)\n",
+          "rawQuery": "SELECT date_add(day, 30 , quarter) as q, last_value(value), name\nFROM default.databook\nWHERE q >= toDateTime(1364390293) and q < toDateTime(1640614693) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name in ('Net profit')\nGROUP BY q, name\nORDER BY q, sum(value)",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "databook",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": true,
+          "intervalFactor": 1,
+          "query": "SELECT date_pub as t, value as dividend\nFROM $table\nWHERE t >= toDateTime($from) and t < toDateTime($to) \nORDER BY t\n",
+          "rawQuery": "SELECT date_pub as t, value as dividend\nFROM default.dividend\nWHERE t >= toDateTime(1364390629) and t < toDateTime(1651069429) \nORDER BY t",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "dividend",
+          "tableLoading": false
+        }
+      ],
+      "title": "Net profit и Stock Price",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Net growth"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    0,
+                    10
+                  ],
+                  "fill": "dot"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stock price"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    0,
+                    10
+                  ],
+                  "fill": "dot"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "8.3.2",
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeColDataType": "date",
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted(close*1000, volume)/1000 as \"Stock price\"\nFROM $table\nWHERE\n    date >= toDate($from) AND date <= toDate($to)\n    and sec_code == 'MOEX' and period == '5' \nGROUP BY t\nORDER BY t",
+          "rawQuery": "SELECT\n    toStartOfInterval(date, INTERVAL 7 day) as t,\n    avgWeighted(close*1000, volume)/1000 as \"Stock price\"\nFROM default.candles\nWHERE\n    date >= toDate(1364390883) AND date <= toDate(1651069683)\n    and sec_code == 'MOEX' and period == '5' \nGROUP BY t\nORDER BY t",
+          "refId": "C",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "candles",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": true,
+          "intervalFactor": 1,
+          "query": "SELECT date_add(day, 30 , quarter) as q, last_value(value), name\nFROM $table\nWHERE q >= toDateTime($from) and q < toDateTime($to) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name in ('Net profit')\nGROUP BY q, name\nORDER BY q, sum(value)\n",
+          "rawQuery": "SELECT date_add(day, 30 , quarter) as q, last_value(value), name\nFROM default.databook\nWHERE q >= toDateTime(1364390293) and q < toDateTime(1640614693) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name in ('Net profit')\nGROUP BY q, name\nORDER BY q, sum(value)",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "databook",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT date_pub as t, value as dividend\nFROM $table\nWHERE t >= toDateTime($from) and t < toDateTime($to) \nORDER BY t\n",
+          "rawQuery": "SELECT date_pub as t, value as dividend\nFROM default.dividend\nWHERE t >= toDateTime(1364390883) and t < toDateTime(1651069683) \nORDER BY t",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "dividend",
+          "tableLoading": false
+        }
+      ],
+      "title": "Dividend и Stock Price",
+      "type": "timeseries"
+    },
     {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 22
       },
       "id": 2,
       "panels": [],
@@ -115,9 +517,9 @@
         "h": 11,
         "w": 24,
         "x": 0,
-        "y": 1
+        "y": 23
       },
-      "id": 6,
+      "id": 8,
       "options": {
         "legend": {
           "calcs": [
@@ -139,7 +541,7 @@
             "type": "vertamedia-clickhouse-datasource",
             "uid": "clickhouse"
           },
-          "dateColDataType": "",
+          "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
           "datetimeLoading": false,
@@ -148,7 +550,7 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "intervalFactor": 1,
           "query": "SELECT quarter as q, last_value(value), name\nFROM $table\nWHERE q >= toDateTime($from) and q < toDateTime($to) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name in ('Net profit')\nGROUP BY q, name\nORDER BY q, sum(value)\n",
-          "rawQuery": "SELECT quarter as q, last_value(value), name\nFROM default.databook\nWHERE q >= toDateTime(1419536193) and q < toDateTime(1640460993) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name in ('Net profit')\nGROUP BY q, name\nORDER BY q, sum(value)",
+          "rawQuery": "SELECT quarter as q, last_value(value), name\nFROM default.databook\nWHERE q >= toDateTime(1545917379) and q < toDateTime(1640611779) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name in ('Net profit')\nGROUP BY q, name\nORDER BY q, sum(value)",
           "refId": "A",
           "round": "0s",
           "skip_comments": true,
@@ -161,7 +563,7 @@
             "type": "vertamedia-clickhouse-datasource",
             "uid": "clickhouse"
           },
-          "dateColDataType": "",
+          "dateColDataType": "quarter",
           "dateLoading": false,
           "dateTimeType": "DATETIME",
           "datetimeLoading": false,
@@ -170,8 +572,8 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT quarter as q, (last_value(value)-last_value(neighbor(value, -1)))/last_value(neighbor(value, -1)) as \"Net growth\"\nFROM $table\nWHERE q >= toDateTime($from) and q < toDateTime($to) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name = 'Net profit'\nGROUP BY q\nORDER BY q\n",
-          "rawQuery": "SELECT quarter as q, (last_value(value)-last_value(neighbor(value, -1)))/last_value(neighbor(value, -1)) as \"Net growth\"\nFROM default.databook\nWHERE q >= toDateTime(1419536193) and q < toDateTime(1640460993) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name = 'Net profit'\nGROUP BY q\nORDER BY q",
+          "query": "SELECT quarter as q, (last_value(value)-last_value(neighbor(value, -1)))/last_value(neighbor(value, -1)) as \"Net growth\"\nFROM $table\nWHERE q >= toDateTime($from) and q < toDateTime($to) and code == 'MOEX' and content == '3. P&L - reporting periods'\nand name = 'Net profit'\nGROUP BY q\nORDER BY q\n",
+          "rawQuery": "SELECT quarter as q, (last_value(value)-last_value(neighbor(value, -1)))/last_value(neighbor(value, -1)) as \"Net growth\"\nFROM default.databook\nWHERE q >= toDateTime(1545917379) and q < toDateTime(1640611779) and code == 'MOEX' and content == '3. P&L - reporting periods'\nand name = 'Net profit'\nGROUP BY q\nORDER BY q",
           "refId": "B",
           "round": "0s",
           "skip_comments": true,
@@ -246,7 +648,7 @@
         "h": 11,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 34
       },
       "id": 7,
       "options": {
@@ -380,7 +782,7 @@
         "h": 11,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 45
       },
       "id": 4,
       "options": {
@@ -490,7 +892,7 @@
               "options": {
                 "mode": "exclude",
                 "names": [
-                  "Fee and commission income"
+                  "Interest and other finance income"
                 ],
                 "prefix": "All except:",
                 "readOnly": true
@@ -513,7 +915,7 @@
         "h": 11,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 56
       },
       "id": 5,
       "options": {
@@ -558,20 +960,20 @@
       "type": "timeseries"
     }
   ],
-  "schemaVersion": 33,
+  "schemaVersion": 34,
   "style": "dark",
   "tags": [],
   "templating": {
     "list": []
   },
   "time": {
-    "from": "now-3y",
-    "to": "now"
+    "from": "now-5y",
+    "to": "now+4M"
   },
   "timepicker": {},
   "timezone": "",
   "title": "MOEX",
   "uid": "moex",
-  "version": 4,
+  "version": 2,
   "weekStart": ""
 }

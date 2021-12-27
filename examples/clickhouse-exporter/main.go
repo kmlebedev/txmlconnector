@@ -49,7 +49,7 @@ func main() {
 	_, err = connect.Exec(`
 		CREATE TABLE IF NOT EXISTS candles (
 		   date   DateTime,
-		   sec_code FixedString(11),
+		   sec_code FixedString(16),
 		   period UInt8,
 		   open   Float32,
 		   close  Float32,
@@ -64,7 +64,7 @@ func main() {
 	_, err = connect.Exec(`
 		CREATE TABLE IF NOT EXISTS securities (
 			secid   UInt16,
-			seccode FixedString(11),
+			seccode FixedString(16),
 			instrclass String,
 			board String,
 			market UInt8,
