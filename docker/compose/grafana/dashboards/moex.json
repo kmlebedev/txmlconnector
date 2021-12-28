@@ -550,7 +550,7 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "intervalFactor": 1,
           "query": "SELECT quarter as q, last_value(value), name\nFROM $table\nWHERE q >= toDateTime($from) and q < toDateTime($to) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name in ('Net profit')\nGROUP BY q, name\nORDER BY q, sum(value)\n",
-          "rawQuery": "SELECT quarter as q, last_value(value), name\nFROM default.databook\nWHERE q >= toDateTime(1545917379) and q < toDateTime(1640611779) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name in ('Net profit')\nGROUP BY q, name\nORDER BY q, sum(value)",
+          "rawQuery": "SELECT quarter as q, last_value(value), name\nFROM default.databook\nWHERE q >= toDateTime(1514464016) and q < toDateTime(1640694416) \nand code == 'MOEX' and content == '3. P&L - reporting periods'\nand name in ('Net profit')\nGROUP BY q, name\nORDER BY q, sum(value)",
           "refId": "A",
           "round": "0s",
           "skip_comments": true,
@@ -572,8 +572,8 @@
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
           "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT quarter as q, (last_value(value)-last_value(neighbor(value, -1)))/last_value(neighbor(value, -1)) as \"Net growth\"\nFROM $table\nWHERE q >= toDateTime($from) and q < toDateTime($to) and code == 'MOEX' and content == '3. P&L - reporting periods'\nand name = 'Net profit'\nGROUP BY q\nORDER BY q\n",
-          "rawQuery": "SELECT quarter as q, (last_value(value)-last_value(neighbor(value, -1)))/last_value(neighbor(value, -1)) as \"Net growth\"\nFROM default.databook\nWHERE q >= toDateTime(1545917379) and q < toDateTime(1640611779) and code == 'MOEX' and content == '3. P&L - reporting periods'\nand name = 'Net profit'\nGROUP BY q\nORDER BY q",
+          "query": "SELECT quarter as q, cbrt(\n(\n  last_value(value) + last_value(neighbor(value, -1)) + last_value(neighbor(value, -2)) + last_value(neighbor(value, -3))\n)/4/last_value(neighbor(value, -3))) -1 as \"Net growth\"\nFROM $table\nWHERE q >= toDateTime($from - 26982500) and q < toDateTime($to) and code == 'MOEX' and content == '3. P&L - reporting periods'\nand name = 'Net profit'\nGROUP BY q\nORDER BY q\n",
+          "rawQuery": "SELECT quarter as q, cbrt(\n(\n  last_value(value) + last_value(neighbor(value, -1)) + last_value(neighbor(value, -2)) + last_value(neighbor(value, -3))\n)/4/last_value(neighbor(value, -3))) -1 as \"Net growth\"\nFROM default.databook\nWHERE q >= toDateTime(1514464016 - 26982500) and q < toDateTime(1640694416) and code == 'MOEX' and content == '3. P&L - reporting periods'\nand name = 'Net profit'\nGROUP BY q\nORDER BY q",
           "refId": "B",
           "round": "0s",
           "skip_comments": true,
@@ -642,13 +642,192 @@
           },
           "unit": "currencyRUB"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Net growth.*"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 11,
         "w": 24,
         "x": 0,
         "y": 34
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "8.3.2",
+      "targets": [
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT np.quarter as q, last_value(np.value)-last_value(fc.value)-last_value(oe.value)+3900+150 as \"Net profit\"\nFROM $table as np\nJOIN $table as fc on (fc.code == np.code and np.content == fc.content and fc.quarter == np.quarter)\nJOIN $table as oe on (oe.code == np.code and np.content == oe.content and oe.quarter == np.quarter)\nWHERE q >= toDateTime($from) and q < toDateTime($to) \nand np.code == 'MOEX' and np.content == '3. P&L - reporting periods' and fc.name == 'Interest and other finance income'\nand np.name == 'Net profit' and oe.name == 'Other operating expenses'\nGROUP BY q\nORDER BY q\n",
+          "rawQuery": "SELECT np.quarter as q, last_value(np.value)-last_value(fc.value)-last_value(oe.value)+3900+150 as \"Net profit\"\nFROM default.databook as np\nJOIN default.databook as fc on (fc.code == np.code and np.content == fc.content and fc.quarter == np.quarter)\nJOIN default.databook as oe on (oe.code == np.code and np.content == oe.content and oe.quarter == np.quarter)\nWHERE q >= toDateTime(1514462867) and q < toDateTime(1640693267) \nand np.code == 'MOEX' and np.content == '3. P&L - reporting periods' and fc.name == 'Interest and other finance income'\nand np.name == 'Net profit' and oe.name == 'Other operating expenses'\nGROUP BY q\nORDER BY q",
+          "refId": "A",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "databook",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT np.quarter as q, \npow(((\n(last_value(np.value)-last_value(fc.value)-last_value(oe.value)+3900+150) +\n(last_value(neighbor(np.value, -1))-last_value(neighbor(fc.value, -1))-last_value(neighbor(oe.value, -1))+3900+150) +\n(last_value(neighbor(np.value, -2))-last_value(neighbor(fc.value, -2))-last_value(neighbor(oe.value, -2))+3900+150) +\n(last_value(neighbor(np.value, -3))-last_value(neighbor(fc.value, -3))-last_value(neighbor(oe.value, -3))+3900+150)\n)/4) /\n(last_value(neighbor(np.value, -3))-last_value(neighbor(fc.value, -3))-last_value(neighbor(oe.value, -3))+3900+150), 1/3) -1\n as \"Net growth avg 12M CAGR\"\nFROM $table as np\nJOIN $table as fc on (fc.code == np.code and np.content == fc.content and fc.quarter == np.quarter)\nJOIN $table as oe on (oe.code == np.code and np.content == oe.content and oe.quarter == np.quarter)\nWHERE q >= toDateTime($from) and q < toDateTime($to) \nand np.code == 'MOEX' and np.content == '3. P&L - reporting periods' and fc.name == 'Interest and other finance income'\nand np.name == 'Net profit' and oe.name == 'Other operating expenses'\nGROUP BY q\nORDER BY q\n\n",
+          "rawQuery": "SELECT np.quarter as q, \npow(((\n(last_value(np.value)-last_value(fc.value)-last_value(oe.value)+3900+150) +\n(last_value(neighbor(np.value, -1))-last_value(neighbor(fc.value, -1))-last_value(neighbor(oe.value, -1))+3900+150) +\n(last_value(neighbor(np.value, -2))-last_value(neighbor(fc.value, -2))-last_value(neighbor(oe.value, -2))+3900+150) +\n(last_value(neighbor(np.value, -3))-last_value(neighbor(fc.value, -3))-last_value(neighbor(oe.value, -3))+3900+150)\n)/4) /\n(last_value(neighbor(np.value, -3))-last_value(neighbor(fc.value, -3))-last_value(neighbor(oe.value, -3))+3900+150), 1/3) -1\n as \"Net growth avg 12M CAGR\"\nFROM default.databook as np\nJOIN default.databook as fc on (fc.code == np.code and np.content == fc.content and fc.quarter == np.quarter)\nJOIN default.databook as oe on (oe.code == np.code and np.content == oe.content and oe.quarter == np.quarter)\nWHERE q >= toDateTime(1514462867) and q < toDateTime(1640693267) \nand np.code == 'MOEX' and np.content == '3. P&L - reporting periods' and fc.name == 'Interest and other finance income'\nand np.name == 'Net profit' and oe.name == 'Other operating expenses'\nGROUP BY q\nORDER BY q",
+          "refId": "B",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "databook",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT np.quarter as q, \npow((last_value(np.value)-last_value(fc.value)-last_value(oe.value)+3900+150)/\n(last_value(neighbor(np.value, -3))-last_value(neighbor(fc.value, -3))-last_value(neighbor(oe.value, -3))+3900+150), 1/4)\n-1 as \"Net growth 12M CAGR\"\nFROM $table as np\nJOIN $table as fc on (fc.code == np.code and np.content == fc.content and fc.quarter == np.quarter)\nJOIN $table as oe on (oe.code == np.code and np.content == oe.content and oe.quarter == np.quarter)\nWHERE q >= toDateTime($from) and q < toDateTime($to) \nand np.code == 'MOEX' and np.content == '3. P&L - reporting periods' and fc.name == 'Interest and other finance income'\nand np.name == 'Net profit' and oe.name == 'Other operating expenses'\nGROUP BY q\nORDER BY q\n\n",
+          "rawQuery": "SELECT np.quarter as q, \npow((last_value(np.value)-last_value(fc.value)-last_value(oe.value)+3900+150)/\n(last_value(neighbor(np.value, -3))-last_value(neighbor(fc.value, -3))-last_value(neighbor(oe.value, -3))+3900+150), 1/4)\n-1 as \"Net growth 12M CAGR\"\nFROM default.databook as np\nJOIN default.databook as fc on (fc.code == np.code and np.content == fc.content and fc.quarter == np.quarter)\nJOIN default.databook as oe on (oe.code == np.code and np.content == oe.content and oe.quarter == np.quarter)\nWHERE q >= toDateTime(1514462867) and q < toDateTime(1640693267) \nand np.code == 'MOEX' and np.content == '3. P&L - reporting periods' and fc.name == 'Interest and other finance income'\nand np.name == 'Net profit' and oe.name == 'Other operating expenses'\nGROUP BY q\nORDER BY q",
+          "refId": "C",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "databook",
+          "tableLoading": false
+        }
+      ],
+      "title": "Net profit очищенная",
+      "transformations": [],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "vertamedia-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyRUB"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 45
       },
       "id": 7,
       "options": {
@@ -782,7 +961,7 @@
         "h": 11,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 56
       },
       "id": 4,
       "options": {
@@ -884,38 +1063,13 @@
           },
           "unit": "currencyRUB"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "Interest and other finance income"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 11,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 67
       },
       "id": 5,
       "options": {
@@ -967,13 +1121,13 @@
     "list": []
   },
   "time": {
-    "from": "now-5y",
-    "to": "now+4M"
+    "from": "now-3y-6M",
+    "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "MOEX",
   "uid": "moex",
-  "version": 2,
+  "version": 9,
   "weekStart": ""
 }
