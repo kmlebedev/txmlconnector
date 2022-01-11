@@ -18,8 +18,6 @@ var (
 )
 
 func init() {
-	//exportQuarter["Consolidated sales"] = "NLMK Group"
-	//exportQuarter["Key Indicators"] = "KEY INDICATORS"
 	exportQuarter = map[string]string{
 		"Consolidated sales": "NLMK Group",
 		"Key Indicators":     "KEY INDICATORS",

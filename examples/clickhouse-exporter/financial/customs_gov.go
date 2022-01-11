@@ -115,7 +115,9 @@ func crawExports(conn *sql.DB) error {
 		}
 		link := e.ChildAttr("a", "href")
 		log.Debugf("Link found: %q -> %s\n", e.Text, link)
-		e.Request.Visit(link)
+		if e.Text != "" {
+			e.Request.Visit(link)
+		}
 	})
 	if err := c.Visit(exportGoodsUrl); err != nil {
 		log.Error(err)
