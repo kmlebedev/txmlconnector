@@ -14,7 +14,14 @@ import (
 	"time"
 )
 
+var (
+	isLoadednvestingData bool
+)
+
 func quarterToDate(quarter string) time.Time {
+	if len(quarter) < 7 {
+		return time.Now()
+	}
 	y, _ := strconv.Atoi(quarter[3:7])
 	m, _ := strconv.Atoi(quarter[1:2])
 	if m == 4 {
@@ -133,11 +140,15 @@ func insertToDB(conn *sql.DB, secCode string, name string, query string, table *
 }
 
 func loadAllInvestingData(conn *sql.DB) {
+	if isLoadednvestingData {
+		return
+	}
 	for code, _ := range exporter.CodeToId {
 		if err := exporter.LoadHistoricalData(conn, code, "07/07/2014", time.Now().Format("01/02/2006"), "Daily"); err != nil {
 			log.Error(err)
 		}
 	}
+	isLoadednvestingData = true
 }
 
 func main() {
@@ -147,10 +158,7 @@ func main() {
 	ticker := os.Getenv("TICKER")
 	conn := initDB()
 	log.Debugf("connected %+v", conn.Stats())
-	//if err := loadMagnData(conn, "MMK_operating_e_financial_data_Q1_2021.xls"); err != nil {
-	//	log.Error(err)
-	//}
-	if ticker == "MOEX" {
+	if ticker == "MOEX" || ticker == "ALL" {
 		var m moexDataBook
 		var t tradingVolumes
 		if err := t.Initialize(conn, "trading-volumes-2021-nov.xlsx"); err != nil {
@@ -166,7 +174,7 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	if ticker == "VTBR" {
+	if ticker == "VTBR" || ticker == "ALL" {
 		if err := crawFinanceResults(conn); err != nil {
 			log.Error(err)
 		}
@@ -177,19 +185,19 @@ func main() {
 			log.Error(err)
 		}
 	}
-	if ticker == "CHMF" {
+	if ticker == "CHMF" || ticker == "ALL" {
 		// Financial and Operating data SVST 3Q_21.xlsx
 		// https://www.severstal.com/files/74962/Financial%20and%20Operating%20data%20SVST%203Q_21.xlsx
 		if err := loadChmfData(conn, "Financial and Operating data SVST 3Q_21.xlsx"); err != nil {
 			log.Error(err)
 		}
 		// Данные из отчета
-		//if err := loadChmfData(conn, "CHMF_revenue_structure.xlsx"); err != nil {
-		//	log.Error(err)
-		//}
-		//loadAllInvestingData(conn)
+		if err := loadChmfData(conn, "CHMF_revenue_structure.xlsx"); err != nil {
+			log.Error(err)
+		}
+		loadAllInvestingData(conn)
 	}
-	if ticker == "MAGN" {
+	if ticker == "MAGN" || ticker == "ALL" {
 		//if err := loadMagnData(conn, "MMK_operating_m_financial_data_Q2_2021.xls"); err != nil {
 		//	log.Error(err)
 		//}
@@ -204,16 +212,16 @@ func main() {
 			log.Error(err)
 		}
 	}
-	if ticker == "NLMK" {
+	if ticker == "NLMK" || ticker == "ALL" {
 		if err := loadNlmkData(conn, "financial_and_operating_data_3q_2021.xlsx"); err != nil {
 			log.Error(err)
 		}
 		loadAllInvestingData(conn)
 	}
-	if ticker == "" {
-		if err := crawExports(conn); err != nil {
-			log.Error(err)
-		}
+	if ticker == "Exports" || ticker == "ALL" {
+		//if err := crawExports(conn); err != nil {
+		//	log.Error(err)
+		//}
 		for code, _ := range exporter.CodeToId {
 			if err := exporter.LoadHistoricalData(conn, code, "07/07/2014", time.Now().Format("01/02/2006"), "Daily"); err != nil {
 				log.Error(err)
@@ -222,15 +230,13 @@ func main() {
 		if err := loadInvestingData(conn); err != nil {
 			log.Error(err)
 		}
-		if err := craw(conn, "szd", "szd", "5319", "Погрузка на Северной железной дороге"); err != nil {
-			//if err := craw(conn, "szd", "5319", "Погрузка на железной дороге в Вологодской области"); err != nil {
-			log.Error(err)
-		}
-		if err := loadLmeData(conn); err != nil {
-			log.Error(err)
-		}
+		//if err := craw(conn, "szd", "szd", "5319", "Погрузка на Северной железной дороге"); err != nil {
+		//if err := craw(conn, "szd", "5319", "Погрузка на железной дороге в Вологодской области"); err != nil {
+		//	log.Error(err)
+		//}
+
+		//if err := loadLmeData(conn); err != nil {
+		//	log.Error(err)
+		//}
 	}
-	//if err := loadChmfData(conn, "Q1_2021-Financial_and_operational_data-Severstal_Final.xlsx"); err != nil {
-	//	log.Error(err)
-	//}
 }

@@ -147,7 +147,7 @@ func main() {
 							candle.Low,
 							candle.Volume,
 						); err != nil {
-							log.Fatal(err)
+							log.Error(err)
 						}
 					}
 					if err := tx.Commit(); err != nil {
@@ -271,6 +271,9 @@ func main() {
 		if res, err := stmtSec.Exec(sec.SecId, sec.SecCode, sec.InstrClass, sec.Board, sec.Market, sec.ShortName, sec.Decimals, sec.MinStep, sec.LotSize, sec.PointCost, sec.SecType, sec.QuotesType); err != nil {
 			log.Error(res, err)
 		}
+		if err := txSec.Commit(); err != nil {
+			log.Error(err)
+		}
 		quotations = append(quotations, commands.SubSecurity{SecId: sec.SecId})
 		for _, kind := range tc.Data.CandleKinds.Items {
 			if len(exportPeriodSeconds) > 0 {
@@ -317,11 +320,7 @@ func main() {
 				dataCandleCount = ExportCandleCount
 				dataCandleCountLock.Unlock()
 			}
-
 		}
-	}
-	if err := txSec.Commit(); err != nil {
-		log.Error(err)
 	}
 	// receive <quotations><quotation secid="21"><board>TQBR</board><seccode>GMKN</seccode><last>24954</last><quantity>4</quantity><time>11:24:00</time><change>220</change><priceminusprevwaprice>432</priceminusprevwaprice><bid>24950</bid><biddepth>35</biddepth><biddeptht>16188</biddeptht><numbids>1563</numbids><offer>24962</offer><offerdepth>51</offerdepth><offerdeptht>25222</offerdeptht><numoffers>1154</numoffers><voltoday>54772</voltoday><numtrades>6273</numtrades><valtoday>1364.723</valtoday></quotation></quotations>
 	// Get subscribe on all sec
