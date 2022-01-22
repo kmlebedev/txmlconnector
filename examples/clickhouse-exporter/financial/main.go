@@ -216,6 +216,9 @@ func main() {
 		if err := loadNlmkData(conn, "financial_and_operating_data_3q_2021.xlsx"); err != nil {
 			log.Error(err)
 		}
+		if err := loadNlmkOPData(conn, "NLMK_Operating_Results_4Q_2021_RUS.xlsx"); err != nil {
+			log.Error(err)
+		}
 		loadAllInvestingData(conn)
 	}
 	if ticker == "Exports" || ticker == "ALL" {
@@ -238,5 +241,13 @@ func main() {
 		//if err := loadLmeData(conn); err != nil {
 		//	log.Error(err)
 		//}
+	}
+	if ticker == "YUZD" {
+		if err := craw(conn, "yuzd", "yuzd", "6194", "Погрузка на Южно-Уральской железной дороге"); err != nil {
+			log.Error(err)
+		}
+		if err := craw(conn, "yuzd", "chel", "6194", "Погрузка на железной дороге в Челябинской области"); err != nil {
+			log.Error(err)
+		}
 	}
 }
