@@ -85,7 +85,7 @@ func getOPQuarters(rows *[][]string, quarterRowsName string) (map[int]string, []
 	return quarters, quarterIdxs
 }
 
-func getQuarters(rows *[][]string, quarterRowsName string) (map[int]string, []int) {
+func getQuarters(rows *[][]string, quarterRowsName string, diff bool) (map[int]string, []int) {
 	quarters := map[int]string{}
 	quarterIdxs := []int{}
 	quarterRowsFound := false
@@ -102,7 +102,7 @@ func getQuarters(rows *[][]string, quarterRowsName string) (map[int]string, []in
 			if quarterRowsFound && isQuarter(cell) {
 				quarters[j] = strings.Trim(cell, " *")
 				quarterIdxs = append(quarterIdxs, j)
-			} else {
+			} else if diff {
 				re, _ := regexp.Compile("([0-9]M|FY) [0-9]{4}")
 				var quarter string
 				if re.MatchString(cell) {
@@ -130,30 +130,37 @@ func getQuarters(rows *[][]string, quarterRowsName string) (map[int]string, []in
 
 func getElasticTableFromRows(rows *[][]string, tableName string, quarterRowsName string, diff bool) *map[string]map[string]float64 {
 	table := make(map[string]map[string]float64)
-	quarters, quarterIdxs := getQuarters(rows, quarterRowsName)
+	quarters, quarterIdxs := getQuarters(rows, quarterRowsName, diff)
+	log.Debugf("quarters row %+v", quarters)
 	if len(quarterIdxs) == 0 {
 		log.Warn("Quarter rows not found name ", quarterRowsName)
 	}
 	tableNameFound := false
 	tableFieldIdx := 0
-	tableFieldFound := false
 	for _, row := range *rows {
-		var tableField string
+		tableField := ""
+		tableFieldFound := false
 		for j, cell := range row {
 			if !tableNameFound && cell == tableName {
 				tableFieldIdx = j
 				tableNameFound = true
-				// break
+				if len(row) > len(quarterIdxs) {
+					tableField = tableName
+					table[tableField] = make(map[string]float64)
+					tableFieldFound = true
+					break
+				}
 			}
 			if tableNameFound && j >= tableFieldIdx && cell != "" && len(tableField) == 0 {
 				tableField = strings.Trim(cell, " :*")
 				table[tableField] = make(map[string]float64)
 				tableFieldFound = true
+				break
 			}
 		}
-		if tableNameFound && !(len(tableField) > 0) {
+		if tableNameFound && len(row) > tableFieldIdx && row[tableFieldIdx] != "" && row[tableFieldIdx] != tableName {
 			if tableFieldFound {
-				log.Debugf("end table row %+v", row)
+				log.Debugf("end table row %+s", row[tableFieldIdx])
 				break
 			}
 			//log.Debugf("skip row %+v", row)
@@ -162,6 +169,9 @@ func getElasticTableFromRows(rows *[][]string, tableName string, quarterRowsName
 		if tableNameFound && len(tableField) > 0 {
 			valOld := float64(0)
 			for _, idx := range quarterIdxs {
+				if idx > len(row) {
+					continue
+				}
 				quarterName := quarters[idx]
 				val, _ := strconv.ParseFloat(row[idx], 32)
 				if diff {
