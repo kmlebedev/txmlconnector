@@ -59,6 +59,31 @@ func init() {
 		"Current assets": "financial_ratios",
 	}
 }
+func getOPQuarters(rows *[][]string, quarterRowsName string) (map[int]string, []int) {
+	quarters := map[int]string{}
+	quarterIdxs := []int{}
+	quarterRowsFound := false
+	re, _ := regexp.Compile("([1-4]кв) [0-9]{4}")
+	for _, row := range *rows {
+		for j, cell := range row {
+			if len(cell) == 0 {
+				continue
+			}
+			if cell == quarterRowsName {
+				quarterRowsFound = true
+				continue
+			}
+			if quarterRowsFound && re.MatchString(cell) {
+				quarters[j] = fmt.Sprintf("Q%s %s", cell[0:1], cell[len(cell)-4:])
+				quarterIdxs = append(quarterIdxs, j)
+			}
+		}
+		if quarterRowsFound {
+			break
+		}
+	}
+	return quarters, quarterIdxs
+}
 
 func getQuarters(rows *[][]string, quarterRowsName string) (map[int]string, []int) {
 	quarters := map[int]string{}
@@ -155,6 +180,65 @@ func getElasticTableFromRows(rows *[][]string, tableName string, quarterRowsName
 	}
 	log.Debugf("table %+v", table)
 	return &table
+}
+
+// NLMK_Operating_Results_4Q_2021_RUS.xlsx
+func loadNlmkOPData(conn *sql.DB, fileName string) error {
+	secCode := "NLMK"
+	dataBasePath := "data"
+	if dir := os.Getenv("FINANCIAL_DATA_DIR"); dir != "" {
+		dataBasePath = dir
+	}
+	xlsxFile, err := excelize.OpenFile(path.Join(dataBasePath, fileName))
+	if err != nil {
+		return err
+	}
+	rows, err := xlsxFile.GetRows(xlsxFile.GetSheetName(0))
+	if err != nil {
+		return err
+	}
+	quarters, quarterIdxs := getOPQuarters(&rows, "Производство, млн т")
+	var tx_op, _ = conn.Begin()
+	var stmt_op, _ = tx_op.Prepare("INSERT INTO operational_databook (*) VALUES (?)")
+
+	rowFieldNum := 1
+	rowFirstValueNum := quarterIdxs[0]
+	rowFields := map[string]bool{
+		"КЛЮЧЕВЫЕ ОПЕРАЦИОННЫЕ ПОКАЗАТЕЛИ": true,
+		"ПРОДАЖИ":      true,
+		"ПРОИЗВОДСТВО": true,
+	}
+	var tableName string
+	var category string
+	for _, row := range rows {
+		if len(row) < rowFirstValueNum+1 {
+			continue
+		}
+		if row[rowFirstValueNum] == "" {
+			if row[rowFieldNum] == strings.ToUpper(row[rowFieldNum]) && rowFields[row[rowFieldNum]] {
+				tableName = row[rowFieldNum]
+				continue
+			}
+			if row[rowFieldNum] != "" {
+				category = row[rowFieldNum]
+			}
+			continue
+		}
+		if strings.Contains(row[rowFirstValueNum], "кв") {
+			continue
+		}
+		for _, idx := range quarterIdxs {
+			quarter := quarters[idx]
+			value, _ := strconv.ParseFloat(strings.Trim(strings.TrimSpace(row[idx]), "%"), 32)
+			if _, err := stmt_op.Exec(secCode, tableName, category, quarterToDate(quarter), row[rowFieldNum], value); err != nil {
+				return err
+			}
+		}
+	}
+	if err := tx_op.Commit(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // financial_and_operating_data_1q_2021.xlsx
