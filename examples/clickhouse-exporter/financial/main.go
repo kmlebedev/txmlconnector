@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	isLoadednvestingData bool
+	isLoadedInvestingData = false
 )
 
 func quarterToDate(quarter string) time.Time {
@@ -140,7 +140,7 @@ func insertToDB(conn *sql.DB, secCode string, name string, query string, table *
 }
 
 func loadAllInvestingData(conn *sql.DB) {
-	if isLoadednvestingData {
+	if isLoadedInvestingData {
 		return
 	}
 	for code, _ := range exporter.CodeToId {
@@ -148,7 +148,7 @@ func loadAllInvestingData(conn *sql.DB) {
 			log.Error(err)
 		}
 	}
-	isLoadednvestingData = true
+	isLoadedInvestingData = true
 }
 
 func main() {
@@ -213,7 +213,7 @@ func main() {
 		}
 	}
 	if ticker == "NLMK" || ticker == "ALL" {
-		if err := loadNlmkData(conn, "financial_and_operating_data_3q_2021.xlsx"); err != nil {
+		if err := loadNlmkData(conn, "financial_and_operating_data_4q_2021.xlsx"); err != nil {
 			log.Error(err)
 		}
 		if err := loadNlmkOPData(conn, "NLMK_Operating_Results_4Q_2021_RUS.xlsx"); err != nil {

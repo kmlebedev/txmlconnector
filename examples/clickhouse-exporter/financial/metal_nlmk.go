@@ -22,7 +22,7 @@ func init() {
 		"Consolidated sales": "NLMK Group",
 		"Key Indicators":     "KEY INDICATORS",
 		"CashFlow":           "Consolidated statement of cash flows (in M'USD)",
-		"P&L":                "Consolidated statement of profit or loss (in M'USD)",
+		"PL":                 "Consolidated statement of profit or loss (in M'USD)",
 		"Balance Sheet":      "Consolidated statement of financial position (in M'USD)",
 		"RFP":                "RUSSIAN FLAT PRODUCTS",
 	}
@@ -38,7 +38,7 @@ func init() {
 		"Payments from settlement of derivative financial instruments": "financial_highlights",
 		"Changes in operating assets and liabilities":                  "financial_highlights",
 	}
-	exportNLMKTables["P&L"] = map[string]string{
+	exportNLMKTables["PL"] = map[string]string{
 		"MULTIPLIES & OTHER INDICATORS": "financial_highlights",
 		"PROFIT AND LOSS":               "financial_highlights",
 		"EBITDA":                        "financial_highlights",
