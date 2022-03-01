@@ -201,7 +201,7 @@ func main() {
 		//if err := loadMagnData(conn, "MMK_operating_m_financial_data_Q2_2021.xls"); err != nil {
 		//	log.Error(err)
 		//}
-		if err := loadMagnData(conn, "MMK_operating_financial_data_Q3_2021.xls"); err != nil {
+		if err := loadMagnData(conn, "MMK_operating_financial_data_Q4_2021.xls"); err != nil {
 			log.Error(err)
 		}
 		loadAllInvestingData(conn)

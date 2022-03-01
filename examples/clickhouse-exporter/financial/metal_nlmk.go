@@ -37,6 +37,7 @@ func init() {
 		"CASH FLOWS FROM INVESTING ACTIVITIES":                         "financial_highlights",
 		"Payments from settlement of derivative financial instruments": "financial_highlights",
 		"Changes in operating assets and liabilities":                  "financial_highlights",
+		"Increase in inventories":                                      "financial_highlights",
 	}
 	exportNLMKTables["PL"] = map[string]string{
 		"MULTIPLIES & OTHER INDICATORS": "financial_highlights",

@@ -21,7 +21,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "iteration": 1642919530673,
+  "iteration": 1644051882377,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -1990,6 +1990,28 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*percent"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              }
+            ]
           }
         ]
       },
@@ -2051,9 +2073,9 @@
           "extrapolate": true,
           "format": "time_series",
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
-          "hide": false,
+          "hide": true,
           "intervalFactor": 1,
-          "query": "SELECT q, sum(n.v)/(last_value(h.value)*4)*100 as \"NWC/(Revenue L3m*4)\"\nFROM (SELECT\n    $dateCol as q,\n    indicator,\n    last_value(value) as v\nFROM $table\nWHERE sec_code == 'NLMK' and has(array('Trade and other accounts receivable','Inventories'), indicator) == 1\nGROUP BY q, indicator\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 'Trade and other accounts receivable' as indicator, 1800 as v)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 'Inventories' as indicator, 2000 as v)) as n\nLEFT JOIN (SELECT * FROM financial_highlights \nUNION ALL (SELECT 'NLMK' as sec_code, toDate(toStartOfQuarter(date_add(month, 2, now()))) as quarter, 'Q4 2021' as quarter_name, 'REVENUE' as indicator, 4284 as value)) as h on h.quarter == n.q\nWHERE h.sec_code == 'NLMK' and h.indicator == 'REVENUE'\nGROUP BY q\nORDER BY q\n",
+          "query": "SELECT q, sum(n.v)/(last_value(h.value)*4)*100 as \"NWC/(Revenue L3m*4) percent\"\nFROM (SELECT\n    $dateCol as q,\n    indicator,\n    last_value(value) as v\nFROM $table\nWHERE sec_code == 'NLMK' and has(array('Trade and other accounts receivable','Inventories'), indicator) == 1\nGROUP BY q, indicator\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 'Trade and other accounts receivable' as indicator, 1800 as v)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 'Inventories' as indicator, 2000 as v)) as n\nLEFT JOIN (SELECT * FROM financial_highlights \nUNION ALL (SELECT 'NLMK' as sec_code, toDate(toStartOfQuarter(date_add(month, 2, now()))) as quarter, 'Q4 2021' as quarter_name, 'REVENUE' as indicator, 4284 as value)) as h on h.quarter == n.q\nWHERE h.sec_code == 'NLMK' and h.indicator == 'REVENUE'\nGROUP BY q\nORDER BY q\n",
           "queryType": "randomWalk",
           "rawQuery": "SELECT q, sum(n.v)/(last_value(h.value)*4)*100 as \"NWC/(Revenue L3m*4)\"\nFROM (SELECT\n    quarter as q,\n    indicator,\n    last_value(value) as v\nFROM default.financial_ratios\nWHERE sec_code == 'NLMK' and has(array('Trade and other accounts receivable','Inventories'), indicator) == 1\nGROUP BY q, indicator\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 'Trade and other accounts receivable' as indicator, 1800 as v)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 'Inventories' as indicator, 2000 as v)) as n\nLEFT JOIN (SELECT * FROM financial_highlights \nUNION ALL (SELECT 'NLMK' as sec_code, toDate(toStartOfQuarter(date_add(month, 2, now()))) as quarter, 'Q4 2021' as quarter_name, 'REVENUE' as indicator, 4284 as value)) as h on h.quarter == n.q\nWHERE h.sec_code == 'NLMK' and h.indicator == 'REVENUE'\nGROUP BY q\nORDER BY q",
           "refId": "A",
@@ -2075,15 +2097,39 @@
           "extrapolate": true,
           "format": "time_series",
           "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
-          "hide": true,
+          "hide": false,
           "intervalFactor": 1,
-          "query": "SELECT q, sum(n.v)/(last_value(h.value)*4)*100 as \"NWC/(Revenue L3m*4)\"\nFROM (SELECT\n    $dateCol as q,\n    indicator,\n    last_value(value) as v\nFROM $table\nWHERE sec_code == 'NLMK' and has(array('Trade and other accounts receivable','Inventories'), indicator) == 1\nGROUP BY q, indicator\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 2, now()))) as q , 'Trade and other accounts receivable' as indicator, 1800 as v)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 2, now()))) as q , 'Inventories' as indicator, 2100 as v)) as n\nLEFT JOIN financial_highlights as h on h.quarter == n.q\nWHERE h.sec_code == 'NLMK' and h.indicator == 'REVENUE'\nGROUP BY q\nORDER BY q\n",
+          "query": "SELECT q, sum(n.v)/(last_value(h.value)*4)*100 as \"NWC/(Revenue L3m*4) percent\"\nFROM (SELECT\n    $dateCol as q,\n    indicator,\n    last_value(value) as v\nFROM $table\nWHERE sec_code == 'NLMK' and has(array('Trade and other accounts receivable','Inventories'), indicator) == 1\nGROUP BY q, indicator\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 2, now()))) as q , 'Trade and other accounts receivable' as indicator, 1800 as v)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 2, now()))) as q , 'Inventories' as indicator, 2100 as v)) as n\nLEFT JOIN financial_highlights as h on h.quarter == n.q\nWHERE h.sec_code == 'NLMK' and h.indicator == 'REVENUE'\nGROUP BY q\nORDER BY q\n",
           "queryType": "randomWalk",
-          "rawQuery": "SELECT q, sum(n.v)/(last_value(h.value)*4)*100 as \"NWC/(Revenue L3m*4)\"\nFROM (SELECT\n    quarter as q,\n    indicator,\n    last_value(value) as v\nFROM default.financial_ratios\nWHERE sec_code == 'NLMK' and has(array('Trade and other accounts receivable','Inventories'), indicator) == 1\nGROUP BY q, indicator\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 'Trade and other accounts receivable' as indicator, 1700 as v)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 1, now()))) as q , 'Inventories' as indicator, 1850 as v)) as n\nLEFT JOIN financial_highlights as h on h.quarter == n.q\nWHERE h.sec_code == 'NLMK' and h.indicator == 'REVENUE'\nGROUP BY q\n\nORDER BY q",
+          "rawQuery": "SELECT q, sum(n.v)/(last_value(h.value)*4)*100 as \"NWC/(Revenue L3m*4) percent\"\nFROM (SELECT\n    quarter as q,\n    indicator,\n    last_value(value) as v\nFROM default.financial_ratios\nWHERE sec_code == 'NLMK' and has(array('Trade and other accounts receivable','Inventories'), indicator) == 1\nGROUP BY q, indicator\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 2, now()))) as q , 'Trade and other accounts receivable' as indicator, 1800 as v)\nUNION ALL (SELECT toDate(toStartOfQuarter(date_add(month, 2, now()))) as q , 'Inventories' as indicator, 2100 as v)) as n\nLEFT JOIN financial_highlights as h on h.quarter == n.q\nWHERE h.sec_code == 'NLMK' and h.indicator == 'REVENUE'\nGROUP BY q\nORDER BY q",
           "refId": "C",
           "round": "0s",
           "skip_comments": true,
           "table": "financial_ratios",
+          "tableLoading": false
+        },
+        {
+          "database": "default",
+          "datasource": {
+            "type": "vertamedia-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "dateColDataType": "quarter",
+          "dateLoading": false,
+          "dateTimeType": "DATETIME",
+          "datetimeLoading": false,
+          "extrapolate": true,
+          "format": "time_series",
+          "formattedQuery": "SELECT $timeSeries as t, count() FROM $table WHERE $timeFilter GROUP BY t ORDER BY t",
+          "hide": false,
+          "intervalFactor": 1,
+          "query": "SELECT\n    n.$dateCol as q,\n    last_value(n.value)/last_value(h.value)*100 as \"Increase in inventories of EBITDA percent\"\nFROM $table as n\nLEFT JOIN financial_highlights as h on h.$dateCol == n.$dateCol and n.sec_code == h.sec_code\nWHERE n.sec_code == 'NLMK' and n.indicator == 'Increase in inventories' and h.indicator == 'EBITDA'\nGROUP BY q\nORDER BY q\n",
+          "queryType": "randomWalk",
+          "rawQuery": "SELECT\n    n.quarter as q,\n    last_value(n.value)/last_value(h.value)*100 as \"Increase in inventories of EBITDA percent\"\nFROM default.financial_highlights as n\nLEFT JOIN financial_highlights as h on h.quarter == n.quarter and n.sec_code == h.sec_code\nWHERE n.sec_code == 'NLMK' and n.indicator == 'Increase in inventories' and h.indicator == 'EBITDA'\nGROUP BY q\nORDER BY q",
+          "refId": "D",
+          "round": "0s",
+          "skip_comments": true,
+          "table": "financial_highlights",
           "tableLoading": false
         }
       ],
@@ -3910,6 +3956,6 @@
   "timezone": "",
   "title": "HLMK Forecast",
   "uid": "nlmk",
-  "version": 17,
+  "version": 19,
   "weekStart": ""
 }
