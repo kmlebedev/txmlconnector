@@ -85,6 +85,25 @@ type Boards struct {
 	} `xml:"board"`
 }
 
+type Tick struct {
+	SecId        int     `xml:"secid"`        // идентификатор бумаги
+	TradeNo      int64   `xml:"tradeno"`      // номер сделки
+	TradeTime    string  `xml:"tradetime"`    // время сделки
+	Price        float64 `xml:"price"`        // цена
+	Quantity     int     `xml:"quantity"`     // количество лотов (контрактов)
+	Period       string  `xml:"period"`       // торговый период (O - открытие, N - торги, C - закрытие; передается только для ММВБ)
+	BuySell      string  `xml:"buysell"`      // B - покупка, S - продажа (с точки зрения того, кто инициировал сделку, приняв условия выставленной ранее заявки - передается только когда есть такая информация)
+	OpenInterest int     `xml:"openinterest"` // кол-во открытых позиций на срочном рынке
+	Board        string  `xml:"board"`        // Идентификатор режима торгов по умолчанию
+	SecCode      string  `xml:"seccode"`      // Код инструмента
+}
+
+// Тики
+type Ticks struct {
+	XMLName xml.Name `xml:"ticks"`
+	Items   []Tick   `xml:"tick"`
+}
+
 type Candle struct {
 	Date   string  `xml:"date,attr"`
 	Open   float64 `xml:"open,attr"`
