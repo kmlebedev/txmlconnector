@@ -1,4 +1,6 @@
-//+build windows,amd64
+//go:build windows && amd64
+// +build windows,amd64
+
 package tcServer
 
 // https://github.com/ivanantipin/transaqgrpc/blob/master/tqgrpcserver/XmlConnector.cs
@@ -7,16 +9,17 @@ import "C"
 import (
 	"context"
 	"fmt"
-	cmds "github.com/kmlebedev/txmlconnector/client/commands"
-	"github.com/kmlebedev/txmlconnector/proto"
-	log "github.com/sirupsen/logrus"
-	"google.golang.org/grpc"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 	"unsafe"
+
+	cmds "github.com/nableru/txmlconnector/client/commands"
+	"github.com/nableru/txmlconnector/proto"
+	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 )
 
 /*

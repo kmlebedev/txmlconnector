@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"google.golang.org/grpc"
 	"io"
 	"os"
 	"strings"
 
-	. "github.com/kmlebedev/txmlconnector/client/commands"
-	pb "github.com/kmlebedev/txmlconnector/proto"
+	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
+
+	. "github.com/nableru/txmlconnector/client/commands"
+	pb "github.com/nableru/txmlconnector/proto"
 )
 
 type TCClient struct {

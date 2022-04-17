@@ -1,4 +1,4 @@
-module github.com/kmlebedev/txmlconnector
+module github.com/nableru/txmlconnector
 
 go 1.16
 

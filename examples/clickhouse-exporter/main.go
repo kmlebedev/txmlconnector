@@ -3,15 +3,16 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"github.com/ClickHouse/clickhouse-go"
-	"github.com/kmlebedev/txmlconnector/client"
-	"github.com/kmlebedev/txmlconnector/client/commands"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ClickHouse/clickhouse-go"
+	tcClient "github.com/nableru/txmlconnector/client"
+	"github.com/nableru/txmlconnector/client/commands"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
