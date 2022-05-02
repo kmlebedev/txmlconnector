@@ -13,8 +13,9 @@ RUN \
     tar -C /usr/bin/ -xzvf /tmp/windows_$ARCH.tar.gz && \
     apk del build-dependencies && \
     rm -fr /var/cache/apk/* && \
-    rm -rf /tmp/*
+    rm -rf /tmp/* && \
+    mkdir -p logs
 
-COPY txmlconnector64-6.19.2.21.8.dll /usr/bin/
+COPY txmlconnector64-6.19.2.21.14.dll /usr/bin/
 
 ENTRYPOINT ["wine64 /usr/bin/txmlconnector-server.exe"]

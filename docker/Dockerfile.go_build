@@ -1,4 +1,4 @@
-FROM golang:1.17-rc-alpine as builder
+FROM golang:1.18-alpine as builder
 ENV GOARCH=amd64
 
 COPY ./client /go/src/github.com/kmlebedev/txmlconnector/client
@@ -17,7 +17,7 @@ RUN apk add --no-cache --virtual build-dependencies --update mingw-w64-gcc gcc m
 
 FROM alpine AS final
 
-ENV TC_DLL_VER=6.19.2.21.8
+ENV TC_DLL_VER=6.19.2.21.16
 COPY --from=builder /go/bin/server.exe /usr/bin/txmlconnector-server.exe
 COPY --from=builder /go/bin/client /usr/bin/txmlconnector-client
 COPY ./txmlconnector64-${TC_DLL_VER}.dll /usr/bin/
