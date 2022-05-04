@@ -9,6 +9,8 @@ on:
 jobs:
   build-release-binaries_windows:
     name: Build server
+    permissions:
+      contents: write  # for wangyoucao577/go-release-action to upload release assets
     runs-on: self-hosted
     strategy:
       matrix:
@@ -30,5 +32,4 @@ jobs:
           binary_name: "txmlconnector-server"
           pre_command: "apt-get update && apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64 && export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++"
           ldflags: "-extldflags -static -s -w"
-          build_command: "go build main.go"
           asset_name: "${{ matrix.goos }}_${{ matrix.goarch }}"
