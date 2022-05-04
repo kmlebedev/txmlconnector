@@ -1,4 +1,6 @@
-//+build windows,amd64
+//go:build windows && amd64
+// +build windows,amd64
+
 package tcServer
 
 // https://github.com/ivanantipin/transaqgrpc/blob/master/tqgrpcserver/XmlConnector.cs
@@ -26,7 +28,7 @@ import "C"
 
 const (
 	txml_dll_name     = "txmlconnector64"
-	txml_dll_ver_main = "6.19.2.21.14"
+	txml_dll_ver_main = "6.19.2.21.16"
 )
 
 var (
