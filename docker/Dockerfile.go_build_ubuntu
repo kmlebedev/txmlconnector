@@ -1,6 +1,7 @@
-FROM golang:1.17-rc-alpine as builder
+FROM golang:1.18-alpine as builder
 ENV GOARCH=amd64
 
+COPY ./main.go /go/src/github.com/kmlebedev/txmlconnector/main.go
 COPY ./client /go/src/github.com/kmlebedev/txmlconnector/client
 COPY ./examples/grpc-client /go/src/github.com/kmlebedev/txmlconnector/examples/grpc-client
 COPY ./server /go/src/github.com/kmlebedev/txmlconnector/server
@@ -10,14 +11,14 @@ COPY ./go.sum /go/src/github.com/kmlebedev/txmlconnector/go.sum
 
 WORKDIR /go/src/github.com/kmlebedev/txmlconnector
 
-RUN apk add --no-cache --virtual build-dependencies --update mingw-w64-gcc gcc mingw-w64-gcc libc-dev musl-dev && \
+RUN apk add --no-cache --virtual build-dependencies --update mingw-w64-gcc gcc libc-dev musl-dev && \
     go mod download && \
-    GOOS=windows CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -race -ldflags "-extldflags -static -s -w" -o /go/bin/server.exe github.com/kmlebedev/txmlconnector/server && \
-    GOOS=linux CGO_ENABLED=0 go build -ldflags "-extldflags -static" -o /go/bin/client github.com/kmlebedev/txmlconnector/examples/grpc-client
+    GOOS=windows CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -race -ldflags "-extldflags -static -s -w" -o /go/bin/server.exe main.go && \
+    GOOS=linux CGO_ENABLED=0 go build -ldflags "-extldflags -static" -o /go/bin/client examples/grpc-client/main.go
 
-FROM ubuntu:20.04 AS final
+FROM ubuntu:22.04 AS final
 
-ENV TC_DLL_VER=6.19.2.21.8
+ENV TC_DLL_VER=6.19.2.21.16
 COPY --from=builder /go/bin/server.exe /usr/bin/txmlconnector-server.exe
 COPY --from=builder /go/bin/client /usr/bin/txmlconnector-client
 COPY ./txmlconnector64-${TC_DLL_VER}.dll /usr/bin/
@@ -33,4 +34,4 @@ RUN mkdir logs && \
 # server gprc port
 EXPOSE 50051
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint_ubuntu.sh"]

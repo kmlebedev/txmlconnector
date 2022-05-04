@@ -20,7 +20,7 @@ queues: queues_build
 
 .PHONY: client
 client: ## Build and run client.
-	go build -race -ldflags "-s -w" -o bin/client client/main.go
+	go build -race -ldflags "-s -w" -o bin/client examples/grpc-client/main.go
 	bin/client
 
 .PHONY: tgbot
