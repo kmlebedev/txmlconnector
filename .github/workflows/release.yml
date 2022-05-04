@@ -32,4 +32,17 @@ jobs:
           binary_name: "txmlconnector-server"
           pre_command: "apt-get update && apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64 && export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++"
           ldflags: "-extldflags -static -s -w"
-          asset_name: "${{ matrix.goos }}_${{ matrix.goarch }}"
+          asset_name: "server_${{ matrix.goos }}_${{ matrix.goarch }}"
+      - name: Go Release queues
+        uses: wangyoucao577/go-release-action@16624612d4e2b73de613857a362d294700207fff # v1.22
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          goos: ${{ matrix.goos }}
+          goarch: ${{ matrix.goarch }}
+          overwrite: true
+          extra_files: txmlconnector64-6.19.2.21.16.dll
+          project_path: "examples/queues/main.go"
+          binary_name: "txmlconnector-queues"
+          pre_command: "apt-get update && apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64 && export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++"
+          ldflags: "-extldflags -static -s -w"
+          asset_name: "server_${{ matrix.goos }}_${{ matrix.goarch }}"
