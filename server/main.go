@@ -16,6 +16,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 	"unsafe"
@@ -58,6 +59,7 @@ func receiveData(cmsg *C.char) (ret uintptr) {
 
 func init() {
 	ll := log.InfoLevel
+	_ = os.MkdirAll(filepath.Join(".", "logs"), os.ModePerm)
 	if lvl, ok := os.LookupEnv("TC_LOG_LEVEL"); ok {
 		if level, err := log.ParseLevel(lvl); err == nil {
 			ll = level
