@@ -130,20 +130,25 @@ func SetupCloseHandler(srv *grpc.Server) {
 func TxmlSendCommand(msg string) (data *string) {
 	log.Info("txmlSendCommand() Call: ", msg)
 	reqData := C.CString(msg)
-	resp, _, err := procSendCommand.Call(uintptr(unsafe.Pointer(reqData)))
+	reqDataPtr := uintptr(unsafe.Pointer(reqData))
+	respPtr, _, err := procSendCommand.Call(reqDataPtr)
 	if err != syscall.Errno(0) && err != nil {
 		log.Error("txmlSendCommand() ", err.Error())
 		return nil
 	}
-	respData := C.GoString((*C.char)(unsafe.Pointer(resp)))
-	defer procFreeMemory.Call(resp)
+	respData := C.GoString((*C.char)(unsafe.Pointer(respPtr)))
+	defer procFreeMemory.Call(respPtr)
 	log.Info("SendCommand Data: ", respData)
 	return &respData
 }
 
 func (s *server) SendCommand(ctx context.Context, request *transaqConnector.SendCommandRequest) (*transaqConnector.SendCommandResponse, error) {
+	msg := TxmlSendCommand(request.Message)
+	if msg == nil {
+		return nil, fmt.Errorf("nil response")
+	}
 	return &transaqConnector.SendCommandResponse{
-		Message: *TxmlSendCommand(request.Message),
+		Message: *msg,
 	}, nil
 }
 
