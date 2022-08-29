@@ -222,9 +222,9 @@ func main() {
 		loadAllInvestingData(conn)
 	}
 	if ticker == "Exports" || ticker == "ALL" {
-		//if err := crawExports(conn); err != nil {
-		//	log.Error(err)
-		//}
+		if err := crawExports(conn); err != nil {
+			log.Error(err)
+		}
 		for code, _ := range exporter.CodeToId {
 			if err := exporter.LoadHistoricalData(conn, code, "07/07/2014", time.Now().Format("01/02/2006"), "Daily"); err != nil {
 				log.Error(err)
