@@ -1,4 +1,4 @@
-FROM golang:1.18 as builder
+FROM golang:1.19-alpine as builder
 ENV GOARCH=amd64
 
 COPY ./main.go /go/src/github.com/kmlebedev/txmlconnector/main.go
@@ -13,7 +13,7 @@ WORKDIR /go/src/github.com/kmlebedev/txmlconnector
 
 RUN apk add --no-cache --virtual build-dependencies --update mingw-w64-gcc gcc mingw-w64-gcc libc-dev musl-dev && \
     go mod download && \
-    GOOS=windows CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -race -ldflags "-extldflags -static -s -w" -o /go/bin/server.exe main.go && \
+    GOOS=windows CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -ldflags "-extldflags -static -s -w" -o /go/bin/server.exe main.go && \
     GOOS=linux CGO_ENABLED=0 go build -ldflags "-extldflags -static" -o /go/bin/client examples/grpc-client/main.go
 
 FROM alpine AS final

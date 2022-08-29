@@ -5,7 +5,7 @@ compile: ## Compile the proto file.
 .PHONY: server
 
 server_build:
-	CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -race -ldflags "-extldflags -static -s -w" -o bin/server.exe main.go
+	CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -ldflags "-extldflags -static -s -w" -o bin/server.exe main.go
 
 ## Build and run server. brew install mingw-w64
 server: server_build
@@ -13,19 +13,19 @@ server: server_build
 	wine64 bin/server.exe
 
 queues_build:
-	CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -race -ldflags "-extldflags -static -s -w" -o bin/queues.exe examples/queues/main.go
+	CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -ldflags "-extldflags -static -s -w" -o bin/queues.exe examples/queues/main.go
 
 queues: queues_build
 	wine64 bin/queues.exe
 
 .PHONY: client
 client: ## Build and run client.
-	go build -race -ldflags "-s -w" -o bin/client examples/grpc-client/main.go
+	go build -ldflags "-s -w" -o bin/client examples/grpc-client/main.go
 	bin/client
 
 .PHONY: tgbot
 tgbot: ## Build and run telegram bot app.
-	go build -race -ldflags "-s -w" -o bin/tgbot examples/telegram-bot/main.go
+	go build -ldflags "-s -w" -o bin/tgbot examples/telegram-bot/main.go
 	bin/tgbot
 
 build:
