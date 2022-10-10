@@ -2,12 +2,12 @@ version: '2'
 
 services:
   server:
-    image: kmlebedev/txmlconnector:6.19.2.21.8
+    image: kmlebedev/txmlconnector:6.19.2.21.21
     ports:
       - 50051:50051
     command: "server"
   client:
-    image: kmlebedev/txmlconnector:6.19.2.21.8
+    image: kmlebedev/txmlconnector:6.19.2.21.21
     command: "client"
     environment:
       TC_LOGIN: "TCNN9979"

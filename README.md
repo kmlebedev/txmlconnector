@@ -65,7 +65,7 @@ sudo apt install wine64
 
 ```shell
 export TC_LOG_LEVEL=debug
-export TC_DLL_PATH=txmlconnector64-6.19.2.21.8.dll
+export TC_DLL_PATH=txmlconnector64-6.19.2.21.21.dll
 ```
 
 #### Example output:
@@ -115,6 +115,7 @@ docker-compose -f docker/transaq-clickhouse-exporter-compose.yaml -p transaq up
 ```
 
 ### Links
+ - [TXmlConnector last(2.21.21) version](https://files.comon.ru/usercontent/TXmlConnector.zip)
  - [TRANSAQ Connector Forum](http://www.transaq.ru/forum/index.php?board=6.0)
  - [TransaqConnector Linux Finam Forum](https://forum.finam.ru/posts/t109457-TransaqConnector-Linux)
  - [TransaqGrpcWrapper](https://github.com/ivanantipin/transaqgrpc)
