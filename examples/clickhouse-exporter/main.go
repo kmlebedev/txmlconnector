@@ -1,9 +1,10 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
-	"github.com/ClickHouse/clickhouse-go"
+	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/kmlebedev/txmlconnector/client"
 	"github.com/kmlebedev/txmlconnector/client/commands"
 	log "github.com/sirupsen/logrus"
@@ -17,8 +18,8 @@ import (
 const (
 	EnvKeyLogLevel          = "LOG_LEVEL"
 	ExportCandleCount       = 1000
-	ChCandlesInsertQuery    = "INSERT INTO candles (date, sec_code, period, open, close, high, low, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-	ChSecuritiesInsertQuery = "INSERT INTO securities (*) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+	ChCandlesInsertQuery    = "INSERT INTO candles"
+	ChSecuritiesInsertQuery = "INSERT INTO securities"
 )
 
 func main() {
@@ -30,13 +31,15 @@ func main() {
 	if chUrl := os.Getenv("CLICKHOUSE_URL"); chUrl != "" {
 		clickhouseUrl = chUrl
 	}
-	var connect *sql.DB
+	clickhouseOptions, _ := clickhouse.ParseDSN(clickhouseUrl)
+	var connect driver.Conn
+	ctx := context.Background()
 	for i := 0; i < 10; i++ {
 		log.Infof("Try connect to clickhouse %s", clickhouseUrl)
-		if connect, err = sql.Open("clickhouse", clickhouseUrl); err != nil {
+		if connect, err = clickhouse.Open(clickhouseOptions); err != nil {
 			log.Fatal(err)
 		}
-		if err := connect.Ping(); err != nil {
+		if err := connect.Ping(ctx); err != nil {
 			if exception, ok := err.(*clickhouse.Exception); ok {
 				log.Infof("[%d] %s \n%s\n", exception.Code, exception.Message, exception.StackTrace)
 			}
@@ -46,7 +49,7 @@ func main() {
 		}
 		time.Sleep(10 * time.Second)
 	}
-	_, err = connect.Exec(`
+	err = connect.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS candles (
 		   date   DateTime,
 		   sec_code FixedString(16),
@@ -61,7 +64,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	_, err = connect.Exec(`
+	err = connect.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS securities (
 			secid   UInt16,
 			seccode FixedString(16),
@@ -130,45 +133,43 @@ func main() {
 					}
 					log.Debugf(fmt.Sprintf("Positions: \n%+v\n", tc.Data.Positions))
 				case "candles":
-					var tx, _ = connect.Begin()
-					var stmt, _ = tx.Prepare(ChCandlesInsertQuery)
+					batch, _ := connect.PrepareBatch(ctx, ChCandlesInsertQuery)
 					dataCandleCountLock.Lock()
 					dataCandleCount = len(tc.Data.Candles.Items)
 					dataCandleCountLock.Unlock()
 					for _, candle := range tc.Data.Candles.Items {
 						candleDate, _ := time.Parse("02.01.2006 15:04:05", candle.Date)
-						if _, err := stmt.Exec(
+						if err := batch.Append(
 							fmt.Sprint(candleDate.Format("2006-01-02 15:04:05")),
 							tc.Data.Candles.SecCode,
-							tc.Data.Candles.Period,
-							candle.Open,
-							candle.Close,
-							candle.High,
-							candle.Low,
-							candle.Volume,
+							uint8(tc.Data.Candles.Period),
+							float32(candle.Open),
+							float32(candle.Close),
+							float32(candle.High),
+							float32(candle.Low),
+							uint64(candle.Volume),
 						); err != nil {
 							log.Error(err)
 						}
 					}
-					if err := tx.Commit(); err != nil {
+					if err := batch.Send(); err != nil {
 						log.Error(err)
 					}
 				case "quotations":
 					timeNow := time.Now()
-					var tx, _ = connect.Begin()
-					var stmt, _ = tx.Prepare(ChCandlesInsertQuery)
+					batch, _ := connect.PrepareBatch(ctx, ChCandlesInsertQuery)
 					for _, quotation := range tc.Data.Quotations.Items {
 						quotationCandle, quotationCandleExist := quotationCandles[quotation.SecId]
 						if strings.HasSuffix(quotation.Time, ":00") && quotation.Last > 0 && quotationCandleExist {
-							if _, err := stmt.Exec(
+							if err := batch.Append(
 								fmt.Sprintf("%s %s", timeNow.Format("2006-01-02"), quotation.Time),
 								quotation.SecCode,
-								1,
-								quotationCandles[quotation.SecId].Open,
-								quotation.Last, // Close
-								quotationCandles[quotation.SecId].High,
-								quotationCandles[quotation.SecId].Low,
-								quotationCandles[quotation.SecId].Volume,
+								uint8(1),
+								float32(quotationCandles[quotation.SecId].Open),
+								float32(quotation.Last), // Close
+								float32(quotationCandles[quotation.SecId].High),
+								float32(quotationCandles[quotation.SecId].Low),
+								uint64(quotationCandles[quotation.SecId].Volume),
 							); err != nil {
 								log.Fatal(err)
 							}
@@ -195,7 +196,7 @@ func main() {
 							}
 						}
 					}
-					if err := tx.Commit(); err != nil {
+					if err := batch.Send(); err != nil {
 						log.Error(err)
 					}
 				default:
@@ -238,8 +239,10 @@ func main() {
 	if ePeriodSeconds := os.Getenv("EXPORT_PERIOD_SECONDS"); ePeriodSeconds != "" {
 		exportPeriodSeconds = strings.Split(ePeriodSeconds, ",")
 	}
-	var txSec, _ = connect.Begin()
-	var stmtSec, _ = txSec.Prepare(ChSecuritiesInsertQuery)
+	batchSec, err := connect.PrepareBatch(ctx, ChSecuritiesInsertQuery)
+	if err != nil {
+		log.Error(err)
+	}
 	for _, sec := range tc.Data.Securities.Items {
 		exportSecBoardFound := false
 		for _, exportSecBoard := range exportSecBoards {
@@ -266,10 +269,20 @@ func main() {
 		if sec.SecId == 0 {
 			continue
 		}
-		//                           secid,    seccode,     instrclass,    board,    market, shortname,      decimals,     minstep,     lotsize,      point_cost,    opmask,    sectype,     sec_tz,     quotestype,     MIC,    ticker
 		log.Debugf("%+v", sec)
-		if res, err := stmtSec.Exec(sec.SecId, sec.SecCode, sec.InstrClass, sec.Board, sec.Market, sec.ShortName, sec.Decimals, sec.MinStep, sec.LotSize, sec.PointCost, sec.SecType, sec.QuotesType); err != nil {
-			log.Error(res, err)
+		if err := batchSec.Append(uint16(sec.SecId),
+			sec.SecCode,
+			sec.InstrClass,
+			sec.Board,
+			uint8(sec.Market),
+			sec.ShortName,
+			uint8(sec.Decimals),
+			float32(sec.MinStep),
+			uint8(sec.LotSize),
+			float32(sec.PointCost),
+			sec.SecType,
+			uint8(sec.QuotesType)); err != nil {
+			log.Error(err)
 		}
 		quotations = append(quotations, commands.SubSecurity{SecId: sec.SecId})
 		for _, kind := range tc.Data.CandleKinds.Items {
@@ -319,7 +332,7 @@ func main() {
 			}
 		}
 	}
-	if err := txSec.Commit(); err != nil {
+	if err := batchSec.Send(); err != nil {
 		log.Error(err)
 	}
 	// receive <quotations><quotation secid="21"><board>TQBR</board><seccode>GMKN</seccode><last>24954</last><quantity>4</quantity><time>11:24:00</time><change>220</change><priceminusprevwaprice>432</priceminusprevwaprice><bid>24950</bid><biddepth>35</biddepth><biddeptht>16188</biddeptht><numbids>1563</numbids><offer>24962</offer><offerdepth>51</offerdepth><offerdeptht>25222</offerdeptht><numoffers>1154</numoffers><voltoday>54772</voltoday><numtrades>6273</numtrades><valtoday>1364.723</valtoday></quotation></quotations>
