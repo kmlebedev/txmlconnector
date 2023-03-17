@@ -65,7 +65,7 @@ sudo apt install wine64
 
 ```shell
 export TC_LOG_LEVEL=debug
-export TC_DLL_PATH=txmlconnector64-6.19.2.21.21.dll
+export TC_DLL_PATH=txmlconnector64-6.32.2.21.23.dll
 ```
 
 #### Example output:
