@@ -28,7 +28,7 @@ jobs:
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
           overwrite: true
-          extra_files: txmlconnector64-6.19.2.21.21.dll
+          extra_files: txmlconnector64-6.32.2.21.23.dll
           binary_name: "txmlconnector-server"
           pre_command: "apt-get update && apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64 && export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++"
           ldflags: "-extldflags -static -s -w"
@@ -40,7 +40,7 @@ jobs:
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
           overwrite: true
-          extra_files: txmlconnector64-6.19.2.21.21.dll
+          extra_files: txmlconnector64-6.32.2.21.23.dll
           project_path: "examples/queues"
           binary_name: "txmlconnector-queues"
           pre_command: "apt-get update && apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64 && export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++"
