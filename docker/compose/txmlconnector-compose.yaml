@@ -7,7 +7,7 @@ services:
       - 50051:50051
     command: "server"
   client:
-    image: kmlebedev/txmlconnector:6.19.2.21.21
+    image: kmlebedev/txmlconnector:6.32.2.21.23
     command: "client"
     environment:
       TC_LOGIN: "TCNN9979"

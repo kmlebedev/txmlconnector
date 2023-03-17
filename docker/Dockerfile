@@ -16,6 +16,6 @@ RUN \
     rm -rf /tmp/* && \
     mkdir -p logs
 
-COPY txmlconnector64-6.19.2.21.21.dll /usr/bin/
+COPY txmlconnector64-6.32.2.21.23.dll /usr/bin/
 
 ENTRYPOINT ["wine64 /usr/bin/txmlconnector-server.exe"]
