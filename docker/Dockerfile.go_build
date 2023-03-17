@@ -18,7 +18,7 @@ RUN apk add --no-cache --virtual build-dependencies --update mingw-w64-gcc gcc m
 
 FROM alpine AS final
 
-ENV TC_DLL_VER=6.19.2.21.21
+ENV TC_DLL_VER=6.32.2.21.23
 COPY --from=builder /go/bin/server.exe /usr/bin/txmlconnector-server.exe
 COPY --from=builder /go/bin/client /usr/bin/txmlconnector-client
 COPY ./txmlconnector64-${TC_DLL_VER}.dll /usr/bin/
