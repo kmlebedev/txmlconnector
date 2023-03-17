@@ -29,7 +29,7 @@ services:
     depends_on:
       - clickhouse
   exporter:
-    image: kmlebedev/transaq-clickhouse-exporter:0.2
+    image: kmlebedev/transaq-clickhouse-exporter:v0.26
     environment:
       CLICKHOUSE_URL: "tcp://clickhouse:9000"
       TC_LOGIN: "TCNN9979"
