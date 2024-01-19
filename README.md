@@ -38,12 +38,12 @@ service ConnectService {
 
 ### Starting server in docker
 ```
-docker run kmlebedev/txmlconnector server
+docker run -p 50051:50051 kmlebedev/txmlconnector server
 ```
 
 ### Start server and client
 ```
-docker-compose -f docker/txmlconnector-compose.yaml -p txmlconnector up
+docker compose -f docker/txmlconnector-compose.yaml -p txmlconnector up
 ```
 
 ### Starting server in Linux/MacOSX
