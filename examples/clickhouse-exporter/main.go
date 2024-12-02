@@ -17,55 +17,24 @@ import (
 
 const (
 	EnvKeyLogLevel          = "LOG_LEVEL"
-	ExportCandleCount       = 1000
-	ChCandlesInsertQuery    = "INSERT INTO candles"
-	ChSecuritiesInsertQuery = "INSERT INTO securities"
-)
+	ExportCandleCount       = 0
+	ChCandlesInsertQuery    = "INSERT INTO transaq_candles"
+	ChSecuritiesInsertQuery = "INSERT INTO transaq_securities"
+	ChTradesInsertQuery     = "INSERT INTO transaq_trades"
 
-func main() {
-	var err error
-	if lvl, err := log.ParseLevel(os.Getenv(EnvKeyLogLevel)); err == nil {
-		log.SetLevel(lvl)
-	}
-	clickhouseUrl := "tcp://127.0.0.1:9000"
-	if chUrl := os.Getenv("CLICKHOUSE_URL"); chUrl != "" {
-		clickhouseUrl = chUrl
-	}
-	clickhouseOptions, _ := clickhouse.ParseDSN(clickhouseUrl)
-	var connect driver.Conn
-	ctx := context.Background()
-	for i := 0; i < 10; i++ {
-		log.Infof("Try connect to clickhouse %s", clickhouseUrl)
-		if connect, err = clickhouse.Open(clickhouseOptions); err != nil {
-			log.Fatal(err)
-		}
-		if err := connect.Ping(ctx); err != nil {
-			if exception, ok := err.(*clickhouse.Exception); ok {
-				log.Infof("[%d] %s \n%s\n", exception.Code, exception.Message, exception.StackTrace)
-			}
-			log.Warn(err)
-		} else {
-			break
-		}
-		time.Sleep(10 * time.Second)
-	}
-	err = connect.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS candles (
-		   date   DateTime,
-		   sec_code FixedString(16),
-		   period UInt8,
-		   open   Float32,
-		   close  Float32,
-		   high   Float32,
-		   low    Float32,
-		   volume UInt64
+	candlesDDL = `CREATE TABLE IF NOT EXISTS transaq_candles (
+		date   DateTime,
+		sec_code FixedString(16),
+		period UInt8,
+		open   Float32,
+		close  Float32,
+		high   Float32,
+		low    Float32,
+		volume UInt64
 		) ENGINE = ReplacingMergeTree()
-		ORDER BY (date, sec_code, period)`)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = connect.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS securities (
+		ORDER BY (date, sec_code, period)`
+
+	securitiesDDL = `CREATE TABLE IF NOT EXISTS transaq_securities (
 			secid   UInt16,
 			seccode FixedString(16),
 			instrclass String,
@@ -79,148 +48,246 @@ func main() {
 			sectype String,
 			quotestype UInt8
 		) ENGINE = ReplacingMergeTree()
-		ORDER BY (secid, seccode, board)`)
-	if err != nil {
-		log.Fatal(err)
+		ORDER BY (secid, seccode, board)`
+
+	tradesDDL = `CREATE TABLE IF NOT EXISTS transaq_trades (
+		time   DateTime,
+		secid   UInt16,
+		sec_code LowCardinality(FixedString(16)),
+        trade_no Int64,
+		board LowCardinality(String),
+		pice   Float32,
+		quantity UInt32,
+        buy_sell LowCardinality(FixedString(1)),
+        open_interest Int32,
+        period LowCardinality(FixedString(1)),
+		) ENGINE = ReplacingMergeTree()
+		ORDER BY (secid, sec_code, trade_no, time, buy_sell)`
+)
+
+var (
+	ctx                 = context.Background()
+	lvl                 log.Level
+	tc                  *tcClient.TCClient
+	connect             driver.Conn
+	positions           = commands.Positions{}
+	quotationCandles    = make(map[int]commands.Candle)
+	dataCandleCount     = ExportCandleCount
+	dataCandleCountLock = sync.RWMutex{}
+)
+
+func init() {
+	var err error
+
+	if lvl, err = log.ParseLevel(os.Getenv(EnvKeyLogLevel)); err == nil {
+		log.SetLevel(lvl)
 	}
-	tc, err := tcClient.NewTCClient()
-	if err != nil {
-		log.Panic(err)
+	clickhouseUrl := "tcp://127.0.0.1:9000"
+	if chUrl := os.Getenv("CLICKHOUSE_URL"); chUrl != "" {
+		clickhouseUrl = chUrl
 	}
-	defer tc.Disconnect()
-	positions := commands.Positions{}
-	quotationCandles := make(map[int]commands.Candle)
-	dataCandleCount := ExportCandleCount
-	dataCandleCountLock := sync.RWMutex{}
-	go func() {
-		for {
-			select {
-			case status := <-tc.ServerStatusChan:
-				{
-					if status.Connected != "true" {
-						// Todo try reconect
-						log.Warnf("txmlconnector not connected %+v", status)
-					}
-				}
-			case resp := <-tc.ResponseChannel:
-				switch resp {
-				case "united_portfolio":
-					log.Infof(fmt.Sprintf("UnitedPortfolio: ```\n%+v\n```", tc.Data.UnitedPortfolio))
-				case "united_equity":
-					log.Infof(fmt.Sprintf("UnitedEquity: ```\n%+v\n```", tc.Data.UnitedEquity))
-				case "positions":
-					// Todo avoid overwrite if only change field
-					if tc.Data.Positions.UnitedLimits != nil && len(tc.Data.Positions.UnitedLimits) > 0 {
-						positions.UnitedLimits = tc.Data.Positions.UnitedLimits
-					}
-					if tc.Data.Positions.SecPositions != nil && len(tc.Data.Positions.SecPositions) > 0 {
-						positions.SecPositions = tc.Data.Positions.SecPositions
-					}
-					if tc.Data.Positions.FortsMoney != nil && len(tc.Data.Positions.FortsMoney) > 0 {
-						positions.FortsMoney = tc.Data.Positions.FortsMoney
-					}
-					if tc.Data.Positions.MoneyPosition != nil && len(tc.Data.Positions.MoneyPosition) > 0 {
-						positions.MoneyPosition = tc.Data.Positions.MoneyPosition
-					}
-					if tc.Data.Positions.FortsPosition != nil && len(tc.Data.Positions.FortsPosition) > 0 {
-						positions.FortsPosition = tc.Data.Positions.FortsPosition
-					}
-					if tc.Data.Positions.FortsCollaterals != nil && len(tc.Data.Positions.FortsCollaterals) > 0 {
-						positions.FortsCollaterals = tc.Data.Positions.FortsCollaterals
-					}
-					if tc.Data.Positions.SpotLimit != nil && len(tc.Data.Positions.SpotLimit) > 0 {
-						positions.SpotLimit = tc.Data.Positions.SpotLimit
-					}
-					log.Debugf(fmt.Sprintf("Positions: \n%+v\n", tc.Data.Positions))
-				case "candles":
-					batch, _ := connect.PrepareBatch(ctx, ChCandlesInsertQuery)
-					dataCandleCountLock.Lock()
-					dataCandleCount = len(tc.Data.Candles.Items)
-					dataCandleCountLock.Unlock()
-					for _, candle := range tc.Data.Candles.Items {
-						candleDate, _ := time.Parse("02.01.2006 15:04:05", candle.Date)
-						if err := batch.Append(
-							fmt.Sprint(candleDate.Format("2006-01-02 15:04:05")),
-							tc.Data.Candles.SecCode,
-							uint8(tc.Data.Candles.Period),
-							float32(candle.Open),
-							float32(candle.Close),
-							float32(candle.High),
-							float32(candle.Low),
-							uint64(candle.Volume),
-						); err != nil {
-							log.Error(err)
-						}
-					}
-					if err := batch.Send(); err != nil {
-						log.Error(err)
-					}
-				case "quotations":
-					timeNow := time.Now()
-					batch, _ := connect.PrepareBatch(ctx, ChCandlesInsertQuery)
-					for _, quotation := range tc.Data.Quotations.Items {
-						quotationCandle, quotationCandleExist := quotationCandles[quotation.SecId]
-						if strings.HasSuffix(quotation.Time, ":00") && quotation.Last > 0 && quotationCandleExist {
-							if err := batch.Append(
-								fmt.Sprintf("%s %s", timeNow.Format("2006-01-02"), quotation.Time),
-								quotation.SecCode,
-								uint8(1),
-								float32(quotationCandles[quotation.SecId].Open),
-								float32(quotation.Last), // Close
-								float32(quotationCandles[quotation.SecId].High),
-								float32(quotationCandles[quotation.SecId].Low),
-								uint64(quotationCandles[quotation.SecId].Volume),
-							); err != nil {
-								log.Fatal(err)
-							}
-							quotationCandles[quotation.SecId] = commands.Candle{}
-						} else {
-							if quotationCandleExist {
-								if quotationCandle.Open == 0 && quotation.Open != 0 {
-									quotationCandle.Open = quotation.Open
-								}
-								if quotation.Last > quotationCandle.High {
-									quotationCandle.High = quotation.Last
-								}
-								if quotation.Last < quotationCandle.Low || quotationCandle.Low == 0 {
-									quotationCandle.Low = quotation.Last
-								}
-								quotationCandle.Volume += int64(quotation.Quantity)
-							} else {
-								quotationCandles[quotation.SecId] = commands.Candle{
-									Open:   quotation.Last,
-									Low:    quotation.Last,
-									High:   quotation.Last,
-									Volume: int64(quotation.Quantity),
-								}
-							}
-						}
-					}
-					if err := batch.Send(); err != nil {
-						log.Error(err)
-					}
-				default:
-					log.Debugf(fmt.Sprintf("receive %s", resp))
-				}
-			}
+	clickhouseOptions, _ := clickhouse.ParseDSN(clickhouseUrl)
+	for i := 0; i < 10; i++ {
+		log.Infof("Try connect to clickhouse %s", clickhouseUrl)
+		if connect, err = clickhouse.Open(clickhouseOptions); err != nil {
+			log.Fatal(err)
 		}
-	}()
-	go func() {
-		for {
-			select {
-			case status := <-tc.ServerStatusChan:
-				log.Infof("Status %v", status)
-				//case upd := <-tc.SecInfoUpdChan:
-				//	log.Debugf("secInfoUpd %v", upd)
+		if err := connect.Ping(ctx); err != nil {
+			if exception, ok := err.(*clickhouse.Exception); ok {
+				log.Infof("[%d] %s \n%s\n", exception.Code, exception.Message, exception.StackTrace)
 			}
-		}
-	}()
-	for {
-		if tc.Data.ServerStatus.Connected == "true" {
+			log.Warn(err)
+		} else {
 			break
 		}
+		time.Sleep(3 * time.Second)
+	}
+	if err = connect.Exec(ctx, candlesDDL); err != nil {
+		log.Fatal(err)
+	}
+	if err = connect.Exec(ctx, securitiesDDL); err != nil {
+		log.Fatal(err)
+	}
+	if err = connect.Exec(ctx, tradesDDL); err != nil {
+		log.Fatal(err)
+	}
+	if tc, err = tcClient.NewTCClient(); err != nil {
+		log.Fatal(err)
+	}
+	go processTransaq()
+}
+
+func processTransaq() {
+	var status commands.ServerStatus
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case upd := <-tc.SecInfoUpdChan:
+			log.Infof("secInfoUpd %+v", upd)
+		case status = <-tc.ServerStatusChan:
+			switch status.Connected {
+			case "true":
+				log.Infof("server status is true")
+			case "error":
+				log.Warnf("txmlconnector not connected %+v\n", status)
+			default:
+				log.Infof("Status %+v", status)
+			}
+		case <-ticker.C:
+			if status.Connected != "error" {
+				continue
+			}
+			if err := tc.Connect(); err != nil {
+				log.Fatal(err)
+			}
+		case trades := <-tc.AllTradesChan:
+			//go func(t *commands.AllTrades) {
+			batch, _ := connect.PrepareBatch(ctx, ChTradesInsertQuery)
+			for _, trade := range trades.Items {
+				tradeTime, _ := time.Parse("02.01.2006 15:04:05", trade.Time)
+				if err := batch.Append(
+					fmt.Sprint(tradeTime.Format("2006-01-02 15:04:05")),
+					trade.SecId,
+					trade.SecCode,
+					trade.TradeNo,
+					trade.Board,
+					trade.Pice,
+					trade.Quantity,
+					trade.BuySell,
+					trade.OpenInterest,
+					trade.Period,
+				); err != nil {
+					log.Errorf("trades batch append trade: %+v: %+v", trade, err)
+				}
+				if err := batch.Send(); err != nil {
+					log.Error("trades batch send: %v", err)
+				}
+			}
+			//}(&trades)
+		case resp := <-tc.ResponseChannel:
+			switch resp {
+			case "united_portfolio":
+				log.Infof(fmt.Sprintf("UnitedPortfolio: ```\n%+v\n```", tc.Data.UnitedPortfolio))
+			case "united_equity":
+				log.Infof(fmt.Sprintf("UnitedEquity: ```\n%+v\n```", tc.Data.UnitedEquity))
+			case "positions":
+				// Todo avoid overwrite if only change field
+				if tc.Data.Positions.UnitedLimits != nil && len(tc.Data.Positions.UnitedLimits) > 0 {
+					positions.UnitedLimits = tc.Data.Positions.UnitedLimits
+				}
+				if tc.Data.Positions.SecPositions != nil && len(tc.Data.Positions.SecPositions) > 0 {
+					positions.SecPositions = tc.Data.Positions.SecPositions
+				}
+				if tc.Data.Positions.FortsMoney != nil && len(tc.Data.Positions.FortsMoney) > 0 {
+					positions.FortsMoney = tc.Data.Positions.FortsMoney
+				}
+				if tc.Data.Positions.MoneyPosition != nil && len(tc.Data.Positions.MoneyPosition) > 0 {
+					positions.MoneyPosition = tc.Data.Positions.MoneyPosition
+				}
+				if tc.Data.Positions.FortsPosition != nil && len(tc.Data.Positions.FortsPosition) > 0 {
+					positions.FortsPosition = tc.Data.Positions.FortsPosition
+				}
+				if tc.Data.Positions.FortsCollaterals != nil && len(tc.Data.Positions.FortsCollaterals) > 0 {
+					positions.FortsCollaterals = tc.Data.Positions.FortsCollaterals
+				}
+				if tc.Data.Positions.SpotLimit != nil && len(tc.Data.Positions.SpotLimit) > 0 {
+					positions.SpotLimit = tc.Data.Positions.SpotLimit
+				}
+				log.Debugf(fmt.Sprintf("Positions: \n%+v\n", tc.Data.Positions))
+			case "candles":
+				batch, _ := connect.PrepareBatch(ctx, ChCandlesInsertQuery)
+				dataCandleCountLock.Lock()
+				dataCandleCount = len(tc.Data.Candles.Items)
+				dataCandleCountLock.Unlock()
+				for _, candle := range tc.Data.Candles.Items {
+					candleDate, _ := time.Parse("02.01.2006 15:04:05", candle.Date)
+					if err := batch.Append(
+						fmt.Sprint(candleDate.Format("2006-01-02 15:04:05")),
+						tc.Data.Candles.SecCode,
+						uint8(tc.Data.Candles.Period),
+						float32(candle.Open),
+						float32(candle.Close),
+						float32(candle.High),
+						float32(candle.Low),
+						uint64(candle.Volume),
+					); err != nil {
+						log.Error(err)
+					}
+				}
+				if err := batch.Send(); err != nil {
+					log.Error(err)
+				}
+			case "quotations":
+				timeNow := time.Now()
+				batch, _ := connect.PrepareBatch(ctx, ChCandlesInsertQuery)
+				for _, quotation := range tc.Data.Quotations.Items {
+					quotationCandle, quotationCandleExist := quotationCandles[quotation.SecId]
+					if strings.HasSuffix(quotation.Time, ":00") && quotation.Last > 0 && quotationCandleExist {
+						if err := batch.Append(
+							fmt.Sprintf("%s %s", timeNow.Format("2006-01-02"), quotation.Time),
+							quotation.SecCode,
+							uint8(1),
+							float32(quotationCandles[quotation.SecId].Open),
+							float32(quotation.Last), // Close
+							float32(quotationCandles[quotation.SecId].High),
+							float32(quotationCandles[quotation.SecId].Low),
+							uint64(quotationCandles[quotation.SecId].Volume),
+						); err != nil {
+							log.Fatal(err)
+						}
+						quotationCandles[quotation.SecId] = commands.Candle{}
+					} else {
+						if quotationCandleExist {
+							if quotationCandle.Open == 0 && quotation.Open != 0 {
+								quotationCandle.Open = quotation.Open
+							}
+							if quotation.Last > quotationCandle.High {
+								quotationCandle.High = quotation.Last
+							}
+							if quotation.Last < quotationCandle.Low || quotationCandle.Low == 0 {
+								quotationCandle.Low = quotation.Last
+							}
+							quotationCandle.Volume += int64(quotation.Quantity)
+						} else {
+							quotationCandles[quotation.SecId] = commands.Candle{
+								Open:   quotation.Last,
+								Low:    quotation.Last,
+								High:   quotation.Last,
+								Volume: int64(quotation.Quantity),
+							}
+						}
+					}
+				}
+				if err := batch.Send(); err != nil {
+					log.Error(err)
+				}
+			default:
+				log.Debugf(fmt.Sprintf("receive %s", resp))
+			}
+		}
+	}
+}
+
+func main() {
+	defer func() {
+		tc.Disconnect()
+		tc.Close()
+		connect.Close()
+	}()
+
+	log.Infof("Wait txmlconnector ")
+	for {
+		if tc.Data.ServerStatus.Connected == "true" {
+			log.Infof(" connected\n")
+			break
+		}
+		fmt.Printf(".")
 		time.Sleep(5 * time.Second)
 	}
+	// subscribe alltrades
+	allTrades := []commands.SubSecurity{}
+
 	// Get History data for all sec
 	quotations := []commands.SubSecurity{}
 	exportCandleCount := ExportCandleCount
@@ -243,6 +310,10 @@ func main() {
 	if err != nil {
 		log.Error(err)
 	}
+	exportAllTradesSec := []string{}
+	if envAllTrades := os.Getenv("EXPORT_ALL_TRADES"); envAllTrades != "" {
+		exportAllTradesSec = strings.Split(envAllTrades, ",")
+	}
 	for _, sec := range tc.Data.Securities.Items {
 		exportSecBoardFound := false
 		for _, exportSecBoard := range exportSecBoards {
@@ -251,25 +322,16 @@ func main() {
 				break
 			}
 		}
-		if !exportSecBoardFound {
-			continue
-		}
-		if len(exportSecCodes) > 0 {
-			exportSecCodeFound := false
-			for _, exportSecCode := range exportSecCodes {
-				if exportSecCode == sec.SecCode || strings.Contains(sec.SecCode, exportSecCode) || exportSecCode == sec.ShortName || exportSecCode == "ALL" {
-					exportSecCodeFound = true
-					break
-				}
-			}
-			if !exportSecCodeFound {
-				continue
+		for _, exportSecBoard := range exportAllTradesSec {
+			if exportSecBoard == sec.SecCode {
+				allTrades = append(allTrades, commands.SubSecurity{SecId: sec.SecId})
 			}
 		}
-		if sec.SecId == 0 {
+		if sec.SecId == 0 || sec.Active != "true" || len(sec.SecCode) > 16 {
 			continue
 		}
 		log.Debugf("%+v", sec)
+
 		if err := batchSec.Append(uint16(sec.SecId),
 			sec.SecCode,
 			sec.InstrClass,
@@ -283,6 +345,22 @@ func main() {
 			sec.SecType,
 			uint8(sec.QuotesType)); err != nil {
 			log.Error(err)
+		}
+		if !exportSecBoardFound {
+			continue
+		}
+		if len(exportSecCodes) == 0 {
+			continue
+		}
+		exportSecCodeFound := false
+		for _, exportSecCode := range exportSecCodes {
+			if exportSecCode == sec.SecCode || strings.Contains(sec.SecCode, exportSecCode) || exportSecCode == sec.ShortName || exportSecCode == "ALL" {
+				exportSecCodeFound = true
+				break
+			}
+		}
+		if !exportSecCodeFound {
+			continue
 		}
 		quotations = append(quotations, commands.SubSecurity{SecId: sec.SecId})
 		for _, kind := range tc.Data.CandleKinds.Items {
@@ -332,14 +410,17 @@ func main() {
 			}
 		}
 	}
-	if err := batchSec.Send(); err != nil {
-		log.Error(err)
+	if batchSec.Rows() > 0 {
+		if err := batchSec.Send(); err != nil {
+			log.Error(err)
+		}
 	}
 	// receive <quotations><quotation secid="21"><board>TQBR</board><seccode>GMKN</seccode><last>24954</last><quantity>4</quantity><time>11:24:00</time><change>220</change><priceminusprevwaprice>432</priceminusprevwaprice><bid>24950</bid><biddepth>35</biddepth><biddeptht>16188</biddeptht><numbids>1563</numbids><offer>24962</offer><offerdepth>51</offerdepth><offerdeptht>25222</offerdeptht><numoffers>1154</numoffers><voltoday>54772</voltoday><numtrades>6273</numtrades><valtoday>1364.723</valtoday></quotation></quotations>
 	// Get subscribe on all sec
 	if err = tc.SendCommand(commands.Command{
 		Id:         "subscribe",
 		Quotations: quotations,
+		Alltrades:  allTrades,
 	}); err != nil {
 		log.Error("SendCommand: ", err)
 	}

@@ -475,6 +475,25 @@ type Quotation struct {
 	LCurrentPrice         float64  `xml:"lcurrentprice,omitempty"`         // Официальная текущая цена Биржи
 }
 
+type trade struct {
+	XMLName      xml.Name `xml:"trade"`
+	SecId        int      `xml:"secid,attr"`             // внутренний код
+	SecCode      string   `xml:"seccode,omitempty"`      // Код инструмента
+	TradeNo      int64    `xml:"tradeno,omitempty"`      // Биржевой номер сделки
+	Time         string   `xml:"time,omitempty"`         // Время сделки :date
+	Board        string   `xml:"board,omitempty"`        // Идентификатор режима торгов
+	Pice         float64  `xml:"price,omitempty"`        // Цена сделки
+	Quantity     int      `xml:"quantity,omitempty"`     // Объем сделки, в лотах
+	BuySell      string   `xml:"buysell,omitempty"`      // покупка (B) / продажа (S)
+	OpenInterest int      `xml:"openinterest,omitempty"` // Открытый интерес
+	Period       string   `xml:"period,omitempty"`       // Период торгов (O - открытие, N - торги, С - закрытие)
+}
+
+type AllTrades struct {
+	XMLName xml.Name `xml:"alltrades"`
+	Items   []trade  `xml:"trade"`
+}
+
 // Encodes the request into XML format.
 func EncodeRequest(request interface{}) string {
 	var bytesBuffer bytes.Buffer
