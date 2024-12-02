@@ -29,7 +29,7 @@ import "C"
 
 const (
 	txml_dll_name     = "txmlconnector64"
-	txml_dll_ver_main = "6.32.2.21.23"
+	txml_dll_ver_main = "6.43.2.24.0"
 )
 
 var (
