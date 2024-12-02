@@ -1,4 +1,4 @@
-FROM golang:1.20-alpine as builder
+FROM docker.io/library/golang:1.20-alpine as builder
 ENV GOARCH=amd64
 
 COPY ./main.go /go/src/github.com/kmlebedev/txmlconnector/main.go
@@ -18,7 +18,7 @@ RUN apk add --no-cache --virtual build-dependencies --update mingw-w64-gcc gcc l
 
 FROM ubuntu:22.04 AS final
 
-ENV TC_DLL_VER=6.32.2.21.23
+ENV TC_DLL_VER=6.43.2.24.0
 COPY --from=builder /go/bin/server.exe /usr/bin/txmlconnector-server.exe
 COPY --from=builder /go/bin/client /usr/bin/txmlconnector-client
 COPY ./txmlconnector64-${TC_DLL_VER}.dll /usr/bin/
