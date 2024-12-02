@@ -1,4 +1,4 @@
-FROM alpine
+FROM docker.io/library/alpine
 
 RUN \
     ARCH=$(if [ $(uname -m) == "x86_64" ] && [ $(getconf LONG_BIT) == "64" ]; then echo "amd64"; \
@@ -16,6 +16,6 @@ RUN \
     rm -rf /tmp/* && \
     mkdir -p logs
 
-COPY txmlconnector64-6.32.2.21.23.dll /usr/bin/
+COPY txmlconnector64-6.43.2.24.0.dll /usr/bin/
 
 ENTRYPOINT ["wine64 /usr/bin/txmlconnector-server.exe"]
