@@ -6,6 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"strings"
+	"time"
 
 	//"go.oneofone.dev/ta"
 	"io"
@@ -31,6 +32,9 @@ var (
 	unions           []Union
 	secInfoUpdChan   = make(chan SecInfoUpd)
 	serverStatusChan = make(chan ServerStatus)
+	pbClient         pb.ConnectServiceClient
+	grpcConn         *grpc.ClientConn
+	ctx              = context.Background()
 )
 
 func init() {
@@ -43,9 +47,10 @@ func init() {
 	log.SetLevel(ll)
 }
 
-func main() {
-	log.Println("Client running ...")
-	conn, err := grpc.Dial(
+func DoConnect() {
+	log.Println("Client connecting ...")
+	var err error
+	grpcConn, err = grpc.Dial(
 		":50051",
 		grpc.WithInsecure(),
 		grpc.WithBlock(),
@@ -54,9 +59,8 @@ func main() {
 	if err != nil {
 		log.Fatalln("grpc.Dial()", err)
 	}
-	defer conn.Close()
 
-	client := pb.NewConnectServiceClient(conn)
+	pbClient = pb.NewConnectServiceClient(grpcConn)
 	connectReq := Connect{
 		Id:             "connect",
 		Login:          os.Getenv("TC_LOGIN"),
@@ -70,13 +74,10 @@ func main() {
 		PushPosEquity:  30,
 	}
 	request := &pb.SendCommandRequest{Message: EncodeRequest(connectReq)}
-
-	ctx := context.Background()
-	response, err := client.SendCommand(ctx, request)
+	response, err := pbClient.SendCommand(ctx, request)
 	if err != nil {
 		log.Error("SendCommand: ", err)
 	}
-	defer client.SendCommand(ctx, &pb.SendCommandRequest{Message: EncodeRequest(Command{Id: "disconnect"})})
 	result := Result{}
 	if err := xml.Unmarshal([]byte(response.GetMessage()), &result); err != nil {
 		log.Error("Unmarshal(Result) ", err, response.GetMessage())
@@ -84,24 +85,35 @@ func main() {
 	if result.Success != "true" {
 		log.Error("Result: ", result.Message)
 	}
+}
 
-	stream, err := client.FetchResponseData(ctx, &pb.DataRequest{})
+func main() {
+	DoConnect()
+	defer func() {
+		pbClient.SendCommand(ctx, &pb.SendCommandRequest{Message: EncodeRequest(Command{Id: "disconnect"})})
+		grpcConn.Close()
+	}()
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		for {
+			select {
+			case status := <-serverStatusChan:
+				log.Infof("Status %+v", status)
+			case upd := <-secInfoUpdChan:
+				log.Debugf("secInfoUpd %v", upd)
+			case <-ticker.C:
+				if serverStatus.Connected != "true" {
+					DoConnect()
+				}
+			}
+		}
+	}()
+	stream, err := pbClient.FetchResponseData(ctx, &pb.DataRequest{})
 	if err != nil {
 		log.Fatalf("open stream error %v", err)
 	}
 	done := make(chan bool)
 	go LoopReadingFromStream(&stream, &done)
-
-	go func() {
-		for {
-			select {
-			case status := <-serverStatusChan:
-				log.Infof("Status %v", status)
-			case upd := <-secInfoUpdChan:
-				log.Debugf("secInfoUpd %v", upd)
-			}
-		}
-	}()
 
 	<-done //we will wait until all response is received
 	log.Info("Loop stream finished")

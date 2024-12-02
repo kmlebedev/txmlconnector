@@ -38,6 +38,9 @@ type TCClient struct {
 	ServerStatusChan chan ServerStatus
 	ResponseChannel  chan string
 	ShutdownChannel  chan bool
+	AllTradesChan    chan AllTrades
+	grpcConn         *grpc.ClientConn
+	ctx              context.Context
 }
 
 func init() {
@@ -50,15 +53,48 @@ func init() {
 	log.SetLevel(ll)
 }
 
-func NewTCClientWithConn(client pb.ConnectServiceClient) (*TCClient, error) {
+func NewTCClientWithConn(client pb.ConnectServiceClient, conn *grpc.ClientConn) (*TCClient, error) {
 	tc := TCClient{
 		Client:           client,
 		SecInfoUpdChan:   make(chan SecInfoUpd),
 		ServerStatusChan: make(chan ServerStatus),
 		ShutdownChannel:  make(chan bool),
 		ResponseChannel:  make(chan string),
+		AllTradesChan:    make(chan AllTrades),
+		ctx:              context.Background(),
+		grpcConn:         conn,
 	}
 
+	if err := tc.Connect(); err != nil {
+		return nil, err
+	}
+	stream, err := tc.Client.FetchResponseData(tc.ctx, &pb.DataRequest{})
+	if err != nil {
+		log.Errorf("open stream error %v", err)
+		return nil, err
+	}
+	go tc.LoopReadingFromStream(&stream)
+
+	return &tc, nil
+}
+
+func NewTCClient() (*TCClient, error) {
+	log.Infoln("gRPC client running ...")
+	conn, err := grpc.Dial(
+		os.Getenv("TC_TARGET"),
+		grpc.WithInsecure(),
+		grpc.WithBlock(),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
+	)
+	if err != nil {
+		log.Error("grpc.Dial()", err)
+		return nil, err
+	}
+	client := pb.NewConnectServiceClient(conn)
+	return NewTCClientWithConn(client, conn)
+}
+
+func (tc *TCClient) Connect() error {
 	connectReq := Connect{
 		Id:             "connect",
 		Login:          os.Getenv("TC_LOGIN"),
@@ -73,53 +109,33 @@ func NewTCClientWithConn(client pb.ConnectServiceClient) (*TCClient, error) {
 	}
 	request := &pb.SendCommandRequest{Message: EncodeRequest(connectReq)}
 
-	ctx := context.Background()
-	response, err := client.SendCommand(ctx, request)
+	response, err := tc.Client.SendCommand(tc.ctx, request)
 	if err != nil {
 		log.Error("SendCommand: ", err)
-		return nil, err
+		return err
 	}
 
 	result := Result{}
 	if err := xml.Unmarshal([]byte(response.GetMessage()), &result); err != nil {
 		log.Error("Unmarshal(Result) ", err, response.GetMessage())
-		return nil, err
+		return err
 	}
 	if result.Success != "true" {
 		log.Error("Result: ", result.Message)
-		return nil, fmt.Errorf("Result not success: %s", result.Message)
+		fmt.Errorf("Result not success: %s", result.Message)
+	} else {
+		log.Debugf("Result: %+v", result)
 	}
 
-	stream, err := client.FetchResponseData(ctx, &pb.DataRequest{})
-	if err != nil {
-		log.Errorf("open stream error %v", err)
-		return nil, err
-	}
-	go tc.LoopReadingFromStream(&stream)
-
-	return &tc, nil
-}
-
-func NewTCClient() (*TCClient, error) {
-	log.Infoln("Client running ...")
-	conn, err := grpc.Dial(
-		os.Getenv("TC_TARGET"),
-		grpc.WithInsecure(),
-		grpc.WithBlock(),
-		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
-	)
-	if err != nil {
-		log.Error("grpc.Dial()", err)
-		return nil, err
-	}
-	// Todo move Close
-	// defer conn.Close()
-	client := pb.NewConnectServiceClient(conn)
-	return NewTCClientWithConn(client)
+	return nil
 }
 
 func (tc *TCClient) Disconnect() error {
 	return tc.SendCommand(Command{Id: "disconnect"})
+}
+
+func (tc *TCClient) Close() {
+	tc.grpcConn.Close()
 }
 
 func (tc *TCClient) SendCommand(cmd Command) error {
@@ -144,11 +160,11 @@ func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchRespons
 		resp, err := (*stream).Recv()
 		if err == io.EOF {
 			log.Debug("Resp received: %s", resp.Message)
-			tc.ShutdownChannel <- true //means stream is finished
+			tc.ShutdownChannel <- true // means stream is finished
 			return
 		}
 		if err != nil {
-			//Todo reconnect
+			// Todo reconnect
 			log.Panicf("stream.Recv() cannot receive %v", err)
 		}
 		xmlReader := strings.NewReader(resp.Message)
@@ -161,6 +177,13 @@ func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchRespons
 		startElement := token.(xml.StartElement)
 		msgData := []byte(resp.Message)
 		switch startElement.Name.Local {
+		case "alltrades":
+			allTrades := AllTrades{}
+			if err := xml.Unmarshal(msgData, &allTrades); err != nil {
+				log.Error(err)
+			} else {
+				tc.AllTradesChan <- allTrades
+			}
 		case "sec_info_upd":
 			if err := xml.Unmarshal(msgData, &tc.Data.SecInfoUpd); err != nil {
 				log.Error(err)
