@@ -25,9 +25,14 @@ type Command struct {
 	Period     int           `xml:"period,attr,omitempty"`
 	Count      int           `xml:"count,attr,omitempty"`
 	Reset      string        `xml:"reset,attr,omitempty"`
-	Alltrades  []SubSecurity `xml:"alltrades,omitempty"`  // подписка на сделки рынка
+	AllTrades  SubAllTrades  `xml:"alltrades,omitempty"`  // подписка на сделки рынка
 	Quotations []SubSecurity `xml:"quotations,omitempty"` // подписка на изменения показателей торгов
 	Quotes     []SubSecurity `xml:"quotes,omitempty"`     // подписка на изменения «стакана»
+}
+
+type SubAllTrades struct {
+	XMLName xml.Name `xml:"alltrades,omitempty"`
+	Items   []int    `xml:"secid,omitempty"`
 }
 
 type SubSecurity struct {
@@ -172,9 +177,10 @@ type Pits struct {
 }
 
 type SecInfo struct {
-	SecId   int    `xml:"secid"`   // идентификатор бумаги
-	Market  int    `xml:"market"`  // Внутренний код рынка
-	SecCode string `xml:"seccode"` // Код инструмента
+	SecId    int    `xml:"secid"`              // идентификатор бумаги
+	Market   int    `xml:"market"`             // Внутренний код рынка
+	SecCode  string `xml:"seccode"`            // Код инструмента
+	Register string `xml:"register,omitempty"` // Регистр учета
 }
 
 type SecInfoUpd struct {
@@ -200,9 +206,9 @@ type Position struct {
 
 type MoneyPosition struct {
 	Position
+	Register  string  `xml:"register,omitempty"` // Регистр учета
 	Currency  string  `xml:"currency,omitempty"` // Код валюты
 	Markets   []int   `xml:"markets->market"`    // Внутренний код рынка
-	Register  int     `xml:"register"`           // Регистр учета
 	Asset     string  `xml:"asset"`              // Код вида средств
 	Comission float64 `xml:"comission"`          // Сумма списанной комиссии
 }
@@ -230,21 +236,22 @@ type Forts struct {
 
 type FortsPosition struct {
 	Forts
-	SecId             int     `xml:"secid"`             // идентификатор бумаги
-	SecCode           string  `xml:"seccode"`           // Код инструмента
-	StartNet          int     `xml:"startnet"`          // Входящая позиция по инструменту
-	OpenBuys          int     `xml:"openbuys"`          // В заявках на покупку
-	OpenSells         int     `xml:"opensells"`         // В заявках на продажу
-	TotalNet          int     `xml:"totalnet"`          // Текущая позиция по инструменту
-	TodayBuy          int     `xml:"todaybuy"`          // Куплено
-	TodaySell         int     `xml:"todaysell"`         // Продано
-	OptMargin         float64 `xml:"optmargin"`         // Маржа для маржируемых опционов
-	VarMargin         float64 `xml:"varmargin"`         // Вариационная маржа
-	Expirationpos     int64   `xml:"expirationpos"`     // Опционов в заявках на исполнение
-	UsedSellSpotLimit float64 `xml:"usedsellspotlimit"` // Объем использованого спот-лимита на продажу
-	SellSpotLimit     float64 `xml:"sellspotlimit"`     // текущий спот-лимит на продажу, установленный Брокером
-	Netto             float64 `xml:"netto"`             // нетто-позиция по всем инструментам данного спота
-	Kgo               rune    `xml:"kgo"`               // коэффициент ГО
+	SecId             int     `xml:"secid"`              // идентификатор бумаги
+	SecCode           string  `xml:"seccode"`            // Код инструмента
+	Register          string  `xml:"register,omitempty"` // Регистр учета
+	StartNet          int     `xml:"startnet"`           // Входящая позиция по инструменту
+	OpenBuys          int     `xml:"openbuys"`           // В заявках на покупку
+	OpenSells         int     `xml:"opensells"`          // В заявках на продажу
+	TotalNet          int     `xml:"totalnet"`           // Текущая позиция по инструменту
+	TodayBuy          int     `xml:"todaybuy"`           // Куплено
+	TodaySell         int     `xml:"todaysell"`          // Продано
+	OptMargin         float64 `xml:"optmargin"`          // Маржа для маржируемых опционов
+	VarMargin         float64 `xml:"varmargin"`          // Вариационная маржа
+	Expirationpos     int64   `xml:"expirationpos"`      // Опционов в заявках на исполнение
+	UsedSellSpotLimit float64 `xml:"usedsellspotlimit"`  // Объем использованого спот-лимита на продажу
+	SellSpotLimit     float64 `xml:"sellspotlimit"`      // текущий спот-лимит на продажу, установленный Брокером
+	Netto             float64 `xml:"netto"`              // нетто-позиция по всем инструментам данного спота
+	Kgo               rune    `xml:"kgo"`                // коэффициент ГО
 }
 
 type FortsMoney struct {
