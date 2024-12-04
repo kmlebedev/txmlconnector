@@ -106,6 +106,7 @@ func (tc *TCClient) Connect() error {
 		Rqdelay:        1000,
 		PushUlimits:    30,
 		PushPosEquity:  30,
+		MicexRegisters: true,
 	}
 	request := &pb.SendCommandRequest{Message: EncodeRequest(connectReq)}
 

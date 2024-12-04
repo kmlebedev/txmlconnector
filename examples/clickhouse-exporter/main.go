@@ -20,10 +20,10 @@ const (
 	ExportCandleCount       = 0
 	ChCandlesInsertQuery    = "INSERT INTO transaq_candles"
 	ChSecuritiesInsertQuery = "INSERT INTO transaq_securities"
-	ChTradesInsertQuery     = "INSERT INTO transaq_trades"
+	ChTradesInsertQuery     = "INSERT INTO transaq_trades VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 	candlesDDL = `CREATE TABLE IF NOT EXISTS transaq_candles (
-		date   DateTime,
+		date   DateTime('Europe/Moscow'),
 		sec_code FixedString(16),
 		period UInt8,
 		open   Float32,
@@ -51,12 +51,12 @@ const (
 		ORDER BY (secid, seccode, board)`
 
 	tradesDDL = `CREATE TABLE IF NOT EXISTS transaq_trades (
-		time   DateTime,
+		time   DateTime('Europe/Moscow'),
 		secid   UInt16,
 		sec_code LowCardinality(FixedString(16)),
         trade_no Int64,
 		board LowCardinality(String),
-		pice   Float32,
+		price   Float32,
 		quantity UInt32,
         buy_sell LowCardinality(FixedString(1)),
         open_interest Int32,
@@ -66,14 +66,16 @@ const (
 )
 
 var (
-	ctx                 = context.Background()
-	lvl                 log.Level
-	tc                  *tcClient.TCClient
-	connect             driver.Conn
-	positions           = commands.Positions{}
-	quotationCandles    = make(map[int]commands.Candle)
-	dataCandleCount     = ExportCandleCount
-	dataCandleCountLock = sync.RWMutex{}
+	ctx                  = context.Background()
+	lvl                  log.Level
+	tc                   *tcClient.TCClient
+	connect              driver.Conn
+	positions            = commands.Positions{}
+	quotationCandles     = make(map[int]commands.Candle)
+	dataCandleCount      = ExportCandleCount
+	dataCandleCountLock  = sync.RWMutex{}
+	isAllTradesPositions = false
+	allTrades            = commands.SubAllTrades{}
 )
 
 func init() {
@@ -114,7 +116,6 @@ func init() {
 	if tc, err = tcClient.NewTCClient(); err != nil {
 		log.Fatal(err)
 	}
-	go processTransaq()
 }
 
 func processTransaq() {
@@ -143,10 +144,9 @@ func processTransaq() {
 			}
 		case trades := <-tc.AllTradesChan:
 			//go func(t *commands.AllTrades) {
-			batch, _ := connect.PrepareBatch(ctx, ChTradesInsertQuery)
 			for _, trade := range trades.Items {
 				tradeTime, _ := time.Parse("02.01.2006 15:04:05", trade.Time)
-				if err := batch.Append(
+				if err := connect.AsyncInsert(ctx, ChTradesInsertQuery, false,
 					fmt.Sprint(tradeTime.Format("2006-01-02 15:04:05")),
 					trade.SecId,
 					trade.SecCode,
@@ -156,12 +156,8 @@ func processTransaq() {
 					trade.Quantity,
 					trade.BuySell,
 					trade.OpenInterest,
-					trade.Period,
-				); err != nil {
-					log.Errorf("trades batch append trade: %+v: %+v", trade, err)
-				}
-				if err := batch.Send(); err != nil {
-					log.Error("trades batch send: %v", err)
+					trade.Period); err != nil {
+					log.Errorf("trades async insert trade: %+v: %+v\n trades: %+v", trade, err)
 				}
 			}
 			//}(&trades)
@@ -194,7 +190,12 @@ func processTransaq() {
 				if tc.Data.Positions.SpotLimit != nil && len(tc.Data.Positions.SpotLimit) > 0 {
 					positions.SpotLimit = tc.Data.Positions.SpotLimit
 				}
-				log.Debugf(fmt.Sprintf("Positions: \n%+v\n", tc.Data.Positions))
+				if isAllTradesPositions {
+					for _, secPosition := range tc.Data.Positions.SecPositions {
+						allTrades.Items = append(allTrades.Items, secPosition.SecInfo.SecId)
+					}
+				}
+				log.Infof("Positions: \n%+v\n", tc.Data.Positions)
 			case "candles":
 				batch, _ := connect.PrepareBatch(ctx, ChCandlesInsertQuery)
 				dataCandleCountLock.Lock()
@@ -276,6 +277,19 @@ func main() {
 		connect.Close()
 	}()
 
+	exportAllTradesSec := []string{}
+	if envAllTrades := os.Getenv("EXPORT_ALL_TRADES"); envAllTrades != "" {
+		for _, sec := range strings.Split(envAllTrades, ",") {
+			if sec == "positions" {
+				isAllTradesPositions = true
+				continue
+			}
+			exportAllTradesSec = append(exportAllTradesSec, sec)
+		}
+	}
+
+	go processTransaq()
+
 	log.Infof("Wait txmlconnector ")
 	for {
 		if tc.Data.ServerStatus.Connected == "true" {
@@ -285,8 +299,6 @@ func main() {
 		fmt.Printf(".")
 		time.Sleep(5 * time.Second)
 	}
-	// subscribe alltrades
-	allTrades := []commands.SubSecurity{}
 
 	// Get History data for all sec
 	quotations := []commands.SubSecurity{}
@@ -310,10 +322,7 @@ func main() {
 	if err != nil {
 		log.Error(err)
 	}
-	exportAllTradesSec := []string{}
-	if envAllTrades := os.Getenv("EXPORT_ALL_TRADES"); envAllTrades != "" {
-		exportAllTradesSec = strings.Split(envAllTrades, ",")
-	}
+
 	for _, sec := range tc.Data.Securities.Items {
 		exportSecBoardFound := false
 		for _, exportSecBoard := range exportSecBoards {
@@ -322,9 +331,9 @@ func main() {
 				break
 			}
 		}
-		for _, exportSecBoard := range exportAllTradesSec {
-			if exportSecBoard == sec.SecCode {
-				allTrades = append(allTrades, commands.SubSecurity{SecId: sec.SecId})
+		for _, exportSecCode := range exportAllTradesSec {
+			if exportSecCode == sec.SecCode {
+				allTrades.Items = append(allTrades.Items, sec.SecId)
 			}
 		}
 		if sec.SecId == 0 || sec.Active != "true" || len(sec.SecCode) > 16 {
@@ -417,12 +426,16 @@ func main() {
 	}
 	// receive <quotations><quotation secid="21"><board>TQBR</board><seccode>GMKN</seccode><last>24954</last><quantity>4</quantity><time>11:24:00</time><change>220</change><priceminusprevwaprice>432</priceminusprevwaprice><bid>24950</bid><biddepth>35</biddepth><biddeptht>16188</biddeptht><numbids>1563</numbids><offer>24962</offer><offerdepth>51</offerdepth><offerdeptht>25222</offerdeptht><numoffers>1154</numoffers><voltoday>54772</voltoday><numtrades>6273</numtrades><valtoday>1364.723</valtoday></quotation></quotations>
 	// Get subscribe on all sec
+	if err = tc.SendCommand(commands.Command{Id: "get_mc_portfolio", Union: "377620R2555"}); err != nil {
+		log.Error("SendCommand get_mc_portfolio: ", err)
+	}
+	time.Sleep(10 * time.Second)
 	if err = tc.SendCommand(commands.Command{
 		Id:         "subscribe",
 		Quotations: quotations,
-		Alltrades:  allTrades,
+		AllTrades:  allTrades,
 	}); err != nil {
-		log.Error("SendCommand: ", err)
+		log.Error("SendCommand subscribe: ", err)
 	}
 	<-tc.ShutdownChannel
 }
