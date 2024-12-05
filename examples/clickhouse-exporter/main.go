@@ -9,6 +9,7 @@ import (
 	"github.com/kmlebedev/txmlconnector/client/commands"
 	log "github.com/sirupsen/logrus"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,8 +32,8 @@ const (
 		high   Float32,
 		low    Float32,
 		volume UInt64
-		) ENGINE = ReplacingMergeTree()
-		ORDER BY (date, sec_code, period)`
+	) ENGINE = ReplacingMergeTree()
+	ORDER BY (date, sec_code, period)`
 
 	securitiesDDL = `CREATE TABLE IF NOT EXISTS transaq_securities (
 			secid   UInt16,
@@ -48,7 +49,7 @@ const (
 			sectype String,
 			quotestype UInt8
 		) ENGINE = ReplacingMergeTree()
-		ORDER BY (secid, seccode, board)`
+		ORDER BY (seccode, board, market, sectype, quotestype)`
 
 	tradesDDL = `CREATE TABLE IF NOT EXISTS transaq_trades (
 		time   DateTime('Europe/Moscow'),
@@ -60,7 +61,7 @@ const (
 		quantity UInt32,
         buy_sell LowCardinality(FixedString(1)),
         open_interest Int32,
-        period LowCardinality(FixedString(1)),
+        period LowCardinality(FixedString(1))
 		) ENGINE = ReplacingMergeTree()
 		ORDER BY (secid, sec_code, trade_no, time, buy_sell)`
 )
@@ -306,7 +307,7 @@ func main() {
 	if eCandleCount, err := strconv.Atoi(os.Getenv("EXPORT_CANDLE_COUNT")); err == nil && eCandleCount > -2 {
 		exportCandleCount = eCandleCount
 	}
-	exportSecBoards := []string{"TQBR"}
+	exportSecBoards := []string{"TQBR", "TQTF"}
 	if eSecBoards := os.Getenv("EXPORT_SEC_BOARDS"); eSecBoards != "" {
 		exportSecBoards = strings.Split(eSecBoards, ",")
 	}
@@ -324,20 +325,15 @@ func main() {
 	}
 
 	for _, sec := range tc.Data.Securities.Items {
-		exportSecBoardFound := false
-		for _, exportSecBoard := range exportSecBoards {
-			if exportSecBoard == sec.Board || exportSecBoard == "ALL" {
-				exportSecBoardFound = true
-				break
-			}
-		}
-		for _, exportSecCode := range exportAllTradesSec {
-			if exportSecCode == sec.SecCode {
-				allTrades.Items = append(allTrades.Items, sec.SecId)
-			}
-		}
 		if sec.SecId == 0 || sec.Active != "true" || len(sec.SecCode) > 16 {
 			continue
+		}
+		exportSecBoardFound := false
+		if slices.Contains(exportSecBoards, sec.Board) {
+			exportSecBoardFound = true
+		}
+		if exportSecBoardFound && slices.Contains(exportAllTradesSec, sec.SecCode) {
+			allTrades.Items = append(allTrades.Items, sec.SecId)
 		}
 		log.Debugf("%+v", sec)
 
