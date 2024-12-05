@@ -121,7 +121,7 @@ func init() {
 
 func processTransaq() {
 	var status commands.ServerStatus
-	ticker := time.NewTicker(60 * time.Second)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
@@ -137,11 +137,11 @@ func processTransaq() {
 				log.Infof("Status %+v", status)
 			}
 		case <-ticker.C:
-			if status.Connected != "error" {
+			if status.Connected == "true" {
 				continue
 			}
 			if err := tc.Connect(); err != nil {
-				log.Fatal(err)
+				log.Error("reconnect ", err)
 			}
 		case trades := <-tc.AllTradesChan:
 			//go func(t *commands.AllTrades) {
