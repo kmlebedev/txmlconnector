@@ -76,6 +76,7 @@ var (
 	dataCandleCount      = ExportCandleCount
 	dataCandleCountLock  = sync.RWMutex{}
 	isAllTradesPositions = false
+	quotations           = []commands.SubSecurity{}
 	allTrades            = commands.SubAllTrades{}
 )
 
@@ -131,6 +132,9 @@ func processTransaq() {
 			switch status.Connected {
 			case "true":
 				log.Infof("server status is true")
+				if err := doSubscribe(); err != nil {
+					log.Error(err)
+				}
 			case "error":
 				log.Warnf("txmlconnector not connected %+v\n", status)
 			default:
@@ -271,6 +275,17 @@ func processTransaq() {
 	}
 }
 
+func doSubscribe() error {
+	if err := tc.SendCommand(commands.Command{
+		Id:         "subscribe",
+		Quotations: quotations,
+		AllTrades:  allTrades,
+	}); err != nil {
+		return fmt.Errorf("SendCommand subscribe: %+v", err)
+	}
+	return nil
+}
+
 func main() {
 	defer func() {
 		tc.Disconnect()
@@ -302,7 +317,6 @@ func main() {
 	}
 
 	// Get History data for all sec
-	quotations := []commands.SubSecurity{}
 	exportCandleCount := ExportCandleCount
 	if eCandleCount, err := strconv.Atoi(os.Getenv("EXPORT_CANDLE_COUNT")); err == nil && eCandleCount > -2 {
 		exportCandleCount = eCandleCount
@@ -422,16 +436,8 @@ func main() {
 	}
 	// receive <quotations><quotation secid="21"><board>TQBR</board><seccode>GMKN</seccode><last>24954</last><quantity>4</quantity><time>11:24:00</time><change>220</change><priceminusprevwaprice>432</priceminusprevwaprice><bid>24950</bid><biddepth>35</biddepth><biddeptht>16188</biddeptht><numbids>1563</numbids><offer>24962</offer><offerdepth>51</offerdepth><offerdeptht>25222</offerdeptht><numoffers>1154</numoffers><voltoday>54772</voltoday><numtrades>6273</numtrades><valtoday>1364.723</valtoday></quotation></quotations>
 	// Get subscribe on all sec
-	if err = tc.SendCommand(commands.Command{Id: "get_mc_portfolio", Union: "377620R2555"}); err != nil {
-		log.Error("SendCommand get_mc_portfolio: ", err)
-	}
-	time.Sleep(10 * time.Second)
-	if err = tc.SendCommand(commands.Command{
-		Id:         "subscribe",
-		Quotations: quotations,
-		AllTrades:  allTrades,
-	}); err != nil {
-		log.Error("SendCommand subscribe: ", err)
-	}
+	// if err = tc.SendCommand(commands.Command{Id: "get_mc_portfolio", Union: "377620R2555"}); err != nil {
+	//	log.Error("SendCommand get_mc_portfolio: ", err)
+	// }
 	<-tc.ShutdownChannel
 }
