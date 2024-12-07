@@ -115,6 +115,7 @@ docker-compose -f docker/transaq-clickhouse-exporter-compose.yaml -p transaq up
 ```
 
 ### Links
+ - [TRANSAQ XML Connector](https://files.comon.ru/usercontent/TXmlConnector.pdf)
  - [TXmlConnector last(2.21.21) version](https://files.comon.ru/usercontent/TXmlConnector.zip)
  - [TRANSAQ Connector Forum](http://www.transaq.ru/forum/index.php?board=6.0)
  - [TransaqConnector Linux Finam Forum](https://forum.finam.ru/posts/t109457-TransaqConnector-Linux)
