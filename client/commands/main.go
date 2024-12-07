@@ -176,20 +176,19 @@ type Pits struct {
 	} `xml:"pit"`
 }
 
-type SecInfo struct {
-	SecId    int    `xml:"secid"`              // идентификатор бумаги
-	Market   int    `xml:"market"`             // Внутренний код рынка
-	SecCode  string `xml:"seccode"`            // Код инструмента
-	Register string `xml:"register,omitempty"` // Регистр учета
-}
-
 type SecInfoUpd struct {
-	SecInfo
-	MinPrice    float32 `xml:"minprice,omitempty"`     // минимальная цена (только FORTS)
-	MaxPrice    float32 `xml:"maxprice,omitempty"`     // минимальная цена (только FORTS)
-	BuyDeposit  float32 `xml:"buy_deposit,omitempty"`  // ГО покупателя (фьючерсы FORTS, руб.)
-	SellDeposit float32 `xml:"sell_deposit,omitempty"` // ГО продавца (фьючерсы FORTS, руб.)
-	PointCost   float32 `xml:"point_cost,omitempty"`   // Стоимость пункта цены
+	XMLName     xml.Name `xml:"sec_info_upd"`
+	SecId       int      `xml:"secid"`                  // идентификатор бумаги
+	Market      int      `xml:"market"`                 // Внутренний код рынка
+	SecCode     string   `xml:"seccode"`                // Код инструмента
+	MinPrice    float32  `xml:"minprice,omitempty"`     // минимальная цена (только FORTS)
+	MaxPrice    float32  `xml:"maxprice,omitempty"`     // минимальная цена (только FORTS)
+	BuyDeposit  float32  `xml:"buy_deposit,omitempty"`  // ГО покупателя (фьючерсы FORTS, руб.)
+	SellDeposit float32  `xml:"sell_deposit,omitempty"` // ГО продавца (фьючерсы FORTS, руб.)
+	BgoC        float32  `xml:"bgo_c,omitempty"`        // ГО покрытой позиции (опционы FORTS, руб.)
+	BgoNc       float32  `xml:"bgo_nc,omitempty"`       // ГО непокрытой позиции (опционы FORTS, руб.)
+	BgoBuy      float32  `xml:"bgo_buy,omitempty"`      // Базовое ГО под покупку маржируемого опциона
+	PointCost   float32  `xml:"point_cost,omitempty"`   // Стоимость пункта цены
 }
 
 type Position struct {
@@ -219,9 +218,12 @@ func (p MoneyPosition) StringT() string {
 
 type SecPosition struct {
 	Position
-	SecInfo
-	Amount float64 `xml:"amount"` // Текущая оценка стоимости позиции, в валюте инструмента
-	Equity float64 `xml:"equity"` // Текущая оценка стоимости позиции, в рублях
+	SecId    int     `xml:"secid"`              // идентификатор бумаги
+	Market   int     `xml:"market"`             // Внутренний код рынка
+	SecCode  string  `xml:"seccode"`            // Код инструмента
+	Register string  `xml:"register,omitempty"` // Регистр учета
+	Amount   float64 `xml:"amount"`             // Текущая оценка стоимости позиции, в валюте инструмента
+	Equity   float64 `xml:"equity"`             // Текущая оценка стоимости позиции, в рублях
 }
 
 func (p SecPosition) StringT() string {
@@ -499,6 +501,38 @@ type trade struct {
 type AllTrades struct {
 	XMLName xml.Name `xml:"alltrades"`
 	Items   []trade  `xml:"trade"`
+}
+
+type SecInfo struct {
+	XMLName       xml.Name `xml:"sec_info"`
+	SecId         int      `xml:"secid,attr"`               // внутренний код
+	SecName       string   `xml:"secname,omitempty"`        // Полное наименование инструмента
+	SecCode       string   `xml:"seccode,omitempty"`        // Код инструмента
+	Market        int      `xml:"market,omitempty"`         // Внутренний код рынка
+	PName         string   `xml:"pname,omitempty"`          // единицы измерения цены
+	MatDate       string   `xml:"mat_date,omitempty"`       // дата погашения
+	ClearingPrice float32  `xml:"clearing_price,omitempty"` // цена последнего клиринга (только FORTS)
+	MinPrice      float32  `xml:"minprice,omitempty"`       // минимальная цена (только FORTS)
+	MaxPrice      float32  `xml:"maxprice,omitempty"`       // минимальная цена (только FORTS)
+	BuyDeposit    float32  `xml:"buy_deposit,omitempty"`    // ГО покупателя (фьючерсы FORTS, руб.)
+	SellDeposit   float32  `xml:"sell_deposit,omitempty"`   // ГО продавца (фьючерсы FORTS, руб.)
+	BgoC          float32  `xml:"bgo_c,omitempty"`          // ГО покрытой позиции (опционы FORTS, руб.)
+	BgoNc         float32  `xml:"bgo_nc,omitempty"`         // ГО непокрытой позиции (опционы FORTS, руб.)
+	BgoBuy        float32  `xml:"bgo_buy,omitempty"`        // Базовое ГО под покупку маржируемого опциона
+	AccruedInt    float32  `xml:"accruedint,omitempty"`     // текущий НКД, руб
+	CouponValue   float32  `xml:"coupon_value,omitempty"`   // размер купона, руб
+	CouponDate    string   `xml:"coupon_date,omitempty"`    // дата погашения купона
+	CouponPeriod  int      `xml:"coupon_period,omitempty"`  // период выплаты купона, дни
+	FaceValue     float32  `xml:"facevalue,omitempty"`      // номинал облигации или акции, руб
+	PutCall       string   `xml:"put_call,omitempty"`       // тип опциона Call(C)/Put(P)
+	PointCost     float32  `xml:"point_cost,omitempty"`     // Стоимость пункта цены
+	OptType       string   `xml:"opt_type,omitempty"`       // маржинальный(M)/премия(P)
+	LotVolume     int      `xml:"lot_volume,omitempty"`     // количество базового актива (FORTS)
+	Isin          string   `xml:"isin,omitempty"`           // Международный идентификационный код инструмента
+	RegNumber     string   `xml:"regnumber,omitempty"`      // Номер государственной регистрации инструмента
+	BuybackPrice  float32  `xml:"buybackprice,omitempty"`   // Цена досрочного выкупа облигации
+	BuybackDate   string   `xml:"buybackdate,omitempty"`    // Дата досрочного выкупа облигации
+	CurrencyId    string   `xml:"currencyid,omitempty"`     // Валюта расчетов режима торгов по умолчанию
 }
 
 // Encodes the request into XML format.
