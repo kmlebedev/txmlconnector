@@ -321,7 +321,7 @@ func main() {
 	if eCandleCount, err := strconv.Atoi(os.Getenv("EXPORT_CANDLE_COUNT")); err == nil && eCandleCount > -2 {
 		exportCandleCount = eCandleCount
 	}
-	exportSecBoards := []string{"TQBR", "TQTF"}
+	exportSecBoards := []string{"TQBR", "TQTF", "FUT"}
 	if eSecBoards := os.Getenv("EXPORT_SEC_BOARDS"); eSecBoards != "" {
 		exportSecBoards = strings.Split(eSecBoards, ",")
 	}
