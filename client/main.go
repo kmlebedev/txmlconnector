@@ -29,11 +29,11 @@ type TCClient struct {
 		Positions       *Positions
 		UnitedPortfolio *UnitedPortfolio
 		UnitedEquity    UnitedEquity
-		SecInfoUpd      SecInfoUpd
 		NewsHeader      NewsHeader
 		Messages        Messages
 		Unions          []Union
 	}
+	SecInfoChan      chan SecInfo
 	SecInfoUpdChan   chan SecInfoUpd
 	ServerStatusChan chan ServerStatus
 	ResponseChannel  chan string
@@ -186,15 +186,25 @@ func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchRespons
 				tc.AllTradesChan <- allTrades
 			}
 		case "sec_info_upd":
-			if err := xml.Unmarshal(msgData, &tc.Data.SecInfoUpd); err != nil {
+			secInfoUpd := SecInfoUpd{}
+			if err := xml.Unmarshal(msgData, &secInfoUpd); err != nil {
 				log.Error(err)
+			} else {
+				tc.SecInfoUpdChan <- secInfoUpd
 			}
-			// tc.SecInfoUpdChan <- tc.Data.SecInfoUpd
+		case "sec_info":
+			secInfo := SecInfo{}
+			if err := xml.Unmarshal(msgData, &secInfo); err != nil {
+				log.Error(err)
+			} else {
+				tc.SecInfoChan <- secInfo
+			}
 		case "server_status":
 			if err := xml.Unmarshal(msgData, &tc.Data.ServerStatus); err != nil {
 				log.Error("Decode serverStatus ", err, resp.Message)
+			} else {
+				tc.ServerStatusChan <- tc.Data.ServerStatus
 			}
-			tc.ServerStatusChan <- tc.Data.ServerStatus
 		case "client":
 			if err := xml.Unmarshal(msgData, &tc.Data.Client); err != nil {
 				log.Error("Decode client ", err, resp.Message)
