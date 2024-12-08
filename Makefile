@@ -1,6 +1,6 @@
 .PHONY: compile
 compile: ## Compile the proto file.
-	protoc -I proto proto/connect.proto --go_out=plugins=grpc:proto/
+	protoc proto/connect.proto --go_out=. --go-grpc_out=. --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative
 
 .PHONY: server
 

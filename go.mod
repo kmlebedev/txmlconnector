@@ -4,13 +4,12 @@ go 1.23
 
 require (
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
-	github.com/golang/glog v1.2.2
-	github.com/golang/protobuf v1.5.4
+	github.com/golang/glog v1.2.3
 	github.com/sirupsen/logrus v1.9.3
 	github.com/streadway/amqp v1.0.0
 	gocloud.dev v0.29.0
 	gocloud.dev/pubsub/rabbitpubsub v0.29.0
-	google.golang.org/grpc v1.68.0
+	google.golang.org/grpc v1.68.1
 	google.golang.org/protobuf v1.35.2
 )
 
