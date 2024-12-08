@@ -39,6 +39,7 @@ type TCClient struct {
 	ResponseChannel  chan string
 	ShutdownChannel  chan bool
 	AllTradesChan    chan AllTrades
+	QuotesChan       chan Quotes
 	grpcConn         *grpc.ClientConn
 	ctx              context.Context
 }
@@ -184,6 +185,13 @@ func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchRespons
 				log.Error(err)
 			} else {
 				tc.AllTradesChan <- allTrades
+			}
+		case "quotes":
+			quotes := Quotes{}
+			if err := xml.Unmarshal(msgData, &quotes); err != nil {
+				log.Error(err)
+			} else {
+				tc.QuotesChan <- quotes
 			}
 		case "sec_info_upd":
 			secInfoUpd := SecInfoUpd{}
