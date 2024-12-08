@@ -81,10 +81,8 @@ func NewTCClientWithConn(client pb.ConnectServiceClient, conn *grpc.ClientConn) 
 
 func NewTCClient() (*TCClient, error) {
 	log.Infoln("gRPC client running ...")
-	conn, err := grpc.Dial(
+	conn, err := grpc.NewClient(
 		os.Getenv("TC_TARGET"),
-		grpc.WithInsecure(),
-		grpc.WithBlock(),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 	)
 	if err != nil {
