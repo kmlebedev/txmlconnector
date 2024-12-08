@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	. "github.com/kmlebedev/txmlconnector/client/commands"
 	pb "github.com/kmlebedev/txmlconnector/proto"
@@ -43,6 +44,10 @@ type TCClient struct {
 	grpcConn         *grpc.ClientConn
 	ctx              context.Context
 }
+
+var (
+	timeNowLocation, _ = time.LoadLocation("Europe/Moscow")
+)
 
 func init() {
 	ll := log.InfoLevel
@@ -186,9 +191,11 @@ func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchRespons
 			}
 		case "quotes":
 			quotes := Quotes{}
+			now := time.Now().In(timeNowLocation)
 			if err := xml.Unmarshal(msgData, &quotes); err != nil {
 				log.Error(err)
 			} else {
+				quotes.Time = now
 				tc.QuotesChan <- quotes
 			}
 		case "sec_info_upd":
