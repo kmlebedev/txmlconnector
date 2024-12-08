@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	log "github.com/sirupsen/logrus"
 )
 
 type ServerStatus struct {
@@ -556,6 +557,8 @@ type quote struct {
 func EncodeRequest(request interface{}) string {
 	var bytesBuffer bytes.Buffer
 	e := xml.NewEncoder(&bytesBuffer)
-	e.Encode(request)
+	if err := e.Encode(request); err != nil {
+		log.Errorf("encode request %+v: %v", request, err)
+	}
 	return bytesBuffer.String()
 }
