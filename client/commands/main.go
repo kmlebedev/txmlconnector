@@ -535,6 +535,23 @@ type SecInfo struct {
 	CurrencyId    string   `xml:"currencyid,omitempty"`     // Валюта расчетов режима торгов по умолчанию
 }
 
+type Quotes struct {
+	XMLName xml.Name `xml:"quotes"`
+	Items   []quote  `xml:"quote"`
+}
+
+// Значение «-1» одновременно и в поле sell и в поле buy означает, что строка с данной ценой (или с данным значением пары price + source) удалена из «стакана».
+type quote struct {
+	XMLName xml.Name `xml:"quote"`
+	SecId   int      `xml:"secid,attr"`        // внутренний код
+	SecCode string   `xml:"seccode,omitempty"` // Код инструмента
+	Board   string   `xml:"board,omitempty"`   // Идентификатор режима торгов
+	Pice    float64  `xml:"price,omitempty"`   // Цена
+	Source  string   `xml:"source,omitempty"`  // Источник котировки (маркетмейкер)
+	Buy     int      `xml:"buy,omitempty"`     // количество бумаг к покупке, значение «-1» - больше нет заявок на покупку
+	Sell    int      `xml:"sell,omitempty"`    // количество бумаг к продаже, значение «-1» - больше нет заявок на покупку
+}
+
 // Encodes the request into XML format.
 func EncodeRequest(request interface{}) string {
 	var bytesBuffer bytes.Buffer
