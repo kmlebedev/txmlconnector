@@ -124,7 +124,7 @@ func (tc *TCClient) Connect() error {
 	}
 	if result.Success != "true" {
 		log.Error("Result: ", result.Message)
-		fmt.Errorf("Result not success: %s", result.Message)
+		return fmt.Errorf("Result not success: %s", result.Message)
 	} else {
 		log.Debugf("Result: %+v", result)
 	}
@@ -137,7 +137,7 @@ func (tc *TCClient) Disconnect() error {
 }
 
 func (tc *TCClient) Close() {
-	tc.grpcConn.Close()
+	_ = tc.grpcConn.Close()
 }
 
 func (tc *TCClient) SendCommand(cmd Command) error {
