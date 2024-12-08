@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	. "github.com/kmlebedev/txmlconnector/client/commands"
 	pb "github.com/kmlebedev/txmlconnector/proto"
@@ -39,9 +40,14 @@ type TCClient struct {
 	ResponseChannel  chan string
 	ShutdownChannel  chan bool
 	AllTradesChan    chan AllTrades
+	QuotesChan       chan Quotes
 	grpcConn         *grpc.ClientConn
 	ctx              context.Context
 }
+
+var (
+	timeNowLocation, _ = time.LoadLocation("Europe/Moscow")
+)
 
 func init() {
 	ll := log.InfoLevel
@@ -80,10 +86,8 @@ func NewTCClientWithConn(client pb.ConnectServiceClient, conn *grpc.ClientConn) 
 
 func NewTCClient() (*TCClient, error) {
 	log.Infoln("gRPC client running ...")
-	conn, err := grpc.Dial(
+	conn, err := grpc.NewClient(
 		os.Getenv("TC_TARGET"),
-		grpc.WithInsecure(),
-		grpc.WithBlock(),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 	)
 	if err != nil {
@@ -123,7 +127,7 @@ func (tc *TCClient) Connect() error {
 	}
 	if result.Success != "true" {
 		log.Error("Result: ", result.Message)
-		fmt.Errorf("Result not success: %s", result.Message)
+		return fmt.Errorf("Result not success: %s", result.Message)
 	} else {
 		log.Debugf("Result: %+v", result)
 	}
@@ -136,7 +140,7 @@ func (tc *TCClient) Disconnect() error {
 }
 
 func (tc *TCClient) Close() {
-	tc.grpcConn.Close()
+	_ = tc.grpcConn.Close()
 }
 
 func (tc *TCClient) SendCommand(cmd Command) error {
@@ -184,6 +188,15 @@ func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchRespons
 				log.Error(err)
 			} else {
 				tc.AllTradesChan <- allTrades
+			}
+		case "quotes":
+			quotes := Quotes{}
+			now := time.Now().In(timeNowLocation)
+			if err := xml.Unmarshal(msgData, &quotes); err != nil {
+				log.Error(err)
+			} else {
+				quotes.Time = now
+				tc.QuotesChan <- quotes
 			}
 		case "sec_info_upd":
 			secInfoUpd := SecInfoUpd{}
