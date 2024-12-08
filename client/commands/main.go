@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	log "github.com/sirupsen/logrus"
+	"time"
 )
 
 type ServerStatus struct {
@@ -446,7 +448,7 @@ type Quotation struct {
 	Board                 string   `xml:"board,omitempty"`                 // Идентификатор режима торгов
 	SecCode               string   `xml:"seccode,omitempty"`               // Код инструмента
 	Open                  float64  `xml:"open,omitempty"`                  // Цена первой сделки
-	WapPice               float64  `xml:"waprice,omitempty"`               // Средневзвешенная цена
+	WapPrice              float64  `xml:"waprice,omitempty"`               // Средневзвешенная цена
 	Last                  float64  `xml:"last,omitempty"`                  // Цена последней сделки
 	Quantity              int      `xml:"quantity,omitempty"`              // Объем последней сделки, в лотах
 	Time                  string   `xml:"time,omitempty"`                  // Время заключения последней сделки
@@ -484,14 +486,14 @@ type Quotation struct {
 	LCurrentPrice         float64  `xml:"lcurrentprice,omitempty"`         // Официальная текущая цена Биржи
 }
 
-type trade struct {
+type Trade struct {
 	XMLName      xml.Name `xml:"trade"`
 	SecId        int      `xml:"secid,attr"`             // внутренний код
 	SecCode      string   `xml:"seccode,omitempty"`      // Код инструмента
 	TradeNo      int64    `xml:"tradeno,omitempty"`      // Биржевой номер сделки
 	Time         string   `xml:"time,omitempty"`         // Время сделки :date
 	Board        string   `xml:"board,omitempty"`        // Идентификатор режима торгов
-	Pice         float64  `xml:"price,omitempty"`        // Цена сделки
+	Price        float64  `xml:"price,omitempty"`        // Цена сделки
 	Quantity     int      `xml:"quantity,omitempty"`     // Объем сделки, в лотах
 	BuySell      string   `xml:"buysell,omitempty"`      // покупка (B) / продажа (S)
 	OpenInterest int      `xml:"openinterest,omitempty"` // Открытый интерес
@@ -500,7 +502,7 @@ type trade struct {
 
 type AllTrades struct {
 	XMLName xml.Name `xml:"alltrades"`
-	Items   []trade  `xml:"trade"`
+	Items   []Trade  `xml:"trade"`
 }
 
 type SecInfo struct {
@@ -535,10 +537,31 @@ type SecInfo struct {
 	CurrencyId    string   `xml:"currencyid,omitempty"`     // Валюта расчетов режима торгов по умолчанию
 }
 
+type Quotes struct {
+	XMLName xml.Name `xml:"quotes"`
+	Items   []Quote  `xml:"quote"`
+	Time    time.Time
+}
+
+// Значение «-1» одновременно и в поле sell и в поле buy означает, что строка с данной ценой (или с данным значением пары price + source) удалена из «стакана».
+type Quote struct {
+	XMLName xml.Name `xml:"quote"`
+	SecId   int      `xml:"secid,attr"`        // внутренний код
+	SecCode string   `xml:"seccode,omitempty"` // Код инструмента
+	Board   string   `xml:"board,omitempty"`   // Идентификатор режима торгов
+	Price   float64  `xml:"price,omitempty"`   // Цена
+	Source  string   `xml:"source,omitempty"`  // Источник котировки (маркетмейкер)
+	Yield   int      `xml:"yield,omitempty"`   // Доходность (актуально только для облигаций)
+	Buy     int      `xml:"buy,omitempty"`     // Количество бумаг к покупке, значение «-1» - больше нет заявок на покупку
+	Sell    int      `xml:"sell,omitempty"`    // Количество бумаг к продаже, значение «-1» - больше нет заявок на покупку
+}
+
 // Encodes the request into XML format.
 func EncodeRequest(request interface{}) string {
 	var bytesBuffer bytes.Buffer
 	e := xml.NewEncoder(&bytesBuffer)
-	e.Encode(request)
+	if err := e.Encode(request); err != nil {
+		log.Errorf("encode request %+v: %v", request, err)
+	}
 	return bytesBuffer.String()
 }
