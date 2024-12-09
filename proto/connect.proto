@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option go_package = "github.com/kmlebedev/txmlconnector/proto";
+option go_package = "github.com/kmlebedev/txmlconnector/transaqConnector";
 package transaqConnector;
 
 message DataRequest {
