@@ -4,7 +4,7 @@
 // - protoc             v5.29.1
 // source: proto/connect.proto
 
-package proto
+package transaqConnector
 
 import (
 	context "context"
