@@ -6,6 +6,8 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials/insecure"
 	"io"
 	"os"
 	"strings"
@@ -88,12 +90,14 @@ func NewTCClient() (*TCClient, error) {
 	log.Infoln("gRPC client running ...")
 	conn, err := grpc.NewClient(
 		os.Getenv("TC_TARGET"),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 	)
 	if err != nil {
 		log.Error("grpc.Dial()", err)
 		return nil, err
 	}
+	conn.WaitForStateChange(context.Background(), connectivity.Ready)
 	client := pb.NewConnectServiceClient(conn)
 	return NewTCClientWithConn(client, conn)
 }
