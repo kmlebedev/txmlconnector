@@ -138,6 +138,7 @@ type Security struct {
 	Decimals   int         `xml:"decimals"`    // Количество десятичных знаков в цене
 	MinStep    float64     `xml:"minstep"`     // Шаг цены
 	LotSize    int         `xml:"lotsize"`     // Размер лота
+	LotDivider int         `xml:"lotdivider"`  // Делитель лота
 	PointCost  float64     `xml:"point_cost"`  // Стоимость пункта цены
 	OpMask     OpMask      `xml:"opmask"`
 	SecType    string      `xml:"sectype"`    // Тип бумаги
