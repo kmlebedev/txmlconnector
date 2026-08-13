@@ -1,31 +1,33 @@
-.PHONY: compile
+.PHONY: compile test vet server_build server queues_build queues client tgbot
 compile: ## Compile the proto file.
 	protoc proto/connect.proto --go_out=. --go-grpc_out=. --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative
 
-.PHONY: server
+test:
+	go test ./...
+
+vet:
+	go vet ./...
 
 server_build:
-	CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -ldflags "-extldflags -static -s -w" -o bin/server.exe main.go
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o bin/server.exe .
 
-## Build and run server. brew install mingw-w64
+## Build and run the Win32 adapter under Wine.
 server: server_build
 	mkdir -p logs
 	wine64 bin/server.exe
 
 queues_build:
-	CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" CXX="x86_64-w64-mingw32-g++" GOOS=windows GOARCH=amd64 go build -ldflags "-extldflags -static -s -w" -o bin/queues.exe examples/queues/main.go
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o bin/queues.exe ./examples/queues
 
 queues: queues_build
 	wine64 bin/queues.exe
 
-.PHONY: client
 client: ## Build and run client.
-	go build -ldflags "-s -w" -o bin/client examples/grpc-client/main.go
+	go build -ldflags "-s -w" -o bin/client ./examples/grpc-client
 	bin/client
 
-.PHONY: tgbot
 tgbot: ## Build and run telegram bot app.
-	go build -ldflags "-s -w" -o bin/tgbot examples/telegram-bot/main.go
+	go build -ldflags "-s -w" -o bin/tgbot ./examples/telegram-bot
 	bin/tgbot
 
 build:

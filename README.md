@@ -1,129 +1,113 @@
 # txmlconnector
 
-### Description
+Go adapter around the proprietary Win32 `TXmlConnector.dll`. The adapter exposes
+the connector over gRPC so native Linux and macOS applications do not depend on
+Win32 calls or Wine themselves.
 
-[gRPC](https://grpc.io/) interface around 
-[TransaqConnector](https://www.finam.ru/howtotrade/tconnector/)
-to be able to connect from different languages via TCP (remote procedure call) and linux as well 
+## Architecture
 
-#### Service proto description
+```text
+Linux/macOS/Windows application
+        |
+        | gRPC (XML command + broadcast XML stream)
+        v
+server package (platform-neutral lifecycle and transport)
+        |
+        | connector.Connector
+        v
+Win32 adapter (windows/amd64 only, pure Go syscall/stdcall)
+        |
+        v
+TXmlConnector.dll
+```
 
-```protobuf
-syntax = "proto3";
+The important boundary is the small `connector.Connector` interface:
 
-option go_package = "github.com/lebedev_k/txmlconnector";
-
-package transaqConnector;
-
-message DataRequest {
-}
-
-message DataResponse {
-  string message = 1;
-}
-
-message SendCommandRequest {
-  string message = 1;
-}
-
-message SendCommandResponse {
-  string message = 1;
-}
-
-service ConnectService {
-  rpc FetchResponseData(DataRequest) returns (stream DataResponse) {}
-  rpc SendCommand(SendCommandRequest) returns (SendCommandResponse) {}
+```go
+type Connector interface {
+    Start(MessageHandler) error
+    SendCommand(context.Context, string) (string, error)
+    Close() error
 }
 ```
 
-### Starting server in docker
-```
-docker run -p 50051:50051 kmlebedev/txmlconnector server
-```
+This keeps the vendor DLL, its memory ownership and Win32 ABI out of gRPC and
+business code. It also makes the server testable on Linux/macOS with a fake
+adapter. Calls into the DLL are serialized because the vendor documents the
+library as not thread-safe. The callback copies the XML and frees DLL-owned
+memory before publishing it to buffered subscribers.
 
-### Start server and client
-```
-docker compose -f docker/txmlconnector-compose.yaml -p txmlconnector up
-```
+The Win32 executable no longer needs CGO or MinGW. On Linux, run that executable
+under Wine and keep Linux clients native. A direct Linux wrapper around the DLL
+is not possible because the vendor distributes a Win32 binary, not an ELF shared
+library.
 
-### Starting server in Linux/MacOSX
-
-#### Requirements
-##### MacOSX
+## Build and test
 
 ```shell
-brew install mingw-w64 
-brew cask install wine-stable
+go test ./...
+go vet ./...
+make server_build     # produces bin/server.exe, CGO_ENABLED=0
 ```
-##### Debian/Ubintu
+
+Run the server on Windows:
+
+```powershell
+$env:TC_DLL_PATH = "C:\path\to\txmlconnector64-6.43.2.24.0.dll"
+$env:TC_LISTEN_ADDR = ":50051"
+.\bin\server.exe
+```
+
+Run the same adapter on Linux/macOS using Wine:
 
 ```shell
-sudo apt install wine64
-```
-
-#### Set environment variables
-
-```shell
-export TC_LOG_LEVEL=debug
-export TC_DLL_PATH=txmlconnector64-6.32.2.21.23.dll
-```
-
-#### Example output:
-
-```bash
+export TC_DLL_PATH=/absolute/path/to/txmlconnector64-6.43.2.24.0.dll
 make server
-CGO_ENABLED=1 CC="x86_64-w64-mingw32-gcc" GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o bin/server.exe server/main.go
-wine64 bin/server.exe
-00ea:fixme:process:SetProcessPriorityBoost (FFFFFFFFFFFFFFFF,1): stub
-time="2020-12-17T20:57:01+05:00" level=info msg="Initialize txmlconnector"
-InitCrashHandler: Z:\Users\kmlebedev\go\src\txmlconnector\bin\server-201217-205701.mdmp
-00f0:fixme:ver:GetCurrentPackageId (0x29d5fd90 0x0): stub
-time="2020-12-17T20:57:01+05:00" level=info msg="Server running ..."
-00ea:fixme:winsock:set_dont_fragment IP_DONTFRAGMENT for IPv4 not supported in this platform
-00ea:fixme:winsock:set_dont_fragment IP_DONTFRAGMENT for IPv6 not supported in this platform
-time="2020-12-17T20:57:01+05:00" level=info msg="Press CRTL+C to stop the server..."
 ```
 
-### Starting client in Linux/MacOSX
+Or build and run the container:
 
-#### Set environment variables
-[TRANSAQ Connector request access to demo account](https://www.finam.ru/howtotrade/tconnector00002/?program=Transaq%20Connector)
-
-```
-export TC_LOGIN="TCNN9979"
-export TC_PASSWORD="n3Z4W4"
-export TC_HOST="tr1-demo5.finam.ru"
-export TC_PORT="3939"
-export TC_LOG_LEVEL="DEBUG"
+```shell
+make build
+docker run --rm -p 50051:50051 kmlebedev/txmlconnector:local server
 ```
 
-#### Example output:
-```bash
+## Native Go client
+
+The client connects over gRPC and is platform-independent:
+
+```shell
+export TC_TARGET=localhost:50051
+export TC_LOGIN=...
+export TC_PASSWORD=...
+export TC_HOST=...
+export TC_PORT=...
 make client
-go build -ldflags "-s -w" -o bin/client client/main.go
-bin/client
-INFO[0000] Client running ...                           
-INFO[0001] res <result success="true"/> 
 ```
 
-### Example apps
-#### Clickhouse-exporter
-Historical Moscow Exchange stock quote prices exporting to [clickhouse server](https://clickhouse.tech/) through transaq 
-#### Starting
-```
-docker-compose -f docker/transaq-clickhouse-exporter-compose.yaml -p transaq up
-```
+Configuration:
 
-### Links
- - [TRANSAQ XML Connector](https://files.comon.ru/usercontent/TXmlConnector.pdf)
- - [TXmlConnector last(2.21.21) version](https://files.comon.ru/usercontent/TXmlConnector.zip)
- - [TRANSAQ Connector Forum](http://www.transaq.ru/forum/index.php?board=6.0)
- - [TransaqConnector Linux Finam Forum](https://forum.finam.ru/posts/t109457-TransaqConnector-Linux)
- - [TransaqGrpcWrapper](https://github.com/ivanantipin/transaqgrpc)
- - [Creating a simplegRPC client and server application with Golang](http://www.inanzzz.com/index.php/post/fczr/creating-a-simple-grpc-client-and-server-application-with-golang)
- - [Using Go to call Windows API](https://medium.com/@justen.walker/breaking-all-the-rules-using-go-to-call-windows-api-2cbfd8c79724)
- - [How to Set Up gRPC Server-Side Streaming with Go](https://www.freecodecamp.org/news/grpc-server-side-streaming-with-go/)
- - [BB](https://www.investopedia.com/terms/b/bollingerbands.asp)
- - https://iqsignal.net/coint
- - https://www.gonum.org/post/intro_to_gonum/
- 
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `TC_DLL_PATH` | Explicit DLL path | version-derived file name |
+| `TC_DLL_VER` | DLL version used in the derived name | `6.43.2.24.0` |
+| `TC_DLL_LOG_DIR` | Directory for DLL logs | `logs` |
+| `TC_DLL_LOG_LEVEL` | Native DLL log level (`1`-`3`) | `2` |
+| `TC_LISTEN_ADDR` | gRPC listen address | `:50051` |
+| `TC_TARGET` | Client gRPC target | `localhost:50051` |
+| `TC_LOG_LEVEL` | Go application log level | `info` |
+
+## Compatibility notes
+
+- The protobuf service and existing Go client fields remain compatible.
+- `server.TxmlSendCommand`, `server.Messages` and `server.Done` remain available
+  on `windows/amd64` as deprecated migration shims. New code should depend on
+  `connector.Connector` explicitly.
+- Every gRPC stream receives its own copy of each XML message. Slow subscribers
+  are disconnected with `ResourceExhausted` rather than blocking the vendor
+  callback and all other clients.
+
+## References
+
+- [TRANSAQ XML Connector documentation](https://files.comon.ru/usercontent/TXmlConnector.pdf)
+- [gRPC](https://grpc.io/)
