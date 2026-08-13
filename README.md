@@ -53,7 +53,7 @@ make server_build     # produces bin/server.exe, CGO_ENABLED=0
 Run the server on Windows:
 
 ```powershell
-$env:TC_DLL_PATH = "C:\path\to\txmlconnector64-6.43.2.24.0.dll"
+$env:TC_DLL_PATH = "C:\path\to\txmlconnector64-6.47.2.26.4.dll"
 $env:TC_LISTEN_ADDR = ":50051"
 .\bin\server.exe
 ```
@@ -61,7 +61,7 @@ $env:TC_LISTEN_ADDR = ":50051"
 Run the same adapter on Linux/macOS using Wine:
 
 ```shell
-export TC_DLL_PATH=/absolute/path/to/txmlconnector64-6.43.2.24.0.dll
+export TC_DLL_PATH=/absolute/path/to/txmlconnector64-6.47.2.26.4.dll
 make server
 ```
 
