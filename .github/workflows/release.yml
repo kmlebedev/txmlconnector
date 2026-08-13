@@ -19,10 +19,10 @@ jobs:
 
     steps:
       - name: Check out code into the Go module directory
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Go Release server
-        uses: wangyoucao577/go-release-action@16624612d4e2b73de613857a362d294700207fff # v1.22
+        uses: wangyoucao577/go-release-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: ${{ matrix.goos }}
@@ -34,7 +34,7 @@ jobs:
           ldflags: "-extldflags -static -s -w"
           asset_name: "server_${{ matrix.goos }}_${{ matrix.goarch }}"
       - name: Go Release queues
-        uses: wangyoucao577/go-release-action@16624612d4e2b73de613857a362d294700207fff # v1.22
+        uses: wangyoucao577/go-release-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: ${{ matrix.goos }}
