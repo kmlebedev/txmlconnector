@@ -1,6 +1,6 @@
 module github.com/kmlebedev/txmlconnector
 
-go 1.23
+go 1.26.0
 
 require (
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
@@ -9,6 +9,7 @@ require (
 	github.com/streadway/amqp v1.0.0
 	gocloud.dev v0.29.0
 	gocloud.dev/pubsub/rabbitpubsub v0.29.0
+	golang.org/x/sys v0.26.0
 	google.golang.org/grpc v1.68.1
 	google.golang.org/protobuf v1.35.2
 )
@@ -22,7 +23,6 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/net v0.30.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.26.0 // indirect
 	golang.org/x/text v0.19.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	google.golang.org/api v0.110.0 // indirect
