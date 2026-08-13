@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	log "github.com/golang/glog"
-	"github.com/streadway/amqp"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
+	log "github.com/golang/glog"
 	. "github.com/kmlebedev/txmlconnector/client/commands"
-	"github.com/kmlebedev/txmlconnector/server"
+	"github.com/kmlebedev/txmlconnector/connector"
+	"github.com/streadway/amqp"
 	"gocloud.dev/pubsub"
 	_ "gocloud.dev/pubsub/rabbitpubsub"
 )
@@ -91,22 +93,51 @@ func init() {
 	}
 }
 
-func sendCmd(cmd interface{}) error {
-	response := tcServer.TxmlSendCommand(EncodeRequest(cmd))
+func sendCmd(native connector.Connector, cmd interface{}) error {
+	message, err := EncodeRequestE(cmd)
+	if err != nil {
+		return fmt.Errorf("encode command: %w", err)
+	}
+	response, err := native.SendCommand(ctx, message)
+	if err != nil {
+		return err
+	}
 	result := Result{}
-	if err := xml.Unmarshal([]byte(*response), &result); err != nil {
+	if err := xml.Unmarshal([]byte(response), &result); err != nil {
 		return err
 	}
 	if result.Success != "true" {
-		return fmt.Errorf(result.Message)
+		return fmt.Errorf("TRANSAQ command failed: %s", result.Message)
 	}
 	return nil
 }
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	messages := make(chan string, 1024)
+	native, err := connector.New(connector.ConfigFromEnv())
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := native.Start(func(message string) {
+		select {
+		case messages <- message:
+		default:
+			log.Warning("connector message buffer is full; dropping message")
+		}
+	}); err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		if err := native.Close(); err != nil {
+			log.Errorf("close connector: %v", err)
+		}
+	}()
+
 	queueSecCodes := strings.Split(os.Getenv("QUEUE_SEC_CODES"), ",")
 	defer topic.Shutdown(ctx)
-	if err := sendCmd(Connect{
+	if err := sendCmd(native, Connect{
 		Id:             "connect",
 		Login:          os.Getenv("TC_LOGIN"),
 		Password:       os.Getenv("TC_PASSWORD"),
@@ -120,11 +151,16 @@ func main() {
 	}); err != nil {
 		log.Fatal(err)
 	}
-	defer tcServer.TxmlSendCommand(EncodeRequest(Command{Id: "disconnect"}))
+	defer func() {
+		if err := sendCmd(native, Command{Id: "disconnect"}); err != nil {
+			log.Warningf("disconnect: %v", err)
+		}
+	}()
 	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
-		case msg := <-tcServer.Messages:
+		case msg := <-messages:
 			xmlReader := strings.NewReader(msg)
 			decoder := xml.NewDecoder(xmlReader)
 			token, err := decoder.Token()
@@ -163,8 +199,8 @@ func main() {
 					continue
 				}
 				if !isSubscribed {
-					if err := sendCmd(Command{Id: "subscribe", Quotations: quotations}); err != nil {
-						log.Errorf("SendCommand: ", err)
+					if err := sendCmd(native, Command{Id: "subscribe", Quotations: quotations}); err != nil {
+						log.Errorf("send subscribe command: %v", err)
 					} else {
 						isSubscribed = true
 					}
@@ -187,17 +223,11 @@ func main() {
 				log.Warningf("skip msg: %s", startElement.Name.Local)
 			}
 		case <-ctx.Done():
-			fmt.Println("Loop done", ctx.Err())
-			break
-		case done := <-tcServer.Done:
-			if done {
-				fmt.Println("Stop loop")
-			}
-			break
+			return
 		case t := <-ticker.C:
 			log.Infoln("no message received, Tick at", t)
 			if !isSubscribed {
-				if err := sendCmd(Command{Id: "server_status"}); err != nil {
+				if err := sendCmd(native, Command{Id: "server_status"}); err != nil {
 					log.Error(err)
 				}
 			}

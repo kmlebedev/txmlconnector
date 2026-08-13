@@ -559,10 +559,20 @@ type Quote struct {
 
 // Encodes the request into XML format.
 func EncodeRequest(request interface{}) string {
+	encoded, err := EncodeRequestE(request)
+	if err != nil {
+		log.Errorf("encode request: %v", err)
+	}
+	return encoded
+}
+
+// EncodeRequestE is the error-returning form used by library code. EncodeRequest
+// remains for backward compatibility with existing applications.
+func EncodeRequestE(request interface{}) (string, error) {
 	var bytesBuffer bytes.Buffer
 	e := xml.NewEncoder(&bytesBuffer)
 	if err := e.Encode(request); err != nil {
-		log.Errorf("encode request %+v: %v", request, err)
+		return "", err
 	}
-	return bytesBuffer.String()
+	return bytesBuffer.String(), nil
 }
