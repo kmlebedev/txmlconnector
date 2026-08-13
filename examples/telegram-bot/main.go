@@ -159,7 +159,7 @@ func main() {
 				}
 				btnsSec := tgbotapi.NewInlineKeyboardRow()
 				for _, sec := range positions.SecPositions {
-					log.Debugln(sec.SecInfo)
+					log.Debugf("security position: %+v", sec)
 					btnsSec = append(btnsSec, tgbotapi.NewInlineKeyboardButtonData(sec.Shortname,
 						fmt.Sprintf("gethistorydata:secid:%d", sec.SecId)))
 				}
