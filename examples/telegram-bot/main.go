@@ -87,11 +87,11 @@ func main() {
 					if tc.Data.Positions.SpotLimit != nil && len(tc.Data.Positions.SpotLimit) > 0 {
 						positions.SpotLimit = tc.Data.Positions.SpotLimit
 					}
-					log.Debugf(fmt.Sprintf("Positions: \n%+v\n", tc.Data.Positions))
+					log.Debugf("Positions: \n%+v\n", tc.Data.Positions)
 				case "candles":
 					for _, candle := range tc.Data.Candles.Items {
 						if candle.Date == fmt.Sprintf("%s 18:45:00", time.Now().Format("02.01.2006")) {
-							log.Infof(fmt.Sprintf("candle: \n%s %+v\n", tc.Data.Candles.SecCode, candle))
+							log.Infof("candle: \n%s %+v\n", tc.Data.Candles.SecCode, candle)
 							postmarket[tc.Data.Candles.SecCode] = candle
 							total[tc.Data.Candles.SecCode] = candle.Open * float64(candle.Volume*int64(secs[tc.Data.Candles.SecCode].LotSize))
 							break
