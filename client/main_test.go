@@ -2,17 +2,70 @@ package tcClient
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/client/commands"
 	pb "github.com/kmlebedev/txmlconnector/proto"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
+
+type clientRPC struct {
+	mu              sync.Mutex
+	stream          grpc.ServerStreamingClient[pb.DataResponse]
+	fetchErr        error
+	fetchContext    context.Context
+	commandResponse string
+	commandErr      error
+	requests        []string
+}
+
+func (rpc *clientRPC) FetchResponseData(
+	ctx context.Context,
+	_ *pb.DataRequest,
+	_ ...grpc.CallOption,
+) (grpc.ServerStreamingClient[pb.DataResponse], error) {
+	rpc.mu.Lock()
+	rpc.fetchContext = ctx
+	rpc.mu.Unlock()
+	if rpc.fetchErr != nil {
+		return nil, rpc.fetchErr
+	}
+	return rpc.stream, nil
+}
+
+func (rpc *clientRPC) SendCommand(
+	_ context.Context,
+	request *pb.SendCommandRequest,
+	_ ...grpc.CallOption,
+) (*pb.SendCommandResponse, error) {
+	rpc.mu.Lock()
+	rpc.requests = append(rpc.requests, request.GetMessage())
+	rpc.mu.Unlock()
+	if rpc.commandErr != nil {
+		return nil, rpc.commandErr
+	}
+	return &pb.SendCommandResponse{Message: rpc.commandResponse}, nil
+}
+
+func (rpc *clientRPC) sentRequests() []string {
+	rpc.mu.Lock()
+	defer rpc.mu.Unlock()
+	return append([]string(nil), rpc.requests...)
+}
+
+func (rpc *clientRPC) responseContext() context.Context {
+	rpc.mu.Lock()
+	defer rpc.mu.Unlock()
+	return rpc.fetchContext
+}
 
 type responseStream struct {
 	ctx         context.Context
@@ -42,6 +95,125 @@ func (s *responseStream) Recv() (*pb.DataResponse, error) {
 		s.received.Do(func() { close(s.allReceived) })
 	}
 	return &pb.DataResponse{Message: message}, nil
+}
+
+func TestNewTCClientWithConnStartsStreamAndConnects(t *testing.T) {
+	t.Setenv("TC_LOGIN", "test-login")
+	t.Setenv("TC_PASSWORD", "test-password")
+	t.Setenv("TC_HOST", "test-host")
+	t.Setenv("TC_PORT", "12345")
+
+	rpc := &clientRPC{
+		stream: &responseStream{
+			ctx:         context.Background(),
+			allReceived: make(chan struct{}),
+		},
+		commandResponse: `<result success="true"/>`,
+	}
+	client, err := NewTCClientWithConn(rpc, nil)
+	if err != nil {
+		t.Fatalf("NewTCClientWithConn error = %v", err)
+	}
+	defer client.Close()
+
+	requests := rpc.sentRequests()
+	if len(requests) != 1 {
+		t.Fatalf("sent requests = %d, want 1", len(requests))
+	}
+	connect := commands.Connect{}
+	if err := xml.Unmarshal([]byte(requests[0]), &connect); err != nil {
+		t.Fatalf("decode connect request: %v", err)
+	}
+	if connect.Id != "connect" || connect.Login != "test-login" || connect.Password != "test-password" ||
+		connect.Host != "test-host" || connect.Port != "12345" {
+		t.Fatalf("connect request = %+v", connect)
+	}
+
+	select {
+	case <-client.ShutdownChannel:
+	case <-time.After(time.Second):
+		t.Fatal("stream EOF did not signal client shutdown")
+	}
+}
+
+func TestNewTCClientWithConnRejectsNilGRPCClient(t *testing.T) {
+	if _, err := NewTCClientWithConn(nil, nil); err == nil {
+		t.Fatal("NewTCClientWithConn accepted a nil gRPC client")
+	}
+}
+
+func TestNewTCClientWithConnReportsStreamOpenFailure(t *testing.T) {
+	rpc := &clientRPC{fetchErr: errors.New("stream unavailable")}
+	client, err := NewTCClientWithConn(rpc, nil)
+	if err == nil || client != nil || !strings.Contains(err.Error(), "open response stream") {
+		t.Fatalf("NewTCClientWithConn = (%v, %v), want stream error", client, err)
+	}
+
+	responseCtx := rpc.responseContext()
+	if responseCtx == nil {
+		t.Fatal("response stream was not requested")
+	}
+	select {
+	case <-responseCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("stream open failure did not cancel the client context")
+	}
+}
+
+func TestNewTCClientWithConnCancelsStreamWhenConnectFails(t *testing.T) {
+	rpc := &clientRPC{
+		stream: &responseStream{
+			ctx:         context.Background(),
+			allReceived: make(chan struct{}),
+		},
+		commandErr: errors.New("send failed"),
+	}
+	if client, err := NewTCClientWithConn(rpc, nil); err == nil || client != nil {
+		t.Fatalf("NewTCClientWithConn = (%v, %v), want nil client and error", client, err)
+	}
+
+	responseCtx := rpc.responseContext()
+	if responseCtx == nil {
+		t.Fatal("response stream was not opened")
+	}
+	select {
+	case <-responseCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("failed client startup did not cancel the response stream")
+	}
+}
+
+func TestSendCommandReportsTransportAndResponseErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		rpcErr   error
+		want     string
+	}{
+		{name: "transport", rpcErr: errors.New("connection lost"), want: "send command"},
+		{name: "malformed XML", response: `<result`, want: "decode command response"},
+		{name: "TRANSAQ rejection", response: `<result success="false"><message>denied</message></result>`, want: "TRANSAQ command failed"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rpc := &clientRPC{commandResponse: test.response, commandErr: test.rpcErr}
+			client := &TCClient{Client: rpc, ctx: context.Background()}
+			err := client.SendCommand(commands.Command{Id: "test"})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("SendCommand error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestCloseIsIdempotentAndCancelsClient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &TCClient{ctx: ctx, cancel: cancel}
+	client.Close()
+	client.Close()
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatalf("client context error = %v", ctx.Err())
+	}
 }
 
 func TestHandleMessageRoutesQuotes(t *testing.T) {
