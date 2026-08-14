@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const defaultSubscriberBuffer = 256
+const defaultSubscriberBuffer = 8192
 
 type service struct {
 	pb.UnimplementedConnectServiceServer
