@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -32,10 +33,23 @@ func ConfigFromEnv() Config {
 	}
 	return Config{
 		Address:          address,
-		SubscriberBuffer: defaultSubscriberBuffer,
+		SubscriberBuffer: subscriberBufferFromEnv(),
 		ShutdownTimeout:  10 * time.Second,
 		Connector:        connector.ConfigFromEnv(),
 	}
+}
+
+func subscriberBufferFromEnv() int {
+	value := os.Getenv("TC_SUBSCRIBER_BUFFER")
+	if value == "" {
+		return defaultSubscriberBuffer
+	}
+	buffer, err := strconv.Atoi(value)
+	if err != nil || buffer < 1 {
+		log.Warnf("invalid TC_SUBSCRIBER_BUFFER %q; using %d", value, defaultSubscriberBuffer)
+		return defaultSubscriberBuffer
+	}
+	return buffer
 }
 
 // Run starts the process-level server and handles SIGINT/SIGTERM gracefully.

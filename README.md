@@ -94,6 +94,7 @@ Configuration:
 | `TC_DLL_LOG_DIR` | Directory for DLL logs | `logs` |
 | `TC_DLL_LOG_LEVEL` | Native DLL log level (`1`-`3`) | `2` |
 | `TC_LISTEN_ADDR` | gRPC listen address | `:50051` |
+| `TC_SUBSCRIBER_BUFFER` | Per-client XML burst buffer on the server | `8192` |
 | `TC_TARGET` | Client gRPC target | `localhost:50051` |
 | `TC_LOG_LEVEL` | Go application log level | `info` |
 
@@ -106,6 +107,9 @@ Configuration:
 - Every gRPC stream receives its own copy of each XML message. Slow subscribers
   are disconnected with `ResourceExhausted` rather than blocking the vendor
   callback and all other clients.
+- The Go client reads the gRPC stream into an internal FIFO before decoding XML.
+  This keeps application handlers and temporary database stalls from blocking
+  transport reads while preserving message order.
 
 ## References
 

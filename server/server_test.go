@@ -120,3 +120,23 @@ func TestServeBridgesConnectorAndGRPC(t *testing.T) {
 		t.Fatalf("commands = %q", native.commands)
 	}
 }
+
+func TestConfigFromEnvReadsSubscriberBuffer(t *testing.T) {
+	t.Setenv("TC_SUBSCRIBER_BUFFER", "16384")
+
+	config := ConfigFromEnv()
+
+	if config.SubscriberBuffer != 16384 {
+		t.Fatalf("subscriber buffer = %d", config.SubscriberBuffer)
+	}
+}
+
+func TestConfigFromEnvRejectsInvalidSubscriberBuffer(t *testing.T) {
+	t.Setenv("TC_SUBSCRIBER_BUFFER", "0")
+
+	config := ConfigFromEnv()
+
+	if config.SubscriberBuffer != defaultSubscriberBuffer {
+		t.Fatalf("subscriber buffer = %d", config.SubscriberBuffer)
+	}
+}
