@@ -203,25 +203,49 @@ func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchRespons
 
 func (tc *TCClient) loopReadingFromStream(stream pb.ConnectService_FetchResponseDataClient) {
 	defer tc.signalShutdown()
+	queue := newResponseQueue()
+	processed := make(chan struct{})
+	go func() {
+		defer close(processed)
+		for {
+			message, ok := queue.pop(tc.done())
+			if !ok {
+				return
+			}
+			if err := tc.handleMessage(message); err != nil {
+				if errors.Is(err, errUnknownMessage) {
+					log.Warnf("%v: %s", err, message)
+				} else if !errors.Is(err, context.Canceled) {
+					log.Errorf("handle response: %v", err)
+				}
+			}
+		}
+	}()
+	defer func() {
+		queue.close()
+		<-processed
+	}()
+
 	for {
 		resp, err := stream.Recv()
 		if err == io.EOF {
 			return
 		}
 		if err != nil {
-			if tc.ctx.Err() == nil {
+			if tc.ctx == nil || tc.ctx.Err() == nil {
 				log.Errorf("receive response stream: %v", err)
 			}
 			return
 		}
-		if err := tc.handleMessage(resp.Message); err != nil {
-			if errors.Is(err, errUnknownMessage) {
-				log.Warnf("%v: %s", err, resp.Message)
-			} else {
-				log.Errorf("handle response: %v", err)
-			}
-		}
+		queue.push(resp.Message)
 	}
+}
+
+func (tc *TCClient) done() <-chan struct{} {
+	if tc.ctx == nil {
+		return nil
+	}
+	return tc.ctx.Done()
 }
 
 func (tc *TCClient) signalShutdown() {
@@ -257,31 +281,51 @@ func (tc *TCClient) handleMessage(message string) error {
 		if err := unmarshal(&allTrades); err != nil {
 			return err
 		}
-		tc.AllTradesChan <- allTrades
+		select {
+		case tc.AllTradesChan <- allTrades:
+		case <-tc.done():
+			return tc.ctx.Err()
+		}
 	case "quotes":
 		quotes := Quotes{}
 		if err := unmarshal(&quotes); err != nil {
 			return err
 		}
 		quotes.Time = time.Now().In(timeNowLocation)
-		tc.QuotesChan <- quotes
+		select {
+		case tc.QuotesChan <- quotes:
+		case <-tc.done():
+			return tc.ctx.Err()
+		}
 	case "sec_info_upd":
 		secInfoUpd := SecInfoUpd{}
 		if err := unmarshal(&secInfoUpd); err != nil {
 			return err
 		}
-		tc.SecInfoUpdChan <- secInfoUpd
+		select {
+		case tc.SecInfoUpdChan <- secInfoUpd:
+		case <-tc.done():
+			return tc.ctx.Err()
+		}
 	case "sec_info":
 		secInfo := SecInfo{}
 		if err := unmarshal(&secInfo); err != nil {
 			return err
 		}
-		tc.SecInfoChan <- secInfo
+		select {
+		case tc.SecInfoChan <- secInfo:
+		case <-tc.done():
+			return tc.ctx.Err()
+		}
 	case "server_status":
 		if err := unmarshal(&tc.Data.ServerStatus); err != nil {
 			return err
 		}
-		tc.ServerStatusChan <- tc.Data.ServerStatus
+		select {
+		case tc.ServerStatusChan <- tc.Data.ServerStatus:
+		case <-tc.done():
+			return tc.ctx.Err()
+		}
 	case "client":
 		return unmarshal(&tc.Data.Client)
 	case "markets":

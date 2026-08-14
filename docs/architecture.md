@@ -21,7 +21,8 @@ The DLL has two constraints that shape this design:
   Win32 code and accepts an injected `connector.Connector` for tests.
 - `server.broker`: non-blocking fan-out. Every gRPC subscriber sees every XML
   message. A slow subscriber is detached before it can block the DLL callback.
-- `client`: native cross-platform gRPC client and XML message router.
+- `client`: native cross-platform gRPC client. A receive FIFO isolates gRPC
+  flow control from ordered XML decoding and typed message delivery.
 - `client/commands`: protocol data structures and XML command encoding.
 
 Dependencies point inward:

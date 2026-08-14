@@ -30,8 +30,8 @@ jobs:
           overwrite: true
           extra_files: txmlconnector64-6.47.2.26.4.dll
           binary_name: "txmlconnector-server"
-          pre_command: "apt-get update && apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64 && export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++"
-          ldflags: "-extldflags -static -s -w"
+          pre_command: "export CGO_ENABLED=0"
+          ldflags: "-s -w"
           asset_name: "server_${{ matrix.goos }}_${{ matrix.goarch }}"
       - name: Go Release queues
         uses: wangyoucao577/go-release-action@v1
@@ -43,6 +43,6 @@ jobs:
           extra_files: txmlconnector64-6.47.2.26.4.dll
           project_path: "examples/queues"
           binary_name: "txmlconnector-queues"
-          pre_command: "apt-get update && apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64 && export CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++"
-          ldflags: "-extldflags -static -s -w"
+          pre_command: "export CGO_ENABLED=0"
+          ldflags: "-s -w"
           asset_name: "queues_${{ matrix.goos }}_${{ matrix.goarch }}"
