@@ -1,0 +1,3759 @@
+{
+  "filename": "txmlconnector64-6.47.2.26.4.dll",
+  "size": 10805760,
+  "sha256": "a197e2625e53c0df453687ae1b20ef2ae1a05e034cd20c424a7014b0c9726342",
+  "machine": "0x8664",
+  "image_base": "0x180000000",
+  "pe_timestamp": 1757064982,
+  "sections": [
+    {
+      "name": ".text",
+      "rva": 4096,
+      "virtual_size": 8518255,
+      "raw_offset": 1024,
+      "raw_size": 8518656
+    },
+    {
+      "name": ".rdata",
+      "rva": 8523776,
+      "virtual_size": 1676578,
+      "raw_offset": 8519680,
+      "raw_size": 1676800
+    },
+    {
+      "name": ".data",
+      "rva": 10203136,
+      "virtual_size": 311260,
+      "raw_offset": 10196480,
+      "raw_size": 99328
+    },
+    {
+      "name": ".pdata",
+      "rva": 10514432,
+      "virtual_size": 396252,
+      "raw_offset": 10295808,
+      "raw_size": 396288
+    },
+    {
+      "name": ".fptable",
+      "rva": 10911744,
+      "virtual_size": 256,
+      "raw_offset": 10692096,
+      "raw_size": 512
+    },
+    {
+      "name": ".rsrc",
+      "rva": 10915840,
+      "virtual_size": 26136,
+      "raw_offset": 10692608,
+      "raw_size": 26624
+    },
+    {
+      "name": ".reloc",
+      "rva": 10944512,
+      "virtual_size": 86520,
+      "raw_offset": 10719232,
+      "raw_size": 86528
+    }
+  ],
+  "exports": [
+    {
+      "name": "FreeMemory",
+      "ordinal": 1,
+      "rva": "0x17a480"
+    },
+    {
+      "name": "GetServiceInfo",
+      "ordinal": 2,
+      "rva": "0x17b1a0"
+    },
+    {
+      "name": "Initialize",
+      "ordinal": 3,
+      "rva": "0x17a500"
+    },
+    {
+      "name": "InitializeEx",
+      "ordinal": 4,
+      "rva": "0x17a550"
+    },
+    {
+      "name": "SendCommand",
+      "ordinal": 5,
+      "rva": "0x179ec0"
+    },
+    {
+      "name": "SetCallback",
+      "ordinal": 6,
+      "rva": "0x179d60"
+    },
+    {
+      "name": "SetCallbackEx",
+      "ordinal": 7,
+      "rva": "0x179e10"
+    },
+    {
+      "name": "SetLogLevel",
+      "ordinal": 8,
+      "rva": "0x17acd0"
+    },
+    {
+      "name": "UnInitialize",
+      "ordinal": 9,
+      "rva": "0x17aa50"
+    }
+  ],
+  "anchors": [
+    {
+      "file_offset": "0xa00",
+      "rva": "0x1600",
+      "text": "Keccak-1600 absorb and squeeze for x86_64, CRYPTOGAMS by <appro@openssl.org>"
+    },
+    {
+      "file_offset": "0x83fbf0",
+      "rva": "0x840bf0",
+      "text": "RQ_LOGIN_EXT send failed"
+    },
+    {
+      "file_offset": "0x83fc18",
+      "rva": "0x840c18",
+      "text": "RQ_LOGIN_EXT send failed"
+    },
+    {
+      "file_offset": "0x83fc38",
+      "rva": "0x840c38",
+      "text": "RQ_LOGIN_EXT"
+    },
+    {
+      "file_offset": "0x83fc48",
+      "rva": "0x840c48",
+      "text": "RQ_LOGIN_EXT Read 1 failed"
+    },
+    {
+      "file_offset": "0x83fc68",
+      "rva": "0x840c68",
+      "text": "RQ_LOGIN_EXT Read 1 failed"
+    },
+    {
+      "file_offset": "0x83fc88",
+      "rva": "0x840c88",
+      "text": "RQ_LOGIN_EXT Read 2 failed"
+    },
+    {
+      "file_offset": "0x83fca8",
+      "rva": "0x840ca8",
+      "text": "RQ_LOGIN_EXT Read 2 failed"
+    },
+    {
+      "file_offset": "0x83fcc8",
+      "rva": "0x840cc8",
+      "text": "RQ_LOGIN_EXT Read 3 failed"
+    },
+    {
+      "file_offset": "0x83fd10",
+      "rva": "0x840d10",
+      "text": "RQ_LOGIN_EXT Read 3 failed"
+    },
+    {
+      "file_offset": "0x83fd58",
+      "rva": "0x840d58",
+      "text": "RQ_LOGIN_EXT Invalid action"
+    },
+    {
+      "file_offset": "0x83fd78",
+      "rva": "0x840d78",
+      "text": "RQ_LOGIN_EXT Invalid action"
+    },
+    {
+      "file_offset": "0x83fde8",
+      "rva": "0x840de8",
+      "text": "RQ_CHANGE_PWD send failed"
+    },
+    {
+      "file_offset": "0x83fe08",
+      "rva": "0x840e08",
+      "text": "RQ_CHANGE_PWD send failed"
+    },
+    {
+      "file_offset": "0x83fe28",
+      "rva": "0x840e28",
+      "text": "RQ_VALIDATE_TRADER"
+    },
+    {
+      "file_offset": "0x83fe40",
+      "rva": "0x840e40",
+      "text": "RQ_VALIDATE_TRADER incorrect buffer"
+    },
+    {
+      "file_offset": "0x83fe68",
+      "rva": "0x840e68",
+      "text": "RQ_VALIDATE_TRADER incorrect buffer"
+    },
+    {
+      "file_offset": "0x83fe90",
+      "rva": "0x840e90",
+      "text": "RQ_VALIDATE_TRADER incorrect buffer 2 "
+    },
+    {
+      "file_offset": "0x83fed8",
+      "rva": "0x840ed8",
+      "text": "RQ_VALIDATE_TRADER incorrect buffer 2 "
+    },
+    {
+      "file_offset": "0x8401f0",
+      "rva": "0x8411f0",
+      "text": "RQ_CHANGE_TRADER_PWD send failed"
+    },
+    {
+      "file_offset": "0x840248",
+      "rva": "0x841248",
+      "text": "RQ_CHANGE_TRADER_PWD send failed"
+    },
+    {
+      "file_offset": "0x840270",
+      "rva": "0x841270",
+      "text": "RQ_CHANGE_TRADER_PWD"
+    },
+    {
+      "file_offset": "0x8402b8",
+      "rva": "0x8412b8",
+      "text": "RQ_CHANGE_TRADER_PWD incorrect buffer"
+    },
+    {
+      "file_offset": "0x840310",
+      "rva": "0x841310",
+      "text": "RQ_CHANGE_TRADER_PWD incorrect buffer"
+    },
+    {
+      "file_offset": "0x840368",
+      "rva": "0x841368",
+      "text": "RQ_CHANGE_TRADER_PWD incorrect buffer 2"
+    },
+    {
+      "file_offset": "0x8403c0",
+      "rva": "0x8413c0",
+      "text": "RQ_CHANGE_TRADER_PWD incorrect buffer 2"
+    },
+    {
+      "file_offset": "0x8405f8",
+      "rva": "0x8415f8",
+      "text": "RQ_CLIENT_LIST send failed"
+    },
+    {
+      "file_offset": "0x840620",
+      "rva": "0x841620",
+      "text": "RQ_CLIENT_LIST send failed"
+    },
+    {
+      "file_offset": "0x840640",
+      "rva": "0x841640",
+      "text": "RQ_CLIENT_LIST"
+    },
+    {
+      "file_offset": "0x840668",
+      "rva": "0x841668",
+      "text": "RQ_CLIENT_LIST incorrect buffer"
+    },
+    {
+      "file_offset": "0x840698",
+      "rva": "0x841698",
+      "text": "RQ_CLIENT_LIST incorrect buffer"
+    },
+    {
+      "file_offset": "0x8406b8",
+      "rva": "0x8416b8",
+      "text": "RQ_CLIENT_LIST Next failed"
+    },
+    {
+      "file_offset": "0x8406d8",
+      "rva": "0x8416d8",
+      "text": "RQ_CLIENT_LIST Next failed"
+    },
+    {
+      "file_offset": "0x840910",
+      "rva": "0x841910",
+      "text": "RQ_GET_CONFIG send failed"
+    },
+    {
+      "file_offset": "0x840930",
+      "rva": "0x841930",
+      "text": "RQ_GET_CONFIG send failed"
+    },
+    {
+      "file_offset": "0x840950",
+      "rva": "0x841950",
+      "text": "RQ_GET_CONFIG"
+    },
+    {
+      "file_offset": "0x840960",
+      "rva": "0x841960",
+      "text": "RQ_GET_CONFIG incorrect buffer"
+    },
+    {
+      "file_offset": "0x840980",
+      "rva": "0x841980",
+      "text": "RQ_GET_CONFIG incorrect buffer"
+    },
+    {
+      "file_offset": "0x8409a0",
+      "rva": "0x8419a0",
+      "text": "RQ_GET_CONFIG incorrect buffer 2"
+    },
+    {
+      "file_offset": "0x8409f8",
+      "rva": "0x8419f8",
+      "text": "RQ_GET_CONFIG incorrect buffer 2"
+    },
+    {
+      "file_offset": "0x840a50",
+      "rva": "0x841a50",
+      "text": "RQ_GET_CONFIG incorrect buffer 3"
+    },
+    {
+      "file_offset": "0x840aa0",
+      "rva": "0x841aa0",
+      "text": "RQ_GET_CONFIG incorrect buffer 3"
+    },
+    {
+      "file_offset": "0x840ac8",
+      "rva": "0x841ac8",
+      "text": "RQ_GET_CONFIG failed"
+    },
+    {
+      "file_offset": "0x840b10",
+      "rva": "0x841b10",
+      "text": "RQ_GET_CONFIG failed"
+    },
+    {
+      "file_offset": "0x840b58",
+      "rva": "0x841b58",
+      "text": "RQ_GET_FILE send failed"
+    },
+    {
+      "file_offset": "0x840b70",
+      "rva": "0x841b70",
+      "text": "RQ_GET_FILE send failed"
+    },
+    {
+      "file_offset": "0x840bb0",
+      "rva": "0x841bb0",
+      "text": "RQ_GET_FILE"
+    },
+    {
+      "file_offset": "0x840be8",
+      "rva": "0x841be8",
+      "text": "RQ_GET_FILE incorrect buffer"
+    },
+    {
+      "file_offset": "0x840c30",
+      "rva": "0x841c30",
+      "text": "RQ_GET_FILE incorrect buffer"
+    },
+    {
+      "file_offset": "0x840c78",
+      "rva": "0x841c78",
+      "text": "RQ_GET_FILE failed"
+    },
+    {
+      "file_offset": "0x840c90",
+      "rva": "0x841c90",
+      "text": "RQ_GET_FILE failed"
+    },
+    {
+      "file_offset": "0x841378",
+      "rva": "0x842378",
+      "text": "RQ_MARGIN_POS_LIST write failed"
+    },
+    {
+      "file_offset": "0x841398",
+      "rva": "0x842398",
+      "text": "RQ_MARGIN_POS_LIST write failed"
+    },
+    {
+      "file_offset": "0x8413b8",
+      "rva": "0x8423b8",
+      "text": "RQ_MARGIN_POS_LIST write failed"
+    },
+    {
+      "file_offset": "0x8413d8",
+      "rva": "0x8423d8",
+      "text": "RQ_MARGIN_POS_LIST write failed"
+    },
+    {
+      "file_offset": "0x8413f8",
+      "rva": "0x8423f8",
+      "text": "RQ_MARGIN_POS_LIST"
+    },
+    {
+      "file_offset": "0x8414d8",
+      "rva": "0x8424d8",
+      "text": "RQ_MARGIN_POS write failed"
+    },
+    {
+      "file_offset": "0x841500",
+      "rva": "0x842500",
+      "text": "RQ_MARGIN_POS write failed"
+    },
+    {
+      "file_offset": "0x841530",
+      "rva": "0x842530",
+      "text": "RQ_MARGIN_POS"
+    },
+    {
+      "file_offset": "0x841540",
+      "rva": "0x842540",
+      "text": "RQ_INQUIRE_UT"
+    },
+    {
+      "file_offset": "0x8417b8",
+      "rva": "0x8427b8",
+      "text": "RQ_INQUIRE_URT failed"
+    },
+    {
+      "file_offset": "0x8417d0",
+      "rva": "0x8427d0",
+      "text": "RQ_INQUIRE_URT failed"
+    },
+    {
+      "file_offset": "0x841e70",
+      "rva": "0x842e70",
+      "text": "RQ_CANDLE_KIND: incorrect buffer"
+    },
+    {
+      "file_offset": "0x841e98",
+      "rva": "0x842e98",
+      "text": "RQ_CANDLE_KIND: incorrect buffer"
+    },
+    {
+      "file_offset": "0x842740",
+      "rva": "0x843740",
+      "text": "CTSClient::ReadSecParam exception."
+    },
+    {
+      "file_offset": "0x8429d8",
+      "rva": "0x8439d8",
+      "text": "RQ_SUBSCRIBE: send failed "
+    },
+    {
+      "file_offset": "0x8429f8",
+      "rva": "0x8439f8",
+      "text": "RQ_SUBSCRIBE: send failed "
+    },
+    {
+      "file_offset": "0x842a18",
+      "rva": "0x843a18",
+      "text": "RQ_SUBSCRIBE"
+    },
+    {
+      "file_offset": "0x843e88",
+      "rva": "0x844e88",
+      "text": "RQ_TRNS_IN_PROGRESS"
+    },
+    {
+      "file_offset": "0x843ea8",
+      "rva": "0x844ea8",
+      "text": "RQ_TRNS_IN_PROGRESS rsp: "
+    },
+    {
+      "file_offset": "0x843ec8",
+      "rva": "0x844ec8",
+      "text": "RQ_TRNS_IN_PROGRESS invalid buffer"
+    },
+    {
+      "file_offset": "0x843ef0",
+      "rva": "0x844ef0",
+      "text": "RQ_TRNS_IN_PROGRESS invalid buffer"
+    },
+    {
+      "file_offset": "0x843f48",
+      "rva": "0x844f48",
+      "text": "RQ_ENFORCE_TRN_RELEASE write failed"
+    },
+    {
+      "file_offset": "0x843f90",
+      "rva": "0x844f90",
+      "text": "RQ_ENFORCE_TRN_RELEASE write failed"
+    },
+    {
+      "file_offset": "0x843fd8",
+      "rva": "0x844fd8",
+      "text": "RQ_ENFORCE_TRN_RELEASE"
+    },
+    {
+      "file_offset": "0x844130",
+      "rva": "0x845130",
+      "text": "void __cdecl CTSClient::ReadOneTrade(class CSocketStream &,struct CMainData *)"
+    },
+    {
+      "file_offset": "0x8441c0",
+      "rva": "0x8451c0",
+      "text": "void __cdecl CTSClient::ReadOneTrade(class CSocketStream &,struct CMainData *)"
+    },
+    {
+      "file_offset": "0x844508",
+      "rva": "0x845508",
+      "text": "CTSClient::ReadOneStatLine exception."
+    },
+    {
+      "file_offset": "0x844590",
+      "rva": "0x845590",
+      "text": "RQ_FOND_PORTFOLIO send failed"
+    },
+    {
+      "file_offset": "0x8445b0",
+      "rva": "0x8455b0",
+      "text": "RQ_FOND_PORTFOLIO send failed"
+    },
+    {
+      "file_offset": "0x8445d0",
+      "rva": "0x8455d0",
+      "text": "RQ_FOND_PORTFOLIO"
+    },
+    {
+      "file_offset": "0x8445e8",
+      "rva": "0x8455e8",
+      "text": "RQ_FOND_PORTFOLIO incorrect server response"
+    },
+    {
+      "file_offset": "0x844618",
+      "rva": "0x845618",
+      "text": "RQ_FOND_PORTFOLIO incorrect server response"
+    },
+    {
+      "file_offset": "0x844648",
+      "rva": "0x845648",
+      "text": "RQ_GET_SECURITIES: read m_wSymbol"
+    },
+    {
+      "file_offset": "0x844670",
+      "rva": "0x845670",
+      "text": "RQ_GET_SECURITIES: read m_wSymbol"
+    },
+    {
+      "file_offset": "0x844698",
+      "rva": "0x845698",
+      "text": "RQ_GET_SECURITIES: symbol read failed"
+    },
+    {
+      "file_offset": "0x8446c0",
+      "rva": "0x8456c0",
+      "text": "RQ_GET_SECURITIES: symbol read failed"
+    },
+    {
+      "file_offset": "0x8446e8",
+      "rva": "0x8456e8",
+      "text": "RQ_GET_SECURITIES: m_byMarket not in list"
+    },
+    {
+      "file_offset": "0x844718",
+      "rva": "0x845718",
+      "text": "RQ_GET_SECURITIES: m_byMarket not in list"
+    },
+    {
+      "file_offset": "0x844748",
+      "rva": "0x845748",
+      "text": "RQ_GET_SECURITIES: m_bySecType not in list"
+    },
+    {
+      "file_offset": "0x844778",
+      "rva": "0x845778",
+      "text": "RQ_GET_SECURITIES: m_bySecType not in list"
+    },
+    {
+      "file_offset": "0x8447a8",
+      "rva": "0x8457a8",
+      "text": "RQ_GET_SECURITIES: wrong m_byMarket"
+    },
+    {
+      "file_offset": "0x8447d0",
+      "rva": "0x8457d0",
+      "text": "RQ_GET_SECURITIES: wrong m_byMarket"
+    },
+    {
+      "file_offset": "0x8447f8",
+      "rva": "0x8457f8",
+      "text": "RQ_GET_SECURITIES: wrong m_bySecType"
+    },
+    {
+      "file_offset": "0x844820",
+      "rva": "0x845820",
+      "text": "RQ_GET_SECURITIES: wrong m_bySecType"
+    },
+    {
+      "file_offset": "0x844848",
+      "rva": "0x845848",
+      "text": "RQ_GET_SECURITIES: symbol properties read failed"
+    },
+    {
+      "file_offset": "0x844880",
+      "rva": "0x845880",
+      "text": "RQ_GET_SECURITIES: symbol properties read failed"
+    },
+    {
+      "file_offset": "0x8448b8",
+      "rva": "0x8458b8",
+      "text": "RQ_GET_SECURITIES: symbol properties (2) read failed"
+    },
+    {
+      "file_offset": "0x8448f0",
+      "rva": "0x8458f0",
+      "text": "RQ_GET_SECURITIES: symbol properties (2) read failed"
+    },
+    {
+      "file_offset": "0x844928",
+      "rva": "0x845928",
+      "text": "RQ_GET_SECURITIES: invalid Market Keyparam"
+    },
+    {
+      "file_offset": "0x844958",
+      "rva": "0x845958",
+      "text": "RQ_GET_SECURITIES: invalid Market Keyparam"
+    },
+    {
+      "file_offset": "0x844988",
+      "rva": "0x845988",
+      "text": "RQ_GET_SECURITIES: Pits read failed"
+    },
+    {
+      "file_offset": "0x8449b0",
+      "rva": "0x8459b0",
+      "text": "RQ_GET_SECURITIES: Pits read failed"
+    },
+    {
+      "file_offset": "0x8449d8",
+      "rva": "0x8459d8",
+      "text": "RQ_GET_SECURITIES: m_BoardID not in list"
+    },
+    {
+      "file_offset": "0x844a08",
+      "rva": "0x845a08",
+      "text": "RQ_GET_SECURITIES: m_BoardID not in list"
+    },
+    {
+      "file_offset": "0x844a38",
+      "rva": "0x845a38",
+      "text": "RQ_GET_SECURITIES: wrong BoardID"
+    },
+    {
+      "file_offset": "0x844a60",
+      "rva": "0x845a60",
+      "text": "RQ_GET_SECURITIES: wrong BoardID"
+    },
+    {
+      "file_offset": "0x844a88",
+      "rva": "0x845a88",
+      "text": "RQ_GET_SECURITIES: Settlement currency read failed"
+    },
+    {
+      "file_offset": "0x844ac0",
+      "rva": "0x845ac0",
+      "text": "RQ_GET_SECURITIES: Settlement currency read failed"
+    },
+    {
+      "file_offset": "0x844b00",
+      "rva": "0x845b00",
+      "text": "RQ_GET_SECURITIES: incorrect buffer"
+    },
+    {
+      "file_offset": "0x844b28",
+      "rva": "0x845b28",
+      "text": "RQ_GET_SECURITIES: incorrect buffer"
+    },
+    {
+      "file_offset": "0x844b50",
+      "rva": "0x845b50",
+      "text": "RQ_GET_SECURITIES: TestEvent (03-07-12)"
+    },
+    {
+      "file_offset": "0x844b78",
+      "rva": "0x845b78",
+      "text": "RQ_GET_SECURITIES: TestEvent (03-07-12)"
+    },
+    {
+      "file_offset": "0x844ba0",
+      "rva": "0x845ba0",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (CurrMCT)"
+    },
+    {
+      "file_offset": "0x844bd0",
+      "rva": "0x845bd0",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (CurrMCT)"
+    },
+    {
+      "file_offset": "0x844c00",
+      "rva": "0x845c00",
+      "text": "RQ_GET_SECURITIES: TestEvent (03-07-12)"
+    },
+    {
+      "file_offset": "0x844c28",
+      "rva": "0x845c28",
+      "text": "RQ_GET_SECURITIES: TestEvent (03-07-12)"
+    },
+    {
+      "file_offset": "0x844c50",
+      "rva": "0x845c50",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (Type)"
+    },
+    {
+      "file_offset": "0x844c80",
+      "rva": "0x845c80",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (Type)"
+    },
+    {
+      "file_offset": "0x844cb0",
+      "rva": "0x845cb0",
+      "text": "RQ_GET_SECURITIES: TestEvent (25-12-12)"
+    },
+    {
+      "file_offset": "0x844cd8",
+      "rva": "0x845cd8",
+      "text": "RQ_GET_SECURITIES: TestEvent (25-12-12)"
+    },
+    {
+      "file_offset": "0x844d00",
+      "rva": "0x845d00",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (Base Price)"
+    },
+    {
+      "file_offset": "0x844d38",
+      "rva": "0x845d38",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (Base Price)"
+    },
+    {
+      "file_offset": "0x844d70",
+      "rva": "0x845d70",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (TimeZone)"
+    },
+    {
+      "file_offset": "0x844da0",
+      "rva": "0x845da0",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (TimeZone)"
+    },
+    {
+      "file_offset": "0x844dd0",
+      "rva": "0x845dd0",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (MicTick)"
+    },
+    {
+      "file_offset": "0x844e00",
+      "rva": "0x845e00",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (MicTick)"
+    },
+    {
+      "file_offset": "0x844e30",
+      "rva": "0x845e30",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (PrCl)"
+    },
+    {
+      "file_offset": "0x844e60",
+      "rva": "0x845e60",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (PrCl)"
+    },
+    {
+      "file_offset": "0x844eb8",
+      "rva": "0x845eb8",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (MPR)"
+    },
+    {
+      "file_offset": "0x844ee8",
+      "rva": "0x845ee8",
+      "text": "RQ_GET_SECURITIES: Incorrect buffer (MPR)"
+    },
+    {
+      "file_offset": "0x845708",
+      "rva": "0x846708",
+      "text": "RQ_HISTORY_EXT"
+    },
+    {
+      "file_offset": "0x845718",
+      "rva": "0x846718",
+      "text": "RQ_HISTORY_EXT"
+    },
+    {
+      "file_offset": "0x845728",
+      "rva": "0x846728",
+      "text": "RQ_SUBSCRIBE"
+    },
+    {
+      "file_offset": "0x845760",
+      "rva": "0x846760",
+      "text": "RQ_GET_RPSREPO write failed"
+    },
+    {
+      "file_offset": "0x845780",
+      "rva": "0x846780",
+      "text": "RQ_GET_RPSREPO write failed"
+    },
+    {
+      "file_offset": "0x8457a0",
+      "rva": "0x8467a0",
+      "text": "RQ_GET_RPSREPO"
+    },
+    {
+      "file_offset": "0x8457e8",
+      "rva": "0x8467e8",
+      "text": "RQ_GET_RPSREPO Next failed"
+    },
+    {
+      "file_offset": "0x845818",
+      "rva": "0x846818",
+      "text": "RQ_GET_RPSREPO Next failed"
+    },
+    {
+      "file_offset": "0x845848",
+      "rva": "0x846848",
+      "text": "RQ_GET_RPSREPO read failed"
+    },
+    {
+      "file_offset": "0x845880",
+      "rva": "0x846880",
+      "text": "RQ_GET_RPSREPO read failed"
+    },
+    {
+      "file_offset": "0x845c38",
+      "rva": "0x846c38",
+      "text": "RQ_LOGOUT"
+    },
+    {
+      "file_offset": "0x845dc8",
+      "rva": "0x846dc8",
+      "text": "RQ_SYMBOL_PARAM : incorrect buffer"
+    },
+    {
+      "file_offset": "0x845df0",
+      "rva": "0x846df0",
+      "text": "RQ_SYMBOL_PARAM : incorrect buffer"
+    },
+    {
+      "file_offset": "0x8461c0",
+      "rva": "0x8471c0",
+      "text": "RQ_SUBSCRIBE_TICKS: send failed "
+    },
+    {
+      "file_offset": "0x8461f0",
+      "rva": "0x8471f0",
+      "text": "RQ_SUBSCRIBE_TICKS: send failed "
+    },
+    {
+      "file_offset": "0x846228",
+      "rva": "0x847228",
+      "text": "RQ_SUBSCRIBE_TICKS"
+    },
+    {
+      "file_offset": "0x846248",
+      "rva": "0x847248",
+      "text": "RQ_SUBSCRIBE_TICKS: send failed "
+    },
+    {
+      "file_offset": "0x846278",
+      "rva": "0x847278",
+      "text": "RQ_SUBSCRIBE_TICKS: send failed "
+    },
+    {
+      "file_offset": "0x8462b8",
+      "rva": "0x8472b8",
+      "text": "RQ_SUBSCRIBE_TICKS: send failed"
+    },
+    {
+      "file_offset": "0x8462e8",
+      "rva": "0x8472e8",
+      "text": "RQ_SUBSCRIBE_TICKS: send failed"
+    },
+    {
+      "file_offset": "0x846310",
+      "rva": "0x847310",
+      "text": "RQ_SUBSCRIBE_TICKS"
+    },
+    {
+      "file_offset": "0x8463b0",
+      "rva": "0x8473b0",
+      "text": "RQ_OPTION_FAMILIES: send failed "
+    },
+    {
+      "file_offset": "0x8463f0",
+      "rva": "0x8473f0",
+      "text": "RQ_OPTION_FAMILIES: send failed "
+    },
+    {
+      "file_offset": "0x846418",
+      "rva": "0x847418",
+      "text": "RQ_OPTION_FAMILIES"
+    },
+    {
+      "file_offset": "0x846438",
+      "rva": "0x847438",
+      "text": "RQ_OPTION_FAMILIES: incorrect buffer"
+    },
+    {
+      "file_offset": "0x846468",
+      "rva": "0x847468",
+      "text": "RQ_OPTION_FAMILIES: incorrect buffer"
+    },
+    {
+      "file_offset": "0x846508",
+      "rva": "0x847508",
+      "text": "RQ_FAMILIY_OPTIONS: send failed "
+    },
+    {
+      "file_offset": "0x846540",
+      "rva": "0x847540",
+      "text": "RQ_FAMILIY_OPTIONS: send failed "
+    },
+    {
+      "file_offset": "0x846570",
+      "rva": "0x847570",
+      "text": "RQ_FAMILIY_OPTIONS"
+    },
+    {
+      "file_offset": "0x846588",
+      "rva": "0x847588",
+      "text": "RQ_FAMILY_OPTIONS: incorrect buffer"
+    },
+    {
+      "file_offset": "0x8465c8",
+      "rva": "0x8475c8",
+      "text": "RQ_FAMILY_OPTIONS: incorrect buffer"
+    },
+    {
+      "file_offset": "0x846630",
+      "rva": "0x847630",
+      "text": "RQ_FAMILY_STRIKES: send failed "
+    },
+    {
+      "file_offset": "0x846650",
+      "rva": "0x847650",
+      "text": "RQ_FAMILY_STRIKES: send failed "
+    },
+    {
+      "file_offset": "0x846670",
+      "rva": "0x847670",
+      "text": "RQ_FAMILY_STRIKES"
+    },
+    {
+      "file_offset": "0x846688",
+      "rva": "0x847688",
+      "text": "RQ_FAMILY_STRIKES: incorrect buffer"
+    },
+    {
+      "file_offset": "0x8466b0",
+      "rva": "0x8476b0",
+      "text": "RQ_FAMILY_STRIKES: incorrect buffer"
+    },
+    {
+      "file_offset": "0x846700",
+      "rva": "0x847700",
+      "text": "RQ_CERTAIN_OPTIONS"
+    },
+    {
+      "file_offset": "0x846718",
+      "rva": "0x847718",
+      "text": "RQ_HISTORY_EXT: send failed "
+    },
+    {
+      "file_offset": "0x846738",
+      "rva": "0x847738",
+      "text": "RQ_HISTORY_EXT: send failed "
+    },
+    {
+      "file_offset": "0x846758",
+      "rva": "0x847758",
+      "text": "RQ_HISTORY_EXT"
+    },
+    {
+      "file_offset": "0x846800",
+      "rva": "0x847800",
+      "text": "CTSClient::ReadTicks exception. Bad alloc: "
+    },
+    {
+      "file_offset": "0x846848",
+      "rva": "0x847848",
+      "text": "CTSClient::ReadTicks exception. Std exception: "
+    },
+    {
+      "file_offset": "0x846890",
+      "rva": "0x847890",
+      "text": "CTSClient::ReadTicks exception."
+    },
+    {
+      "file_offset": "0x846b20",
+      "rva": "0x847b20",
+      "text": "CTSClient::ReadOneBookAmer exception."
+    },
+    {
+      "file_offset": "0x8470e0",
+      "rva": "0x8480e0",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG write 0 failed"
+    },
+    {
+      "file_offset": "0x847118",
+      "rva": "0x848118",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG write 0 failed"
+    },
+    {
+      "file_offset": "0x847160",
+      "rva": "0x848160",
+      "text": "CTSClient::ReadOneBook exception."
+    },
+    {
+      "file_offset": "0x847188",
+      "rva": "0x848188",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG write 1 failed"
+    },
+    {
+      "file_offset": "0x8471b8",
+      "rva": "0x8481b8",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG write 1 failed"
+    },
+    {
+      "file_offset": "0x8471e8",
+      "rva": "0x8481e8",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG leg write 2 failed"
+    },
+    {
+      "file_offset": "0x847238",
+      "rva": "0x848238",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG leg write 2 failed"
+    },
+    {
+      "file_offset": "0x847278",
+      "rva": "0x848278",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG write 3 failed"
+    },
+    {
+      "file_offset": "0x8472c0",
+      "rva": "0x8482c0",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG write 3 failed"
+    },
+    {
+      "file_offset": "0x8472f0",
+      "rva": "0x8482f0",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG write CARGO failed"
+    },
+    {
+      "file_offset": "0x847328",
+      "rva": "0x848328",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG write CARGO failed"
+    },
+    {
+      "file_offset": "0x847370",
+      "rva": "0x848370",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG write size failed"
+    },
+    {
+      "file_offset": "0x8473c8",
+      "rva": "0x8483c8",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG write size failed"
+    },
+    {
+      "file_offset": "0x847400",
+      "rva": "0x848400",
+      "text": "RQ_TRANSACT TRN_MULTILEG write 0 failed"
+    },
+    {
+      "file_offset": "0x847428",
+      "rva": "0x848428",
+      "text": "RQ_TRANSACT TRN_MULTILEG write 0 failed"
+    },
+    {
+      "file_offset": "0x847470",
+      "rva": "0x848470",
+      "text": "RQ_TRANSACT TRN_MULTILEG write 1 failed"
+    },
+    {
+      "file_offset": "0x8474a8",
+      "rva": "0x8484a8",
+      "text": "RQ_TRANSACT TRN_MULTILEG write 1 failed"
+    },
+    {
+      "file_offset": "0x8474e0",
+      "rva": "0x8484e0",
+      "text": "RQ_TRANSACT TRN_MULTILEG leg write 2 failed"
+    },
+    {
+      "file_offset": "0x847510",
+      "rva": "0x848510",
+      "text": "RQ_TRANSACT TRN_MULTILEG leg write 2 failed"
+    },
+    {
+      "file_offset": "0x847540",
+      "rva": "0x848540",
+      "text": "RQ_TRANSACT TRN_MULTILEG write 3 failed"
+    },
+    {
+      "file_offset": "0x847568",
+      "rva": "0x848568",
+      "text": "RQ_TRANSACT TRN_MULTILEG write 3 failed"
+    },
+    {
+      "file_offset": "0x847590",
+      "rva": "0x848590",
+      "text": "RQ_TRANSACT TRN_MULTILEG write CARGO failed"
+    },
+    {
+      "file_offset": "0x8475c0",
+      "rva": "0x8485c0",
+      "text": "RQ_TRANSACT TRN_MULTILEG write CARGO failed"
+    },
+    {
+      "file_offset": "0x8475f0",
+      "rva": "0x8485f0",
+      "text": "RQ_TRANSACT TRN_MULTILEG write size failed"
+    },
+    {
+      "file_offset": "0x847620",
+      "rva": "0x848620",
+      "text": "RQ_TRANSACT TRN_MULTILEG write size failed"
+    },
+    {
+      "file_offset": "0x847650",
+      "rva": "0x848650",
+      "text": "RQ_TRANSACT TRN_CANCEL_MULTILEG send failed"
+    },
+    {
+      "file_offset": "0x847680",
+      "rva": "0x848680",
+      "text": "RQ_TRANSACT TRN_CANCEL_MULTILEG send failed"
+    },
+    {
+      "file_offset": "0x8476b0",
+      "rva": "0x8486b0",
+      "text": "RQ_TRANSACT TRN_CANCEL_MULTILEG KILL_ORDER send failed"
+    },
+    {
+      "file_offset": "0x8476e8",
+      "rva": "0x8486e8",
+      "text": "RQ_TRANSACT TRN_CANCEL_MULTILEG KILL_ORDER send failed"
+    },
+    {
+      "file_offset": "0x847730",
+      "rva": "0x848730",
+      "text": "RQ_TRANSACT TRN_STOP send failed"
+    },
+    {
+      "file_offset": "0x847758",
+      "rva": "0x848758",
+      "text": "RQ_TRANSACT TRN_STOP send failed"
+    },
+    {
+      "file_offset": "0x847780",
+      "rva": "0x848780",
+      "text": "RQ_TRANSACT TRN_STOP write CARGO failed"
+    },
+    {
+      "file_offset": "0x8477a8",
+      "rva": "0x8487a8",
+      "text": "RQ_TRANSACT TRN_STOP write CARGO failed"
+    },
+    {
+      "file_offset": "0x847a78",
+      "rva": "0x848a78",
+      "text": "RQ_TRANSACT TRN_CCP_REPO_ORDER send failed"
+    },
+    {
+      "file_offset": "0x847aa8",
+      "rva": "0x848aa8",
+      "text": "RQ_TRANSACT TRN_CCP_REPO_ORDER send failed"
+    },
+    {
+      "file_offset": "0x847bb8",
+      "rva": "0x848bb8",
+      "text": "RQ_TRANSACT TRN_NEWEXTREPO send failed"
+    },
+    {
+      "file_offset": "0x847be0",
+      "rva": "0x848be0",
+      "text": "RQ_TRANSACT TRN_NEWEXTREPO send failed"
+    },
+    {
+      "file_offset": "0x847ce8",
+      "rva": "0x848ce8",
+      "text": "RQ_TRANSACT TRN_NEWORDER send failed"
+    },
+    {
+      "file_offset": "0x847d10",
+      "rva": "0x848d10",
+      "text": "RQ_TRANSACT TRN_NEWORDER send failed"
+    },
+    {
+      "file_offset": "0x847d38",
+      "rva": "0x848d38",
+      "text": "RQ_TRANSACT TRN_WHATIF_ORDER send failed"
+    },
+    {
+      "file_offset": "0x847d68",
+      "rva": "0x848d68",
+      "text": "RQ_TRANSACT TRN_WHATIF_ORDER send failed"
+    },
+    {
+      "file_offset": "0x847d98",
+      "rva": "0x848d98",
+      "text": "RQ_TRANSACT TRN_NEWORDER write CARGO failed"
+    },
+    {
+      "file_offset": "0x847dc8",
+      "rva": "0x848dc8",
+      "text": "RQ_TRANSACT TRN_NEWORDER write CARGO failed"
+    },
+    {
+      "file_offset": "0x847df8",
+      "rva": "0x848df8",
+      "text": "RQ_TRANSACT TRN_WHATIF_ORDER write CARGO failed"
+    },
+    {
+      "file_offset": "0x847e28",
+      "rva": "0x848e28",
+      "text": "RQ_TRANSACT TRN_WHATIF_ORDER write CARGO failed"
+    },
+    {
+      "file_offset": "0x847e58",
+      "rva": "0x848e58",
+      "text": "RQ_TRANSACT TRN_NEWORDER write ComplianceID failed"
+    },
+    {
+      "file_offset": "0x847e90",
+      "rva": "0x848e90",
+      "text": "RQ_TRANSACT TRN_NEWORDER write ComplianceID failed"
+    },
+    {
+      "file_offset": "0x847ec8",
+      "rva": "0x848ec8",
+      "text": "RQ_TRANSACT TRN_NEWORDER write ComplianceID failed"
+    },
+    {
+      "file_offset": "0x847f00",
+      "rva": "0x848f00",
+      "text": "RQ_TRANSACT TRN_NEWORDER write ComplianceID failed"
+    },
+    {
+      "file_offset": "0x847f38",
+      "rva": "0x848f38",
+      "text": "RQ_TRANSACT TRN_NEWORDER write Insist failed"
+    },
+    {
+      "file_offset": "0x847f68",
+      "rva": "0x848f68",
+      "text": "ReadHistory: incorrect buffer"
+    },
+    {
+      "file_offset": "0x847f88",
+      "rva": "0x848f88",
+      "text": "RQ_TRANSACT TRN_NEWORDER write Insist failed"
+    },
+    {
+      "file_offset": "0x847fb8",
+      "rva": "0x848fb8",
+      "text": "ReadHistory: incorrect buffer"
+    },
+    {
+      "file_offset": "0x847ff8",
+      "rva": "0x848ff8",
+      "text": "ReadHistory: incorrect buffer"
+    },
+    {
+      "file_offset": "0x848020",
+      "rva": "0x849020",
+      "text": "ReadHistory: incorrect buffer"
+    },
+    {
+      "file_offset": "0x848068",
+      "rva": "0x849068",
+      "text": "ReadHistory: incorrect buffer"
+    },
+    {
+      "file_offset": "0x848090",
+      "rva": "0x849090",
+      "text": "ReadHistory: incorrect buffer"
+    },
+    {
+      "file_offset": "0x8481c8",
+      "rva": "0x8491c8",
+      "text": "RQ_TICKS write failed"
+    },
+    {
+      "file_offset": "0x8481e8",
+      "rva": "0x8491e8",
+      "text": "RQ_TICKS write failed"
+    },
+    {
+      "file_offset": "0x848218",
+      "rva": "0x849218",
+      "text": "RQ_TICKS Symbols write failed"
+    },
+    {
+      "file_offset": "0x848248",
+      "rva": "0x849248",
+      "text": "RQ_TICKS Symbols write failed"
+    },
+    {
+      "file_offset": "0x848268",
+      "rva": "0x849268",
+      "text": "RQ_TICKS"
+    },
+    {
+      "file_offset": "0x8482b0",
+      "rva": "0x8492b0",
+      "text": "RQ_TICKS incorrect server response"
+    },
+    {
+      "file_offset": "0x8482f0",
+      "rva": "0x8492f0",
+      "text": "RQ_TICKS incorrect server response"
+    },
+    {
+      "file_offset": "0x848320",
+      "rva": "0x849320",
+      "text": "RQ_LOGIN write failed"
+    },
+    {
+      "file_offset": "0x848358",
+      "rva": "0x849358",
+      "text": "RQ_LOGIN write failed"
+    },
+    {
+      "file_offset": "0x848390",
+      "rva": "0x849390",
+      "text": "RQ_TRANSACT TRN_CANCELSTOP send failed"
+    },
+    {
+      "file_offset": "0x8483b8",
+      "rva": "0x8493b8",
+      "text": "RQ_TRANSACT TRN_CANCELSTOP send failed"
+    },
+    {
+      "file_offset": "0x8483e0",
+      "rva": "0x8493e0",
+      "text": "RQ_LOGIN write failed"
+    },
+    {
+      "file_offset": "0x848408",
+      "rva": "0x849408",
+      "text": "RQ_LOGIN write failed"
+    },
+    {
+      "file_offset": "0x848428",
+      "rva": "0x849428",
+      "text": "RQ_LOGIN"
+    },
+    {
+      "file_offset": "0x848440",
+      "rva": "0x849440",
+      "text": "RQ_LOGIN return incorrect buffer"
+    },
+    {
+      "file_offset": "0x848468",
+      "rva": "0x849468",
+      "text": "RQ_LOGIN return incorrect buffer"
+    },
+    {
+      "file_offset": "0x848490",
+      "rva": "0x849490",
+      "text": "RQ_TRANSACT TRN_CANCELORDER send failed"
+    },
+    {
+      "file_offset": "0x8484b8",
+      "rva": "0x8494b8",
+      "text": "RQ_TRANSACT TRN_CANCELORDER send failed"
+    },
+    {
+      "file_offset": "0x8484e0",
+      "rva": "0x8494e0",
+      "text": "RQ_LOGIN write failed"
+    },
+    {
+      "file_offset": "0x8484f8",
+      "rva": "0x8494f8",
+      "text": "RQ_TRANSACT TRN_CANCELORDER KILL_ORDER send failed"
+    },
+    {
+      "file_offset": "0x848530",
+      "rva": "0x849530",
+      "text": "RQ_LOGIN write failed"
+    },
+    {
+      "file_offset": "0x848548",
+      "rva": "0x849548",
+      "text": "RQ_TRANSACT TRN_CANCELORDER KILL_ORDER send failed"
+    },
+    {
+      "file_offset": "0x848590",
+      "rva": "0x849590",
+      "text": "RQ_LOGIN return incorrect buffer"
+    },
+    {
+      "file_offset": "0x8485c0",
+      "rva": "0x8495c0",
+      "text": "RQ_LOGIN return incorrect buffer"
+    },
+    {
+      "file_offset": "0x8485f8",
+      "rva": "0x8495f8",
+      "text": "RQ_LOGIN Version return incorrect buffer"
+    },
+    {
+      "file_offset": "0x848628",
+      "rva": "0x849628",
+      "text": "RQ_LOGIN Version return incorrect buffer"
+    },
+    {
+      "file_offset": "0x848658",
+      "rva": "0x849658",
+      "text": "RQ_TRANSACT TRN_MOVE_ORDER send failed"
+    },
+    {
+      "file_offset": "0x848680",
+      "rva": "0x849680",
+      "text": "RQ_TRANSACT TRN_MOVE_ORDER send failed"
+    },
+    {
+      "file_offset": "0x8486b8",
+      "rva": "0x8496b8",
+      "text": "RQ_HANDSHAKE write failed"
+    },
+    {
+      "file_offset": "0x8486e0",
+      "rva": "0x8496e0",
+      "text": "RQ_HANDSHAKE write failed"
+    },
+    {
+      "file_offset": "0x848708",
+      "rva": "0x849708",
+      "text": "RQ_HANDSHAKE"
+    },
+    {
+      "file_offset": "0x848730",
+      "rva": "0x849730",
+      "text": "RQ_HANDSHAKE RSP read failed"
+    },
+    {
+      "file_offset": "0x848760",
+      "rva": "0x849760",
+      "text": "RQ_HANDSHAKE RSP read failed"
+    },
+    {
+      "file_offset": "0x8487a0",
+      "rva": "0x8497a0",
+      "text": "RQ_HANDSHAKE read failed"
+    },
+    {
+      "file_offset": "0x8487d0",
+      "rva": "0x8497d0",
+      "text": "RQ_HANDSHAKE read failed"
+    },
+    {
+      "file_offset": "0x848808",
+      "rva": "0x849808",
+      "text": "HANDSHAKE: Cryptokey"
+    },
+    {
+      "file_offset": "0x848820",
+      "rva": "0x849820",
+      "text": "HANDSHAKE: Cryptosync"
+    },
+    {
+      "file_offset": "0x848838",
+      "rva": "0x849838",
+      "text": "RQ_TRANSACT TRN_ZAP send failed"
+    },
+    {
+      "file_offset": "0x848858",
+      "rva": "0x849858",
+      "text": "RQ_TRANSACT TRN_ZAP send failed"
+    },
+    {
+      "file_offset": "0x848888",
+      "rva": "0x849888",
+      "text": "RQ_HANDSHAKE write failed"
+    },
+    {
+      "file_offset": "0x8488b8",
+      "rva": "0x8498b8",
+      "text": "RQ_HANDSHAKE write failed"
+    },
+    {
+      "file_offset": "0x8488d8",
+      "rva": "0x8498d8",
+      "text": "RQ_HANDSHAKE"
+    },
+    {
+      "file_offset": "0x848910",
+      "rva": "0x849910",
+      "text": "RQ_HANDSHAKE read failed"
+    },
+    {
+      "file_offset": "0x848948",
+      "rva": "0x849948",
+      "text": "RQ_HANDSHAKE read failed"
+    },
+    {
+      "file_offset": "0x8489c0",
+      "rva": "0x8499c0",
+      "text": "RQ_TRANSACT TRN_NEWRPSORDER send failed"
+    },
+    {
+      "file_offset": "0x8489e8",
+      "rva": "0x8499e8",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848a00",
+      "rva": "0x849a00",
+      "text": "RQ_TRANSACT TRN_NEWRPSORDER send failed"
+    },
+    {
+      "file_offset": "0x848a28",
+      "rva": "0x849a28",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848a50",
+      "rva": "0x849a50",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848a70",
+      "rva": "0x849a70",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848a90",
+      "rva": "0x849a90",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848ac8",
+      "rva": "0x849ac8",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848af8",
+      "rva": "0x849af8",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848b18",
+      "rva": "0x849b18",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848b58",
+      "rva": "0x849b58",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848b80",
+      "rva": "0x849b80",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848ba8",
+      "rva": "0x849ba8",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848bd0",
+      "rva": "0x849bd0",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848be8",
+      "rva": "0x849be8",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848c00",
+      "rva": "0x849c00",
+      "text": "RQ_TRANSACT TRN_NEWRPSREPO send failed"
+    },
+    {
+      "file_offset": "0x848c28",
+      "rva": "0x849c28",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848c40",
+      "rva": "0x849c40",
+      "text": "RQ_TRANSACT TRN_NEWRPSREPO send failed"
+    },
+    {
+      "file_offset": "0x848c78",
+      "rva": "0x849c78",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848c98",
+      "rva": "0x849c98",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848cb8",
+      "rva": "0x849cb8",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848ce0",
+      "rva": "0x849ce0",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848d08",
+      "rva": "0x849d08",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848d38",
+      "rva": "0x849d38",
+      "text": "RQ_PWD write failed"
+    },
+    {
+      "file_offset": "0x848d58",
+      "rva": "0x849d58",
+      "text": "RQ_PWD"
+    },
+    {
+      "file_offset": "0x848db8",
+      "rva": "0x849db8",
+      "text": "RQ_PWD snd/rcv error"
+    },
+    {
+      "file_offset": "0x848de0",
+      "rva": "0x849de0",
+      "text": "RQ_PWD snd/rcv error"
+    },
+    {
+      "file_offset": "0x848e10",
+      "rva": "0x849e10",
+      "text": "RQ_PWD return incorrect buffer"
+    },
+    {
+      "file_offset": "0x848e30",
+      "rva": "0x849e30",
+      "text": "RQ_PWD return incorrect buffer"
+    },
+    {
+      "file_offset": "0x848e50",
+      "rva": "0x849e50",
+      "text": "RQ_TRANSACT TRN_CANCELRPSORDER send failed"
+    },
+    {
+      "file_offset": "0x848e80",
+      "rva": "0x849e80",
+      "text": "RQ_TRANSACT TRN_CANCELRPSORDER send failed"
+    },
+    {
+      "file_offset": "0x848ec0",
+      "rva": "0x849ec0",
+      "text": "RQ_PWD return incorrect buffer"
+    },
+    {
+      "file_offset": "0x848ee8",
+      "rva": "0x849ee8",
+      "text": "RQ_PWD return incorrect buffer"
+    },
+    {
+      "file_offset": "0x848f20",
+      "rva": "0x849f20",
+      "text": "RQ_PWD return incorrect buffer"
+    },
+    {
+      "file_offset": "0x848f40",
+      "rva": "0x849f40",
+      "text": "RQ_PWD return incorrect buffer"
+    },
+    {
+      "file_offset": "0x848f60",
+      "rva": "0x849f60",
+      "text": "RQ_TRANSACT TRN_NEWREPORT4 send failed"
+    },
+    {
+      "file_offset": "0x848f88",
+      "rva": "0x849f88",
+      "text": "RQ_TRANSACT TRN_NEWREPORT4 send failed"
+    },
+    {
+      "file_offset": "0x848fb0",
+      "rva": "0x849fb0",
+      "text": "RQ_PWD return incorrect buffer"
+    },
+    {
+      "file_offset": "0x848fe0",
+      "rva": "0x849fe0",
+      "text": "RQ_PWD return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849058",
+      "rva": "0x84a058",
+      "text": "RQ_TRANSACT TRN_CANCELREPORT4 send failed"
+    },
+    {
+      "file_offset": "0x849088",
+      "rva": "0x84a088",
+      "text": "RQ_TRANSACT TRN_CANCELREPORT4 send failed"
+    },
+    {
+      "file_offset": "0x8490f8",
+      "rva": "0x84a0f8",
+      "text": "RQ_TRANSACT TRN_SIMPLECLEARING send failed"
+    },
+    {
+      "file_offset": "0x849148",
+      "rva": "0x84a148",
+      "text": "RQ_TRANSACT TRN_SIMPLECLEARING send failed"
+    },
+    {
+      "file_offset": "0x849210",
+      "rva": "0x84a210",
+      "text": "RQ_TRANSACT TRN_AUCTION_MKT_ORDER send failed"
+    },
+    {
+      "file_offset": "0x849240",
+      "rva": "0x84a240",
+      "text": "RQ_PWD return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849260",
+      "rva": "0x84a260",
+      "text": "RQ_TRANSACT TRN_AUCTION_MKT_ORDER send failed"
+    },
+    {
+      "file_offset": "0x849290",
+      "rva": "0x84a290",
+      "text": "RQ_PWD return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849308",
+      "rva": "0x84a308",
+      "text": "RQ_TRANSACT TRN_NEW_EXPIRATION send failed"
+    },
+    {
+      "file_offset": "0x849338",
+      "rva": "0x84a338",
+      "text": "RQ_TRANSACT TRN_NEW_EXPIRATION send failed"
+    },
+    {
+      "file_offset": "0x8493b0",
+      "rva": "0x84a3b0",
+      "text": "RQ_TRANSACT TRN_UPDATE_EXPIRATION send failed"
+    },
+    {
+      "file_offset": "0x8493f0",
+      "rva": "0x84a3f0",
+      "text": "RQ_TRANSACT TRN_UPDATE_EXPIRATION send failed"
+    },
+    {
+      "file_offset": "0x849448",
+      "rva": "0x84a448",
+      "text": "RQ_RELOGIN"
+    },
+    {
+      "file_offset": "0x8494b0",
+      "rva": "0x84a4b0",
+      "text": "RQ_TRANSACT TRN_NEWEXTREPO send failed"
+    },
+    {
+      "file_offset": "0x8494e0",
+      "rva": "0x84a4e0",
+      "text": "RQ_RECOVER"
+    },
+    {
+      "file_offset": "0x8494f0",
+      "rva": "0x84a4f0",
+      "text": "RQ_TRANSACT TRN_NEWEXTREPO send failed"
+    },
+    {
+      "file_offset": "0x849658",
+      "rva": "0x84a658",
+      "text": "RQ_TRANSACT TRN_NEWEXTCREPO send failed"
+    },
+    {
+      "file_offset": "0x849680",
+      "rva": "0x84a680",
+      "text": "RQ_TRANSACT TRN_NEWEXTCREPO send failed"
+    },
+    {
+      "file_offset": "0x849850",
+      "rva": "0x84a850",
+      "text": "RQ_TRANSACT TRN_COMPLEX_REPORT send failed"
+    },
+    {
+      "file_offset": "0x849880",
+      "rva": "0x84a880",
+      "text": "RQ_TRANSACT TRN_COMPLEX_REPORT send failed"
+    },
+    {
+      "file_offset": "0x8498f8",
+      "rva": "0x84a8f8",
+      "text": "RQ_TRANSACT TRN_CANCEL_TRADES send failed"
+    },
+    {
+      "file_offset": "0x849928",
+      "rva": "0x84a928",
+      "text": "RQ_TRANSACT TRN_CANCEL_TRADES send failed"
+    },
+    {
+      "file_offset": "0x849988",
+      "rva": "0x84a988",
+      "text": "RQ_TRANSACT TRN_NEWOTCORDER send failed"
+    },
+    {
+      "file_offset": "0x8499b0",
+      "rva": "0x84a9b0",
+      "text": "RQ_TRANSACT TRN_NEWOTCORDER send failed"
+    },
+    {
+      "file_offset": "0x849a50",
+      "rva": "0x84aa50",
+      "text": "RQ_TRANSACT TRN_CANCELOTCORDER send failed"
+    },
+    {
+      "file_offset": "0x849a80",
+      "rva": "0x84aa80",
+      "text": "RQ_TRANSACT TRN_CANCELOTCORDER send failed"
+    },
+    {
+      "file_offset": "0x849ad8",
+      "rva": "0x84aad8",
+      "text": "RQ_TRANSACT TRN_NEWOTCORDER send failed"
+    },
+    {
+      "file_offset": "0x849b00",
+      "rva": "0x84ab00",
+      "text": "RQ_TRANSACT TRN_NEWOTCORDER send failed"
+    },
+    {
+      "file_offset": "0x849b70",
+      "rva": "0x84ab70",
+      "text": "RQ_TRANSACT send failed"
+    },
+    {
+      "file_offset": "0x849b88",
+      "rva": "0x84ab88",
+      "text": "RQ_TRANSACT send failed"
+    },
+    {
+      "file_offset": "0x849ba0",
+      "rva": "0x84aba0",
+      "text": "RQ_STARTUP"
+    },
+    {
+      "file_offset": "0x849be0",
+      "rva": "0x84abe0",
+      "text": "RQ_TRANSACT write failed"
+    },
+    {
+      "file_offset": "0x849c00",
+      "rva": "0x84ac00",
+      "text": "RQ_TRANSACT write failed"
+    },
+    {
+      "file_offset": "0x849c20",
+      "rva": "0x84ac20",
+      "text": "RQ_TRANSACT send failed 2"
+    },
+    {
+      "file_offset": "0x849c40",
+      "rva": "0x84ac40",
+      "text": "RQ_TRANSACT send failed 2"
+    },
+    {
+      "file_offset": "0x849d78",
+      "rva": "0x84ad78",
+      "text": "RQ_TRANSACT write failed"
+    },
+    {
+      "file_offset": "0x849d98",
+      "rva": "0x84ad98",
+      "text": "RQ_TRANSACT write failed"
+    },
+    {
+      "file_offset": "0x849db8",
+      "rva": "0x84adb8",
+      "text": "RQ_TRANSACT"
+    },
+    {
+      "file_offset": "0x849de0",
+      "rva": "0x84ade0",
+      "text": "RQ_TRANSACT return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849e08",
+      "rva": "0x84ae08",
+      "text": "RQ_TRANSACT return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849e30",
+      "rva": "0x84ae30",
+      "text": "RQ_TRANSACT TRN_MULTILEG RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849e68",
+      "rva": "0x84ae68",
+      "text": "RQ_TRANSACT TRN_MULTILEG RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849ea0",
+      "rva": "0x84aea0",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849ee0",
+      "rva": "0x84aee0",
+      "text": "RQ_TRANSACT TRN_WHATIF_MULTILEG RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849f20",
+      "rva": "0x84af20",
+      "text": "RQ_TRANSACT TRN_STOP RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849f58",
+      "rva": "0x84af58",
+      "text": "RQ_TRANSACT TRN_STOP RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849f90",
+      "rva": "0x84af90",
+      "text": "RQ_TRANSACT TRN_NEWORDER/CCP_REPO_ORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x849fe0",
+      "rva": "0x84afe0",
+      "text": "RQ_TRANSACT TRN_NEWORDER/CCP_REPO_ORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a028",
+      "rva": "0x84b028",
+      "text": "RQ_TRANSACT TRN_WHATIF_ORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a068",
+      "rva": "0x84b068",
+      "text": "RQ_TRANSACT TRN_WHATIF_ORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a0a8",
+      "rva": "0x84b0a8",
+      "text": "RQ_TRANSACT TRN_..._EXPIRATION RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a0e8",
+      "rva": "0x84b0e8",
+      "text": "RQ_TRANSACT TRN_..._EXPIRATION RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a128",
+      "rva": "0x84b128",
+      "text": "RQ_INDEX_RTS write failed"
+    },
+    {
+      "file_offset": "0x84a148",
+      "rva": "0x84b148",
+      "text": "RQ_TRANSACT TRN_NEWRPSORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a188",
+      "rva": "0x84b188",
+      "text": "RQ_INDEX_RTS write failed"
+    },
+    {
+      "file_offset": "0x84a1a8",
+      "rva": "0x84b1a8",
+      "text": "RQ_TRANSACT TRN_NEWRPSORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a1e8",
+      "rva": "0x84b1e8",
+      "text": "RQ_INDEX_RTS"
+    },
+    {
+      "file_offset": "0x84a1f8",
+      "rva": "0x84b1f8",
+      "text": "RQ_TRANSACT TRN_NEWRPSREPO RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a238",
+      "rva": "0x84b238",
+      "text": "RQ_INDEX_RTS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a260",
+      "rva": "0x84b260",
+      "text": "RQ_TRANSACT TRN_NEWRPSREPO RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a2a0",
+      "rva": "0x84b2a0",
+      "text": "RQ_INDEX_RTS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a2d0",
+      "rva": "0x84b2d0",
+      "text": "RQ_TRANSACT TRN_NEWEXTREPO/CCP_REPOM RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a320",
+      "rva": "0x84b320",
+      "text": "RQ_TRANSACT TRN_NEWEXTREPO/CCP_REPOM RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a368",
+      "rva": "0x84b368",
+      "text": "RQ_TRANSACT TRN_NEWEXTCREPO RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a3a8",
+      "rva": "0x84b3a8",
+      "text": "RQ_TRANSACT TRN_NEWEXTCREPO RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a3e8",
+      "rva": "0x84b3e8",
+      "text": "RQ_TRANSACT TRN_NEWREPORT4 RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a428",
+      "rva": "0x84b428",
+      "text": "RQ_TRANSACT TRN_NEWREPORT4 RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a468",
+      "rva": "0x84b468",
+      "text": "RQ_TRANSACT TRN_SIMPLECLEARING RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a4a8",
+      "rva": "0x84b4a8",
+      "text": "RQ_TRANSACT TRN_SIMPLECLEARING RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a4e8",
+      "rva": "0x84b4e8",
+      "text": "RQ_TRANSACT TRN_COMPLEX_REPORT RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a528",
+      "rva": "0x84b528",
+      "text": "RQ_TRANSACT TRN_COMPLEX_REPORT RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a568",
+      "rva": "0x84b568",
+      "text": "RQ_TRANSACT TRN_CANCEL_TRADES RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a5a8",
+      "rva": "0x84b5a8",
+      "text": "RQ_TRANSACT TRN_CANCEL_TRADES RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a5f0",
+      "rva": "0x84b5f0",
+      "text": "RQ_TRANSACT TRN_AUCTION_MKT_ORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a640",
+      "rva": "0x84b640",
+      "text": "RQ_TRANSACT TRN_AUCTION_MKT_ORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a688",
+      "rva": "0x84b688",
+      "text": "RQ_TRANSACT TRN_ZAP RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a6c0",
+      "rva": "0x84b6c0",
+      "text": "RQ_TRANSACT TRN_ZAP RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a6f8",
+      "rva": "0x84b6f8",
+      "text": "RQ_TRANSACT TRN_NEWOTCORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a738",
+      "rva": "0x84b738",
+      "text": "RQ_TRANSACT TRN_NEWOTCORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a780",
+      "rva": "0x84b780",
+      "text": "RQ_TRANSACT TRN_AUCTION_MKT_ORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a7d0",
+      "rva": "0x84b7d0",
+      "text": "RQ_TRANSACT TRN_AUCTION_MKT_ORDER RSM_OK return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a818",
+      "rva": "0x84b818",
+      "text": "RQ_TRANSACT GetResume return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a848",
+      "rva": "0x84b848",
+      "text": "RQ_TRANSACT GetResume return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a8e0",
+      "rva": "0x84b8e0",
+      "text": "RQ_MONEY_POS send failed"
+    },
+    {
+      "file_offset": "0x84a900",
+      "rva": "0x84b900",
+      "text": "RQ_MONEY_POS send failed"
+    },
+    {
+      "file_offset": "0x84a920",
+      "rva": "0x84b920",
+      "text": "RQ_MONEY_POS"
+    },
+    {
+      "file_offset": "0x84a930",
+      "rva": "0x84b930",
+      "text": "RQ_MONEY_POS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a958",
+      "rva": "0x84b958",
+      "text": "RQ_MONEY_POS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84a980",
+      "rva": "0x84b980",
+      "text": "RQ_POSITIONS send failed"
+    },
+    {
+      "file_offset": "0x84a9a0",
+      "rva": "0x84b9a0",
+      "text": "RQ_POSITIONS send failed"
+    },
+    {
+      "file_offset": "0x84a9c0",
+      "rva": "0x84b9c0",
+      "text": "RQ_POSITIONS send failed 2"
+    },
+    {
+      "file_offset": "0x84a9e0",
+      "rva": "0x84b9e0",
+      "text": "RQ_POSITIONS send failed 2"
+    },
+    {
+      "file_offset": "0x84aa00",
+      "rva": "0x84ba00",
+      "text": "RQ_POSITIONS"
+    },
+    {
+      "file_offset": "0x84aa10",
+      "rva": "0x84ba10",
+      "text": "RQ_POSITIONS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84aa38",
+      "rva": "0x84ba38",
+      "text": "RQ_POSITIONS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84aa60",
+      "rva": "0x84ba60",
+      "text": "RQ_DEPO_POS send failed"
+    },
+    {
+      "file_offset": "0x84aa78",
+      "rva": "0x84ba78",
+      "text": "RQ_DEPO_POS send failed"
+    },
+    {
+      "file_offset": "0x84aa90",
+      "rva": "0x84ba90",
+      "text": "RQ_DEPO_POS"
+    },
+    {
+      "file_offset": "0x84aaa0",
+      "rva": "0x84baa0",
+      "text": "RQ_DEPO_POS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84aac8",
+      "rva": "0x84bac8",
+      "text": "RQ_DEPO_POS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84aaf0",
+      "rva": "0x84baf0",
+      "text": "RQ_CLIENT_HOLDINGS send failed"
+    },
+    {
+      "file_offset": "0x84ab10",
+      "rva": "0x84bb10",
+      "text": "RQ_CLIENT_HOLDINGS send failed"
+    },
+    {
+      "file_offset": "0x84ab30",
+      "rva": "0x84bb30",
+      "text": "RQ_CLIENT_HOLDINGS"
+    },
+    {
+      "file_offset": "0x84ab48",
+      "rva": "0x84bb48",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (1)"
+    },
+    {
+      "file_offset": "0x84ab78",
+      "rva": "0x84bb78",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (1)"
+    },
+    {
+      "file_offset": "0x84aba8",
+      "rva": "0x84bba8",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (7)"
+    },
+    {
+      "file_offset": "0x84abd8",
+      "rva": "0x84bbd8",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (7)"
+    },
+    {
+      "file_offset": "0x84ac08",
+      "rva": "0x84bc08",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (2)"
+    },
+    {
+      "file_offset": "0x84ac38",
+      "rva": "0x84bc38",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (2)"
+    },
+    {
+      "file_offset": "0x84ac68",
+      "rva": "0x84bc68",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (3)"
+    },
+    {
+      "file_offset": "0x84ac98",
+      "rva": "0x84bc98",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (3)"
+    },
+    {
+      "file_offset": "0x84acc8",
+      "rva": "0x84bcc8",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (4)"
+    },
+    {
+      "file_offset": "0x84acf8",
+      "rva": "0x84bcf8",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (4)"
+    },
+    {
+      "file_offset": "0x84ad28",
+      "rva": "0x84bd28",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (5)"
+    },
+    {
+      "file_offset": "0x84ad58",
+      "rva": "0x84bd58",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (5)"
+    },
+    {
+      "file_offset": "0x84ad88",
+      "rva": "0x84bd88",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (6)"
+    },
+    {
+      "file_offset": "0x84adb8",
+      "rva": "0x84bdb8",
+      "text": "RQ_CLIENT_HOLDINGS return incorrect buffer (6)"
+    },
+    {
+      "file_offset": "0x84ae30",
+      "rva": "0x84be30",
+      "text": "RQ_MAIN"
+    },
+    {
+      "file_offset": "0x84ae78",
+      "rva": "0x84be78",
+      "text": "RQ_MAIN R_EDP_RATE: incorrect buffer"
+    },
+    {
+      "file_offset": "0x84aea0",
+      "rva": "0x84bea0",
+      "text": "RQ_MAIN R_EDP_RATE: incorrect buffer"
+    },
+    {
+      "file_offset": "0x84af40",
+      "rva": "0x84bf40",
+      "text": "RQ_CLIENT_LIMITS send failed"
+    },
+    {
+      "file_offset": "0x84af68",
+      "rva": "0x84bf68",
+      "text": "RQ_CLIENT_LIMITS send failed"
+    },
+    {
+      "file_offset": "0x84af90",
+      "rva": "0x84bf90",
+      "text": "RQ_CLIENT_LIMITS"
+    },
+    {
+      "file_offset": "0x84afc8",
+      "rva": "0x84bfc8",
+      "text": "RQ_CLIENT_LIMITS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84aff8",
+      "rva": "0x84bff8",
+      "text": "RQ_CLIENT_LIMITS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b050",
+      "rva": "0x84c050",
+      "text": "RQ_CLIENT_LIMITS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b080",
+      "rva": "0x84c080",
+      "text": "RQ_CLIENT_LIMITS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b0b0",
+      "rva": "0x84c0b0",
+      "text": "RQ_CLIENT_LIMITS return incorrect buffer 2"
+    },
+    {
+      "file_offset": "0x84b0e0",
+      "rva": "0x84c0e0",
+      "text": "RQ_CLIENT_LIMITS return incorrect buffer 2"
+    },
+    {
+      "file_offset": "0x84b138",
+      "rva": "0x84c138",
+      "text": "RQ_MAIN R_DELAY: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b168",
+      "rva": "0x84c168",
+      "text": "RQ_MAIN R_DELAY: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b1b0",
+      "rva": "0x84c1b0",
+      "text": "RQ_MAIN R_MSG: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b1d8",
+      "rva": "0x84c1d8",
+      "text": "RQ_MAIN R_MSG: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b220",
+      "rva": "0x84c220",
+      "text": "RQ_SEND_MESSAGE send failed"
+    },
+    {
+      "file_offset": "0x84b240",
+      "rva": "0x84c240",
+      "text": "RQ_SEND_MESSAGE send failed"
+    },
+    {
+      "file_offset": "0x84b260",
+      "rva": "0x84c260",
+      "text": "RQ_SEND_MESSAGE"
+    },
+    {
+      "file_offset": "0x84b290",
+      "rva": "0x84c290",
+      "text": "RQ_SEND_MESSAGE incorrect server buffer"
+    },
+    {
+      "file_offset": "0x84b2b8",
+      "rva": "0x84c2b8",
+      "text": "RQ_SEND_MESSAGE incorrect server buffer"
+    },
+    {
+      "file_offset": "0x84b2e0",
+      "rva": "0x84c2e0",
+      "text": "RQ_SEND_MESSAGE incorrect server buffer 2"
+    },
+    {
+      "file_offset": "0x84b310",
+      "rva": "0x84c310",
+      "text": "RQ_SEND_MESSAGE incorrect server buffer 2"
+    },
+    {
+      "file_offset": "0x84b438",
+      "rva": "0x84c438",
+      "text": "RQ_CHANGE_PWD send failed"
+    },
+    {
+      "file_offset": "0x84b458",
+      "rva": "0x84c458",
+      "text": "RQ_CHANGE_PWD send failed"
+    },
+    {
+      "file_offset": "0x84b478",
+      "rva": "0x84c478",
+      "text": "RQ_CHANGE_PWD"
+    },
+    {
+      "file_offset": "0x84b4a8",
+      "rva": "0x84c4a8",
+      "text": "RQ_CHANGE_PWD incorrect server buffer"
+    },
+    {
+      "file_offset": "0x84b4d0",
+      "rva": "0x84c4d0",
+      "text": "RQ_CHANGE_PWD incorrect server buffer"
+    },
+    {
+      "file_offset": "0x84b530",
+      "rva": "0x84c530",
+      "text": "RQ_CHANGE_PWD incorrect server buffer 2"
+    },
+    {
+      "file_offset": "0x84b568",
+      "rva": "0x84c568",
+      "text": "RQ_CHANGE_PWD incorrect server buffer 2"
+    },
+    {
+      "file_offset": "0x84b5b8",
+      "rva": "0x84c5b8",
+      "text": "RQ_SUBSCRIBE"
+    },
+    {
+      "file_offset": "0x84b5f0",
+      "rva": "0x84c5f0",
+      "text": "RQ_SUBSCRIBE incorrect server response"
+    },
+    {
+      "file_offset": "0x84b618",
+      "rva": "0x84c618",
+      "text": "RQ_SUBSCRIBE incorrect server response"
+    },
+    {
+      "file_offset": "0x84b640",
+      "rva": "0x84c640",
+      "text": "RQ_MAIN R_SEC_RATE: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b670",
+      "rva": "0x84c670",
+      "text": "RQ_HISTORY"
+    },
+    {
+      "file_offset": "0x84b680",
+      "rva": "0x84c680",
+      "text": "RQ_MAIN R_SEC_RATE: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b6b0",
+      "rva": "0x84c6b0",
+      "text": "RQ_HISTORY incorrect server response"
+    },
+    {
+      "file_offset": "0x84b6d8",
+      "rva": "0x84c6d8",
+      "text": "RQ_HISTORY incorrect server response"
+    },
+    {
+      "file_offset": "0x84b700",
+      "rva": "0x84c700",
+      "text": "RQ_MAIN R_CURRENCY_RATE: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b738",
+      "rva": "0x84c738",
+      "text": "RQ_MAIN R_CURRENCY_RATE: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b770",
+      "rva": "0x84c770",
+      "text": "RQ_MAIN R_SEC_ZALOG: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b7a0",
+      "rva": "0x84c7a0",
+      "text": "RQ_MAIN R_SEC_ZALOG: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b7d0",
+      "rva": "0x84c7d0",
+      "text": "RQ_MAIN R_SEC_OBLIG: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b800",
+      "rva": "0x84c800",
+      "text": "RQ_MAIN R_SEC_OBLIG: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b830",
+      "rva": "0x84c830",
+      "text": "RQ_MAIN R_SEC_ONOFF: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b860",
+      "rva": "0x84c860",
+      "text": "RQ_MAIN R_SEC_ONOFF: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b890",
+      "rva": "0x84c890",
+      "text": "RQ_MAIN R_SEC_MKT_PERMIT: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b8c8",
+      "rva": "0x84c8c8",
+      "text": "RQ_MAIN R_SEC_MKT_PERMIT: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b900",
+      "rva": "0x84c900",
+      "text": "RQ_ATTACH_CLIENT send failed"
+    },
+    {
+      "file_offset": "0x84b920",
+      "rva": "0x84c920",
+      "text": "RQ_ATTACH_CLIENT send failed"
+    },
+    {
+      "file_offset": "0x84b940",
+      "rva": "0x84c940",
+      "text": "RQ_MAIN R_SEC_RESIDENT: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b970",
+      "rva": "0x84c970",
+      "text": "RQ_ATTACH_CLIENT"
+    },
+    {
+      "file_offset": "0x84b988",
+      "rva": "0x84c988",
+      "text": "RQ_MAIN R_SEC_RESIDENT: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b9b8",
+      "rva": "0x84c9b8",
+      "text": "RQ_ATTACH_CLIENT incorrect buffer"
+    },
+    {
+      "file_offset": "0x84b9e0",
+      "rva": "0x84c9e0",
+      "text": "RQ_MAIN R_SEC_DEFSETTLECODE: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84ba18",
+      "rva": "0x84ca18",
+      "text": "RQ_ATTACH_CLIENT incorrect buffer"
+    },
+    {
+      "file_offset": "0x84ba40",
+      "rva": "0x84ca40",
+      "text": "RQ_MAIN R_SEC_DEFSETTLECODE: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84baa0",
+      "rva": "0x84caa0",
+      "text": "RQ_MAIN R_SUPERVISOR: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bad0",
+      "rva": "0x84cad0",
+      "text": "RQ_MAIN R_SUPERVISOR: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bb00",
+      "rva": "0x84cb00",
+      "text": "RQ_RPSREPO_SUBSCR send failed"
+    },
+    {
+      "file_offset": "0x84bb20",
+      "rva": "0x84cb20",
+      "text": "RQ_RPSREPO_SUBSCR send failed"
+    },
+    {
+      "file_offset": "0x84bb40",
+      "rva": "0x84cb40",
+      "text": "RQ_MAIN R_PIPESTATUS: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bb70",
+      "rva": "0x84cb70",
+      "text": "RQ_RPSREPO_SUBSCR"
+    },
+    {
+      "file_offset": "0x84bb88",
+      "rva": "0x84cb88",
+      "text": "RQ_MAIN R_PIPESTATUS: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bbb8",
+      "rva": "0x84cbb8",
+      "text": "RQ_MAIN R_OVERNIGHT: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bbe8",
+      "rva": "0x84cbe8",
+      "text": "RQ_MAIN R_OVERNIGHT: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bc18",
+      "rva": "0x84cc18",
+      "text": "RQ_MAIN R_PWD_RESULT: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bc48",
+      "rva": "0x84cc48",
+      "text": "RQ_FORTS_FIRM_MONEY"
+    },
+    {
+      "file_offset": "0x84bc60",
+      "rva": "0x84cc60",
+      "text": "RQ_MAIN R_PWD_RESULT: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bc90",
+      "rva": "0x84cc90",
+      "text": "RQ_FORTS_FIRM_MONEY return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bcc0",
+      "rva": "0x84ccc0",
+      "text": "RQ_MAIN R_PWD_RESULT 2 return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bcf0",
+      "rva": "0x84ccf0",
+      "text": "RQ_FORTS_FIRM_MONEY return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bd20",
+      "rva": "0x84cd20",
+      "text": "RQ_MAIN R_PWD_RESULT 2 return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bd50",
+      "rva": "0x84cd50",
+      "text": "RQ_FORTS_FIRM_MONEY return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bd80",
+      "rva": "0x84cd80",
+      "text": "RQ_MAIN R_MONEY_CHANGE: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bdb0",
+      "rva": "0x84cdb0",
+      "text": "RQ_FORTS_FIRM_MONEY return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bde0",
+      "rva": "0x84cde0",
+      "text": "RQ_MAIN R_MONEY_CHANGE: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84be60",
+      "rva": "0x84ce60",
+      "text": "RQ_MAIN R_DEPO_CHANGE: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84be90",
+      "rva": "0x84ce90",
+      "text": "RQ_MAIN R_DEPO_CHANGE: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bed0",
+      "rva": "0x84ced0",
+      "text": "RQ_MAIN R_OPT_EXPIRATION: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bf20",
+      "rva": "0x84cf20",
+      "text": "RQ_MAIN R_OPT_EXPIRATION: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bf78",
+      "rva": "0x84cf78",
+      "text": "RQ_MAIN R_UPLOAD: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bfa8",
+      "rva": "0x84cfa8",
+      "text": "RQ_MAIN R_UPLOAD: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84bfd8",
+      "rva": "0x84cfd8",
+      "text": "RQ_INDEX_RTS write failed"
+    },
+    {
+      "file_offset": "0x84bff8",
+      "rva": "0x84cff8",
+      "text": "RQ_MAIN R_UPLOAD Read: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c028",
+      "rva": "0x84d028",
+      "text": "RQ_INDEX_RTS write failed"
+    },
+    {
+      "file_offset": "0x84c048",
+      "rva": "0x84d048",
+      "text": "RQ_MAIN R_UPLOAD Read: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c078",
+      "rva": "0x84d078",
+      "text": "RQ_INDEX_RTS"
+    },
+    {
+      "file_offset": "0x84c088",
+      "rva": "0x84d088",
+      "text": "RQ_MAIN R_BOARD: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c0b8",
+      "rva": "0x84d0b8",
+      "text": "RQ_TIME"
+    },
+    {
+      "file_offset": "0x84c0c0",
+      "rva": "0x84d0c0",
+      "text": "RQ_MAIN R_BOARD: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c0f0",
+      "rva": "0x84d0f0",
+      "text": "RQ_INDEX_RTS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c118",
+      "rva": "0x84d118",
+      "text": "RQ_TIME incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c138",
+      "rva": "0x84d138",
+      "text": "RQ_INDEX_RTS return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c160",
+      "rva": "0x84d160",
+      "text": "RQ_TIME incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c180",
+      "rva": "0x84d180",
+      "text": "RQ_MAIN R_NEWS: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c1a8",
+      "rva": "0x84d1a8",
+      "text": "RQ_TIME incorrect buffer (Timezone)"
+    },
+    {
+      "file_offset": "0x84c1d0",
+      "rva": "0x84d1d0",
+      "text": "RQ_MAIN R_NEWS: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c1f8",
+      "rva": "0x84d1f8",
+      "text": "RQ_TIME incorrect buffer (Timezone)"
+    },
+    {
+      "file_offset": "0x84c220",
+      "rva": "0x84d220",
+      "text": "RQ_MAIN R_NEWS_UPLOAD: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c250",
+      "rva": "0x84d250",
+      "text": "RQ_MAIN R_NEWS_UPLOAD: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c280",
+      "rva": "0x84d280",
+      "text": "RQ_MAIN R_NEWS_UPLOAD HDR: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c2b8",
+      "rva": "0x84d2b8",
+      "text": "RQ_MAIN R_NEWS_UPLOAD HDR: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c2f0",
+      "rva": "0x84d2f0",
+      "text": "RQ_MAIN R_NEWS_UPLOAD: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c320",
+      "rva": "0x84d320",
+      "text": "RQ_MAIN R_NEWS_UPLOAD: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c350",
+      "rva": "0x84d350",
+      "text": "RQ_MAIN R_NEWS_UPLOAD: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c380",
+      "rva": "0x84d380",
+      "text": "RQ_MAIN R_NEWS_UPLOAD: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c3b0",
+      "rva": "0x84d3b0",
+      "text": "RQ_UPLOAD send failed"
+    },
+    {
+      "file_offset": "0x84c3c8",
+      "rva": "0x84d3c8",
+      "text": "RQ_MAIN R_NEWS_UPLOAD: allocation error"
+    },
+    {
+      "file_offset": "0x84c3f0",
+      "rva": "0x84d3f0",
+      "text": "RQ_UPLOAD send failed"
+    },
+    {
+      "file_offset": "0x84c408",
+      "rva": "0x84d408",
+      "text": "RQ_MAIN R_NEWS_UPLOAD: allocation error"
+    },
+    {
+      "file_offset": "0x84c430",
+      "rva": "0x84d430",
+      "text": "RQ_MAIN R_NEWS_UPLOAD Read: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c468",
+      "rva": "0x84d468",
+      "text": "RQ_UPLOAD send failed 2"
+    },
+    {
+      "file_offset": "0x84c480",
+      "rva": "0x84d480",
+      "text": "RQ_MAIN R_NEWS_UPLOAD Read: return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c4b8",
+      "rva": "0x84d4b8",
+      "text": "RQ_UPLOAD send failed 2"
+    },
+    {
+      "file_offset": "0x84c4d0",
+      "rva": "0x84d4d0",
+      "text": "RQ_UPLOAD"
+    },
+    {
+      "file_offset": "0x84c4e0",
+      "rva": "0x84d4e0",
+      "text": "RQ_UPLOAD incorrect server response"
+    },
+    {
+      "file_offset": "0x84c508",
+      "rva": "0x84d508",
+      "text": "RQ_UPLOAD incorrect server response"
+    },
+    {
+      "file_offset": "0x84c530",
+      "rva": "0x84d530",
+      "text": "RQ_GET_SETTLECODE write failed"
+    },
+    {
+      "file_offset": "0x84c550",
+      "rva": "0x84d550",
+      "text": "RQ_GET_SETTLECODE write failed"
+    },
+    {
+      "file_offset": "0x84c570",
+      "rva": "0x84d570",
+      "text": "RQ_UPLOAD incorrect server response 2"
+    },
+    {
+      "file_offset": "0x84c598",
+      "rva": "0x84d598",
+      "text": "RQ_GET_SETTLECODE write failed"
+    },
+    {
+      "file_offset": "0x84c5b8",
+      "rva": "0x84d5b8",
+      "text": "RQ_UPLOAD incorrect server response 2"
+    },
+    {
+      "file_offset": "0x84c5e0",
+      "rva": "0x84d5e0",
+      "text": "RQ_GET_SETTLECODE write failed"
+    },
+    {
+      "file_offset": "0x84c600",
+      "rva": "0x84d600",
+      "text": "RQ_GET_SETTLECODE"
+    },
+    {
+      "file_offset": "0x84c650",
+      "rva": "0x84d650",
+      "text": "RQ_GET_SETTLECODE return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c680",
+      "rva": "0x84d680",
+      "text": "RQ_MAIN Invalid Event ID"
+    },
+    {
+      "file_offset": "0x84c6a0",
+      "rva": "0x84d6a0",
+      "text": "RQ_GET_SETTLECODE return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84c6d0",
+      "rva": "0x84d6d0",
+      "text": "RQ_MAIN Invalid Event ID"
+    },
+    {
+      "file_offset": "0x84c6f0",
+      "rva": "0x84d6f0",
+      "text": "RQ_CANCEL_UPLOAD"
+    },
+    {
+      "file_offset": "0x84c7c0",
+      "rva": "0x84d7c0",
+      "text": "RQ_GET_SEC_SETTLECODE write failed"
+    },
+    {
+      "file_offset": "0x84c7e8",
+      "rva": "0x84d7e8",
+      "text": "RQ_REPORT_INFO send failed"
+    },
+    {
+      "file_offset": "0x84c808",
+      "rva": "0x84d808",
+      "text": "RQ_GET_SEC_SETTLECODE write failed"
+    },
+    {
+      "file_offset": "0x84c838",
+      "rva": "0x84d838",
+      "text": "RQ_REPORT_INFO send failed"
+    },
+    {
+      "file_offset": "0x84c860",
+      "rva": "0x84d860",
+      "text": "RQ_REPORT_INFO"
+    },
+    {
+      "file_offset": "0x84c878",
+      "rva": "0x84d878",
+      "text": "RQ_GET_SEC_SETTLECODE write failed"
+    },
+    {
+      "file_offset": "0x84c8a0",
+      "rva": "0x84d8a0",
+      "text": "RQ_REPORT_INFO incorrect server response"
+    },
+    {
+      "file_offset": "0x84c8e0",
+      "rva": "0x84d8e0",
+      "text": "RQ_GET_SEC_SETTLECODE write failed"
+    },
+    {
+      "file_offset": "0x84c908",
+      "rva": "0x84d908",
+      "text": "RQ_REPORT_INFO incorrect server response"
+    },
+    {
+      "file_offset": "0x84c950",
+      "rva": "0x84d950",
+      "text": "RQ_GET_SEC_SETTLECODE write failed"
+    },
+    {
+      "file_offset": "0x84c978",
+      "rva": "0x84d978",
+      "text": "RQ_REPORT_INFO incorrect server response 2"
+    },
+    {
+      "file_offset": "0x84c9a8",
+      "rva": "0x84d9a8",
+      "text": "RQ_GET_SEC_SETTLECODE write failed"
+    },
+    {
+      "file_offset": "0x84c9e0",
+      "rva": "0x84d9e0",
+      "text": "RQ_GET_SEC_SETTLECODE"
+    },
+    {
+      "file_offset": "0x84c9f8",
+      "rva": "0x84d9f8",
+      "text": "RQ_REPORT_INFO incorrect server response 2"
+    },
+    {
+      "file_offset": "0x84ca40",
+      "rva": "0x84da40",
+      "text": "RQ_REPORT_INFO incorrect server response 3"
+    },
+    {
+      "file_offset": "0x84ca70",
+      "rva": "0x84da70",
+      "text": "RQ_GET_SEC_SETTLECODE return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84caa0",
+      "rva": "0x84daa0",
+      "text": "RQ_REPORT_INFO incorrect server response 3"
+    },
+    {
+      "file_offset": "0x84cad0",
+      "rva": "0x84dad0",
+      "text": "RQ_GET_SEC_SETTLECODE return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84cb00",
+      "rva": "0x84db00",
+      "text": "RQ_REPORT_INFO incorrect server response 4"
+    },
+    {
+      "file_offset": "0x84cb40",
+      "rva": "0x84db40",
+      "text": "RQ_REPORT_INFO incorrect server response 4"
+    },
+    {
+      "file_offset": "0x84cbf0",
+      "rva": "0x84dbf0",
+      "text": "RQ_GETNEWS write failed"
+    },
+    {
+      "file_offset": "0x84cc20",
+      "rva": "0x84dc20",
+      "text": "RQ_GETNEWS write failed"
+    },
+    {
+      "file_offset": "0x84cc38",
+      "rva": "0x84dc38",
+      "text": "RQ_GETNEWS"
+    },
+    {
+      "file_offset": "0x84cc70",
+      "rva": "0x84dc70",
+      "text": "RQ_GET_REPORT send failed"
+    },
+    {
+      "file_offset": "0x84cca8",
+      "rva": "0x84dca8",
+      "text": "RQ_GET_REPORT send failed"
+    },
+    {
+      "file_offset": "0x84ccd8",
+      "rva": "0x84dcd8",
+      "text": "RQ_GET_REPORT"
+    },
+    {
+      "file_offset": "0x84cd08",
+      "rva": "0x84dd08",
+      "text": "RQ_GET_REPORT incorrect server response"
+    },
+    {
+      "file_offset": "0x84cd30",
+      "rva": "0x84dd30",
+      "text": "RQ_GET_REPORT incorrect server response"
+    },
+    {
+      "file_offset": "0x84d0c0",
+      "rva": "0x84e0c0",
+      "text": "RQ_PACKET write failed"
+    },
+    {
+      "file_offset": "0x84d0d8",
+      "rva": "0x84e0d8",
+      "text": "RQ_PACKET write failed"
+    },
+    {
+      "file_offset": "0x84d0f0",
+      "rva": "0x84e0f0",
+      "text": "RQ_PACKET"
+    },
+    {
+      "file_offset": "0x84d100",
+      "rva": "0x84e100",
+      "text": "RQ_SEC_SPEC"
+    },
+    {
+      "file_offset": "0x84d110",
+      "rva": "0x84e110",
+      "text": "RQ_PACKET send failed"
+    },
+    {
+      "file_offset": "0x84d128",
+      "rva": "0x84e128",
+      "text": " RQ_SEC_SPEC error "
+    },
+    {
+      "file_offset": "0x84d140",
+      "rva": "0x84e140",
+      "text": "RQ_PACKET send failed"
+    },
+    {
+      "file_offset": "0x84d158",
+      "rva": "0x84e158",
+      "text": "RQ_SEC_SPEC failed"
+    },
+    {
+      "file_offset": "0x84d170",
+      "rva": "0x84e170",
+      "text": "RQ_SEC_SPEC failed"
+    },
+    {
+      "file_offset": "0x84d188",
+      "rva": "0x84e188",
+      "text": "RQ_SEC_SPEC incorrect server response"
+    },
+    {
+      "file_offset": "0x84d1b0",
+      "rva": "0x84e1b0",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d1d0",
+      "rva": "0x84e1d0",
+      "text": "RQ_SEC_SPEC incorrect server response"
+    },
+    {
+      "file_offset": "0x84d1f8",
+      "rva": "0x84e1f8",
+      "text": "RQ_SEC_SPEC incorrect server response"
+    },
+    {
+      "file_offset": "0x84d220",
+      "rva": "0x84e220",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d240",
+      "rva": "0x84e240",
+      "text": "RQ_SEC_SPEC incorrect server response"
+    },
+    {
+      "file_offset": "0x84d268",
+      "rva": "0x84e268",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d288",
+      "rva": "0x84e288",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d2a8",
+      "rva": "0x84e2a8",
+      "text": "RQ_SEND_FILE"
+    },
+    {
+      "file_offset": "0x84d2b8",
+      "rva": "0x84e2b8",
+      "text": "RQ_SEND_FILE return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84d2e0",
+      "rva": "0x84e2e0",
+      "text": "RQ_SEND_FILE return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84d308",
+      "rva": "0x84e308",
+      "text": "RQ_SEND_FILE return incorrect buffer 2"
+    },
+    {
+      "file_offset": "0x84d330",
+      "rva": "0x84e330",
+      "text": "RQ_SEND_FILE return incorrect buffer 2"
+    },
+    {
+      "file_offset": "0x84d358",
+      "rva": "0x84e358",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d378",
+      "rva": "0x84e378",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d398",
+      "rva": "0x84e398",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d3b8",
+      "rva": "0x84e3b8",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d3d8",
+      "rva": "0x84e3d8",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d3f8",
+      "rva": "0x84e3f8",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d418",
+      "rva": "0x84e418",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d448",
+      "rva": "0x84e448",
+      "text": "RQ_SEND_FILE write failed"
+    },
+    {
+      "file_offset": "0x84d468",
+      "rva": "0x84e468",
+      "text": "RQ_SEND_FILE"
+    },
+    {
+      "file_offset": "0x84d478",
+      "rva": "0x84e478",
+      "text": "RQ_SEND_FILE return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84d4a0",
+      "rva": "0x84e4a0",
+      "text": "RQ_SEND_FILE return incorrect buffer"
+    },
+    {
+      "file_offset": "0x84d4c8",
+      "rva": "0x84e4c8",
+      "text": "RQ_SEND_FILE return incorrect buffer 2"
+    },
+    {
+      "file_offset": "0x84d4f0",
+      "rva": "0x84e4f0",
+      "text": "RQ_SEND_FILE return incorrect buffer 2"
+    },
+    {
+      "file_offset": "0x84d718",
+      "rva": "0x84e718",
+      "text": "RQ_INQUIRE_SECURITY send failed"
+    },
+    {
+      "file_offset": "0x84d738",
+      "rva": "0x84e738",
+      "text": "RQ_INQUIRE_SECURITY send failed"
+    },
+    {
+      "file_offset": "0x84d760",
+      "rva": "0x84e760",
+      "text": "RQ_INQUIRE_SECURITY"
+    },
+    {
+      "file_offset": "0x84d778",
+      "rva": "0x84e778",
+      "text": "RQ_INQUIRE_SECURITY invalid event"
+    },
+    {
+      "file_offset": "0x84d7a0",
+      "rva": "0x84e7a0",
+      "text": "RQ_INQUIRE_SECURITY invalid event"
+    },
+    {
+      "file_offset": "0x84d7c8",
+      "rva": "0x84e7c8",
+      "text": "RQ_INQUIRE_SECURITY:R_SEC_NEW: incorrect event size"
+    },
+    {
+      "file_offset": "0x84d800",
+      "rva": "0x84e800",
+      "text": "RQ_INQUIRE_SECURITY:R_SEC_NEW: incorrect event size"
+    },
+    {
+      "file_offset": "0x84d898",
+      "rva": "0x84e898",
+      "text": "RQ_SEC_INIT invalid event"
+    },
+    {
+      "file_offset": "0x84d8b8",
+      "rva": "0x84e8b8",
+      "text": "RQ_SEC_INIT invalid event"
+    },
+    {
+      "file_offset": "0x84d8d8",
+      "rva": "0x84e8d8",
+      "text": "RQ_SEC_VERIFY invalid event"
+    },
+    {
+      "file_offset": "0x84d8f8",
+      "rva": "0x84e8f8",
+      "text": "RQ_SEC_VERIFY invalid event"
+    },
+    {
+      "file_offset": "0x84d918",
+      "rva": "0x84e918",
+      "text": "RQ_SEC_INIT"
+    },
+    {
+      "file_offset": "0x84d928",
+      "rva": "0x84e928",
+      "text": "RQ_SEC_VERIFY"
+    },
+    {
+      "file_offset": "0x84d938",
+      "rva": "0x84e938",
+      "text": "RQ_SEC_INIT invalid buffer"
+    },
+    {
+      "file_offset": "0x84d958",
+      "rva": "0x84e958",
+      "text": "RQ_SEC_INIT invalid buffer"
+    },
+    {
+      "file_offset": "0x84d978",
+      "rva": "0x84e978",
+      "text": "RQ_SEC_VERIFY invalid buffer"
+    },
+    {
+      "file_offset": "0x84d998",
+      "rva": "0x84e998",
+      "text": "RQ_SEC_VERIFY invalid buffer"
+    },
+    {
+      "file_offset": "0x84daa0",
+      "rva": "0x84eaa0",
+      "text": "RQ_MAKE_COND_OWN send failed"
+    },
+    {
+      "file_offset": "0x84dad8",
+      "rva": "0x84ead8",
+      "text": "RQ_MAKE_COND_OWN send failed"
+    },
+    {
+      "file_offset": "0x84daf8",
+      "rva": "0x84eaf8",
+      "text": "RQ_MAKE_COND_OWN"
+    },
+    {
+      "file_offset": "0x84db10",
+      "rva": "0x84eb10",
+      "text": "RQ_MAKE_COND_OWN invalid buffer"
+    },
+    {
+      "file_offset": "0x84db48",
+      "rva": "0x84eb48",
+      "text": "RQ_MAKE_COND_OWN invalid buffer"
+    },
+    {
+      "file_offset": "0x850b48",
+      "rva": "0x851b48",
+      "text": "sslpro.dll"
+    },
+    {
+      "file_offset": "0x850f10",
+      "rva": "0x851f10",
+      "text": "mespro.dll"
+    },
+    {
+      "file_offset": "0x8514c8",
+      "rva": "0x8524c8",
+      "text": "cTCryptoWin::initSvr"
+    },
+    {
+      "file_offset": "0x851518",
+      "rva": "0x852518",
+      "text": "cTCryptoWin::initTempClnCA"
+    },
+    {
+      "file_offset": "0x851538",
+      "rva": "0x852538",
+      "text": "cTCryptoWin::initCln"
+    },
+    {
+      "file_offset": "0x851568",
+      "rva": "0x852568",
+      "text": "cTCryptoWin::exportSessionKey"
+    },
+    {
+      "file_offset": "0x851620",
+      "rva": "0x852620",
+      "text": "cTCryptoWin::importSessionKey"
+    },
+    {
+      "file_offset": "0x851670",
+      "rva": "0x852670",
+      "text": "cTCryptoWin::encrypt"
+    },
+    {
+      "file_offset": "0x8516c8",
+      "rva": "0x8526c8",
+      "text": "cTCryptoWin::decrypt"
+    },
+    {
+      "file_offset": "0x8516f0",
+      "rva": "0x8526f0",
+      "text": "cTCryptoWin::setPublicKey"
+    },
+    {
+      "file_offset": "0x851728",
+      "rva": "0x852728",
+      "text": "cTCryptoWin::verifyReplica"
+    },
+    {
+      "file_offset": "0x851748",
+      "rva": "0x852748",
+      "text": "cTCryptoWin::verifySign"
+    },
+    {
+      "file_offset": "0x851798",
+      "rva": "0x852798",
+      "text": "cTCryptoWin::getExchangeKey"
+    },
+    {
+      "file_offset": "0x851810",
+      "rva": "0x852810",
+      "text": "cTCryptoWin::getPublicKeyBlob"
+    },
+    {
+      "file_offset": "0x851858",
+      "rva": "0x852858",
+      "text": "cTCryptoWin::getSessionKey(void)"
+    },
+    {
+      "file_offset": "0x8518d0",
+      "rva": "0x8528d0",
+      "text": "cTCryptoWin::getExchangeKey(void)"
+    },
+    {
+      "file_offset": "0x851940",
+      "rva": "0x852940",
+      "text": "cTCryptoWin::VerifyClientCert"
+    },
+    {
+      "file_offset": "0x851960",
+      "rva": "0x852960",
+      "text": "cTCryptoWin::SSL_LoadCerts"
+    },
+    {
+      "file_offset": "0x851980",
+      "rva": "0x852980",
+      "text": "cTMyCryptoWin::initMS"
+    },
+    {
+      "file_offset": "0x8519e8",
+      "rva": "0x8529e8",
+      "text": "cTMyCryptoWin::initCP"
+    },
+    {
+      "file_offset": "0x851a50",
+      "rva": "0x852a50",
+      "text": "cTMyCryptoWin::initSC"
+    },
+    {
+      "file_offset": "0x851a90",
+      "rva": "0x852a90",
+      "text": "cTMyCryptoWin::StoreAndValidatePeriods"
+    },
+    {
+      "file_offset": "0x851ab8",
+      "rva": "0x852ab8",
+      "text": "cTMyCryptoWin::initCPCA"
+    },
+    {
+      "file_offset": "0x851b10",
+      "rva": "0x852b10",
+      "text": "cTMyCryptoWin::getPublicKeyBlob"
+    },
+    {
+      "file_offset": "0x851b30",
+      "rva": "0x852b30",
+      "text": "cTMyCryptoWin::signData"
+    },
+    {
+      "file_offset": "0x851b58",
+      "rva": "0x852b58",
+      "text": "cTMyCryptoWin::genRandom"
+    },
+    {
+      "file_offset": "0x851b88",
+      "rva": "0x852b88",
+      "text": "cTMyCryptoWin::getMyCertContext"
+    },
+    {
+      "file_offset": "0x851be0",
+      "rva": "0x852be0",
+      "text": "cTMyCryptoWin::getMyKeySetFromFile"
+    },
+    {
+      "file_offset": "0x851d20",
+      "rva": "0x852d20",
+      "text": "cTCryptoMsgPro::initSvr"
+    },
+    {
+      "file_offset": "0x851d70",
+      "rva": "0x852d70",
+      "text": "cTCryptoMsgPro::initTempClnCA"
+    },
+    {
+      "file_offset": "0x851d90",
+      "rva": "0x852d90",
+      "text": "cTCryptoMsgPro::SSL_LoadCerts"
+    },
+    {
+      "file_offset": "0x851db0",
+      "rva": "0x852db0",
+      "text": "cTCryptoMsgPro::initCln"
+    },
+    {
+      "file_offset": "0x851de0",
+      "rva": "0x852de0",
+      "text": "cTCryptoMsgPro::exportSessionKey"
+    },
+    {
+      "file_offset": "0x851e08",
+      "rva": "0x852e08",
+      "text": "cTCryptoMsgPro::importSessionKey"
+    },
+    {
+      "file_offset": "0x851e48",
+      "rva": "0x852e48",
+      "text": "cTCryptoMsgPro::setPublicKey"
+    },
+    {
+      "file_offset": "0x851ed0",
+      "rva": "0x852ed0",
+      "text": "cTCryptoMsgPro::verifySign"
+    },
+    {
+      "file_offset": "0x851ef0",
+      "rva": "0x852ef0",
+      "text": "cTCryptoMsgPro::getPublicKeyBlob"
+    },
+    {
+      "file_offset": "0x851f30",
+      "rva": "0x852f30",
+      "text": "cTMyCryptoMsgPro::VerifyClientCert"
+    },
+    {
+      "file_offset": "0x851f58",
+      "rva": "0x852f58",
+      "text": "cTMyCryptoMsgPro::initMP"
+    },
+    {
+      "file_offset": "0x852038",
+      "rva": "0x853038",
+      "text": "cTMyCryptoMsgPro::getPublicKeyBlob"
+    },
+    {
+      "file_offset": "0x852060",
+      "rva": "0x853060",
+      "text": "cTMyCryptoMsgPro::signData"
+    },
+    {
+      "file_offset": "0x8520d8",
+      "rva": "0x8530d8",
+      "text": "cTCryptoSsl::initSvr"
+    },
+    {
+      "file_offset": "0x8520f0",
+      "rva": "0x8530f0",
+      "text": "cTCryptoSsl::initTempClnCA"
+    },
+    {
+      "file_offset": "0x852110",
+      "rva": "0x853110",
+      "text": "cTCryptoSsl::initCln"
+    },
+    {
+      "file_offset": "0x852128",
+      "rva": "0x853128",
+      "text": "cTCryptoSsl::exportSessionKey"
+    },
+    {
+      "file_offset": "0x852148",
+      "rva": "0x853148",
+      "text": "cTCryptoSsl::importSessionKey"
+    },
+    {
+      "file_offset": "0x852168",
+      "rva": "0x853168",
+      "text": "cTCryptoSsl::encrypt"
+    },
+    {
+      "file_offset": "0x852180",
+      "rva": "0x853180",
+      "text": "cTCryptoSsl::decrypt"
+    },
+    {
+      "file_offset": "0x852198",
+      "rva": "0x853198",
+      "text": "cTCryptoSsl::verifyReplica"
+    },
+    {
+      "file_offset": "0x8521b8",
+      "rva": "0x8531b8",
+      "text": "cTCryptoSsl::setPublicKey"
+    },
+    {
+      "file_offset": "0x8521d8",
+      "rva": "0x8531d8",
+      "text": "cTCryptoSsl::verifySign"
+    },
+    {
+      "file_offset": "0x8521f8",
+      "rva": "0x8531f8",
+      "text": "cTCryptoSsl::handshake"
+    },
+    {
+      "file_offset": "0x852210",
+      "rva": "0x853210",
+      "text": "cTCryptoSsl::shutdown"
+    },
+    {
+      "file_offset": "0x852228",
+      "rva": "0x853228",
+      "text": "cTCryptoSsl::SSL_LoadCerts"
+    },
+    {
+      "file_offset": "0x852278",
+      "rva": "0x853278",
+      "text": "cTCryptoSsl::VerifyClientCert"
+    },
+    {
+      "file_offset": "0x852338",
+      "rva": "0x853338",
+      "text": "cTCryptoSsl::getPublicKeyBlob"
+    },
+    {
+      "file_offset": "0x852370",
+      "rva": "0x853370",
+      "text": "cTMyCryptoSsl::initSSL"
+    },
+    {
+      "file_offset": "0x8525a0",
+      "rva": "0x8535a0",
+      "text": "cTMyCryptoSsl::signData"
+    },
+    {
+      "file_offset": "0x8525f0",
+      "rva": "0x8535f0",
+      "text": "cTMyCryptoSsl::getPublicKeyBlob"
+    },
+    {
+      "file_offset": "0x85282c",
+      "rva": "0x85382c",
+      "text": " \"mespro.dll\""
+    },
+    {
+      "file_offset": "0x852866",
+      "rva": "0x853866",
+      "text": " \"mespro.dll\""
+    },
+    {
+      "file_offset": "0x85288c",
+      "rva": "0x85388c",
+      "text": " \"sslpro.dll\""
+    },
+    {
+      "file_offset": "0x8528c6",
+      "rva": "0x8538c6",
+      "text": " \"sslpro.dll\""
+    },
+    {
+      "file_offset": "0x85b870",
+      "rva": "0x85c870",
+      "text": " inflate 1.2.5 Copyright 1995-2010 Mark Adler "
+    },
+    {
+      "file_offset": "0x905a84",
+      "rva": "0x906a84",
+      "text": "d:\\work\\git\\xc4447\\xmlconnector\\bin\\release\\x64\\txmlconnector64.pdb"
+    },
+    {
+      "file_offset": "0x9c7f28",
+      "rva": "0x9c9928",
+      "text": ".?AVCSocketStream@@"
+    },
+    {
+      "file_offset": "0x9c81e0",
+      "rva": "0x9c9be0",
+      "text": ".?AVcTCryptoBase@@"
+    },
+    {
+      "file_offset": "0x9c8208",
+      "rva": "0x9c9c08",
+      "text": ".?AVcTCryptoWin@@"
+    },
+    {
+      "file_offset": "0x9c8230",
+      "rva": "0x9c9c30",
+      "text": ".?AVcTCryptoMsgPro@@"
+    },
+    {
+      "file_offset": "0x9c8258",
+      "rva": "0x9c9c58",
+      "text": ".?AVcTCryptoSsl@@"
+    },
+    {
+      "file_offset": "0x9c82a8",
+      "rva": "0x9c9ca8",
+      "text": ".?AVcTMyCryptoBase@@"
+    },
+    {
+      "file_offset": "0x9c82d0",
+      "rva": "0x9c9cd0",
+      "text": ".?AVcTMyCryptoWin@@"
+    },
+    {
+      "file_offset": "0x9c82f8",
+      "rva": "0x9c9cf8",
+      "text": ".?AVcTMyCryptoMsgPro@@"
+    },
+    {
+      "file_offset": "0x9c8320",
+      "rva": "0x9c9d20",
+      "text": ".?AVcTMyCryptoSsl@@"
+    },
+    {
+      "file_offset": "0x9c8468",
+      "rva": "0x9c9e68",
+      "text": ".?AVGostCipherCommon@@"
+    },
+    {
+      "file_offset": "0x9c8490",
+      "rva": "0x9c9e90",
+      "text": ".?AVGostCipherNoSubst@@"
+    },
+    {
+      "file_offset": "0x9c84b8",
+      "rva": "0x9c9eb8",
+      "text": ".?AVGostCipherChild@@"
+    },
+    {
+      "file_offset": "0x9c84e0",
+      "rva": "0x9c9ee0",
+      "text": ".?AVGostCipherChildB@@"
+    },
+    {
+      "file_offset": "0x9c8508",
+      "rva": "0x9c9f08",
+      "text": ".?AVGostCipherSubst@@"
+    },
+    {
+      "file_offset": "0x9c8530",
+      "rva": "0x9c9f30",
+      "text": ".?AVGostCipherGamma@@"
+    },
+    {
+      "file_offset": "0x9c8558",
+      "rva": "0x9c9f58",
+      "text": ".?AVGostCipherGammaB@@"
+    },
+    {
+      "file_offset": "0x9c8580",
+      "rva": "0x9c9f80",
+      "text": ".?AVAesCtrCipher@@"
+    },
+    {
+      "file_offset": "0x9c85a8",
+      "rva": "0x9c9fa8",
+      "text": ".?AVIntelAesCtrCipher@@"
+    }
+  ],
+  "caveat": "Strings are static evidence, not proof of active network algorithms. RVA differs from file offset; runtime VA depends on ASLR."
+}
