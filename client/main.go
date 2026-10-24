@@ -20,7 +20,10 @@ import (
 
 const defaultTarget = "localhost:50051"
 
-var errUnknownMessage = errors.New("unknown TRANSAQ message")
+var (
+	errUnknownMessage      = errors.New("unknown TRANSAQ message")
+	clientHandshakeTimeout = 10 * time.Second
+)
 
 type TCClient struct {
 	Client pb.ConnectServiceClient
@@ -90,27 +93,42 @@ func NewTCClientWithConn(client pb.ConnectServiceClient, conn *grpc.ClientConn) 
 		cancel()
 		return nil, fmt.Errorf("open response stream: %w", err)
 	}
-	streamReady := make(chan error, 1)
-	go func() {
-		_, err := stream.Header()
-		streamReady <- err
-	}()
-	if err := tc.Connect(); err != nil {
+	// The server subscribes the stream before sending headers. Wait for that
+	// readiness handshake before issuing connect so the initial client and
+	// securities snapshot is not published to an empty broker and dropped.
+	if err := tc.waitForStreamHeader(stream); err != nil {
 		cancel()
 		return nil, err
 	}
-	go func() {
-		if err := <-streamReady; err != nil {
-			if tc.ctx.Err() == nil {
-				log.Errorf("response stream readiness: %v", err)
-			}
-			tc.signalShutdown()
-			return
-		}
-		tc.loopReadingFromStream(stream)
-	}()
+	connectCtx, connectCancel := context.WithTimeout(tc.ctx, clientHandshakeTimeout)
+	connectErr := tc.connect(connectCtx)
+	connectCancel()
+	if connectErr != nil {
+		cancel()
+		return nil, connectErr
+	}
+	go tc.loopReadingFromStream(stream)
 
 	return &tc, nil
+}
+
+func (tc *TCClient) waitForStreamHeader(stream grpc.ServerStreamingClient[pb.DataResponse]) error {
+	headerReady := make(chan error, 1)
+	go func() {
+		_, err := stream.Header()
+		headerReady <- err
+	}()
+	select {
+	case err := <-headerReady:
+		if err != nil {
+			return fmt.Errorf("response stream readiness: %w", err)
+		}
+		return nil
+	case <-time.After(clientHandshakeTimeout):
+		return fmt.Errorf("response stream readiness: timeout after %s", clientHandshakeTimeout)
+	case <-tc.ctx.Done():
+		return fmt.Errorf("response stream readiness: %w", tc.ctx.Err())
+	}
 }
 
 func NewTCClient() (*TCClient, error) {
@@ -119,10 +137,12 @@ func NewTCClient() (*TCClient, error) {
 	if target == "" {
 		target = defaultTarget
 	}
+	// Do not wait for readiness inside the factory: RunWithReconnect owns the
+	// retry loop, and an unavailable server must surface as an error instead of
+	// blocking the supervisor forever.
 	conn, err := grpc.NewClient(
 		target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create gRPC client for %s: %w", target, err)
@@ -137,12 +157,31 @@ func NewTCClient() (*TCClient, error) {
 }
 
 func (tc *TCClient) Connect() error {
+	return tc.connect(tc.ctx)
+}
+
+func (tc *TCClient) connect(ctx context.Context) error {
+	login := os.Getenv("TC_LOGIN")
+	password := os.Getenv("TC_PASSWORD")
+	host := os.Getenv("TC_HOST")
+	port := os.Getenv("TC_PORT")
+	switch {
+	case login == "":
+		return errors.New("TC_LOGIN is required")
+	case password == "":
+		return errors.New("TC_PASSWORD is required")
+	case host == "":
+		return errors.New("TC_HOST is required")
+	case port == "":
+		return errors.New("TC_PORT is required")
+	}
+
 	connectReq := Connect{
 		Id:             "connect",
-		Login:          os.Getenv("TC_LOGIN"),
-		Password:       os.Getenv("TC_PASSWORD"),
-		Host:           os.Getenv("TC_HOST"),
-		Port:           os.Getenv("TC_PORT"),
+		Login:          login,
+		Password:       password,
+		Host:           host,
+		Port:           port,
 		SessionTimeout: 60,
 		RequestTimeout: 10,
 		Rqdelay:        1000,
@@ -150,7 +189,7 @@ func (tc *TCClient) Connect() error {
 		PushPosEquity:  30,
 		MicexRegisters: true,
 	}
-	return tc.send(tc.ctx, connectReq)
+	return tc.send(ctx, connectReq)
 }
 
 func (tc *TCClient) Disconnect() error {

@@ -24,7 +24,10 @@ type clientRPC struct {
 	fetchContext    context.Context
 	commandResponse string
 	commandErr      error
+	commandBlock    bool
 	requests        []string
+	commandCalled   chan struct{}
+	commandOnce     sync.Once
 }
 
 func (rpc *clientRPC) FetchResponseData(
@@ -42,13 +45,20 @@ func (rpc *clientRPC) FetchResponseData(
 }
 
 func (rpc *clientRPC) SendCommand(
-	_ context.Context,
+	ctx context.Context,
 	request *pb.SendCommandRequest,
 	_ ...grpc.CallOption,
 ) (*pb.SendCommandResponse, error) {
 	rpc.mu.Lock()
 	rpc.requests = append(rpc.requests, request.GetMessage())
 	rpc.mu.Unlock()
+	if rpc.commandCalled != nil {
+		rpc.commandOnce.Do(func() { close(rpc.commandCalled) })
+	}
+	if rpc.commandBlock {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if rpc.commandErr != nil {
 		return nil, rpc.commandErr
 	}
@@ -68,20 +78,32 @@ func (rpc *clientRPC) responseContext() context.Context {
 }
 
 type responseStream struct {
-	ctx         context.Context
-	messages    []string
-	mu          sync.Mutex
-	next        int
-	allReceived chan struct{}
-	received    sync.Once
+	ctx           context.Context
+	messages      []string
+	mu            sync.Mutex
+	next          int
+	allReceived   chan struct{}
+	received      sync.Once
+	headerStarted chan struct{}
+	headerGate    chan struct{}
+	headerErr     error
+	headerOnce    sync.Once
 }
 
-func (s *responseStream) Header() (metadata.MD, error) { return nil, nil }
-func (s *responseStream) Trailer() metadata.MD         { return nil }
-func (s *responseStream) CloseSend() error             { return nil }
-func (s *responseStream) Context() context.Context     { return s.ctx }
-func (s *responseStream) SendMsg(interface{}) error    { return nil }
-func (s *responseStream) RecvMsg(interface{}) error    { return nil }
+func (s *responseStream) Header() (metadata.MD, error) {
+	if s.headerStarted != nil {
+		s.headerOnce.Do(func() { close(s.headerStarted) })
+	}
+	if s.headerGate != nil {
+		<-s.headerGate
+	}
+	return nil, s.headerErr
+}
+func (s *responseStream) Trailer() metadata.MD      { return nil }
+func (s *responseStream) CloseSend() error          { return nil }
+func (s *responseStream) Context() context.Context  { return s.ctx }
+func (s *responseStream) SendMsg(interface{}) error { return nil }
+func (s *responseStream) RecvMsg(interface{}) error { return nil }
 
 func (s *responseStream) Recv() (*pb.DataResponse, error) {
 	s.mu.Lock()
@@ -133,6 +155,155 @@ func TestNewTCClientWithConnStartsStreamAndConnects(t *testing.T) {
 	case <-client.ShutdownChannel:
 	case <-time.After(time.Second):
 		t.Fatal("stream EOF did not signal client shutdown")
+	}
+}
+
+func TestNewTCClientWithConnWaitsForStreamHeaderBeforeConnect(t *testing.T) {
+	t.Setenv("TC_LOGIN", "test-login")
+	t.Setenv("TC_PASSWORD", "test-password")
+	t.Setenv("TC_HOST", "test-host")
+	t.Setenv("TC_PORT", "12345")
+
+	stream := &responseStream{
+		ctx:           context.Background(),
+		allReceived:   make(chan struct{}),
+		headerStarted: make(chan struct{}),
+		headerGate:    make(chan struct{}),
+	}
+	rpc := &clientRPC{
+		stream:          stream,
+		commandResponse: `<result success="true"/>`,
+		commandCalled:   make(chan struct{}),
+	}
+	type result struct {
+		client *TCClient
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		client, err := NewTCClientWithConn(rpc, nil)
+		done <- result{client: client, err: err}
+	}()
+
+	select {
+	case <-stream.headerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("client did not wait for the response stream header")
+	}
+	select {
+	case <-rpc.commandCalled:
+		t.Fatal("connect was sent before the stream header")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(stream.headerGate)
+	select {
+	case res := <-done:
+		if res.err != nil {
+			t.Fatalf("NewTCClientWithConn error = %v", res.err)
+		}
+		defer res.client.Close()
+	case <-time.After(time.Second):
+		t.Fatal("NewTCClientWithConn did not finish after the stream header")
+	}
+	if requests := rpc.sentRequests(); len(requests) != 1 {
+		t.Fatalf("sent requests = %d, want 1", len(requests))
+	}
+}
+
+func TestNewTCClientWithConnReportsStreamHeaderFailure(t *testing.T) {
+	t.Setenv("TC_LOGIN", "test-login")
+	t.Setenv("TC_PASSWORD", "test-password")
+	t.Setenv("TC_HOST", "test-host")
+	t.Setenv("TC_PORT", "12345")
+
+	rpc := &clientRPC{
+		stream: &responseStream{
+			ctx:         context.Background(),
+			allReceived: make(chan struct{}),
+			headerErr:   errors.New("stream not ready"),
+		},
+		commandResponse: `<result success="true"/>`,
+	}
+	client, err := NewTCClientWithConn(rpc, nil)
+	if err == nil || client != nil {
+		t.Fatalf("NewTCClientWithConn = (%v, %v), want nil client and error", client, err)
+	}
+	if !strings.Contains(err.Error(), "response stream readiness") {
+		t.Fatalf("error = %v, want response stream readiness", err)
+	}
+	if requests := rpc.sentRequests(); len(requests) != 0 {
+		t.Fatalf("connect was sent after header failure: %d requests", len(requests))
+	}
+
+	responseCtx := rpc.responseContext()
+	if responseCtx == nil {
+		t.Fatal("response stream was not opened")
+	}
+	select {
+	case <-responseCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("header failure did not cancel the client context")
+	}
+}
+
+func setClientHandshakeTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	previous := clientHandshakeTimeout
+	clientHandshakeTimeout = timeout
+	t.Cleanup(func() { clientHandshakeTimeout = previous })
+}
+
+func TestNewTCClientWithConnTimesOutWaitingForStreamHeader(t *testing.T) {
+	setClientHandshakeTimeout(t, 20*time.Millisecond)
+	t.Setenv("TC_LOGIN", "test-login")
+	t.Setenv("TC_PASSWORD", "test-password")
+	t.Setenv("TC_HOST", "test-host")
+	t.Setenv("TC_PORT", "12345")
+
+	headerGate := make(chan struct{})
+	rpc := &clientRPC{
+		stream: &responseStream{
+			ctx:           context.Background(),
+			allReceived:   make(chan struct{}),
+			headerStarted: make(chan struct{}),
+			headerGate:    headerGate,
+		},
+		commandResponse: `<result success="true"/>`,
+	}
+	client, err := NewTCClientWithConn(rpc, nil)
+	if err == nil || client != nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("NewTCClientWithConn = (%v, %v), want header timeout", client, err)
+	}
+	if requests := rpc.sentRequests(); len(requests) != 0 {
+		t.Fatalf("connect was sent after header timeout: %d requests", len(requests))
+	}
+	close(headerGate)
+}
+
+func TestNewTCClientWithConnTimesOutConnecting(t *testing.T) {
+	setClientHandshakeTimeout(t, 20*time.Millisecond)
+	t.Setenv("TC_LOGIN", "test-login")
+	t.Setenv("TC_PASSWORD", "test-password")
+	t.Setenv("TC_HOST", "test-host")
+	t.Setenv("TC_PORT", "12345")
+
+	rpc := &clientRPC{
+		stream: &responseStream{
+			ctx:         context.Background(),
+			allReceived: make(chan struct{}),
+		},
+		commandBlock:  true,
+		commandCalled: make(chan struct{}),
+	}
+	client, err := NewTCClientWithConn(rpc, nil)
+	if err == nil || client != nil || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("NewTCClientWithConn = (%v, %v), want connect timeout", client, err)
+	}
+	select {
+	case <-rpc.commandCalled:
+	default:
+		t.Fatal("connect command was not attempted")
 	}
 }
 
@@ -201,6 +372,31 @@ func TestSendCommandReportsTransportAndResponseErrors(t *testing.T) {
 			err := client.SendCommand(commands.Command{Id: "test"})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("SendCommand error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestConnectRequiresCredentials(t *testing.T) {
+	values := map[string]string{
+		"TC_LOGIN":    "test-login",
+		"TC_PASSWORD": "test-password",
+		"TC_HOST":     "test-host",
+		"TC_PORT":     "12345",
+	}
+	for _, missing := range []string{"TC_LOGIN", "TC_PASSWORD", "TC_HOST", "TC_PORT"} {
+		t.Run(missing, func(t *testing.T) {
+			for key, value := range values {
+				if key == missing {
+					t.Setenv(key, "")
+					continue
+				}
+				t.Setenv(key, value)
+			}
+			client := &TCClient{ctx: context.Background()}
+			err := client.Connect()
+			if err == nil || !strings.Contains(err.Error(), missing) {
+				t.Fatalf("Connect error = %v, want %s required", err, missing)
 			}
 		})
 	}

@@ -16,6 +16,7 @@ type ServerStatus struct {
 	ServerTZ  string   `xml:"server_tz,attr,omitempty"` // имя таймзоны сервер
 	SysVer    int      `xml:"sys_ver,attr,omitempty"`   // версия системы
 	Build     int      `xml:"build,attr,omitempty"`     // билд сервера
+	Message   string   `xml:",chardata"`                // причина при connected="error"
 }
 
 type Command struct {
