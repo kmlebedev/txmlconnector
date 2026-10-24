@@ -1,4 +1,4 @@
-FROM docker.io/library/golang:1.23-alpine as builder
+FROM docker.io/library/golang:1.26-alpine as builder
 ENV GOARCH=amd64
 
 COPY ./main.go /go/src/github.com/kmlebedev/txmlconnector/main.go
@@ -18,7 +18,7 @@ RUN go mod download && \
 
 FROM docker.io/library/alpine AS final
 
-ENV TC_DLL_VER=6.43.2.24.0
+ENV TC_DLL_VER=6.47.2.26.4
 COPY --from=builder /go/bin/server.exe /usr/bin/txmlconnector-server.exe
 COPY --from=builder /go/bin/client /usr/bin/txmlconnector-client
 COPY ./txmlconnector64-${TC_DLL_VER}.dll /usr/bin/

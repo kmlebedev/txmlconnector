@@ -74,10 +74,11 @@ whenToUse: When working on connector lifecycle, native_windows_amd64 syscalls, s
 
 **Client:**
 
-- [ ] Stream readiness: сервер сначала отправляет Header, клиент не должен потерять начальный snapshot. Текущий `NewTCClientWithConn` запускает ожидание Header, но `Connect` вызывает сразу; при правке этого места добавь тест на порядок и приведи код к документации.
+- [ ] Stream readiness: сервер сначала отправляет Header, клиент не должен потерять начальный snapshot. `NewTCClientWithConn` ждёт Header (с `clientHandshakeTimeout`) и только потом отправляет `Connect`; при правке сохраняй тесты на порядок и таймауты.
 - [ ] `responseQueue` сохраняет FIFO и не блокирует `Recv`; при изменении помни, что очередь неограничена и не должна стать утечкой памяти.
 - [ ] Типизированные каналы буферизованы; отмена освобождает dispatch и не оставляет горутин.
 - [ ] Переподключением управляет один `RunWithReconnect`; не появляется второй конкурирующий цикл.
+- [ ] Фабрика клиента не блокируется на недоступном сервере: `RunWithReconnect` владеет retry, а Header/`Connect` ограничены `clientHandshakeTimeout`; есть тест на закрытие stream и пересоздание клиента.
 - [ ] XML-разбор проверяет ошибки; неизвестное сообщение не роняет stream.
 
 **Proto:**

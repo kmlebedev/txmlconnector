@@ -50,6 +50,9 @@ proto <- server -> connector interface <- Win32 adapter -> DLL
 
 - DLL load, missing symbol and initialization failures are returned from
   `Start`; package initialization never terminates the process.
+- Client creation fails fast when the server is unavailable and bounds the
+  response-header and `connect` handshake; `RunWithReconnect` owns retries, so a
+  transient outage cannot block the client factory forever.
 - A panic in an application callback is contained at the Win32 boundary and is
   reported to the DLL as a failed callback instead of crossing foreign code.
 - A nil or failed native command response becomes a gRPC `Internal` error.
