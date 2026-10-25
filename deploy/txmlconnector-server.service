@@ -1,0 +1,17 @@
+[Unit]
+Description=Txmlconnector Server Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=__TXML_WINE__ __TXML_BIN_DIR__/txmlconnector-server.exe
+WorkingDirectory=__TXML_BIN_DIR__
+Restart=always
+RestartSec=5
+User=root
+Environment="TC_DLL_PATH=__TXML_DLL_PATH__"
+Environment="TC_LISTEN_ADDR=__TXML_LISTEN_ADDR__"
+Environment="TC_DLL_LOG_DIR=__TXML_LOG_DIR__"
+
+[Install]
+WantedBy=multi-user.target
