@@ -63,6 +63,14 @@ proto <- server -> connector interface <- Win32 adapter -> DLL
 - Unsupported platforms return an explicit error that points to the Wine/gRPC
   deployment instead of failing through build constraints.
 
+## Deployment
+
+`palmshell` runs `server.exe` under Wine as `txmlconnector-server.service`.
+`make deploy-staging` builds the Windows binary, copies it and the pinned DLL
+atomically, installs the unit and restarts the service. The server listens on
+`:50051` by default; use a VPN or an SSH tunnel for a non-local bind. See
+[`deploy/README.md`](../deploy/README.md).
+
 ## Migration path
 
 The protobuf contract remains unchanged. Older Windows code using

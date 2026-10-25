@@ -72,6 +72,30 @@ make build
 docker run --rm -p 50051:50051 kmlebedev/txmlconnector:local server
 ```
 
+## Deploy to palmshell
+
+The server runs on `palmshell` as a systemd unit under Wine. The deploy targets
+build the Windows binary, copy it and the tracked DLL atomically, install the
+unit and restart the service:
+
+```bash
+make deploy-staging
+make deploy-staging-smoke
+make deploy-staging-status
+make deploy-staging-logs
+make rollback-staging
+```
+
+Defaults: `/root/bin/txmlconnector-server.exe`,
+`/root/txmlconnector64-6.47.2.26.4.dll`, `txmlconnector-server.service`, listen
+`:50051`; override with `STAGING_*` variables. See
+[deploy/README.md](deploy/README.md).
+
+The server stores no TRANSAQ credentials — the client sends `connect`. The gRPC
+endpoint is unauthenticated; for a non-local bind use a VPN or an SSH tunnel
+(`ssh -N -L 50051:127.0.0.1:50051 palmshell` with
+`STAGING_LISTEN_ADDR=127.0.0.1:50051`).
+
 ## Native Go client
 
 The client connects over gRPC and is platform-independent:
