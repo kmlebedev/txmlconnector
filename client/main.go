@@ -25,9 +25,33 @@ var (
 	clientHandshakeTimeout = 10 * time.Second
 )
 
+// Options configures the native client. The zero value keeps the historical
+// environment-based behaviour and does not enable portfolio updates.
+type Options struct {
+	Target          string
+	PortfolioBuffer int
+	Connect         *ConnectConfig
+}
+
+// ConnectConfig overrides the TC_* environment variables for the connect
+// command. Zero timeouts fall back to the historical defaults.
+type ConnectConfig struct {
+	Login          string
+	Password       string
+	Host           string
+	Port           string
+	SessionTimeout int
+	RequestTimeout int
+	PushUlimits    int
+	PushPosEquity  int
+}
+
 type TCClient struct {
 	Client pb.ConnectServiceClient
-	Data   struct {
+	// Data is kept for backward compatibility. The stream dispatcher writes it
+	// without synchronization; concurrent readers must use the typed channels
+	// (PortfolioUpdates, SecInfoChan, ...) instead.
+	Data struct {
 		Client          Client
 		ServerStatus    ServerStatus
 		Markets         Markets
@@ -44,17 +68,22 @@ type TCClient struct {
 		Messages        Messages
 		Unions          []Union
 	}
-	SecInfoChan      chan SecInfo
-	SecInfoUpdChan   chan SecInfoUpd
-	ServerStatusChan chan ServerStatus
-	ResponseChannel  chan string
-	ShutdownChannel  chan bool
-	AllTradesChan    chan AllTrades
-	QuotesChan       chan Quotes
-	grpcConn         *grpc.ClientConn
-	ctx              context.Context
-	cancel           context.CancelFunc
-	closeOnce        sync.Once
+	SecInfoChan       chan SecInfo
+	SecInfoUpdChan    chan SecInfoUpd
+	ServerStatusChan  chan ServerStatus
+	ResponseChannel   chan string
+	ShutdownChannel   chan bool
+	AllTradesChan     chan AllTrades
+	QuotesChan        chan Quotes
+	portfolioUpdates  chan PortfolioUpdate
+	closeUpdatesOnce  sync.Once
+	shutdown          chan struct{}
+	closeShutdownOnce sync.Once
+	options           Options
+	grpcConn          *grpc.ClientConn
+	ctx               context.Context
+	cancel            context.CancelFunc
+	closeOnce         sync.Once
 }
 
 var timeNowLocation = moscowLocation()
@@ -70,6 +99,12 @@ func init() {
 }
 
 func NewTCClientWithConn(client pb.ConnectServiceClient, conn *grpc.ClientConn) (*TCClient, error) {
+	return NewTCClientWithConnAndOptions(client, conn, Options{})
+}
+
+// NewTCClientWithConnAndOptions is NewTCClientWithConn with an explicit
+// configuration. PortfolioBuffer > 0 enables the PortfolioUpdates stream.
+func NewTCClientWithConnAndOptions(client pb.ConnectServiceClient, conn *grpc.ClientConn, opts Options) (*TCClient, error) {
 	if client == nil {
 		return nil, errors.New("gRPC client is required")
 	}
@@ -83,9 +118,14 @@ func NewTCClientWithConn(client pb.ConnectServiceClient, conn *grpc.ClientConn) 
 		ResponseChannel:  make(chan string, 16),
 		AllTradesChan:    make(chan AllTrades, 16),
 		QuotesChan:       make(chan Quotes, 16),
+		shutdown:         make(chan struct{}),
+		options:          opts,
 		ctx:              ctx,
 		cancel:           cancel,
 		grpcConn:         conn,
+	}
+	if opts.PortfolioBuffer > 0 {
+		tc.portfolioUpdates = make(chan PortfolioUpdate, opts.PortfolioBuffer)
 	}
 
 	stream, err := tc.Client.FetchResponseData(tc.ctx, &pb.DataRequest{})
@@ -132,8 +172,17 @@ func (tc *TCClient) waitForStreamHeader(stream grpc.ServerStreamingClient[pb.Dat
 }
 
 func NewTCClient() (*TCClient, error) {
+	return NewTCClientWithOptions(Options{})
+}
+
+// NewTCClientWithOptions creates a client from Options. Target overrides
+// TC_TARGET; Connect overrides TC_LOGIN/TC_PASSWORD/TC_HOST/TC_PORT.
+func NewTCClientWithOptions(opts Options) (*TCClient, error) {
 	log.Infoln("gRPC client running ...")
-	target := os.Getenv("TC_TARGET")
+	target := opts.Target
+	if target == "" {
+		target = os.Getenv("TC_TARGET")
+	}
 	if target == "" {
 		target = defaultTarget
 	}
@@ -148,7 +197,7 @@ func NewTCClient() (*TCClient, error) {
 		return nil, fmt.Errorf("create gRPC client for %s: %w", target, err)
 	}
 	client := pb.NewConnectServiceClient(conn)
-	tc, err := NewTCClientWithConn(client, conn)
+	tc, err := NewTCClientWithConnAndOptions(client, conn, opts)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -161,35 +210,62 @@ func (tc *TCClient) Connect() error {
 }
 
 func (tc *TCClient) connect(ctx context.Context) error {
-	login := os.Getenv("TC_LOGIN")
-	password := os.Getenv("TC_PASSWORD")
-	host := os.Getenv("TC_HOST")
-	port := os.Getenv("TC_PORT")
+	cfg := tc.connectConfig()
 	switch {
-	case login == "":
+	case cfg.Login == "":
 		return errors.New("TC_LOGIN is required")
-	case password == "":
+	case cfg.Password == "":
 		return errors.New("TC_PASSWORD is required")
-	case host == "":
+	case cfg.Host == "":
 		return errors.New("TC_HOST is required")
-	case port == "":
+	case cfg.Port == "":
 		return errors.New("TC_PORT is required")
 	}
 
 	connectReq := Connect{
 		Id:             "connect",
-		Login:          login,
-		Password:       password,
-		Host:           host,
-		Port:           port,
-		SessionTimeout: 60,
-		RequestTimeout: 10,
+		Login:          cfg.Login,
+		Password:       cfg.Password,
+		Host:           cfg.Host,
+		Port:           cfg.Port,
+		SessionTimeout: cfg.SessionTimeout,
+		RequestTimeout: cfg.RequestTimeout,
 		Rqdelay:        1000,
-		PushUlimits:    30,
-		PushPosEquity:  30,
+		PushUlimits:    cfg.PushUlimits,
+		PushPosEquity:  cfg.PushPosEquity,
 		MicexRegisters: true,
 	}
 	return tc.send(ctx, connectReq)
+}
+
+func (tc *TCClient) connectConfig() ConnectConfig {
+	defaults := ConnectConfig{
+		SessionTimeout: 60,
+		RequestTimeout: 10,
+		PushUlimits:    30,
+		PushPosEquity:  30,
+	}
+	if tc.options.Connect == nil {
+		defaults.Login = os.Getenv("TC_LOGIN")
+		defaults.Password = os.Getenv("TC_PASSWORD")
+		defaults.Host = os.Getenv("TC_HOST")
+		defaults.Port = os.Getenv("TC_PORT")
+		return defaults
+	}
+	cfg := *tc.options.Connect
+	if cfg.SessionTimeout <= 0 {
+		cfg.SessionTimeout = defaults.SessionTimeout
+	}
+	if cfg.RequestTimeout <= 0 {
+		cfg.RequestTimeout = defaults.RequestTimeout
+	}
+	if cfg.PushUlimits <= 0 {
+		cfg.PushUlimits = defaults.PushUlimits
+	}
+	if cfg.PushPosEquity <= 0 {
+		cfg.PushPosEquity = defaults.PushPosEquity
+	}
+	return cfg
 }
 
 func (tc *TCClient) Disconnect() error {
@@ -198,9 +274,7 @@ func (tc *TCClient) Disconnect() error {
 
 func (tc *TCClient) Close() {
 	tc.closeOnce.Do(func() {
-		if tc.cancel != nil {
-			tc.cancel()
-		}
+		tc.cancelContext()
 		if tc.grpcConn != nil {
 			_ = tc.grpcConn.Close()
 		}
@@ -235,6 +309,8 @@ func (tc *TCClient) send(ctx context.Context, command interface{}) error {
 func (tc *TCClient) LoopReadingFromStream(stream *pb.ConnectService_FetchResponseDataClient) {
 	if stream == nil || *stream == nil {
 		tc.signalShutdown()
+		tc.closeShutdown()
+		tc.closePortfolioUpdates()
 		return
 	}
 	tc.loopReadingFromStream(*stream)
@@ -254,7 +330,7 @@ func (tc *TCClient) loopReadingFromStream(stream pb.ConnectService_FetchResponse
 			if err := tc.handleMessage(message); err != nil {
 				if errors.Is(err, errUnknownMessage) {
 					log.Warnf("%v: %s", err, message)
-				} else if !errors.Is(err, context.Canceled) {
+				} else if !errors.Is(err, context.Canceled) && !errors.Is(err, errStreamClosed) {
 					log.Errorf("handle response: %v", err)
 				}
 			}
@@ -262,7 +338,14 @@ func (tc *TCClient) loopReadingFromStream(stream pb.ConnectService_FetchResponse
 	}()
 	defer func() {
 		queue.close()
+		// Unblock typed sends without cancelling the client context: queued
+		// messages must still be drained before the stream is declared closed.
+		tc.closeShutdown()
 		<-processed
+		tc.closePortfolioUpdates()
+		// The session is over; fail future commands fast. Cancellation happens
+		// only after the queue is drained so no received snapshot is dropped.
+		tc.cancelContext()
 	}()
 
 	for {
@@ -285,6 +368,12 @@ func (tc *TCClient) done() <-chan struct{} {
 		return nil
 	}
 	return tc.ctx.Done()
+}
+
+func (tc *TCClient) cancelContext() {
+	if tc.cancel != nil {
+		tc.cancel()
+	}
 }
 
 func (tc *TCClient) signalShutdown() {
@@ -320,53 +409,42 @@ func (tc *TCClient) handleMessage(message string) error {
 		if err := unmarshal(&allTrades); err != nil {
 			return err
 		}
-		select {
-		case tc.AllTradesChan <- allTrades:
-		case <-tc.done():
-			return tc.ctx.Err()
-		}
+		return sendTyped(tc, tc.AllTradesChan, allTrades)
 	case "quotes":
 		quotes := Quotes{}
 		if err := unmarshal(&quotes); err != nil {
 			return err
 		}
 		quotes.Time = time.Now().In(timeNowLocation)
-		select {
-		case tc.QuotesChan <- quotes:
-		case <-tc.done():
-			return tc.ctx.Err()
-		}
+		return sendTyped(tc, tc.QuotesChan, quotes)
 	case "sec_info_upd":
 		secInfoUpd := SecInfoUpd{}
 		if err := unmarshal(&secInfoUpd); err != nil {
 			return err
 		}
-		select {
-		case tc.SecInfoUpdChan <- secInfoUpd:
-		case <-tc.done():
-			return tc.ctx.Err()
-		}
+		return sendTyped(tc, tc.SecInfoUpdChan, secInfoUpd)
 	case "sec_info":
 		secInfo := SecInfo{}
 		if err := unmarshal(&secInfo); err != nil {
 			return err
 		}
-		select {
-		case tc.SecInfoChan <- secInfo:
-		case <-tc.done():
-			return tc.ctx.Err()
-		}
+		return sendTyped(tc, tc.SecInfoChan, secInfo)
 	case "server_status":
 		if err := unmarshal(&tc.Data.ServerStatus); err != nil {
 			return err
 		}
-		select {
-		case tc.ServerStatusChan <- tc.Data.ServerStatus:
-		case <-tc.done():
-			return tc.ctx.Err()
-		}
+		return sendTyped(tc, tc.ServerStatusChan, tc.Data.ServerStatus)
 	case "client":
-		return unmarshal(&tc.Data.Client)
+		if err := unmarshal(&tc.Data.Client); err != nil {
+			return err
+		}
+		client := tc.Data.Client
+		return tc.sendPortfolioUpdate(PortfolioUpdate{
+			Kind:       UpdateClient,
+			ReceivedAt: time.Now().UTC(),
+			Raw:        message,
+			Client:     &client,
+		})
 	case "markets":
 		return unmarshal(&tc.Data.Markets)
 	case "boards":
@@ -374,7 +452,17 @@ func (tc *TCClient) handleMessage(message string) error {
 	case "candlekinds":
 		return unmarshal(&tc.Data.CandleKinds)
 	case "securities":
-		return unmarshal(&tc.Data.Securities)
+		securities := Securities{}
+		if err := unmarshal(&securities); err != nil {
+			return err
+		}
+		tc.Data.Securities = securities
+		return tc.sendPortfolioUpdate(PortfolioUpdate{
+			Kind:       UpdateSecurities,
+			ReceivedAt: time.Now().UTC(),
+			Raw:        message,
+			Securities: &securities,
+		})
 	case "candles":
 		if err := unmarshal(&tc.Data.Candles); err != nil {
 			return err
@@ -394,6 +482,27 @@ func (tc *TCClient) handleMessage(message string) error {
 		}
 		tc.Data.Positions = &data
 		notify()
+		now := time.Now().UTC()
+		if err := tc.sendPortfolioUpdate(PortfolioUpdate{
+			Kind:       UpdatePositions,
+			ReceivedAt: now,
+			Raw:        message,
+			Positions:  &data,
+		}); err != nil {
+			return err
+		}
+		for i := range data.UnitedLimits {
+			limits := data.UnitedLimits[i]
+			if err := tc.sendPortfolioUpdate(PortfolioUpdate{
+				Kind:         UpdateUnitedLimits,
+				ReceivedAt:   now,
+				Raw:          message,
+				UnitedLimits: &limits,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "united_portfolio":
 		data := UnitedPortfolio{}
 		if err := unmarshal(&data); err != nil {
@@ -401,6 +510,23 @@ func (tc *TCClient) handleMessage(message string) error {
 		}
 		tc.Data.UnitedPortfolio = &data
 		notify()
+		return tc.sendPortfolioUpdate(PortfolioUpdate{
+			Kind:            UpdateUnitedPortfolio,
+			ReceivedAt:      time.Now().UTC(),
+			Raw:             message,
+			UnitedPortfolio: &data,
+		})
+	case "united_limits":
+		limits := UnitedLimits{}
+		if err := unmarshal(&limits); err != nil {
+			return err
+		}
+		return tc.sendPortfolioUpdate(PortfolioUpdate{
+			Kind:         UpdateUnitedLimits,
+			ReceivedAt:   time.Now().UTC(),
+			Raw:          message,
+			UnitedLimits: &limits,
+		})
 	case "united_equity":
 		if err := unmarshal(&tc.Data.UnitedEquity); err != nil {
 			return err
