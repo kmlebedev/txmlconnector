@@ -286,14 +286,15 @@ type SpotLimit struct {
 
 }
 type UnitedLimits struct {
-	Union        string  `xml:"union,attr"`   // код юниона
-	OpenEquity   float64 `xml:"open_equity"`  // Входящая оценка стоимости единого портфеля
-	Equity       float64 `xml:"equity"`       // Текущая оценка стоимости единого портфеля
-	Requirements float64 `xml:"requirements"` // Начальные требования
-	Free         float64 `xml:"free"`         // Свободные средства
-	VM           float64 `xml:"vm"`           // Вариационная маржа FORTS
-	FinRes       float64 `xml:"finres"`       // Финансовый результат последнего клиринга FORTS
-	GO           float64 `xml:"go"`           // Размер требуемого ГО, посчитанный биржей FORTS
+	XMLName      xml.Name `xml:"united_limits"`
+	Union        string   `xml:"union,attr"`   // код юниона
+	OpenEquity   float64  `xml:"open_equity"`  // Входящая оценка стоимости единого портфеля
+	Equity       float64  `xml:"equity"`       // Текущая оценка стоимости единого портфеля
+	Requirements float64  `xml:"requirements"` // Начальные требования
+	Free         float64  `xml:"free"`         // Свободные средства
+	VM           float64  `xml:"vm"`           // Вариационная маржа FORTS
+	FinRes       float64  `xml:"finres"`       // Финансовый результат последнего клиринга FORTS
+	GO           float64  `xml:"go"`           // Размер требуемого ГО, посчитанный биржей FORTS
 }
 
 type Positions struct {

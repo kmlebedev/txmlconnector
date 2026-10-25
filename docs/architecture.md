@@ -22,7 +22,9 @@ The DLL has two constraints that shape this design:
 - `server.broker`: non-blocking fan-out. Every gRPC subscriber sees every XML
   message. A slow subscriber is detached before it can block the DLL callback.
 - `client`: native cross-platform gRPC client. A receive FIFO isolates gRPC
-  flow control from ordered XML decoding and typed message delivery.
+  flow control from ordered XML decoding and typed message delivery. Portfolio
+  snapshots are delivered through a race-safe `PortfolioUpdates` stream; the
+  legacy `Data` struct is compatibility-only.
 - `client/commands`: protocol data structures and XML command encoding.
 
 Dependencies point inward:

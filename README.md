@@ -98,6 +98,39 @@ Configuration:
 | `TC_TARGET` | Client gRPC target | `localhost:50051` |
 | `TC_LOG_LEVEL` | Go application log level | `info` |
 
+## Portfolio updates
+
+`NewTCClientWithOptions` can expose a race-safe stream of portfolio messages.
+The zero `Options` keeps the environment-based behaviour; `PortfolioBuffer > 0`
+enables the stream. `PortfolioUpdates` is closed when the response stream ends.
+
+```go
+client, err := tcClient.NewTCClientWithOptions(tcClient.Options{
+    Target:          os.Getenv("TC_TARGET"),
+    PortfolioBuffer: 64,
+    Connect: &tcClient.ConnectConfig{
+        Login:    os.Getenv("TC_LOGIN"),
+        Password: os.Getenv("TC_PASSWORD"),
+        Host:     os.Getenv("TC_HOST"),
+        Port:     os.Getenv("TC_PORT"),
+    },
+})
+if err != nil {
+    return err
+}
+defer client.Close()
+
+for update := range client.PortfolioUpdates() {
+    // update.Kind is client, securities, positions, united_portfolio or
+    // united_limits; Raw keeps the original XML.
+    _ = update
+}
+```
+
+`TCClient.Data` remains for source compatibility but is written by the stream
+dispatcher without synchronization. New code must consume the typed channels.
+Use `RunWithReconnect` to recreate the client after a stream failure.
+
 ## Compatibility notes
 
 - The protobuf service and existing Go client fields remain compatible.
