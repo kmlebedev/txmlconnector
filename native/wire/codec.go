@@ -5,7 +5,6 @@ package wire
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"math"
 )
 
@@ -42,43 +41,44 @@ func (w *Writer) Raw(b []byte) { w.buf = append(w.buf, b...) }
 // Int32 writes a packed signed integer (FUN_1801be7d0 "L").
 func (w *Writer) Int32(v int32) { w.buf = appendPacked(w.buf, int64(v)) }
 
-// Int64 writes a packed signed integer (FUN_1801be970 "G"). Magnitudes above
-// 60 bits are not representable.
-func (w *Writer) Int64(v int64) error {
-	m := v
-	if m < 0 {
-		m = -m
-	}
-	if m < 0 || uint64(m)>>60 != 0 {
-		return fmt.Errorf("wire: %d does not fit a packed integer", v)
-	}
+// Int64 writes a packed signed integer. Up to six extra bytes it matches
+// FUN_1801be970; longer values use the count 7 = eight extra bytes form that
+// FUN_1801bd9b0 reads, which covers the full int64 range.
+func (w *Writer) Int64(v int64) {
 	w.buf = appendPacked(w.buf, v)
-	return nil
 }
 
 // appendPacked encodes v as: first byte = low nibble of |v| << 4 | sign << 3 |
-// count of extra bytes; extra bytes hold |v| >> 4 little-endian. The minimum
-// 32-bit value is written as negative zero.
+// count of extra bytes; extra bytes hold |v| >> 4 little-endian. Count 7
+// stands for eight extra bytes. The minimum 32-bit value is written as
+// negative zero.
 func appendPacked(buf []byte, v int64) []byte {
 	var head byte
 	m := uint64(v)
 	if v < 0 {
 		head = 8
 		m = uint64(-v)
-		if v == math.MinInt32 {
+		if v == math.MinInt32 || v == math.MinInt64 {
 			m = 0
 		}
 	}
 	head |= byte(m&0xf) << 4
 	m >>= 4
-	start := len(buf)
-	buf = append(buf, head)
-	for m != 0 {
-		buf = append(buf, byte(m))
-		m >>= 8
+	var ext [8]byte
+	n := 0
+	for ; m != 0; m >>= 8 {
+		ext[n] = byte(m)
+		n++
 	}
-	buf[start] |= byte(len(buf) - start - 1)
-	return buf
+	count := n
+	if n == 7 {
+		n, count = 8, 7
+	}
+	if n == 8 {
+		count = 7
+	}
+	buf = append(buf, head|byte(count))
+	return append(buf, ext[:n]...)
 }
 
 func indexNUL(s string) int {
@@ -143,21 +143,28 @@ func (r *Reader) String(max int) (string, error) {
 // Int32 reads a packed signed integer (FUN_1801bd7b0). Arithmetic wraps at
 // 32 bits like the DLL.
 func (r *Reader) Int32() (int32, error) {
-	v, err := r.packed()
+	v, err := r.packed(false)
+	if err == nil && v == math.MinInt64 {
+		v = math.MinInt32
+	}
 	return int32(v), err
 }
 
-// Int64 reads a packed integer written by Writer.Int64.
+// Int64 reads a packed 64-bit integer (FUN_1801bd9b0): count 7 means eight
+// extra bytes.
 func (r *Reader) Int64() (int64, error) {
-	return r.packed()
+	return r.packed(true)
 }
 
-func (r *Reader) packed() (int64, error) {
+func (r *Reader) packed(wide bool) (int64, error) {
 	if r.Len() < 1 {
 		return 0, ErrShortBuffer
 	}
 	head := r.buf[r.off]
 	n := int(head & 7)
+	if wide && n == 7 {
+		n = 8
+	}
 	if r.Len() < n+1 {
 		return 0, ErrShortBuffer
 	}
@@ -169,7 +176,7 @@ func (r *Reader) packed() (int64, error) {
 	r.off += n + 1
 	if head&8 != 0 {
 		if m == 0 {
-			return math.MinInt32, nil
+			return math.MinInt64, nil
 		}
 		return -int64(m), nil
 	}

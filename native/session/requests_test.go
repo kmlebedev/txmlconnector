@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/hex"
 	"net"
 	"testing"
 	"time"
@@ -62,5 +63,31 @@ func TestLogoutSendsWithoutWaiting(t *testing.T) {
 	}
 	if f := <-got; f.Type != RqLogout || f.Kind() != wire.KindRequest || len(f.Payload) != 0 {
 		t.Fatalf("frame = %+v", f)
+	}
+}
+
+// RQ_SUBSCRIBE payloads the DLL sent on the demo server: alltrades for
+// LKOH, VTBR, GAZP, SBER on TQBR (board 37); the matching unsubscribe; and
+// alltrades+quotations (mask 5) for SBER on TQBR.
+func TestSubscribePayloadMatchesDLL(t *testing.T) {
+	tq := func(mask byte, ids ...uint16) []SubscribeItem {
+		var items []SubscribeItem
+		for _, id := range ids {
+			items = append(items, SubscribeItem{SecID: id, Board: 37, Mask: mask})
+		}
+		return items
+	}
+	cases := []struct {
+		items []SubscribeItem
+		want  string
+	}{
+		{tq(SubAllTrades, 4, 889, 379, 26), "00040025040379002504017b002504001a002504"},
+		{tq(0, 4, 889, 379, 26), "00040025000379002500017b002500001a002500"},
+		{tq(SubAllTrades|SubQuotations, 26), "001a002505"},
+	}
+	for _, c := range cases {
+		if got := hex.EncodeToString(SubscribePayload(c.items)); got != c.want {
+			t.Errorf("got %s, want %s", got, c.want)
+		}
 	}
 }

@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+// Market data decoded by the native TRANSAQ client (package native) and
+// published to NATS by native/natsout. No XML is involved.
+package transaq.marketdata.v1;
+
+option go_package = "github.com/kmlebedev/txmlconnector/proto/marketdata";
+
+enum Side {
+  SIDE_UNSPECIFIED = 0;
+  SIDE_BUY = 1;
+  SIDE_SELL = 2;
+}
+
+// Trade is one market trade of the <alltrades> feed (record R_ALLTRADE).
+// Subject: <prefix>.<board>.<seccode>, with '.', '*', '>' and spaces in
+// tokens replaced by '_'.
+message Trade {
+  string board = 1;
+  string seccode = 2;
+  // Exchange trade number; unique and increasing per security and board.
+  int64 tradeno = 3;
+  // Trade time, Unix milliseconds UTC.
+  int64 time_ms = 4;
+  // Exact price: price × 10^-decimals (no floating point).
+  sint64 price = 5;
+  uint32 decimals = 6;
+  int64 quantity = 7;
+  Side side = 8;
+  // Trading period character: 'O' opening, 'N' normal, 'C' closing; 0 if absent.
+  uint32 period = 9;
+  // Futures and options only.
+  optional int64 open_interest = 10;
+  // TRANSAQ secid; valid only within one server session.
+  uint32 secid = 11;
+}
