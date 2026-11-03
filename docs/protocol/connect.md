@@ -1,27 +1,32 @@
-# TRANSAQ: подключение и логин (встроенный криптопрофиль)
+# TRANSAQ: подключение, логин и начальная загрузка (встроенный криптопрофиль)
 
 Дата: 3 ноября 2026. Источник: `txmlconnector64-6.47.2.26.4.dll`, SHA-256 `a197e2625e53c0df453687ae1b20ef2ae1a05e034cd20c424a7014b0c9726342`. Адреса ниже — VA при базе `0x180000000`.
 
-Реализация на Go: [`internal/cryptoprofile`](../../internal/cryptoprofile), [`internal/wire`](../../internal/wire), [`internal/session`](../../internal/session); CLI [`tools/native-login`](../../tools/native-login).
+Реализация на Go: [`internal/cryptoprofile`](../../internal/cryptoprofile), [`internal/wire`](../../internal/wire), [`internal/session`](../../internal/session); CLI [`tools/native-login`](../../tools/native-login), расшифровщик захватов [`tools/wire-decode`](../../tools/wire-decode).
 
-Статусы: **R** — подтверждено runtime (DLL под Wine 11.21 + Rosetta против локального стаба), **D** — прочитано в декомпиляторе Ghidra 12.2, **I** — вывод/гипотеза.
+Статусы: **S** — подтверждено на демо-сервере Finam (`tr1-demo5.finam.ru:3939`, 3 ноября 2026), **R** — подтверждено runtime (DLL под Wine 11.21 + Rosetta против локального стаба), **D** — прочитано в декомпиляторе Ghidra 12.2, **I** — вывод/гипотеза.
 
 ## Методика
 
-1. DLL запускалась через [`tools/reference-harness`](../../tools/reference-harness) с `<command id="connect">` на `127.0.0.1` и тестовыми логином/паролем. Реальный сервер брокера не использовался.
+1. DLL запускалась через [`tools/reference-harness`](../../tools/reference-harness) с `<command id="connect">` на `127.0.0.1` и тестовыми логином/паролем.
 2. При `TC_DLL_LOG_LEVEL=3` журнал `*_ts.log` печатает логическое содержимое запросов (`RQ: 1`, `WR: C:x;W:78;...`). Это дало открытый текст для сопоставления с шифртекстом.
 3. Ghidra headless: функции найдены по ссылкам на строки журнала (`RQ_LOGIN return incorrect buffer`, `incorrect server response`).
 4. Python-стаб отвечал по восстановленному формату; DLL принимала ответы и продвигалась по сценарию. Это проверка обеих сторон обмена.
+5. Демо-доступ Finam: DLL и Go-клиент подключались через логирующий TCP-прокси; захваты расшифрованы `tools/wire-decode` с проверкой CRC каждого кадра. Сырые захваты содержат данные счёта и в репозиторий не входят.
 
 ## Последовательность
 
 | Шаг | Тип | Направление | Ключ | Статус |
 |---|---|---|---|---|
-| TCP connect | — | — | — | R |
-| RQ_LOGIN | `0x01` | C→S, S→C | ключ по умолчанию | R |
-| RQ_PWD | `0x2e` | C→S, S→C | ключ по умолчанию | R |
-| смена ключа | — | оба направления | сессионный из ответа RQ_PWD | R для C→S, I для S→C |
-| RQ_TIME, RQ_STARTUP | `0x32`, `0x09` | C→S | сессионный | R (только отправка) |
+| TCP connect | — | — | — | S |
+| RQ_LOGIN | 1 | C→S, S→C | ключ по умолчанию | S |
+| RQ_PWD | 46 | C→S, S→C | ключ по умолчанию | S |
+| смена ключа | — | оба направления | сессионный из ответа RQ_PWD | S |
+| RQ_TIME | 50 | C→S, S→C | сессионный | S |
+| RQ_STARTUP | 9 | C→S, S→C | сессионный | S |
+| RQ_MAIN, пока ответ заполняет буфер | 5 | C→S, S→C | сессионный | S |
+| RQ_CLIENT_HOLDINGS (DLL, один раз) | 42 | C→S, S→C | сессионный | S, не реализован |
+| RQ_LOGOUT, без ответа | 2 | C→S | сессионный | S |
 
 После успешного RQ_PWD DLL пишет `SYS# … SID# … UID# …` и переходит в состояние LOADING. RQ_HANDSHAKE (`0x6a`) используется только с внешними криптопровайдерами (режимы 4/5, `FUN_1803895c0`) — **D**.
 
@@ -81,14 +86,28 @@ B: DAT_1809d4064 (наблюдалось 0)
 
 Пример: challenge `0102030405060708` + пароль `TESTPASS` → `211cf3ef536a73bf`.
 
-Ответ, **D** + **R**: `B:status`. При `0x0e` далее идёт `Z0x103` — текст ошибки, при прочих ненулевых — только код. При 0 идут 32 байта ключа и 8 байт синхропосылки, каждые расшифровываются CFB (ключ пароля, синхропосылка по умолчанию) отдельно. Дальше обязательные `B B B L B B B B L` (4-е — таймаут сессии от сервера) и необязательные поля; полный порядок — в `parsePwdReply`. Подтверждены runtime: `UID` (L) и `SID` (B) — журнал показал `SID# 7 UID# 4242` для значений стаба.
+Ответ, **D** + **R**: `B:status`. При `0x0e` далее идёт `Z0x103` — текст ошибки, при прочих ненулевых — только код. При 0 идут 32 байта ключа и 8 байт синхропосылки, каждые расшифровываются CFB (ключ пароля, синхропосылка по умолчанию) отдельно. Дальше обязательные `B B B L B B B B L` (4-е — таймаут сессии от сервера) и необязательные поля; полный порядок — в `parsePwdReply`. Подтверждены runtime: `UID` (L) и `SID` (B) — журнал показал `SID# 7 UID# 4242` для значений стаба. На демо-сервере разбор Go совпал с журналом DLL: `SYS# 626`, `BLD# 4`, `PRO# 68`, `UID# 8202`, `SID# 0` — **S**.
+
+Демо-сервер принял RQ_PWD Go-клиента со строками хоста macOS (`darwin/arm64`) и без адресов — **S**.
+
+## Номера запросов
+
+Константа, передаваемая вместе с именем в `FUN_180355d50` (скрипт по всем вызовам) — **D**: 1 RQ_LOGIN, 2 RQ_LOGOUT, 3 RQ_CHANGE_PWD, 4 RQ_SEND_MESSAGE, 5 RQ_MAIN, 9 RQ_STARTUP, 10 RQ_SUBSCRIBE, 11 RQ_HISTORY, 13 RQ_TICKS, 14 RQ_TRANSACT, 15 RQ_SEC_SPEC, 16 RQ_DEPO_POS, 17 RQ_MONEY_POS, 21 RQ_REPORT_INFO, 22 RQ_GET_REPORT, 42 RQ_CLIENT_HOLDINGS, 43 RQ_CLIENT_LIMITS, 46 RQ_PWD, 47 RQ_FORTS_FIRM_MONEY, 48 RQ_INDEX_RTS, 49 RQ_UPLOAD, 50 RQ_TIME, 51 RQ_GET_SETTLECODE, 52 RQ_GET_SEC_SETTLECODE, 54 RQ_PACKET, 63 RQ_RELOGIN, 64 RQ_RECOVER, 69 RQ_CANCEL_UPLOAD, 72 RQ_RPSREPO_SUBSCR, 73 RQ_GETNEWS, 78 RQ_SEND_FILE, 81 RQ_POSITIONS, 82 RQ_GET_RPSREPO, 84 RQ_MARGIN_POS, 85 RQ_MARGIN_POS_LIST, 86 RQ_FOND_PORTFOLIO, 106 RQ_HANDSHAKE, 111 RQ_INQUIRE_SECURITY, 112 RQ_MAKE_COND_OWN, 120 RQ_SUBSCRIBE_TICKS, 127 RQ_LOGIN_EXT, 129 RQ_ATTACH_CLIENT, 131 RQ_VALIDATE_TRADER, 132 RQ_CLIENT_LIST, 133 RQ_CHANGE_TRADER_PWD, 134 RQ_GET_CONFIG, 135 RQ_GET_FILE, 148 RQ_HISTORY_EXT, 149 RQ_OPTION_FAMILIES, 150 RQ_FAMILIY_OPTIONS, 151 RQ_CERTAIN_OPTIONS, 152 RQ_INQUIRE_UT, 153 RQ_FAMILY_STRIKES, 156 RQ_TRNS_IN_PROGRESS, 157 RQ_ENFORCE_TRN_RELEASE.
+
+## После логина
+
+- **RQ_TIME** (`FUN_1803b7ca0`): пустой запрос; ответ `L:время` + 16 байт часового пояса. Время — секунды «настенного» времени сервера (МСК на демо), DLL печатает его как `Server time`. Первые 2 байта пояса на демо: `-180` (int16 LE, минуты) — **I**. Демо-сервер присылает этот ответ с флагом `0x82` (без шифрования) — **S**.
+- **RQ_STARTUP** (`FUN_180355ce0`): пустой запрос; ответ — справочники (рынки, режимы, CP1251), 4355 байт на демо. Формат пока не разобран.
+- **RQ_MAIN** (`FUN_18038d7d0`): пустой запрос; ответ — поток записей `B:tag …`, около сотни типов. Тег `0x5f` (`R_WRAPPER`) — запись с длиной, её можно пропустить. Если `65520 − len(ответ) < 500`, DLL сразу повторяет RQ_MAIN, иначе ждёт `rqdelay`. На демо и DLL, и Go получают первый неполный ответ на 35-м опросе (≈2.26 МБ) — это критерий выборки снапшота — **S**. Признак DLL «Snapshot done» зависит от разбора записей (M5).
+- **RQ_LOGOUT** (`FUN_18038d720`): пустой запрос, DLL не ждёт ответа (таймаут 4000 мс, приём не выполняется); сервер ответа не присылает — **S**.
+- Часть ответов RQ_MAIN приходит с флагом `0x82` (payload без шифрования); CRC проверяется всегда.
+- Сжатия на демо не наблюдалось: payload — открытые записи.
 
 ## Что не доказано
 
-- Работа против реального сервера: не проверялась, нет тестового доступа. Неизвестно, принимает ли сервер произвольные строки хоста в RQ_PWD.
-- Сессионный ключ для S→C: DLL переключает слот 0, который в режиме 0 используется для обоих направлений (**D**), но ответ сервера под сессионным ключом runtime не проверен.
 - Смысл большинства полей ответа RQ_PWD, флагов 4/8 RQ_LOGIN и слов `W:1`, `W:540`.
-- RQ_TIME, RQ_STARTUP, RQ_RELOGIN/RQ_RECOVER, logout, сжатие (`inflate 1.2.5`) — следующий этап (M5).
+- Форматы RQ_STARTUP и записей RQ_MAIN; признак «Snapshot done»; RQ_CLIENT_HOLDINGS; RQ_RELOGIN/RQ_RECOVER; сжатие (`inflate 1.2.5`, на демо не встречалось) — этап M5.
+- Поведение на боевом сервере и на HFT-адресах; демо-сервер может отличаться.
 - Режимы с внешней криптографией (MS CryptoAPI, MESPRO, SSL; `cfg+8 != 0`) не реализованы.
 
 ## Воспроизведение
@@ -96,6 +115,7 @@ B: DAT_1809d4064 (наблюдалось 0)
 ```sh
 go test ./internal/...
 TC_LOGIN=... TC_PASSWORD=... go run ./tools/native-login -addr host:port
+TC_PASSWORD=... go run ./tools/wire-decode capture.log
 ```
 
-Тесты используют байты, снятые с DLL и принятые ею: три пакета RQ_LOGIN, ответы стаба, доказательство пароля, заголовок RQ_TIME под сессионным ключом.
+Тесты используют байты, снятые с DLL и принятые ею: три пакета RQ_LOGIN, ответы стаба, доказательство пароля, заголовок RQ_TIME под сессионным ключом, ответ RQ_TIME демо-сервера.

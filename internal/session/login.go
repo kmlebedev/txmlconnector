@@ -15,14 +15,18 @@ import (
 	"github.com/kmlebedev/txmlconnector/internal/wire"
 )
 
-// Request types observed in the DLL trace ("RQ: n").
+// Request types: the constant passed with each name to FUN_180355d50.
 const (
-	RqLogin     byte = 0x01 // RQ_LOGIN
-	RqRelogin   byte = 0x02 // RQ_RELOGIN (sent after reconnect; not implemented)
-	RqStartup   byte = 0x09 // RQ_STARTUP
-	RqPwd       byte = 0x2e // RQ_PWD
-	RqTime      byte = 0x32 // RQ_TIME
-	RqHandshake byte = 0x6a // RQ_HANDSHAKE, external crypto providers only
+	RqLogin          byte = 1   // RQ_LOGIN
+	RqLogout         byte = 2   // RQ_LOGOUT, sent without waiting for a reply
+	RqMain           byte = 5   // RQ_MAIN, polls queued server events
+	RqStartup        byte = 9   // RQ_STARTUP
+	RqClientHoldings byte = 42  // RQ_CLIENT_HOLDINGS
+	RqPwd            byte = 46  // RQ_PWD
+	RqTime           byte = 50  // RQ_TIME
+	RqRelogin        byte = 63  // RQ_RELOGIN (not implemented)
+	RqRecover        byte = 64  // RQ_RECOVER (not implemented)
+	RqHandshake      byte = 106 // RQ_HANDSHAKE, external crypto providers only
 )
 
 // Constant RQ_LOGIN fields written by FUN_1803895c0.
@@ -203,6 +207,21 @@ func Login(ctx context.Context, nc net.Conn, cfg Config) (*Conn, *Info, error) {
 	return c, info, nil
 }
 
+// SessionKeys parses an RQ_PWD reply payload with the account password and
+// returns its fields and the session keys. It is used to decode captures.
+func SessionKeys(password string, reply []byte) (*Info, *wire.Keys, error) {
+	pwKey, err := cryptoprofile.NewCipher(cryptoprofile.PasswordKey(password))
+	if err != nil {
+		return nil, nil, err
+	}
+	info, key, sync, err := parsePwdReply(pwKey, reply)
+	if err != nil {
+		return nil, nil, err
+	}
+	keys, err := wire.NewKeys(key, sync)
+	return info, keys, err
+}
+
 // LoginPayload builds RQ_LOGIN: C:'x' W:78 W:1 W:540 Z12:login W:65512.
 func LoginPayload(login string) []byte {
 	var w wire.Writer
@@ -362,6 +381,15 @@ func readString(r *wire.Reader, max int, dst *string) func() error {
 // Request sends one request and waits for its reply. A reply must carry kind
 // 2 and the request type (FUN_180355d50); kind 3 is BYE.
 func (c *Conn) Request(ctx context.Context, typ byte, payload []byte) ([]byte, error) {
+	f, err := c.exchange(ctx, typ, payload, true)
+	if err != nil {
+		return nil, err
+	}
+	return f.Payload, nil
+}
+
+// exchange sends a request and, if wait is set, reads and validates the reply.
+func (c *Conn) exchange(ctx context.Context, typ byte, payload []byte, wait bool) (wire.Frame, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -370,29 +398,32 @@ func (c *Conn) Request(ctx context.Context, typ byte, payload []byte) ([]byte, e
 		deadline = d
 	}
 	if err := c.nc.SetDeadline(deadline); err != nil {
-		return nil, err
+		return wire.Frame{}, err
 	}
 	stop := context.AfterFunc(ctx, func() { c.nc.SetDeadline(time.Unix(1, 0)) })
 	defer stop()
 
 	out, err := c.keys.Encode(wire.ClientToServer, wire.Frame{Flags: wire.KindRequest, Type: typ, Payload: payload})
 	if err != nil {
-		return nil, err
+		return wire.Frame{}, err
 	}
 	if _, err := c.nc.Write(out); err != nil {
-		return nil, ctxErr(ctx, err)
+		return wire.Frame{}, ctxErr(ctx, err)
+	}
+	if !wait {
+		return wire.Frame{}, nil
 	}
 	f, err := c.keys.Decode(wire.ServerToClient, c.nc)
 	if err != nil {
-		return nil, ctxErr(ctx, err)
+		return wire.Frame{}, ctxErr(ctx, err)
 	}
 	switch {
 	case f.Kind() == wire.KindBye:
-		return nil, ErrBye
+		return wire.Frame{}, ErrBye
 	case f.Kind() != wire.KindReply || f.Type != typ:
-		return nil, fmt.Errorf("incorrect server response: flags %#x type %#x", f.Flags, f.Type)
+		return wire.Frame{}, fmt.Errorf("incorrect server response: flags %#x type %#x", f.Flags, f.Type)
 	}
-	return f.Payload, nil
+	return f, nil
 }
 
 func ctxErr(ctx context.Context, err error) error {
