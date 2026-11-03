@@ -143,6 +143,7 @@ func compareSecurities(t *testing.T, payloads, docs [][]byte) int {
 		check("currency", g.Currency, w.Currency)
 		check("currencyid", g.CurrencyID, w.CurrencyID)
 		check("lotdivider", g.LotDivider, w.LotDivider)
+		check("sec_tz", g.SecTZ.Name, w.SecTZ.Name)
 		if w.LotSizeText != "" {
 			check("lotsize", strconv.Itoa(g.LotSize), w.LotSizeText)
 		}

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/kmlebedev/txmlconnector/internal/wire"
+	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
 // RQ_MAIN record tags (dispatcher FUN_18038d7d0; the switch value is tag-1).

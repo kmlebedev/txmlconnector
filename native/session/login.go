@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/internal/cryptoprofile"
-	"github.com/kmlebedev/txmlconnector/internal/wire"
+	"github.com/kmlebedev/txmlconnector/native/cryptoprofile"
+	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
 // Request types: the constant passed with each name to FUN_180355d50.
