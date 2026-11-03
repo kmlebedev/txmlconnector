@@ -65,32 +65,39 @@ type Connect struct {
 	PushPosEquity  int      `xml:"push_pos_equity,omitempty"` // Период в секундах
 }
 
+type Market struct {
+	ID   int    `xml:"id,attr"`
+	Name string `xml:",chardata"`
+}
+
 type Markets struct {
 	XMLName xml.Name `xml:"markets"`
-	Items   []struct {
-		ID   int    `xml:"id,attr"`
-		Name string `xml:",chardata"`
-	} `xml:"market"`
+	Items   []Market `xml:"market"`
+}
+
+type CandleKind struct {
+	ID     int    `xml:"id"`
+	Period int    `xml:"period"`
+	Name   string `xml:"name"`
 }
 
 type CandleKinds struct {
-	XMLName xml.Name `xml:"candlekinds"`
-	Items   []struct {
-		ID     int    `xml:"id"`
-		Period int    `xml:"period"`
-		Name   string `xml:"name"`
-	} `xml:"kind"`
+	XMLName xml.Name     `xml:"candlekinds"`
+	Items   []CandleKind `xml:"kind"`
+}
+
+// Режим торгов
+type Board struct {
+	ID     string `xml:"id,attr"` // Идентификатор режима торгов
+	Name   string `xml:"name"`    // Наименование режима торгов
+	Market int    `xml:"market"`  // Внутренний код рынка
+	Type   int    `xml:"type"`    // тип режима торгов 0=FORTS, 1=Т+, 2= Т0
 }
 
 // Справочник режимов торгов
 type Boards struct {
 	XMLName xml.Name `xml:"boards"`
-	Items   struct {
-		ID     string `xml:"id,attr"` // Идентификатор режима торгов
-		Name   string `xml:"name"`    // Наименование режима торгов
-		Market int    `xml:"market"`  // Внутренний код рынка
-		Type   int    `xml:"type"`    // тип режима торгов 0=FORTS, 1=Т+, 2= Т0
-	} `xml:"board"`
+	Items   []Board  `xml:"board"`
 }
 
 type Candle struct {
@@ -142,11 +149,13 @@ type Security struct {
 	LotDivider int         `xml:"lotdivider"`  // Делитель лота
 	PointCost  float64     `xml:"point_cost"`  // Стоимость пункта цены
 	OpMask     OpMask      `xml:"opmask"`
-	SecType    string      `xml:"sectype"`    // Тип бумаги
-	SecTZ      SecTimeZone `xml:"sec_tz"`     // Тип бумаги
-	QuotesType int         `xml:"quotestype"` // 0 - без стакана, 1 - стакан типа OrderBook, 2 - стакан типа Level2
-	MIC        string      `xml:"MIC"`        // код биржи листинга по стандарту ISO
-	Ticker     string      `xml:"ticker"`     // тикер на бирже листинга
+	SecType    string      `xml:"sectype"`              // Тип бумаги
+	SecTZ      SecTimeZone `xml:"sec_tz"`               // Тип бумаги
+	QuotesType int         `xml:"quotestype"`           // 0 - без стакана, 1 - стакан типа OrderBook, 2 - стакан типа Level2
+	MIC        string      `xml:"MIC"`                  // код биржи листинга по стандарту ISO
+	Ticker     string      `xml:"ticker"`               // тикер на бирже листинга
+	Currency   string      `xml:"currency,omitempty"`   // Валюта номинала инструмента
+	CurrencyID string      `xml:"currencyid,omitempty"` // Валюта расчетов режима торгов по умолчанию
 }
 
 // Список инструментов
