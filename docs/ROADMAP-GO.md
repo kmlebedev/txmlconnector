@@ -136,7 +136,8 @@ tools/reference-harness/       # создать на M1
 - [x] Импортировать DLL в Ghidra и восстановить путь login: framing, ГОСТ-профиль, RQ_LOGIN/RQ_PWD, смена ключа ([docs/protocol/connect.md](protocol/connect.md), `internal/{cryptoprofile,wire,session}`). Recover/relogin — открыто.
 - [x] Проверить `tools/native-login` против реального сервера с тестовым доступом.
 - [x] M4 на демо-сервере: login, RQ_TIME, RQ_STARTUP, выборка снапшота RQ_MAIN и RQ_LOGOUT без DLL, три независимых прогона.
-- [ ] M5: разобрать RQ_STARTUP и записи RQ_MAIN (справочники, котировки, свечи), подключить Go-backend к `connector.Connector`.
+- [x] M5, справочники: RQ_STARTUP (рынки, режимы, виды свечей — XML побайтно как у DLL) и R_SEC_NEW (14 полей `<security>` сверены на 17 176 инструментах), см. [protocol/dictionaries.md](protocol/dictionaries.md).
+- [ ] M5: `active`/`opmask`/`quotestype`/`sec_tz` инструментов, `<pits>`, `<sec_info_upd>`, остальные теги RQ_MAIN (котировки, сделки, свечи), подключить Go-backend к `connector.Connector`.
 - [ ] RQ_RELOGIN/RQ_RECOVER и обрывы связи; сравнить с поведением DLL (эксперимент E05).
 
 ## Результат проверки: macOS arm64 + Rosetta + Wine (3 ноября 2026)
