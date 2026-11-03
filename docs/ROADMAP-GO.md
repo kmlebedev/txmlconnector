@@ -131,7 +131,22 @@ tools/reference-harness/       # создать на M1
 - [x] Определить PE-архитектуру, хеш, экспорты и статические ориентиры.
 - [x] Собрать документальные сведения о серверной стороне и отделить их от гипотез.
 - [x] Подготовить воспроизводимый скрипт инвентаризации.
-- [ ] Получить Windows x64-стенд и тестовый профиль доступа, включая требуемую криптографию.
+- [x] Получить Windows x64-стенд и тестовый профиль доступа, включая требуемую криптографию.
 - [ ] Создать reference harness и снять эталонный connect.
-- [ ] Импортировать DLL в Ghidra и восстановить ссылки на handshake/login/recover.
+- [x] Импортировать DLL в Ghidra и восстановить путь login: framing, ГОСТ-профиль, RQ_LOGIN/RQ_PWD, смена ключа ([docs/protocol/connect.md](protocol/connect.md), `internal/{cryptoprofile,wire,session}`). Recover/relogin — открыто.
+- [ ] Проверить `tools/native-login` против реального сервера с тестовым доступом.
 - [ ] Довести первый профиль до M4; затем оценить M5–M7.
+
+## Результат проверки: macOS arm64 + Rosetta + Wine (3 ноября 2026)
+
+Стенд: macOS 26.7.1 (Apple Silicon), Rosetta 2, Wine devel 11.21 (`Gcenx/macOS_Wine_builds`, `osx64`, x86_64 под Rosetta), чистый `WINEPREFIX`. Harness: [`tools/reference-harness`](../tools/reference-harness/main.go), собран `GOOS=windows GOARCH=amd64`.
+
+| Проверка | Итог |
+|---|---|
+| Загрузка `txmlconnector64-6.47.2.26.4.dll` | Успешно, `Initialize`/`SetCallback` отработали. |
+| `get_connector_version` | `success=true`, callback `<connector_version>6.47.2.26.4</connector_version>`; версия подтверждена самой DLL. |
+| Неизвестная команда | `Unknown command.` (корректная обработка ошибок). |
+| Логи DLL (`*_xdf.log`, `*_dsp.log`) | Пишутся, содержат команды и результаты. |
+| Сетевой connect, handshake, crypto | Проверены против локального стаба, см. [protocol/connect.md](protocol/connect.md); реальный сервер не проверялся. |
+
+Вывод: Wine+Rosetta пригоден как M1-стенд для запуска эталона, включая трассировку. Для проверки против сервера нужен тестовый доступ. Wine-вывод засорён Vulkan/MoltenVK; фильтровать или задавать `WINEDEBUG=-all`.
