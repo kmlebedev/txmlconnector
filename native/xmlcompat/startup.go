@@ -11,7 +11,7 @@ import (
 	"golang.org/x/text/encoding/charmap"
 
 	"github.com/kmlebedev/txmlconnector/client/commands"
-	"github.com/kmlebedev/txmlconnector/internal/wire"
+	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
 // Market is one record of the markets section (FUN_1803953e0 "ReadMarkets").

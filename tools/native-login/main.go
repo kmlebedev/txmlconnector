@@ -10,11 +10,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/user"
-	"runtime"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/internal/session"
+	"github.com/kmlebedev/txmlconnector/native"
+	"github.com/kmlebedev/txmlconnector/native/session"
 )
 
 func main() {
@@ -35,20 +34,11 @@ func main() {
 }
 
 func run(addr, login, password string, timeout time.Duration, load bool, maxPolls int) error {
-	host, _ := os.Hostname()
-	userName := ""
-	if u, err := user.Current(); err == nil {
-		userName = u.Username
-	}
 	cfg := session.Config{
 		Login:          login,
 		Password:       password,
 		RequestTimeout: timeout,
-		Client: session.ClientInfo{
-			ComputerName: host,
-			UserName:     userName,
-			OS:           runtime.GOOS + "/" + runtime.GOARCH + " ",
-		},
+		Client:         native.DefaultClientInfo(),
 	}
 
 	ctx := context.Background()

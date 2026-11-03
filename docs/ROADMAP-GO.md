@@ -70,7 +70,7 @@ Go-клиент / gRPC / экспортёр
       TRANSAQ server
 ```
 
-Предлагаемые новые пакеты: `internal/wire`, `internal/session`, `internal/cryptoprofile`, `internal/xmlcompat`; конкретное размещение уточнить на M4. Существующие `client`, `proto` и `server` использовать как потребителей совместимого backend.
+Пакеты нативной реализации: `native/wire`, `native/session`, `native/cryptoprofile`, `native/xmlcompat` (публичные, чтобы их могли импортировать другие модули, например экспортёр). Существующие `client`, `proto` и `server` использовать как потребителей совместимого backend.
 
 Принципы:
 
@@ -133,11 +133,12 @@ tools/reference-harness/       # создать на M1
 - [x] Подготовить воспроизводимый скрипт инвентаризации.
 - [x] Получить Windows x64-стенд и тестовый профиль доступа, включая требуемую криптографию.
 - [x] Создать reference harness и снять эталонный connect (демо-сервер Finam, DLL под Wine через логирующий прокси).
-- [x] Импортировать DLL в Ghidra и восстановить путь login: framing, ГОСТ-профиль, RQ_LOGIN/RQ_PWD, смена ключа ([docs/protocol/connect.md](protocol/connect.md), `internal/{cryptoprofile,wire,session}`). Recover/relogin — открыто.
+- [x] Импортировать DLL в Ghidra и восстановить путь login: framing, ГОСТ-профиль, RQ_LOGIN/RQ_PWD, смена ключа ([docs/protocol/connect.md](protocol/connect.md), `native/{cryptoprofile,wire,session}`). Recover/relogin — открыто.
 - [x] Проверить `tools/native-login` против реального сервера с тестовым доступом.
 - [x] M4 на демо-сервере: login, RQ_TIME, RQ_STARTUP, выборка снапшота RQ_MAIN и RQ_LOGOUT без DLL, три независимых прогона.
 - [x] M5, справочники: RQ_STARTUP (рынки, режимы, виды свечей — XML побайтно как у DLL) и R_SEC_NEW (14 полей `<security>` сверены на 17 176 инструментах), см. [protocol/dictionaries.md](protocol/dictionaries.md).
-- [ ] M5: `active`/`opmask`/`quotestype`/`sec_tz` инструментов, `<pits>`, `<sec_info_upd>`, остальные теги RQ_MAIN (котировки, сделки, свечи), подключить Go-backend к `connector.Connector`.
+- [x] Публичный пакет `native/` и `native.Connector` (интерфейс `connector.Connector`): `connect`, `disconnect`, `server_status`, `get_connector_version` сверены с DLL на демо-сервере, см. [protocol/commands.md](protocol/commands.md) (#39).
+- [ ] M5: `active`/`opmask`/`quotestype` инструментов, `<pits>`, `<sec_info_upd>`, остальные теги RQ_MAIN (котировки, сделки, свечи) и соответствующие команды `native.Connector` (`get_securities`, `subscribe`, `gethistorydata` …), переподключение.
 - [ ] RQ_RELOGIN/RQ_RECOVER и обрывы связи; сравнить с поведением DLL (эксперимент E05).
 
 ## Результат проверки: macOS arm64 + Rosetta + Wine (3 ноября 2026)

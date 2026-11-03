@@ -2,7 +2,7 @@
 
 Дата: 3 ноября 2026. Источник: `txmlconnector64-6.47.2.26.4.dll`, демо-сервер Finam. Обозначения статусов те же, что в [connect.md](connect.md): **S** — сверено с XML-колбэками DLL на демо-сервере, **D** — прочитано в декомпиляторе, **I** — вывод.
 
-Реализация: [`internal/xmlcompat`](../../internal/xmlcompat). XML строится в структуры [`client/commands`](../../client/commands/main.go), которые уже используют клиенты.
+Реализация: [`native/xmlcompat`](../../native/xmlcompat). XML строится в структуры [`client/commands`](../../client/commands/main.go), которые уже используют клиенты.
 
 ## Методика
 
@@ -75,14 +75,14 @@ Z4:валюта
 - `active`, `opmask`, `quotestype`, `sec_tz`, `MIC`, `ticker`. По генератору `FUN_18011f4a0`: флаги opmask собираются в `FUN_180398640` из таблицы типов бумаг RQ_STARTUP и байта свойств записи, а `sec_tz` — по 16-байтовому поясу. Это следующий шаг. В Go эти поля пока пустые.
 - DLL закрывает `<ticker>` тегом `<ticker>` вместо `</ticker>` (`FUN_18011f4a0`) — **D**. На демо тикеров нет. Реализации не нужно воспроизводить эту ошибку, но на неё стоит рассчитывать при сравнении.
 - `<pits>`, `<sec_info_upd>` (R_SEC_PARAM), R_DOUBLELEG, 0x62 и другие теги без размера.
-- Подключение `internal/xmlcompat` к `connector.Connector`.
+- Подключение `native/xmlcompat` к `connector.Connector`.
 
 ## Воспроизведение
 
 ```sh
-go test ./internal/xmlcompat
+go test ./native/xmlcompat
 # полная сверка на локальном захвате (вне репозитория):
-TXML_DEMO_MAIN=main.hex TXML_DEMO_XML=dll.xml go test -run SecuritiesFull -v ./internal/xmlcompat
+TXML_DEMO_MAIN=main.hex TXML_DEMO_XML=dll.xml go test -run SecuritiesFull -v ./native/xmlcompat
 ```
 
-Фикстуры в `internal/xmlcompat/testdata` — справочные данные демо-сервера без полей счёта: ответ RQ_STARTUP, первый ответ RQ_MAIN (499 инструментов) и соответствующие колбэки DLL.
+Фикстуры в `native/xmlcompat/testdata` — справочные данные демо-сервера без полей счёта: ответ RQ_STARTUP, первый ответ RQ_MAIN (499 инструментов) и соответствующие колбэки DLL.
