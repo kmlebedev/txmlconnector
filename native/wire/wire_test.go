@@ -114,14 +114,13 @@ func TestPackedIntMatchesDLL(t *testing.T) {
 }
 
 func TestPackedIntRoundTrip(t *testing.T) {
-	for _, v := range []int64{1, -1, 15, 16, -16, 4242, math.MaxInt32, math.MinInt32 + 1, 1<<60 - 1, -(1<<60 - 1)} {
+	for _, v := range []int64{1, -1, 15, 16, -16, 4242, math.MaxInt32, math.MinInt32 + 1,
+		1<<52 - 1, 1 << 52, 1<<60 - 1, -(1<<60 - 1), math.MaxInt64, math.MinInt64 + 1} {
 		var w Writer
-		if err := w.Int64(v); err != nil {
-			t.Fatal(err)
-		}
+		w.Int64(v)
 		got, err := NewReader(w.Bytes()).Int64()
 		if err != nil || got != v {
-			t.Fatalf("%d: got %d, %v", v, got, err)
+			t.Fatalf("%d: got %d, %v (% x)", v, got, err, w.Bytes())
 		}
 	}
 	var w Writer
@@ -129,8 +128,11 @@ func TestPackedIntRoundTrip(t *testing.T) {
 	if got, _ := NewReader(w.Bytes()).Int32(); got != math.MinInt32 {
 		t.Fatalf("MinInt32 = %d", got)
 	}
-	if err := w.Int64(1 << 60); err == nil {
-		t.Fatal("expected overflow error")
+	// Count 7 means eight extra bytes for 64-bit fields (FUN_1801bd9b0).
+	w = Writer{}
+	w.Int64(math.MaxInt64)
+	if b := w.Bytes(); len(b) != 9 || b[0]&7 != 7 {
+		t.Fatalf("MaxInt64 = % x", b)
 	}
 }
 

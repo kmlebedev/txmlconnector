@@ -23,15 +23,20 @@ const (
 
 // fakeServer speaks the server side of the protocol: it accepts any RQ_PWD
 // for testPassword's key, issues a session key and answers RQ_TIME,
-// RQ_STARTUP (demo-server fixture) and RQ_MAIN (empty).
+// RQ_STARTUP (demo-server fixture) and RQ_MAIN: first the snapshot (if set),
+// then empty, and once after RQ_SUBSCRIBE the queued trades.
 type fakeServer struct {
 	t       *testing.T
 	startup []byte
 
-	mu        sync.Mutex
-	logouts   int
-	conns     []net.Conn
-	mainDelay time.Duration
+	mu         sync.Mutex
+	logouts    int
+	conns      []net.Conn
+	mainDelay  time.Duration
+	snapshot   []byte   // first RQ_MAIN reply
+	trades     []byte   // RQ_MAIN reply after the next RQ_SUBSCRIBE
+	subscribes [][]byte // RQ_SUBSCRIBE payloads received
+	pending    []byte
 }
 
 func newFakeServer(t *testing.T) *fakeServer {
@@ -137,8 +142,19 @@ func (s *fakeServer) serve(nc net.Conn) {
 		case session.RqMain:
 			s.mu.Lock()
 			delay := s.mainDelay
+			payload := s.snapshot
+			s.snapshot = nil
+			if payload == nil {
+				payload, s.pending = s.pending, nil
+			}
 			s.mu.Unlock()
 			time.Sleep(delay)
+			err = reply(f.Type, payload)
+		case session.RqSubscribe:
+			s.mu.Lock()
+			s.subscribes = append(s.subscribes, f.Payload)
+			s.pending, s.trades = s.trades, nil
+			s.mu.Unlock()
 			err = reply(f.Type, nil)
 		case session.RqLogout:
 			s.mu.Lock()
