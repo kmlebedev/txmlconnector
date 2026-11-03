@@ -23,6 +23,7 @@
 | `disconnect` | `<result success="true"/>` | `server_status connected="false"` **до** возврата |
 | `disconnect` без соединения | `Соединение не установлено...` | — |
 | `get_connector_version` | `<result success="true"/>` | `<connector_version>…</connector_version>` |
+| `subscribe`/`unsubscribe` с `<alltrades>` (`secid` или `security`) | `<result success="true"/>` | `<alltrades>` при поступлении сделок, см. [alltrades.md](alltrades.md) |
 
 Атрибуты `server_status` в порядке DLL: `sys_ver` (SYS# из ответа RQ_PWD), `build` (BLD#), `server_tz`, `id` (SID#), `connected`.
 
@@ -33,7 +34,8 @@
 - `connect` разбирает `commands.Connect` (`host`, `port`, `login`, `password`, `rqdelay`, `request_timeout`) и сразу возвращает успех. Дальше в фоне идут логин, RQ_TIME, RQ_STARTUP, колбэки `<markets>`, `<boards>`, `<candlekinds>` (побайтно как у DLL), выборка снапшота RQ_MAIN, затем `server_status connected="true"`. После этого RQ_MAIN опрашивается каждые `rqdelay` (по умолчанию 100 мс, не меньше 10 мс), как в DLL, и это держит сессию.
 - Потеря связи: колбэк `server_status connected="false"`, коннектор готов к новому `connect`. Восстановление (`RQ_RELOGIN`/`RQ_RECOVER`, `recover="true"`) пока не реализовано.
 - `disconnect` останавливает опрос, даже если запрос RQ_MAIN уже в полёте. Затем отправляет `RQ_LOGOUT` (без ответа, таймаут 4 с) и отдаёт колбэк `connected="false"` до возврата.
-- Остальные 39 команд из таблицы DLL отвечают `Command is not implemented by the native connector.`, а если требуют соединения и его нет — сообщением DLL.
+- `subscribe`/`unsubscribe` поддерживают `<alltrades>`; `<quotations>` и `<quotes>` отвечают «not implemented».
+- Остальные 37 команд из таблицы DLL отвечают `Command is not implemented by the native connector.`, а если требуют соединения и его нет — сообщением DLL.
 - `get_connector_version` возвращает `6.47.2.26.4-native`: версию DLL, поведение которой воспроизводится, с пометкой реализации.
 - Колбэки доставляются по порядку из одной горутины, как из потока колбэков DLL.
 

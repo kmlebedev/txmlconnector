@@ -3,14 +3,16 @@
 // messages, so it can stand in for connector.New where a command is supported.
 //
 // Supported commands: connect, disconnect, server_status,
-// get_connector_version. Other commands registered by the DLL answer with an
-// explicit "not implemented" error. See docs/protocol/commands.md.
+// get_connector_version, and subscribe/unsubscribe for <alltrades>. Other
+// commands registered by the DLL answer with an explicit "not implemented"
+// error. See docs/protocol/commands.md. Client is the typed API without XML.
 package native
 
 import (
 	"context"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/user"
@@ -86,15 +88,14 @@ type Connector struct {
 
 	cmdMu sync.Mutex // serializes SendCommand like the DLL
 
-	mu       sync.Mutex
-	started  bool
-	closed   bool
-	state    state
-	conn     *session.Conn
-	info     *session.Info
-	serverTZ string
-	cancel   context.CancelFunc
-	done     chan struct{}
+	mu         sync.Mutex
+	started    bool
+	closed     bool
+	state      state
+	client     *Client
+	withMillis bool // connect <milliseconds>: <time> carries .fff
+	cancel     context.CancelFunc
+	done       chan struct{}
 
 	out     chan message
 	outDone chan struct{}
@@ -121,7 +122,7 @@ func DefaultClientInfo() session.ClientInfo {
 }
 
 func New(cfg Config) *Connector {
-	if cfg.Client.ComputerName == "" && cfg.Client.UserName == "" && cfg.Client.OS == "" {
+	if isZeroClient(cfg.Client) {
 		cfg.Client = DefaultClientInfo()
 	}
 	if cfg.Version == "" {
@@ -211,6 +212,8 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 	case "get_connector_version":
 		c.emit("<connector_version>" + escapeText(c.cfg.Version) + "</connector_version>")
 		return success(), nil
+	case "subscribe", "unsubscribe":
+		return c.subscribe(ctx, command, id == "subscribe")
 	default:
 		return failure(msgNotImplemented), nil
 	}
@@ -262,7 +265,7 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 		delay = max(time.Duration(req.Rqdelay)*time.Millisecond, minRqDelay)
 	}
 
-	conn, err := c.open(ctx, req, timeout)
+	client, err := c.open(ctx, req, timeout)
 	if err != nil {
 		c.finish(ctx, nil, func() string { return connectErrorXML(err) })
 		return
@@ -275,77 +278,105 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 		}
 		// Poll again at once while replies fill the buffer, as the DLL does.
 		for more := true; more; {
-			r, err := conn.Main(ctx)
+			trades, m, err := client.Poll(ctx)
 			if err != nil {
-				c.finish(ctx, conn, func() string { return c.statusLocked(false) })
+				c.finish(ctx, client, func() string { return c.statusLocked(false) })
 				return
 			}
-			more = r.More
+			more = m
+			if len(trades) > 0 {
+				raw := make([]xmlcompat.AllTrade, len(trades))
+				for i, t := range trades {
+					raw[i] = t.Raw
+				}
+				c.emit(client.Catalog().AllTradesXML(raw, c.withMillis))
+			}
 		}
 	}
 }
 
 // open logs in, loads dictionaries and the snapshot, then reports
 // connected="true" (the DLL reports it after the snapshot).
-func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time.Duration) (*session.Conn, error) {
-	nc, err := c.cfg.Dial(ctx, net.JoinHostPort(req.Host, req.Port))
-	if err != nil {
-		return nil, err
-	}
-	conn, info, err := session.Login(ctx, nc, session.Config{
-		Login: req.Login, Password: req.Password, Client: c.cfg.Client, RequestTimeout: timeout,
+func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time.Duration) (*Client, error) {
+	client, err := Dial(ctx, ClientConfig{
+		Address: net.JoinHostPort(req.Host, req.Port), Login: req.Login, Password: req.Password,
+		Client: c.cfg.Client, RequestTimeout: timeout, Dial: c.cfg.Dial,
 	})
 	if err != nil {
-		nc.Close()
 		return nil, err
 	}
-	fail := func(err error) (*session.Conn, error) {
-		conn.Close()
-		return nil, err
-	}
-	st, err := conn.Time(ctx)
-	if err != nil {
-		return fail(err)
-	}
-	tz, _ := xmlcompat.TimeZoneName(st.Zone)
-	payload, err := conn.Startup(ctx)
-	if err != nil {
-		return fail(err)
-	}
-	startup, err := xmlcompat.ParseStartup(payload)
-	if err != nil {
-		return fail(err)
-	}
-	for _, v := range []any{startup.MarketsXML(), startup.BoardsXML(), startup.CandleKindsXML()} {
+	st := client.Catalog().Startup()
+	for _, v := range []any{st.MarketsXML(), st.BoardsXML(), st.CandleKindsXML()} {
 		m, err := xmlcompat.Marshal(v)
 		if err != nil {
-			return fail(err)
+			client.Close()
+			return nil, err
 		}
 		c.emit(m)
-	}
-	for more := true; more; {
-		r, err := conn.Main(ctx)
-		if err != nil {
-			return fail(err)
-		}
-		more = r.More
 	}
 
 	c.mu.Lock()
 	if ctx.Err() != nil {
 		c.mu.Unlock()
-		return fail(ctx.Err())
+		client.Close()
+		return nil, ctx.Err()
 	}
-	c.conn, c.info, c.serverTZ, c.state = conn, info, tz, stateConnected
+	c.client, c.withMillis, c.state = client, req.Milliseconds, stateConnected
 	status := c.statusLocked(true)
 	c.mu.Unlock()
 	c.emit(status)
-	return conn, nil
+	return client, nil
+}
+
+// subscribe handles <alltrades> of subscribe/unsubscribe, in either the
+// secid or the board+seccode form. Quotations and quotes are not implemented.
+func (c *Connector) subscribe(ctx context.Context, command string, on bool) (string, error) {
+	var req struct {
+		AllTrades struct {
+			SecIDs     []int `xml:"secid"`
+			Securities []struct {
+				Board   string `xml:"board"`
+				SecCode string `xml:"seccode"`
+			} `xml:"security"`
+		} `xml:"alltrades"`
+		Quotations *struct{} `xml:"quotations"`
+		Quotes     *struct{} `xml:"quotes"`
+	}
+	if err := xml.Unmarshal([]byte(command), &req); err != nil {
+		return failure(err.Error()), nil
+	}
+	if req.Quotations != nil || req.Quotes != nil {
+		return failure(msgNotImplemented), nil
+	}
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+	var symbols []Symbol
+	for _, s := range req.AllTrades.Securities {
+		symbols = append(symbols, Symbol{Board: s.Board, SecCode: s.SecCode})
+	}
+	for _, id := range req.AllTrades.SecIDs {
+		sec, ok := client.Catalog().Security(uint16(id))
+		p, hasPit := sec.DefaultPit()
+		board, hasBoard := client.Catalog().Board(p.Board)
+		if !ok || !hasPit || !hasBoard {
+			return failure(fmt.Sprintf("unknown secid %d", id)), nil
+		}
+		symbols = append(symbols, Symbol{Board: board.Code, SecCode: sec.SecCode})
+	}
+	update := client.SubscribeAllTrades
+	if !on {
+		update = client.UnsubscribeAllTrades
+	}
+	if err := update(ctx, symbols...); err != nil {
+		return failure(err.Error()), nil
+	}
+	return success(), nil
 }
 
 // finish handles a connection that ended without disconnect: it resets the
 // state and reports it, unless disconnect is already in charge (ctx done).
-func (c *Connector) finish(ctx context.Context, conn *session.Conn, report func() string) {
+func (c *Connector) finish(ctx context.Context, client *Client, report func() string) {
 	c.mu.Lock()
 	if ctx.Err() != nil {
 		// disconnect cancelled an exchange in flight; it still owns the
@@ -354,10 +385,10 @@ func (c *Connector) finish(ctx context.Context, conn *session.Conn, report func(
 		return
 	}
 	message := report() // called with c.mu held
-	c.state, c.conn = stateDisconnected, nil
+	c.state, c.client = stateDisconnected, nil
 	c.mu.Unlock()
-	if conn != nil {
-		conn.Close()
+	if client != nil {
+		client.Close()
 	}
 	c.emit(message)
 }
@@ -374,13 +405,13 @@ func (c *Connector) disconnect(ctx context.Context) (string, error) {
 	cancel()
 	<-done
 	c.mu.Lock()
-	conn := c.conn
+	client := c.client
 	status := c.statusLocked(false)
-	c.state, c.conn = stateDisconnected, nil
+	c.state, c.client = stateDisconnected, nil
 	c.mu.Unlock()
-	if conn != nil {
+	if client != nil {
 		logoutCtx, stop := context.WithTimeout(ctx, logoutTimeout)
-		_ = conn.Logout(logoutCtx)
+		_ = client.Logout(logoutCtx)
 		stop()
 	}
 	// The DLL reports connected="false" before disconnect returns.
@@ -424,11 +455,12 @@ func (c *Connector) statusXML(connected bool) string {
 func (c *Connector) statusLocked(connected bool) string {
 	var b strings.Builder
 	b.WriteString("<server_status")
-	if c.info != nil {
-		b.WriteString(` sys_ver="` + strconv.Itoa(int(c.info.SysVersion)) + `"`)
-		b.WriteString(` build="` + strconv.Itoa(int(c.info.Build)) + `"`)
-		b.WriteString(` server_tz="` + escapeText(c.serverTZ) + `"`)
-		b.WriteString(` id="` + strconv.Itoa(int(c.info.SID)) + `"`)
+	if c.client != nil {
+		info := c.client.Info()
+		b.WriteString(` sys_ver="` + strconv.Itoa(int(info.SysVersion)) + `"`)
+		b.WriteString(` build="` + strconv.Itoa(int(info.Build)) + `"`)
+		b.WriteString(` server_tz="` + escapeText(c.client.ServerTZ()) + `"`)
+		b.WriteString(` id="` + strconv.Itoa(int(info.SID)) + `"`)
 	}
 	b.WriteString(` connected="` + strconv.FormatBool(connected) + `"/>`)
 	return b.String()
