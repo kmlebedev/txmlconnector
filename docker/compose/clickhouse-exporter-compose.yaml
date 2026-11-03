@@ -20,8 +20,8 @@ services:
     environment:
       CLICKHOUSE_URL: "tcp://clickhouse:9000"
       LOG_LEVEL: "DEBUG"
-      TC_LOGIN: "TCNN9979"
-      TC_PASSWORD: "n3Z4W4"
+      TC_LOGIN: "{TC_LOGIN}"
+      TC_PASSWORD: "${TC_PASSWORD}"
       TC_HOST: "tr1-demo5.finam.ru"
       TC_PORT: "3939"
       TC_LOG_LEVEL: "DEBUG"
