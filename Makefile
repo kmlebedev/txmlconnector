@@ -20,8 +20,9 @@ STAGING_UNIT_TMPL   ?= deploy/txmlconnector-server.service
 	staging-precheck staging-prepare deploy-staging deploy-staging-binary \
 	deploy-staging-dll deploy-staging-unit deploy-staging-smoke \
 	deploy-staging-status deploy-staging-logs deploy-staging-restart rollback-staging
-compile: ## Compile the proto file.
+compile: ## Compile the proto files.
 	protoc proto/connect.proto --go_out=. --go-grpc_out=. --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative
+	protoc proto/marketdata/trade.proto --go_out=. --go_opt=paths=source_relative
 
 test:
 	go test ./...

@@ -85,3 +85,41 @@ func (c *Conn) Logout(ctx context.Context) error {
 	}
 	return err
 }
+
+// RQ_SUBSCRIBE mask bits (FUN_180359140). Each item carries the full desired
+// subscription state of one security on one board; 0 unsubscribes.
+const (
+	SubQuotations byte = 0x01 // <quotations>, seen on the demo server
+	SubQuotes     byte = 0x02 // <quotes>, inferred from the bit layout, not observed
+	SubAllTrades  byte = 0x04 // <alltrades>, seen on the demo server
+)
+
+// SubscribeItem is one security in RQ_SUBSCRIBE.
+type SubscribeItem struct {
+	SecID uint16
+	Board uint16 // board number from RQ_STARTUP
+	Mask  byte
+}
+
+// SubscribePayload builds RQ_SUBSCRIBE: W secid, W board, B mask per item.
+func SubscribePayload(items []SubscribeItem) []byte {
+	var w wire.Writer
+	for _, it := range items {
+		w.Uint16(it.SecID)
+		w.Uint16(it.Board)
+		w.Byte(it.Mask)
+	}
+	return w.Bytes()
+}
+
+// Subscribe sends RQ_SUBSCRIBE; the server answers with an empty payload and
+// streams the data through RQ_MAIN.
+func (c *Conn) Subscribe(ctx context.Context, items []SubscribeItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	if _, err := c.Request(ctx, RqSubscribe, SubscribePayload(items)); err != nil {
+		return fmt.Errorf("RQ_SUBSCRIBE: %w", err)
+	}
+	return nil
+}

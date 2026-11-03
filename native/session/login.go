@@ -21,6 +21,7 @@ const (
 	RqLogout         byte = 2   // RQ_LOGOUT, sent without waiting for a reply
 	RqMain           byte = 5   // RQ_MAIN, polls queued server events
 	RqStartup        byte = 9   // RQ_STARTUP
+	RqSubscribe      byte = 10  // RQ_SUBSCRIBE
 	RqClientHoldings byte = 42  // RQ_CLIENT_HOLDINGS
 	RqPwd            byte = 46  // RQ_PWD
 	RqTime           byte = 50  // RQ_TIME
@@ -286,9 +287,7 @@ func PwdPayload(pwKey *cryptoprofile.Cipher, challenge []byte, ci ClientInfo) ([
 	w.String(ci.ComputerName, maxComputerName)
 	w.String(ci.UserName, maxUserName)
 	w.String(ci.OS, maxOSName)
-	if err := w.Int64(ci.HardwareID); err != nil {
-		return nil, err
-	}
+	w.Int64(ci.HardwareID)
 	for _, a := range ci.Addresses {
 		if a == 0 {
 			break

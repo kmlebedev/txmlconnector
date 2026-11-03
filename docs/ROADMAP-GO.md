@@ -138,6 +138,7 @@ tools/reference-harness/       # создать на M1
 - [x] M4 на демо-сервере: login, RQ_TIME, RQ_STARTUP, выборка снапшота RQ_MAIN и RQ_LOGOUT без DLL, три независимых прогона.
 - [x] M5, справочники: RQ_STARTUP (рынки, режимы, виды свечей — XML побайтно как у DLL) и R_SEC_NEW (14 полей `<security>` сверены на 17 176 инструментах), см. [protocol/dictionaries.md](protocol/dictionaries.md).
 - [x] Публичный пакет `native/` и `native.Connector` (интерфейс `connector.Connector`): `connect`, `disconnect`, `server_status`, `get_connector_version` сверены с DLL на демо-сервере, см. [protocol/commands.md](protocol/commands.md) (#39).
+- [x] M5, сделки: `RQ_SUBSCRIBE`, `R_ALLTRADE`, типизированный `native.Client`, `<alltrades>` как у DLL и вывод в NATS Core (`tools/native-trades`), см. [protocol/alltrades.md](protocol/alltrades.md). Живые сделки с сервера ещё не наблюдались.
 - [ ] M5: `active`/`opmask`/`quotestype` инструментов, `<pits>`, `<sec_info_upd>`, остальные теги RQ_MAIN (котировки, сделки, свечи) и соответствующие команды `native.Connector` (`get_securities`, `subscribe`, `gethistorydata` …), переподключение.
 - [ ] RQ_RELOGIN/RQ_RECOVER и обрывы связи; сравнить с поведением DLL (эксперимент E05).
 

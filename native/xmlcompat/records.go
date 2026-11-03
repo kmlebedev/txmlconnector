@@ -9,6 +9,8 @@ import (
 
 // RQ_MAIN record tags (dispatcher FUN_18038d7d0; the switch value is tag-1).
 const (
+	TagAllTrade  byte = 0x08 // R_ALLTRADE ("NEW_MTRADE" in DLL messages)
+	TagSecRate   byte = 0x0a // R_SEC_RATE: W secid, L value
 	TagSecNew    byte = 0x28 // R_SEC_NEW
 	TagDate      byte = 0x3d // R_DATE
 	TagSecParam  byte = 0x5e // R_SEC_PARAM
@@ -24,6 +26,10 @@ var sizedTags = map[byte]string{
 	0x54: "R_STOP", 0x5e: "R_SEC_PARAM", 0x5f: "R_WRAPPER", 0x66: "R_DOUBLELEG",
 }
 
+// attrTags are security attribute updates handled by FUN_1803c1360: W secid
+// followed by one byte (R_SEC_ZALOG, R_SEC_OBLIG, R_SEC_ONOFF, 0x0e).
+var attrTags = map[byte]string{0x0b: "R_SEC_ZALOG", 0x0c: "R_SEC_OBLIG", 0x0d: "R_SEC_ONOFF", 0x0e: "R_SEC_0E"}
+
 // Record is one RQ_MAIN event record.
 type Record struct {
 	Tag byte
@@ -35,8 +41,22 @@ type Record struct {
 // implemented; the rest of the payload cannot be split without it.
 var ErrUnknownRecord = errors.New("xmlcompat: record layout not implemented")
 
+// UnknownRecordError is the error Records returns at such a record.
+type UnknownRecordError struct {
+	Tag    byte
+	Offset int
+}
+
+func (e *UnknownRecordError) Error() string {
+	return fmt.Sprintf("%v: tag %#02x at offset %d", ErrUnknownRecord, e.Tag, e.Offset)
+}
+
+func (e *UnknownRecordError) Is(target error) bool { return target == ErrUnknownRecord }
+
 // Records splits an RQ_MAIN reply payload. R_WRAPPER bodies are not
-// returned: the wrapped records follow it and are yielded themselves.
+// returned: the wrapped records follow it and are yielded themselves. On a
+// record whose layout is not implemented it returns the records before it
+// and an error wrapping ErrUnknownRecord.
 func Records(p []byte) ([]Record, error) {
 	var out []Record
 	r := wire.NewReader(p)
@@ -58,12 +78,27 @@ func Records(p []byte) ([]Record, error) {
 			out = append(out, Record{Tag: tag, Body: body})
 		case tag == TagDate:
 			start := len(p) - r.Len()
-			if _, err := r.Int64(); err != nil {
+			if _, err := r.Int32(); err != nil { // FUN_1801bd960: 32-bit, sign-extended
 				return out, fmt.Errorf("R_DATE: %w", err)
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagSecRate:
+			start := len(p) - r.Len()
+			if _, err := r.Uint16(); err != nil {
+				return out, fmt.Errorf("R_SEC_RATE: %w", err)
+			}
+			if _, err := r.Int32(); err != nil {
+				return out, fmt.Errorf("R_SEC_RATE: %w", err)
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case attrTags[tag] != "":
+			body, err := r.Raw(3)
+			if err != nil {
+				return out, fmt.Errorf("%s: %w", attrTags[tag], err)
+			}
+			out = append(out, Record{Tag: tag, Body: body})
 		default:
-			return out, fmt.Errorf("%w: tag %#02x at offset %d", ErrUnknownRecord, tag, len(p)-r.Len()-1)
+			return out, &UnknownRecordError{Tag: tag, Offset: len(p) - r.Len() - 1}
 		}
 	}
 	return out, nil
@@ -72,5 +107,6 @@ func Records(p []byte) ([]Record, error) {
 // TradeDate decodes an R_DATE body: seconds since the Unix epoch at 00:00
 // of the trading day (logged by the DLL as days, "R_DATE:20760").
 func TradeDate(rec Record) (int64, error) {
-	return wire.NewReader(rec.Body).Int64()
+	v, err := wire.NewReader(rec.Body).Int32()
+	return int64(v), err
 }
