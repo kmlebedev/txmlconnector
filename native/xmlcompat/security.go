@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/kmlebedev/txmlconnector/client/commands"
-	"github.com/kmlebedev/txmlconnector/internal/wire"
+	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
 // Pit is a per-board parameter block inside R_SEC_NEW.
@@ -151,7 +151,7 @@ const (
 // dictionary from RQ_STARTUP. Fields verified against the DLL on all 17 176
 // demo-server instruments: secid, seccode, shortname, instrclass, board,
 // market, decimals, minstep, lotsize, lotdivider, point_cost, sectype,
-// currency, currencyid. active, opmask, quotestype, sec_tz, MIC and ticker
+// currency, currencyid, sec_tz. active, opmask, quotestype, MIC and ticker
 // are not derived yet and are left empty.
 func (st *Startup) Security(s SecNew) commands.Security {
 	out := commands.Security{
@@ -173,6 +173,9 @@ func (st *Startup) Security(s SecNew) commands.Security {
 	}
 	if out.Currency == "" && s.Market == marketMICEX {
 		out.Currency = "RUR"
+	}
+	if s.HasTimeZone {
+		out.SecTZ.Name, _ = TimeZoneName(s.TimeZone)
 	}
 	p, ok := s.DefaultPit()
 	if !ok {

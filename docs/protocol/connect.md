@@ -2,7 +2,7 @@
 
 Дата: 3 ноября 2026. Источник: `txmlconnector64-6.47.2.26.4.dll`, SHA-256 `a197e2625e53c0df453687ae1b20ef2ae1a05e034cd20c424a7014b0c9726342`. Адреса ниже — VA при базе `0x180000000`.
 
-Реализация на Go: [`internal/cryptoprofile`](../../internal/cryptoprofile), [`internal/wire`](../../internal/wire), [`internal/session`](../../internal/session); CLI [`tools/native-login`](../../tools/native-login), расшифровщик захватов [`tools/wire-decode`](../../tools/wire-decode).
+Реализация на Go: [`native/cryptoprofile`](../../native/cryptoprofile), [`native/wire`](../../native/wire), [`native/session`](../../native/session); CLI [`tools/native-login`](../../tools/native-login), расшифровщик захватов [`tools/wire-decode`](../../tools/wire-decode).
 
 Статусы: **S** — подтверждено на демо-сервере Finam (`tr1-demo5.finam.ru:3939`, 3 ноября 2026), **R** — подтверждено runtime (DLL под Wine 11.21 + Rosetta против локального стаба), **D** — прочитано в декомпиляторе Ghidra 12.2, **I** — вывод/гипотеза.
 
@@ -48,7 +48,7 @@
 
 ГОСТ 28147-89, 32 раунда, стандартный порядок ключей; ключи и слова блока — little-endian (`FUN_1801bc170`, `FUN_180439d90`) — **D**, **R**.
 
-- S-блоки: набор 3 (`FUN_180439c70(ctx, 3)`), четыре **8-битные** таблицы по 256 байт с VA `0x1809bea50`. Это не стандартные 4-битные узлы ГОСТ; таблица встроена в `internal/cryptoprofile/tables.go`.
+- S-блоки: набор 3 (`FUN_180439c70(ctx, 3)`), четыре **8-битные** таблицы по 256 байт с VA `0x1809bea50`. Это не стандартные 4-битные узлы ГОСТ; таблица встроена в `native/cryptoprofile/tables.go`.
 - C→S: гаммирование (`FUN_18043a520`): шифруется синхропосылка, затем на каждый блок `N2 += 0x01010104 (mod 2^32−1)`, `N1 += 0x01010101`.
 - S→C: CFB (`FUN_18043a5d0` шифрование, `FUN_18043a660` расшифровка).
 - Ключ по умолчанию — 32 байта с VA `0x180856010`, синхропосылка — 8 байт с `0x180856058`.
@@ -113,7 +113,7 @@ B: DAT_1809d4064 (наблюдалось 0)
 ## Воспроизведение
 
 ```sh
-go test ./internal/...
+go test ./native/...
 TC_LOGIN=... TC_PASSWORD=... go run ./tools/native-login -addr host:port
 TC_PASSWORD=... go run ./tools/wire-decode capture.log
 ```

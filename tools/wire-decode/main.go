@@ -20,8 +20,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kmlebedev/txmlconnector/internal/session"
-	"github.com/kmlebedev/txmlconnector/internal/wire"
+	"github.com/kmlebedev/txmlconnector/native/session"
+	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
 type stream struct {
