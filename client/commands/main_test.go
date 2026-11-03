@@ -31,6 +31,18 @@ func TestServerStatusDecodesErrorMessage(t *testing.T) {
 	}
 }
 
+func TestBoardsDecodesEveryBoard(t *testing.T) {
+	var boards Boards
+	raw := `<boards><board id="AUCT"><name>Аукцион</name><market>1</market><type>2</type></board>` +
+		`<board id="TQBR"><name>Т+ Акции и ДР</name><market>1</market><type>1</type></board></boards>`
+	if err := xml.Unmarshal([]byte(raw), &boards); err != nil {
+		t.Fatal(err)
+	}
+	if len(boards.Items) != 2 || boards.Items[1].ID != "TQBR" || boards.Items[1].Type != 1 {
+		t.Fatalf("boards = %+v", boards.Items)
+	}
+}
+
 func TestEncodeRequestEReturnsMarshalError(t *testing.T) {
 	_, err := EncodeRequestE(struct {
 		Value chan int `xml:"value"`
