@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"encoding/hex"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,5 +42,38 @@ func TestCancelStopOrderPayloadMatchesDLL(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "1710" {
 		t.Fatalf("RQ_TRANSACT payloads = %v, want [1710]", got)
+	}
+}
+
+// TestCancelStopOrderCommand checks the Connector command: transactionid is
+// required (DLL text), the payload is 17 <packed id>.
+func TestCancelStopOrderCommand(t *testing.T) {
+	srv := newRunServer(t)
+	payload, _ := hex.DecodeString("00100010")
+	srv.Handle(session.RqTransact, func([]byte) (byte, []byte) {
+		return wire.KindReply | wire.FlagPlain, payload
+	})
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	if got := send(t, c, "<command id="+quote+"cancelstoporder"+quote+"/>"); !strings.Contains(got, "You have to specify transactionid.") {
+		t.Fatalf("missing transactionid = %s", got)
+	}
+	if got := send(t, c, "<command id="+quote+"cancelstoporder"+quote+"><transactionid>1</transactionid></command>"); got != "<result success="+quote+"true"+quote+" transactionid="+quote+"1"+quote+"/>" {
+		t.Fatalf("cancelstoporder = %s", got)
+	}
+	var gotPayloads []string
+	for _, f := range srv.Requests() {
+		if f.Type == session.RqTransact {
+			gotPayloads = append(gotPayloads, hex.EncodeToString(f.Payload))
+		}
+	}
+	if len(gotPayloads) != 1 || gotPayloads[0] != "1710" {
+		t.Fatalf("RQ_TRANSACT payloads = %v, want [1710]", gotPayloads)
 	}
 }

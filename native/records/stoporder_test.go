@@ -45,3 +45,19 @@ func TestStopOrdersMatchDLL(t *testing.T) {
 		t.Fatalf("stop order\n got %s\nwant %s", got, want)
 	}
 }
+
+// TestStopOrderNegatives: short bodies and unrecovered mask bits are explicit
+// errors, not silent swallows.
+func TestStopOrderNegatives(t *testing.T) {
+	if _, err := records.ParseStopOrder(nil); err == nil {
+		t.Fatal("ParseStopOrder(nil) did not fail")
+	}
+	// L id=1, packed L mask=0x80 (the unrecovered status block).
+	if _, err := records.ParseStopOrder([]byte{0x10, 0x08, 0x08}); err == nil {
+		t.Fatal("mask 0x80 was accepted")
+	}
+	// L id=1, packed L mask=0x10000 (a bit above 0x8000).
+	if _, err := records.ParseStopOrder([]byte{0x10, 0x02, 0x00, 0x10}); err == nil {
+		t.Fatal("mask above 0x8000 was accepted")
+	}
+}
