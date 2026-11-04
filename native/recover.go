@@ -67,6 +67,14 @@ func isFatalRecoverError(err error) bool {
 // (docs/protocol/connect.md) confirms: 0 or below 0x14 — 20 s, below 300 —
 // seconds, otherwise milliseconds.
 func (c *Client) sessionTimeout() time.Duration {
+	if override := c.cfg.SessionTimeout; override > 0 {
+		// The DLL normalizes the <connect> value like the server one: below
+		// 20 s it becomes 20 s.
+		if override < 20*time.Second {
+			return 20 * time.Second
+		}
+		return override
+	}
 	c.mu.Lock()
 	info := c.info
 	c.mu.Unlock()

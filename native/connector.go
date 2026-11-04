@@ -14,6 +14,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"os/user"
@@ -91,14 +92,17 @@ type Connector struct {
 
 	cmdMu sync.Mutex // serializes SendCommand like the DLL
 
-	mu         sync.Mutex
-	started    bool
-	closed     bool
-	state      state
-	client     *Client
-	withMillis bool // connect <milliseconds>: <time> carries .fff
-	cancel     context.CancelFunc
-	done       chan struct{}
+	mu             sync.Mutex
+	started        bool
+	closed         bool
+	state          state
+	client         *Client
+	withMillis     bool // connect <milliseconds>: <time> carries .fff
+	withUTC        bool // connect <utc_time>: <time> carries the UTC instant
+	autoPos        bool // connect <autopos>: stored, its XML effect is not recovered yet
+	micexRegisters bool // connect <micex_registers>: affects <positions> (task 7)
+	cancel         context.CancelFunc
+	done           chan struct{}
 
 	out     chan message
 	outDone chan struct{}
@@ -224,6 +228,44 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		c.emit(xmlcompat.SecuritiesDumpXML(client.Catalog().Startup(), client.Catalog().List()))
 		return success(), nil
+	case "get_server_id":
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		// DLL FUN_180197ea0: <current_server id="SID"/> from the RQ_PWD cache.
+		c.emit(fmt.Sprintf("<current_server id=%q/>", strconv.Itoa(client.ServerID())))
+		return success(), nil
+	case "get_servtime_difference":
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		// DLL FUN_180197d20 sends RQ_TIME and reports server minus local time
+		// in seconds.
+		diff, err := client.ServerTimeDifference(ctx)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		seconds := int64(math.Round(diff.Seconds()))
+		return fmt.Sprintf("<result success=%q diff=%q/>", "true", strconv.FormatInt(seconds, 10)), nil
+	case "get_markets":
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		msg, err := xmlcompat.Marshal(xmlcompat.MarketsXML(client.Catalog().Startup()))
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(msg)
+		return success(), nil
 	case "subscribe", "unsubscribe":
 		return c.subscribe(ctx, command, id == "subscribe")
 	default:
@@ -250,6 +292,13 @@ func (c *Connector) connect(command string) (string, error) {
 	if req.Host == "" || req.Port == "" || req.Login == "" {
 		c.mu.Unlock()
 		return failure("host, port and login are required"), nil
+	}
+	switch req.Language {
+	case "", "ru", "en":
+	default:
+		// The DLL statcard of FUN_1801196a0: unknown values fail the command.
+		c.mu.Unlock()
+		return failure("Unknown language."), nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.state = stateConnecting
@@ -305,7 +354,10 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 			}
 		}
 		if len(trades) > 0 {
-			c.emit(xmlcompat.AllTradesXML(trades, c.withMillis))
+			c.emit(xmlcompat.AllTradesXMLOptions(trades, xmlcompat.Options{
+				Milliseconds: c.withMillis,
+				UTCTime:      c.withUTC,
+			}))
 		}
 		if secs := client.Catalog().DrainPending(); len(secs) > 0 {
 			st := client.Catalog().Startup()
@@ -338,6 +390,12 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 	client, err := Dial(ctx, ClientConfig{
 		Address: net.JoinHostPort(req.Host, req.Port), Login: req.Login, Password: req.Password,
 		Client: c.cfg.Client, RequestTimeout: timeout, Dial: c.cfg.Dial,
+		Language: req.Language, Milliseconds: req.Milliseconds, UTCTime: req.UtcTime,
+		AutoPos: req.Autopos, MicexRegisters: req.MicexRegisters,
+		RqDelay:        time.Duration(req.Rqdelay) * time.Millisecond,
+		SessionTimeout: time.Duration(req.SessionTimeout) * time.Second,
+		PushULimits:    time.Duration(req.PushUlimits) * time.Second,
+		PushPosEquity:  time.Duration(req.PushPosEquity) * time.Second,
 		OnDictionaries: func(s *model.Startup) {
 			st = s
 			for _, v := range []any{xmlcompat.MarketsXML(s), xmlcompat.BoardsXML(s), xmlcompat.CandleKindsXML(s)} {
@@ -373,7 +431,9 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 		client.Close()
 		return nil, ctx.Err()
 	}
-	c.client, c.withMillis, c.state = client, req.Milliseconds, stateConnected
+	c.client, c.state = client, stateConnected
+	c.withMillis, c.withUTC = req.Milliseconds, req.UtcTime
+	c.autoPos, c.micexRegisters = req.Autopos, req.MicexRegisters
 	status := c.statusLocked(true)
 	c.mu.Unlock()
 	c.emit(status)

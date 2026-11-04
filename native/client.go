@@ -23,6 +23,22 @@ type ClientConfig struct {
 	Client session.ClientInfo
 	// RequestTimeout bounds each exchange; session.DefaultRequestTimeout if 0.
 	RequestTimeout time.Duration
+	// Language is the <connect> language: "ru" (default) or "en", the trailer
+	// byte of RQ_PWD (RE-1: ru=0, en=1). An unknown value fails Dial.
+	Language string
+	// Milliseconds, UTCTime, AutoPos and MicexRegisters are the XML-layer
+	// <connect> options (RE-1). The typed client stores them; the Connector
+	// applies them to the rendered callbacks.
+	Milliseconds, UTCTime, AutoPos, MicexRegisters bool
+	// RqDelay is the default RQ_MAIN poll period of Run when RunOptions does not
+	// set one; 100 ms when 0.
+	RqDelay time.Duration
+	// SessionTimeout overrides the recovery window (the RQ_PWD value when 0);
+	// values below 20 s are raised to 20 s, as the DLL does.
+	SessionTimeout time.Duration
+	// PushULimits and PushPosEquity are the client refresh periods of the
+	// limits and positions requests (the DLL timers; used with tasks 20/21).
+	PushULimits, PushPosEquity time.Duration
 	// Dial opens the TCP connection; net.Dialer if nil.
 	Dial func(ctx context.Context, address string) (net.Conn, error)
 	// OnDictionaries is called once after RQ_STARTUP is parsed, before the
@@ -70,6 +86,13 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	}
 	if isZeroClient(cfg.Client) {
 		cfg.Client = DefaultClientInfo()
+	}
+	if cfg.Language != "" {
+		trailer, err := languageTrailer(cfg.Language)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Client.Trailer = trailer
 	}
 	nc, err := cfg.Dial(ctx, cfg.Address)
 	if err != nil {
@@ -333,6 +356,9 @@ type RunOptions struct {
 func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) error) error {
 	delay := opt.RqDelay
 	if delay == 0 {
+		delay = c.cfg.RqDelay
+	}
+	if delay == 0 {
 		delay = defaultRunRqDelay
 	}
 	if delay < minRunRqDelay {
@@ -406,4 +432,17 @@ func (c *Client) WallTime(t model.Trade) time.Time { return t.Time.Add(-c.bias) 
 
 func isZeroClient(ci session.ClientInfo) bool {
 	return ci.ComputerName == "" && ci.UserName == "" && ci.OS == "" && ci.HardwareID == 0 && len(ci.Addresses) == 0
+}
+
+// languageTrailer maps the <connect> language to the RQ_PWD trailer byte the DLL
+// writes (RE-1: "ru" -> 0, "en" -> 1).
+func languageTrailer(language string) (byte, error) {
+	switch language {
+	case "", "ru":
+		return 0, nil
+	case "en":
+		return 1, nil
+	default:
+		return 0, fmt.Errorf("unknown language %q", language)
+	}
 }
