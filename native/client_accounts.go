@@ -68,7 +68,9 @@ func decodeClientNew(c *Client, body []byte) ([]model.Event, error) {
 		c.accountOrder = append(c.accountOrder, raw.ID)
 	}
 	c.accounts[raw.ID] = &accountState{account: account, raw: raw}
-	return []model.Event{&account}, nil
+	events := []model.Event{&account}
+	events = append(events, c.flushPendingOrdersLocked(raw.ID)...)
+	return events, nil
 }
 
 func decodeClientAsset(c *Client, body []byte) ([]model.Event, error) {

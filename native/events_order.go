@@ -6,8 +6,10 @@ import (
 )
 
 // The <orders> feed: R_ORD_NEW (0x03) creates an order, R_ORD_MODIFY (0x10)
-// updates it and the DLL renders the resulting order in one <orders> callback
-// (orders.md, O).
+// updates it and the DLL renders the resulting order (orders.md, O). Orders of
+// other numeric clients are dropped; when the R_CLN_NEW store is not loaded yet
+// (the load record order is not guaranteed) the order is buffered and resolved
+// when the client record arrives.
 func init() {
 	registerDecoder(records.TagOrderNew, decodeOrderNew)
 	registerDecoder(records.TagOrderModify, decodeOrderModify)
@@ -18,15 +20,15 @@ func decodeOrderNew(c *Client, body []byte) ([]model.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	order := parsed.Order
-	if c.catalog != nil {
-		if sec, ok := c.catalog.Security(order.SecID); ok {
-			order.SecCode = sec.SecCode
-		}
-		if board, ok := c.catalog.Board(parsed.BoardID); ok {
-			order.Board = board.Code
-		}
+	_, known, match := c.orderClientMatchLocked(parsed.ClientID)
+	if !known {
+		c.pendingOrders = append(c.pendingOrders, parsed)
+		return nil, nil
 	}
+	if !match {
+		return nil, nil // foreign client: the DLL drops the order silently (O)
+	}
+	order := c.buildOrderEventLocked(parsed)
 	c.storeOrderLocked(order)
 	return []model.Event{&order}, nil
 }

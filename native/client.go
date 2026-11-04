@@ -93,6 +93,8 @@ type Client struct {
 	secSpecs         map[uint16]records.SecSpec
 	history          map[historyKey]*historyCollector
 	orders           map[uint64]*model.Order
+	pendingOrders    []records.OrderNew
+	orderOrder       []uint64
 	secPositions     map[positionKey]model.SecPosition
 	secPositionOrder []positionKey
 }

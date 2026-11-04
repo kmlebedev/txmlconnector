@@ -251,6 +251,8 @@ func (c *Client) relogin(ctx context.Context) error {
 	c.failHistoryParts(errors.New("transaq: connection was recovered"))
 	c.history = map[historyKey]*historyCollector{}
 	c.orders = map[uint64]*model.Order{}
+	c.pendingOrders = nil
+	c.orderOrder = nil
 	c.mu.Unlock()
 	// load re-runs the ClientConfig.OnDictionaries/OnSecurities callbacks, so
 	// the Connector emits the dictionary and securities callbacks again after a
