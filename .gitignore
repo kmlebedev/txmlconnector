@@ -4,3 +4,17 @@
 /.re-run/
 *.cap
 *.dump
+
+# local IDE state (GoLand), not part of the build
+/.idea/
+.DS_Store
+
+# repository-local Go cache (used when the sandbox blocks the global cache)
+/.cache/
+
+# agent worktrees (DSH create_worktree pool; AGENTS.md §3)
+/.agents/
+/.worktrees/
+
+# secrets: never commit environment files (use tools/re/demo.env.example)
+*.env

@@ -17,11 +17,16 @@
 # keep it out of git); stdout shows command results and callbacks cut to 300
 # characters.
 set -eu
-: "${WINE:?set WINE to the wine binary}"
-: "${WINEPREFIX:?set WINEPREFIX}"
-: "${TXC_DLL:?set TXC_DLL to the DLL path}"
-WORK=${RE_WORKDIR:-./.re-run}
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
+# Defaults match the local macOS setup (Wine 11.21 under Rosetta, prefix, bundled DLL);
+# override WINE / WINEPREFIX / TXC_DLL to use another environment.
+: "${WINE:=$HOME/re/wine/Wine Devel.app/Contents/Resources/wine/bin/wine}"
+: "${WINEPREFIX:=$HOME/re/wine-prefix}"
+: "${TXC_DLL:=$REPO/txmlconnector64-6.47.2.26.4.dll}"
+[ -x "$WINE" ] || { echo "run_dll: WINE is not executable: $WINE (set WINE)" >&2; exit 1; }
+[ -d "$WINEPREFIX" ] || { echo "run_dll: WINEPREFIX not found: $WINEPREFIX (create with: WINE=... \"\$WINE\" wineboot -i)" >&2; exit 1; }
+[ -f "$TXC_DLL" ] || { echo "run_dll: TXC_DLL not found: $TXC_DLL (set TXC_DLL)" >&2; exit 1; }
+WORK=${RE_WORKDIR:-./.re-run}
 mkdir -p "$WORK/logs"
 WORK=$(cd "$WORK" && pwd)
 (cd "$REPO" && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o "$WORK/harness.exe" ./tools/reference-harness)
