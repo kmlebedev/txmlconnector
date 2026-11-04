@@ -94,30 +94,43 @@ func run(ctx context.Context, addr, login, password, natsURL, prefix string, sym
 	}
 	log.Printf("subscribed to alltrades: %v; publishing to %s.<board>.<seccode>", symbols, prefix)
 
-	var lastStats time.Time
-	for {
-		select {
-		case <-ctx.Done():
-			log.Printf("stopping: %+v", client.Stats())
-			return nil
-		case <-time.After(delay):
-		}
-		for more := true; more; {
-			trades, m, err := client.Poll(ctx)
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					return nil
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+	if statsEvery > 0 {
+		go func() {
+			ticker := time.NewTicker(statsEvery)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-ticker.C:
+					log.Printf("stats: %+v", client.Stats())
 				}
-				return fmt.Errorf("transaq: %w", err)
 			}
-			more = m
-			if err := sink.Publish(trades); err != nil {
-				return fmt.Errorf("nats: %w", err)
-			}
-		}
-		if statsEvery > 0 && time.Since(lastStats) >= statsEvery {
-			lastStats = time.Now()
-			log.Printf("stats: %+v", client.Stats())
-		}
+		}()
 	}
+	err = client.Run(runCtx, native.RunOptions{RqDelay: delay}, func(events []model.Event) error {
+		var trades []model.Trade
+		for _, ev := range events {
+			if t, ok := ev.(*model.Trade); ok {
+				trades = append(trades, *t)
+			}
+		}
+		if len(trades) == 0 {
+			return nil
+		}
+		if err := sink.Publish(trades); err != nil {
+			return fmt.Errorf("nats: %w", err)
+		}
+		return nil
+	})
+	if errors.Is(err, context.Canceled) {
+		log.Printf("stopping: %+v", client.Stats())
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("transaq: %w", err)
+	}
+	return nil
 }
