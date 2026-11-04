@@ -226,6 +226,11 @@ func (c *Client) Close() error {
 	if conn == nil {
 		return nil
 	}
+	// A gethistorydata collection still waiting for its RQ_MAIN parts can never
+	// complete after Close: wake it instead of leaving it until the ctx timeout.
+	c.mu.Lock()
+	c.failHistoryParts(errors.New("transaq: client is closed"))
+	c.mu.Unlock()
 	return conn.Close()
 }
 

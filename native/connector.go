@@ -354,13 +354,33 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		if count == 0 {
 			count = req.ACount
 		}
+		if period <= 0 {
+			// DLL text (D): the period comes from <candlekinds> and is required.
+			return failure("'period' is absent"), nil
+		}
+		if count <= 0 || count > 0xffff {
+			return failure("count is out of range"), nil
+		}
 		reset := req.Reset == "true" || req.Reset == "1" || req.AReset == "true" || req.AReset == "1"
-		// The DLL accepts the command only with an established connection (S).
-		candles, err := client.History(ctx, HistoryRequest{Symbol: symbol, Period: period, Count: count, Reset: reset})
+		// The DLL renders <result success="true"/> at once (S r14: result at
+		// 7.310 s, <candles> at 7.340 s): start the collection in the background
+		// and emit the candles when the parts are complete.
+		err := client.StartHistory(ctx, HistoryRequest{Symbol: symbol, Period: period, Count: count, Reset: reset},
+			func(candles model.Candles, err error) {
+				if err != nil {
+					return
+				}
+				c.mu.Lock()
+				closed := c.closed
+				c.mu.Unlock()
+				if closed {
+					return
+				}
+				c.emit(xmlcompat.CandlesXML(candles))
+			})
 		if err != nil {
 			return failure(err.Error()), nil
 		}
-		c.emit(xmlcompat.CandlesXML(candles))
 		return success(), nil
 	case "get_securities_info":
 		var req struct {

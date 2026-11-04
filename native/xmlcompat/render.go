@@ -439,7 +439,9 @@ func CandlesXML(candles model.Candles) string {
 	b.WriteString(" seccode=" + quoteAttr(candles.Symbol.SecCode) + " period=" + quoteAttr(strconv.Itoa(candles.Period)))
 	b.WriteString(" status=" + quoteAttr(strconv.Itoa(candles.Status)) + "> ")
 	for _, candle := range candles.Items {
-		b.WriteString("<candle date=" + quoteAttr(candle.Time.Format("02.01.2006 15:04:05")))
+		// The items are UTC; the DLL prints the server wall clock.
+		wall := candle.Time.Add(-candles.ZoneBias)
+		b.WriteString("<candle date=" + quoteAttr(wall.Format("02.01.2006 15:04:05")))
 		b.WriteString(" open=" + quoteAttr(candle.Open.String()))
 		b.WriteString(" close=" + quoteAttr(candle.Close.String()))
 		b.WriteString(" high=" + quoteAttr(candle.High.String()))

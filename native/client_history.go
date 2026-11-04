@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
@@ -24,13 +25,23 @@ type historyKey struct {
 	period byte
 }
 
+type historyResult struct {
+	candles model.Candles
+	err     error
+}
+
 type historyCollector struct {
-	ch    chan model.Candles
+	ch    chan historyResult
 	parts []records.Candles
 }
 
 // History runs gethistorydata like the DLL: it sends RQ_HISTORY_EXT and waits
-// for the RQ_MAIN candle records. Parts with status 2 are collected and the
+// for the RQ_MAIN candle records.
+//
+// The plain RQ_HISTORY (11) direct-reply fallback of the plan is I: the live
+// r14/r15 captures show only the EXT exchange (S), and the plain request is not
+// sent by the DLL, so the EXT path is treated as the equivalent implementation
+// (TestHistoryPayloadMatchesDLL pins both count payloads). Parts with status 2 are collected and the
 // clock/parts are merged into one chronological Candles; Run does not emit the
 // individual parts as events.
 func (c *Client) History(ctx context.Context, req HistoryRequest) (model.Candles, error) {
@@ -52,8 +63,12 @@ func (c *Client) History(ctx context.Context, req HistoryRequest) (model.Candles
 		return empty, errors.New("transaq: client is not connected")
 	}
 	key := historyKey{secID: sec.SecID, board: board.Num, period: byte(req.Period)}
-	coll := &historyCollector{ch: make(chan model.Candles, 1)}
+	coll := &historyCollector{ch: make(chan historyResult, 1)}
 	c.mu.Lock()
+	if c.recovering {
+		c.mu.Unlock()
+		return empty, errors.New("transaq: connection is being recovered")
+	}
 	if c.history == nil {
 		c.history = map[historyKey]*historyCollector{}
 	}
@@ -69,8 +84,8 @@ func (c *Client) History(ctx context.Context, req HistoryRequest) (model.Candles
 		return empty, err
 	}
 	select {
-	case candles := <-coll.ch:
-		return candles, nil
+	case result := <-coll.ch:
+		return result.candles, result.err
 	case <-ctx.Done():
 		c.dropHistory(key, coll)
 		return empty, ctx.Err()
@@ -86,7 +101,7 @@ func (c *Client) dropHistory(key historyKey, coll *historyCollector) {
 }
 
 // addHistoryPart is called by the candles decoder under the client lock.
-func (c *Client) addHistoryPart(part records.Candles) {
+func (c *Client) addHistoryPart(part records.Candles, bias time.Duration) {
 	key := historyKey{secID: part.SecID, board: part.Board, period: part.Period}
 	coll := c.history[key]
 	if coll == nil {
@@ -97,11 +112,42 @@ func (c *Client) addHistoryPart(part records.Candles) {
 		return
 	}
 	delete(c.history, key)
-	candles := records.CombineCandles(coll.parts, c.catalog)
+	candles := records.CombineCandles(coll.parts, c.catalog, bias)
 	select {
-	case coll.ch <- candles:
+	case coll.ch <- historyResult{candles: candles}:
 	default:
 	}
+}
+
+// failHistoryParts wakes every waiting History with err (used when a relogin
+// resets the history state: the old collectors can never complete).
+func (c *Client) failHistoryParts(err error) {
+	for key, coll := range c.history {
+		select {
+		case coll.ch <- historyResult{err: err}:
+		default:
+		}
+		delete(c.history, key)
+	}
+}
+
+// StartHistory runs History in the background and calls onDone with the
+// combined candles: the XML command returns <result success="true"/> before the
+// data arrives, as the DLL does (S r14: result 7.310, candles 7.340).
+func (c *Client) StartHistory(ctx context.Context, req HistoryRequest, onDone func(model.Candles, error)) error {
+	c.mu.Lock()
+	recovering := c.recovering
+	c.mu.Unlock()
+	if recovering {
+		return errors.New("transaq: connection is being recovered")
+	}
+	go func() {
+		candles, err := c.History(ctx, req)
+		if onDone != nil {
+			onDone(candles, err)
+		}
+	}()
+	return nil
 }
 
 // SymbolByBoard resolves the <security> form of gethistorydata (board code plus

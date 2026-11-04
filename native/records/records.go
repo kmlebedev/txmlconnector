@@ -162,13 +162,17 @@ func Records(p []byte) ([]Record, error) {
 			for c.Len() > 0 {
 				if c.Len() <= 5 {
 					if _, err := c.Int32(); err != nil {
-						return out, fmt.Errorf("R_HISTORY status: %w", err)
+						return out, fmt.Errorf("R_HISTORY: unexpected data after the record status (unsized record): %w", err)
 					}
 					break
 				}
 				for i := 0; i < 7; i++ {
 					if _, err := c.Int32(); err != nil {
-						return out, fmt.Errorf("R_HISTORY candle: %w", err)
+						// The record is unsized: data after its status cannot be
+						// split from the next record, so make it an explicit
+						// diagnostic (docs/protocol/history.md; the DLL sends
+						// every part in its own reply).
+						return out, fmt.Errorf("R_HISTORY: unexpected data after the record status (unsized record): %w", err)
 					}
 				}
 				if flag != 0 {
@@ -178,7 +182,16 @@ func Records(p []byte) ([]Record, error) {
 				}
 			}
 			n := len(p[start:]) - c.Len()
-			r.Raw(n)
+			if _, err := r.Raw(n); err != nil {
+				return out, fmt.Errorf("R_HISTORY body: %w", err)
+			}
+			if r.Len() > 0 {
+				// R_HISTORY is not length-delimited: silent consumption of the
+				// bytes after the status would hide a second record or a
+				// desynchronised stream, so report it instead (I; the DLL sends
+				// every history part in its own reply).
+				return out, fmt.Errorf("R_HISTORY: %d trailing bytes after the status: an unsized record cannot be split", r.Len())
+			}
 			out = append(out, Record{Tag: tag, Body: p[start : start+n]})
 		case tag == TagUnion:
 			start := len(p) - r.Len()

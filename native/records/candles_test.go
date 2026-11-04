@@ -7,9 +7,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kmlebedev/txmlconnector/native/internal/oracle"
 	"github.com/kmlebedev/txmlconnector/native/records"
+	"github.com/kmlebedev/txmlconnector/native/wire"
 	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
 )
 
@@ -74,7 +76,7 @@ func TestCandlesMatchDLL(t *testing.T) {
 		t.Fatalf("items/status = %d/%d, want 10/1", len(part.Items), part.Status)
 	}
 	catalog := oracle.LoadCatalog(t, "main1-demo.hex.gz")
-	ev := part.Event(catalog)
+	ev := part.Event(catalog, 0)
 	got, ok := xmlcompat.Render(catalog, &ev, xmlcompat.Options{})
 	if !ok {
 		t.Fatal("no XML form")
@@ -108,7 +110,7 @@ func TestCandlesMultipart(t *testing.T) {
 	if parts[0].Status != 2 || parts[1].Status != 1 {
 		t.Fatalf("statuses = %d/%d, want 2/1", parts[0].Status, parts[1].Status)
 	}
-	ev := records.CombineCandles(parts, catalog)
+	ev := records.CombineCandles(parts, catalog, 0)
 	got, ok := xmlcompat.Render(catalog, &ev, xmlcompat.Options{})
 	if !ok {
 		t.Fatal("no XML form")
@@ -116,6 +118,139 @@ func TestCandlesMultipart(t *testing.T) {
 	want := strings.TrimSpace(readPlainText(t, "candles-multipart-dll.xml"))
 	if got != want {
 		t.Fatalf("multipart candles\n got %s\nwant %s", got, want)
+	}
+}
+
+// candleRecord builds one synthetic R_HISTORY byte body for the given wire
+// items (newest first, minutes/deltas as the wire format).
+func candleRecord(t *testing.T, secID, board uint16, period, flag byte, items []records.Candle) []byte {
+	t.Helper()
+	var w wire.Writer
+	w.Uint16(secID)
+	w.Uint16(board)
+	w.Byte(period)
+	w.Byte(flag)
+	for _, item := range items {
+		w.Int32(int32(item.Time))
+		w.Int32(int32(item.Open))
+		w.Int32(int32(item.Close))
+		w.Int32(int32(item.High))
+		w.Int32(int32(item.Low))
+		w.Int32(int32(item.Field6))
+		w.Int32(int32(item.Volume))
+	}
+	w.Int32(1) // final status
+	return append([]byte{records.TagCandles}, w.Bytes()...)
+}
+
+// TestCombineCandlesSinglePartOrder is the P1 regression: CombineCandles on one
+// 10-candle part keeps the DLL chronological order (18:35 -> 18:44) and its XML
+// matches the live callback.
+func TestCombineCandlesSinglePartOrder(t *testing.T) {
+	payload := readCandlesHex(t, "candles-live.hex.gz")
+	recs, err := records.Records(payload)
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+	part, err := records.ParseCandles(recs[0].Body)
+	if err != nil {
+		t.Fatalf("ParseCandles: %v", err)
+	}
+	catalog := oracle.LoadCatalog(t, "main1-demo.hex.gz")
+	combined := records.CombineCandles([]records.Candles{part}, catalog, 0)
+	if len(combined.Items) != 10 {
+		t.Fatalf("items = %d, want 10", len(combined.Items))
+	}
+	if got := combined.Items[0].Time.Format("15:04"); got != "18:35" {
+		t.Fatalf("first time = %s, want 18:35 (double reverse regression)", got)
+	}
+	if got := combined.Items[9].Time.Format("15:04"); got != "18:44" {
+		t.Fatalf("last time = %s, want 18:44", got)
+	}
+	got, ok := xmlcompat.Render(catalog, &combined, xmlcompat.Options{})
+	if !ok {
+		t.Fatal("no XML form")
+	}
+	want := readCandlesText(t, "candles-dll.xml.gz")
+	if i := strings.Index(want, "</candles>"); i >= 0 {
+		want = want[:i+len("</candles>")]
+	}
+	if got != want {
+		t.Fatalf("combined candles\n got %s\nwant %s", got, want)
+	}
+}
+
+// TestCombineCandlesMultipartOrder is the P1 multipart regression with more
+// than one candle per part: parts arrive newest first and each part is already
+// chronological; the result must be 18:41..18:44.
+func TestCombineCandlesMultipartOrder(t *testing.T) {
+	part1 := candleRecord(t, 26, 37, 1, 0, []records.Candle{
+		{Time: 29896964, Open: 2914600}, // 18:44 absolute
+		{Time: -1, Open: 2914200},       // 18:43 delta
+	})
+	part2 := candleRecord(t, 26, 37, 1, 0, []records.Candle{
+		{Time: 29896962, Open: 2914100}, // 18:42 absolute
+		{Time: -1, Open: 2914000},       // 18:41 delta
+	})
+	var parts []records.Candles
+	for _, payload := range [][]byte{part1, part2} {
+		recs, err := records.Records(payload)
+		if err != nil {
+			t.Fatalf("Records: %v", err)
+		}
+		part, err := records.ParseCandles(recs[0].Body)
+		if err != nil {
+			t.Fatalf("ParseCandles: %v", err)
+		}
+		parts = append(parts, part)
+	}
+	catalog := oracle.LoadCatalog(t, "main1-demo.hex.gz")
+	combined := records.CombineCandles(parts, catalog, 0)
+	if len(combined.Items) != 4 {
+		t.Fatalf("items = %d, want 4", len(combined.Items))
+	}
+	want := []string{"18:41", "18:42", "18:43", "18:44"}
+	for i, item := range combined.Items {
+		if got := item.Time.Format("15:04"); got != want[i] {
+			t.Fatalf("item %d = %s, want %s (parts must be reversed, items kept)", i, got, want[i])
+		}
+	}
+}
+
+// TestCandlesTimeBias is the P2.1 regression: the wire minutes are the server
+// wall clock, the event Time is UTC (15:44Z) and the DLL XML keeps 18:44.
+func TestCandlesTimeBias(t *testing.T) {
+	payload := readCandlesHex(t, "candles-live.hex.gz")
+	recs, err := records.Records(payload)
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+	part, err := records.ParseCandles(recs[0].Body)
+	if err != nil {
+		t.Fatalf("ParseCandles: %v", err)
+	}
+	catalog := oracle.LoadCatalog(t, "main1-demo.hex.gz")
+	bias := -180 * time.Minute
+	ev := part.Event(catalog, bias)
+	last := ev.Items[len(ev.Items)-1]
+	if got := last.Time.UTC().Format("15:04"); got != "15:44" {
+		t.Fatalf("event time = %s, want 15:44Z", got)
+	}
+	got, ok := xmlcompat.Render(catalog, &ev, xmlcompat.Options{})
+	if !ok {
+		t.Fatal("no XML form")
+	}
+	if !strings.Contains(got, "04.11.2026 18:44:00") {
+		t.Fatalf("XML must keep the wall clock 18:44: %s", got)
+	}
+}
+
+// TestHistorySplitterRejectsTrailing pins the P3.3 diagnostic: an unsized
+// R_HISTORY followed by more bytes is an explicit error, not a silent swallow.
+func TestHistorySplitterRejectsTrailing(t *testing.T) {
+	concat := append(readPlainHex(t, "candles-part1-inject.hex"), readPlainHex(t, "candles-part2-inject.hex")...)
+	if _, err := records.Records(concat); err == nil || !strings.Contains(err.Error(), "unexpected data after the record status") {
+		t.Fatalf("err = %v, want the trailing-bytes diagnostic", err)
 	}
 }
 

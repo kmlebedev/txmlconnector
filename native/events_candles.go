@@ -15,6 +15,6 @@ func decodeCandles(c *Client, body []byte) ([]model.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.addHistoryPart(part)
+	c.addHistoryPart(part, c.bias)
 	return nil, nil
 }
