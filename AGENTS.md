@@ -272,7 +272,7 @@ Teammates не пушут и не мержат. Ветка `main` не комм�
 ## 7. Команды (минимум перед каждым commit)
 
 ```bash
-gofmt -l .                          # должно быть пусто
+gofmt -l $(git ls-files '*.go')     # должно быть пусто (в .re-run/ лежат scratch-файлы RE, они gitignored; make verify проверяет только tracked)
 go vet ./...                        # без диагностик
 go build ./...                      # текущая платформа
 CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build ./native/...
