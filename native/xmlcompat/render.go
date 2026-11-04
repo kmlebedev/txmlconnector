@@ -320,7 +320,10 @@ func SecInfoXML(info model.SecInfo) string {
 	if info.SecCode != "" {
 		b.WriteString("<seccode>" + escape(info.SecCode) + "</seccode>")
 	}
-	b.WriteString("<market>" + strconv.Itoa(info.Market) + "</market>")
+	// The DLL skips empty/zero fields; market 0 is not a real market.
+	if info.Market != 0 {
+		b.WriteString("<market>" + strconv.Itoa(info.Market) + "</market>")
+	}
 	if info.PName != "" {
 		b.WriteString("<pname>" + escape(info.PName) + "</pname>")
 	}
@@ -330,12 +333,12 @@ func SecInfoXML(info model.SecInfo) string {
 		}
 	}
 	decField := func(name string, v *model.Decimal) {
-		if v != nil {
+		if v != nil && v.Units != 0 {
 			b.WriteString("<" + name + ">" + v.String() + "</" + name + ">")
 		}
 	}
 	fixedField := func(name string, v *model.Decimal) {
-		if v != nil {
+		if v != nil && v.Units != 0 {
 			b.WriteString("<" + name + ">" + fixedDecimal(*v) + "</" + name + ">")
 		}
 	}

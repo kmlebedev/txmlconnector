@@ -15,22 +15,18 @@ import (
 // RQ_SEC_SPEC request the client sends after every subscribe.
 func (c *Client) SecuritiesInfo(ctx context.Context, symbols ...model.Symbol) ([]model.SecInfo, error) {
 	c.mu.Lock()
-	catalog := c.catalog
-	specs := make(map[uint16]records.SecSpec, len(c.secSpecs))
-	for id, spec := range c.secSpecs {
-		specs[id] = spec
-	}
-	c.mu.Unlock()
-	if catalog == nil {
+	defer c.mu.Unlock()
+	if c.catalog == nil {
 		return nil, errors.New("transaq: client is not connected")
 	}
 	infos := make([]model.SecInfo, 0, len(symbols))
 	for _, symbol := range symbols {
-		sec, _, ok := catalog.Lookup(symbol.Board, symbol.SecCode)
+		// Poll writes the catalog under c.mu, so all reads are guarded too.
+		sec, _, ok := c.catalog.Lookup(symbol.Board, symbol.SecCode)
 		if !ok {
 			return nil, fmt.Errorf("transaq: unknown security %s", symbol)
 		}
-		spec, ok := specs[sec.SecID]
+		spec, ok := c.secSpecs[sec.SecID]
 		if !ok {
 			// The DLL throws "GetSecSpec returned null" here (I, D).
 			return nil, fmt.Errorf("transaq: sec spec for %s is not loaded", symbol)
@@ -44,12 +40,11 @@ func (c *Client) SecuritiesInfo(ctx context.Context, symbols ...model.Symbol) ([
 // looks the security up by market id and code in the local catalog.
 func (c *Client) SymbolByMarket(market int, secCode string) (model.Symbol, bool) {
 	c.mu.Lock()
-	catalog := c.catalog
-	c.mu.Unlock()
-	if catalog == nil {
+	defer c.mu.Unlock()
+	if c.catalog == nil {
 		return model.Symbol{}, false
 	}
-	for _, sec := range catalog.List() {
+	for _, sec := range c.catalog.List() {
 		if int(sec.Market) != market || sec.SecCode != secCode {
 			continue
 		}
@@ -57,7 +52,7 @@ func (c *Client) SymbolByMarket(market int, secCode string) (model.Symbol, bool)
 		if !ok {
 			return model.Symbol{}, false
 		}
-		board, ok := catalog.Board(pit.Board)
+		board, ok := c.catalog.Board(pit.Board)
 		if !ok {
 			return model.Symbol{}, false
 		}
@@ -69,12 +64,11 @@ func (c *Client) SymbolByMarket(market int, secCode string) (model.Symbol, bool)
 // SymbolBySecID resolves the <secid> form of get_securities_info.
 func (c *Client) SymbolBySecID(secID uint16) (model.Symbol, bool) {
 	c.mu.Lock()
-	catalog := c.catalog
-	c.mu.Unlock()
-	if catalog == nil {
+	defer c.mu.Unlock()
+	if c.catalog == nil {
 		return model.Symbol{}, false
 	}
-	sec, ok := catalog.Security(secID)
+	sec, ok := c.catalog.Security(secID)
 	if !ok {
 		return model.Symbol{}, false
 	}
@@ -82,7 +76,7 @@ func (c *Client) SymbolBySecID(secID uint16) (model.Symbol, bool) {
 	if !ok {
 		return model.Symbol{}, false
 	}
-	board, ok := catalog.Board(pit.Board)
+	board, ok := c.catalog.Board(pit.Board)
 	if !ok {
 		return model.Symbol{}, false
 	}

@@ -349,6 +349,9 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			symbols = append(symbols, symbol)
 		}
 		for _, id := range req.SecIDs {
+			if id < 0 || id > 0xffff {
+				return failure(fmt.Sprintf("secid %d is out of range", id)), nil
+			}
 			symbol, ok := client.SymbolBySecID(uint16(id))
 			if !ok {
 				return failure(fmt.Sprintf("unknown secid %d", id)), nil

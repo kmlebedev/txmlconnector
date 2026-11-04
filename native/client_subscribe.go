@@ -58,18 +58,24 @@ func (c *Client) changeSubscription(ctx context.Context, sub Subscription, on bo
 	}
 	conn := c.conn
 	catalog := c.catalog
-	c.mu.Unlock()
 	if conn == nil || catalog == nil {
+		c.mu.Unlock()
 		return errors.New("transaq: client is not connected")
 	}
 	items := make([]session.SubscribeItem, 0, len(next))
+	var specIDs []uint16
 	for s, mask := range next {
 		sec, board, ok := catalog.Lookup(s.Board, s.SecCode)
 		if !ok {
+			c.mu.Unlock()
 			return fmt.Errorf("unknown security %s", s)
 		}
 		items = append(items, session.SubscribeItem{SecID: sec.SecID, Board: board.Num, Mask: mask})
+		if on && mask != 0 {
+			specIDs = append(specIDs, sec.SecID)
+		}
 	}
+	c.mu.Unlock()
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].SecID != items[j].SecID {
 			return items[i].SecID < items[j].SecID
@@ -79,28 +85,8 @@ func (c *Client) changeSubscription(ctx context.Context, sub Subscription, on bo
 	if err := conn.Subscribe(ctx, items); err != nil {
 		return err
 	}
-	// Like the DLL, request the security specs of the subscribed securities
-	// right after the subscribe (the payload order is the reverse of the XML
-	// elements, RQ_SEC_SPEC needs no counter).
-	var ids []uint16
-	for _, s := range []struct {
-		symbols []model.Symbol
-	}{
-		{sub.AllTrades}, {sub.Quotations}, {sub.Quotes},
-	} {
-		for _, symbol := range s.symbols {
-			if _, ok := next[symbol]; !ok {
-				continue
-			}
-			if sec, _, ok := catalog.Lookup(symbol.Board, symbol.SecCode); ok {
-				ids = append(ids, sec.SecID)
-			}
-		}
-	}
-	reverseIDs(ids)
-	if err := c.loadSecSpecs(ctx, ids); err != nil {
-		return err
-	}
+	// The subscription state is updated first: a failed best-effort spec refresh
+	// must not leave the client thinking the subscribe did not happen.
 	c.mu.Lock()
 	for s, mask := range next {
 		if mask == 0 {
@@ -110,6 +96,16 @@ func (c *Client) changeSubscription(ctx context.Context, sub Subscription, on bo
 		}
 	}
 	c.mu.Unlock()
+	if on {
+		// Like the DLL, RQ_SEC_SPEC is requested only after a successful
+		// subscribe (never on unsubscribe), in the reverse order of the symbols.
+		reverseIDs(specIDs)
+		if err := c.loadSecSpecs(ctx, specIDs); err != nil {
+			// The cache refresh is best-effort: the DLL does not fail the
+			// subscribe when the spec lookup fails, and neither do we.
+			return nil
+		}
+	}
 	return nil
 }
 
