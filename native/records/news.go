@@ -40,14 +40,20 @@ type NewsUpload struct {
 // field is not padded, so the NUL is part of the stream and the next field
 // starts right after it (news-repro.md).
 func readCString(r *wire.Reader, max int) (string, error) {
-	var out []byte
-	for i := 0; i < max; i++ {
+	// A C-string may hold exactly max characters; the NUL is the (max+1)-th
+	// byte of the field. Reading one extra byte distinguishes "exactly max" from
+	// "longer than max" (news/messages repro notes).
+	out := make([]byte, 0, max)
+	for i := 0; i <= max; i++ {
 		b, err := r.Byte()
 		if err != nil {
 			return "", fmt.Errorf("C-string: %w", err)
 		}
 		if b == 0 {
 			return string(out), nil
+		}
+		if i == max {
+			return "", fmt.Errorf("C-string longer than %d bytes without NUL", max)
 		}
 		out = append(out, b)
 	}

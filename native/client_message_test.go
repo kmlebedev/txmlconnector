@@ -135,3 +135,46 @@ func TestMessageRenderBatch(t *testing.T) {
 		t.Fatalf("MessagesXML = %s", got)
 	}
 }
+
+// TestMessageTimeBiasTable: the RQ_TIME bias shifts the UTC instant used for
+// the HH:MM:SS part (wall 1762300000 = 23:46:40 UTC).
+func TestMessageTimeBiasTable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bias int16
+		date string
+	}{
+		{"utc", 0, "23:46:40"},
+		{"plus3h", 180, "02:46:40"},
+		{"minus2h", -120, "21:46:40"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newRunServer(t)
+			messageRqTime(t, srv, 1762300000, tc.bias)
+			srv.Snapshot = clientSnapshot(t)
+			c := New(Config{Dial: srv.Dial})
+			rec := newRecorder()
+			if err := c.Start(rec.handle); err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			send(t, c, connectCommand())
+			rec.next(t, "<server_status")
+			srv.QueueMain(readOrderFixture(t, "message-inject.hex"))
+			got := rec.next(t, "<messages")
+			if !strings.Contains(got, "<date>"+tc.date+"</date>") {
+				t.Fatalf("date = %s, want %s", got, tc.date)
+			}
+		})
+	}
+}
+
+// TestMessageTextCDATA: text is wrapped in CDATA; we escape ]]> (DLL likely
+// inserts as-is - I) and check the escaped form.
+func TestMessageTextCDATA(t *testing.T) {
+	item := model.Message{Time: time.Unix(1762300000, 0).UTC(), From: "A", Text: "a]]>b"}
+	want := "<messages><message><date>23:46:40</date><urgent>N</urgent><from>A</from><text><![CDATA[a]]]]><![CDATA[>b]]></text></message></messages>"
+	if got := xmlcompat.MessagesXML([]model.Message{item}); got != want {
+		t.Fatalf("MessagesXML = %s, want %s", got, want)
+	}
+}
