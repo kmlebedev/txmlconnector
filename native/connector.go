@@ -356,6 +356,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.SecInfoUpdateXML(*e))
 			case *model.Quotation:
 				c.emit(xmlcompat.QuotationXML(*e))
+			case *model.Quotes:
+				c.emit(xmlcompat.QuotesXML(*e))
 			case model.ServerStatus:
 				switch {
 				case e.Recover:
@@ -506,9 +508,6 @@ func (c *Connector) subscribe(ctx context.Context, command string, on bool) (str
 	if err := xml.Unmarshal([]byte(command), &req); err != nil {
 		return failure(err.Error()), nil
 	}
-	if req.Quotes != nil {
-		return failure(msgNotImplemented), nil
-	}
 	c.mu.Lock()
 	client := c.client
 	c.mu.Unlock()
@@ -534,6 +533,18 @@ func (c *Connector) subscribe(ctx context.Context, command string, on bool) (str
 		return failure(err.Error()), nil
 	}
 	sub.AllTrades = symbols
+	if req.Quotes != nil {
+		// The DLL accepts only the first element of one feed block (S for
+		// <quotations>; the same shape is used for <quotes>).
+		quotes, err := resolve(*req.Quotes)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		if len(quotes) > 1 {
+			quotes = quotes[:1]
+		}
+		sub.Quotes = quotes
+	}
 	if req.Quotations != nil {
 		// The DLL accepts only the first <quotations> element of one command (S).
 		quotations, err := resolve(*req.Quotations)

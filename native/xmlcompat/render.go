@@ -41,6 +41,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return SecInfoUpdateXML(*e), true
 	case *model.Quotation:
 		return QuotationXML(*e), true
+	case *model.Quotes:
+		return QuotesXML(*e), true
 	}
 	return "", false
 }
@@ -259,5 +261,39 @@ func QuotationXML(q model.Quotation) string {
 	decField("buydeposit", f.BuyDeposit)
 	decField("selldeposit", f.SellDeposit)
 	b.WriteString("</quotation></quotations>")
+	return b.String()
+}
+
+// QuotesXML renders one <quotes> order book callback (FUN_1800f7b40): all levels
+// of the snapshot in wire order (buy levels, then sell levels), each as
+// <quote secid><board><seccode><price><yield><buy|sell>.
+func QuotesXML(book model.Quotes) string {
+	var b strings.Builder
+	b.WriteString("<quotes>")
+	for _, level := range book.Levels {
+		b.WriteString("<quote secid=" + quoteAttr(strconv.Itoa(int(level.SecID))) + ">")
+		b.WriteString("<board>" + escape(book.Board) + "</board>")
+		b.WriteString("<seccode>" + escape(book.Symbol.SecCode) + "</seccode>")
+		if level.Buy != -1 && level.Sell != -1 {
+			b.WriteString("<price>" + level.Price.String() + "</price>")
+		}
+		yield := 0
+		if level.Yield != nil {
+			yield = *level.Yield
+		}
+		b.WriteString("<yield>" + strconv.Itoa(yield) + "</yield>")
+		switch {
+		case level.Buy == -1:
+			b.WriteString("<buy>-1</buy>")
+		case level.Sell == -1:
+			b.WriteString("<sell>-1</sell>")
+		case level.Sell != 0:
+			b.WriteString("<sell>" + strconv.FormatInt(level.Sell, 10) + "</sell>")
+		default:
+			b.WriteString("<buy>" + strconv.FormatInt(level.Buy, 10) + "</buy>")
+		}
+		b.WriteString("</quote>")
+	}
+	b.WriteString("</quotes>")
 	return b.String()
 }

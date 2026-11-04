@@ -140,6 +140,30 @@ func Records(p []byte) ([]Record, error) {
 				return out, fmt.Errorf("R_UNION unicat: %w", err)
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagQuotes:
+			start := len(p) - r.Len()
+			if _, err := r.Uint16(); err != nil {
+				return out, fmt.Errorf("R_QUOTES secid: %w", err)
+			}
+			if _, err := r.Uint16(); err != nil {
+				return out, fmt.Errorf("R_QUOTES board: %w", err)
+			}
+			for {
+				side, err := r.Byte()
+				if err != nil {
+					return out, fmt.Errorf("R_QUOTES side: %w", err)
+				}
+				if side == 0xff {
+					break
+				}
+				if _, err := r.Int32(); err != nil {
+					return out, fmt.Errorf("R_QUOTES price delta: %w", err)
+				}
+				if _, err := r.Int32(); err != nil {
+					return out, fmt.Errorf("R_QUOTES quantity: %w", err)
+				}
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagQuotation:
 			start := len(p) - r.Len()
 			if _, err := r.Uint16(); err != nil {
