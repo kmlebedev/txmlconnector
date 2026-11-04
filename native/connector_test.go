@@ -2,8 +2,10 @@ package native
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"math"
 	"net"
 	"os"
 	"strings"
@@ -603,4 +605,54 @@ func TestUnionRecordReachesLoadEnd(t *testing.T) {
 	}
 	rec.next(t, "<overnight")
 	rec.next(t, "<server_status")
+}
+
+// secParamRecord builds one sized R_SEC_PARAM record for the testserver: mask
+// 0x9 (bit0 money value + bit3 point_cost), as validated against the DLL.
+func secParamRecord(t *testing.T, secid uint16, money int64, pointCost float64) []byte {
+	t.Helper()
+	var w wire.Writer
+	w.Uint16(secid)
+	w.Int64(0x9) // bits 0x1 (money) and 0x8 (point_cost)
+	w.Int64(money)
+	w.Raw([]byte{0, 0}) // the two header bytes of the point_cost block
+	var raw [8]byte
+	binary.LittleEndian.PutUint64(raw[:], math.Float64bits(pointCost))
+	w.Raw(raw[:])
+	body := w.Bytes()
+	rec := make([]byte, 3+len(body))
+	rec[0] = records.TagSecParam
+	rec[1] = byte(len(body) >> 8)
+	rec[2] = byte(len(body))
+	copy(rec[3:], body)
+	return rec
+}
+
+// TestConnectorSecInfoUpd checks the XML path end to end: a R_SEC_PARAM fetched
+// after the subscription reaches the Connector handler as <sec_info_upd>.
+func TestConnectorSecInfoUpd(t *testing.T) {
+	// The catalog comes from the recorded demo snapshot, which knows SBER 26.
+	srv := newRunServer(t)
+	srv.AfterSubscribe = secParamRecord(t, 26, 3272739, 100)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	sub := "<command id=" + quote + "subscribe" + quote + "><alltrades>"
+	sub += "<security><board>TQBR</board><seccode>SBER</seccode></security></alltrades></command>"
+	if got := send(t, c, sub); got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("subscribe = %s", got)
+	}
+	// The values are hardcoded (the DLL money format: hundredths with exactly
+	// two decimals; point_cost %g) and only the catalog identity comes from the
+	// demo snapshot.
+	want := "<sec_info_upd><secid>26</secid><seccode>SBER</seccode><market>1</market>"
+	want += "<buy_deposit>32727.39</buy_deposit><point_cost>100</point_cost></sec_info_upd>"
+	if got := rec.next(t, "<sec_info_upd"); got != want {
+		t.Fatalf("sec_info_upd = %s, want %s", got, want)
+	}
 }
