@@ -127,6 +127,49 @@ func Records(p []byte) ([]Record, error) {
 				return out, fmt.Errorf("record %#02x: %w", tag, err)
 			}
 			out = append(out, Record{Tag: tag, Body: body})
+		case tag == TagCandles:
+			// R_HISTORY is not length-delimited: its last packed value is the
+			// status, so the splitter expects one record at the start of the
+			// payload (the DLL sends each history part in its own reply; several
+			// records in one payload would be ambiguous — I).
+			start := len(p) - r.Len()
+			// Walk the record once to find its end: W,W,B,B, then candles until
+			// only the packed status is left.
+			c := wire.NewReader(p[start:])
+			if _, err := c.Uint16(); err != nil {
+				return out, fmt.Errorf("R_HISTORY: %w", err)
+			}
+			if _, err := c.Uint16(); err != nil {
+				return out, fmt.Errorf("R_HISTORY: %w", err)
+			}
+			if _, err := c.Byte(); err != nil {
+				return out, fmt.Errorf("R_HISTORY: %w", err)
+			}
+			flag, err := c.Byte()
+			if err != nil {
+				return out, fmt.Errorf("R_HISTORY: %w", err)
+			}
+			for c.Len() > 0 {
+				if c.Len() <= 5 {
+					if _, err := c.Int32(); err != nil {
+						return out, fmt.Errorf("R_HISTORY status: %w", err)
+					}
+					break
+				}
+				for i := 0; i < 7; i++ {
+					if _, err := c.Int32(); err != nil {
+						return out, fmt.Errorf("R_HISTORY candle: %w", err)
+					}
+				}
+				if flag != 0 {
+					if _, err := c.Int32(); err != nil {
+						return out, fmt.Errorf("R_HISTORY openinterest: %w", err)
+					}
+				}
+			}
+			n := len(p[start:]) - c.Len()
+			r.Raw(n)
+			out = append(out, Record{Tag: tag, Body: p[start : start+n]})
 		case tag == TagFortsSession:
 			start := len(p) - r.Len()
 			if _, err := r.Int32(); err != nil {

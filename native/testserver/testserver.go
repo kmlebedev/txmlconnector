@@ -66,6 +66,9 @@ type Server struct {
 	// SID is the server id reported in RQ_PWD (and used by RQ_RELOGIN when
 	// ReloginSID is 0); New sets it to defaultSID.
 	SID int
+	// HistoryParts are queued as RQ_MAIN payloads in reply to RQ_HISTORY_EXT
+	// (the gethistorydata candle records of the tests).
+	HistoryParts [][]byte
 	// SecSpec is the reply payload of RQ_SEC_SPEC (the RQ_SEC_SPEC records of
 	// native/testdata/secinfo-live.hex.gz in tests); nil replies empty.
 	SecSpec []byte
@@ -87,7 +90,11 @@ type Server struct {
 	conns    []net.Conn
 	logouts  int
 	pending  []byte
-	delay    time.Duration
+	// historyQueue carries the HistoryParts one RQ_MAIN reply per part (each
+	// part is a separate DLL reply; R_HISTORY is not length-delimited, so several
+	// records in one payload cannot be split reliably).
+	historyQueue [][]byte
+	delay        time.Duration
 }
 
 // New returns a server that reports protocol errors through t.
@@ -256,6 +263,11 @@ func (s *Server) serve(nc net.Conn) {
 			if err = reply(wire.KindReply, f.Type, w.Bytes()); err == nil {
 				keys, err = wire.NewKeys(sessionKey, sessionSync)
 			}
+		case session.RqHistoryExt, session.RqHistory:
+			s.mu.Lock()
+			s.historyQueue = append(s.historyQueue, s.HistoryParts...)
+			s.mu.Unlock()
+			err = reply(wire.KindReply, f.Type, nil)
 		case session.RqSecSpec:
 			s.mu.Lock()
 			payload := s.SecSpec
@@ -274,6 +286,9 @@ func (s *Server) serve(nc net.Conn) {
 			snapshot = nil
 			if payload == nil {
 				payload, s.pending = s.pending, nil
+			}
+			if payload == nil && len(s.historyQueue) > 0 {
+				payload, s.historyQueue = s.historyQueue[0], s.historyQueue[1:]
 			}
 			delay := s.delay
 			s.mu.Unlock()

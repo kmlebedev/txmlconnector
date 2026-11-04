@@ -273,6 +273,56 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		c.emit(msg)
 		return success(), nil
+	case "gethistorydata":
+		var req struct {
+			Security *struct {
+				Board   string `xml:"board"`
+				SecCode string `xml:"seccode"`
+			} `xml:"security"`
+			Period int    `xml:"period"`
+			Count  int    `xml:"count"`
+			Reset  string `xml:"reset"`
+			SecID  int    `xml:"secid,attr"`
+			// Attribute form: <command id="gethistorydata" secid=... period=...>
+			APeriod int    `xml:"period,attr"`
+			ACount  int    `xml:"count,attr"`
+			AReset  string `xml:"reset,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		var symbol model.Symbol
+		var ok bool
+		switch {
+		case req.Security != nil && req.Security.SecCode != "":
+			symbol, ok = client.SymbolByBoard(req.Security.Board, req.Security.SecCode)
+		case req.SecID != 0:
+			symbol, ok = client.SymbolBySecID(uint16(req.SecID))
+		}
+		if !ok {
+			return failure("unknown security"), nil
+		}
+		period, count := req.Period, req.Count
+		if period == 0 {
+			period = req.APeriod
+		}
+		if count == 0 {
+			count = req.ACount
+		}
+		reset := req.Reset == "true" || req.Reset == "1" || req.AReset == "true" || req.AReset == "1"
+		// The DLL accepts the command only with an established connection (S).
+		candles, err := client.History(ctx, HistoryRequest{Symbol: symbol, Period: period, Count: count, Reset: reset})
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.CandlesXML(candles))
+		return success(), nil
 	case "get_securities_info":
 		var req struct {
 			Security []struct {

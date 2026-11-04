@@ -91,6 +91,7 @@ type Client struct {
 	unions        []model.Union
 	overnight     model.Overnight
 	secSpecs      map[uint16]records.SecSpec
+	history       map[historyKey]*historyCollector
 }
 
 // Dial logs in, loads the dictionaries and the initial snapshot (RQ_TIME,
@@ -128,7 +129,7 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	// becomes half the window (docs/protocol/connect.md).
 	cfg.RequestTimeout = normalizeRequestTimeout(cfg.RequestTimeout, effectiveSessionTTL(cfg.SessionTimeout, info))
 	conn.SetRequestTimeout(cfg.RequestTimeout)
-	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}, secSpecs: map[uint16]records.SecSpec{}}
+	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}, secSpecs: map[uint16]records.SecSpec{}, history: map[historyKey]*historyCollector{}}
 	c.resetAccountsLocked()
 	if err := c.load(ctx, conn); err != nil {
 		conn.Close()
