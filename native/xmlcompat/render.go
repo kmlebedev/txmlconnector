@@ -56,6 +56,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return MarketOrdXML(*e), true
 	case *model.NewsHeader:
 		return NewsHeaderXML(*e), true
+	case *model.Messages:
+		return MessagesXML(e.Items), true
 	}
 	return "", false
 }
@@ -977,4 +979,26 @@ func NewsHeaderXML(h model.NewsHeader) string {
 // NewsBodyXML renders <news_body> (D form; the emit mechanics are I).
 func NewsBodyXML(b model.NewsBody) string {
 	return "<news_body><id>" + strconv.FormatInt(b.ID, 10) + "</id><text><![CDATA[" + cdata(b.Text) + "]]></text></news_body>"
+}
+
+// MessageXML renders one <message> item (messages.md D/O): only HH:MM:SS of the
+// UTC instant (the machine-local conversion is I), Y/N urgency and CDATA text.
+func MessageXML(m model.Message) string {
+	urgent := "N"
+	if m.Urgent {
+		urgent = "Y"
+	}
+	return "<message><date>" + m.Time.UTC().Format("15:04:05") + "</date><urgent>" + urgent +
+		"</urgent><from>" + escape(m.From) + "</from><text><![CDATA[" + cdata(m.Text) + "]]></text></message>"
+}
+
+// MessagesXML renders the batch of one RQ_MAIN reply in record order (O).
+func MessagesXML(messages []model.Message) string {
+	var b strings.Builder
+	b.WriteString("<messages>")
+	for _, m := range messages {
+		b.WriteString(MessageXML(m))
+	}
+	b.WriteString("</messages>")
+	return b.String()
 }
