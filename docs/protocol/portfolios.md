@@ -23,8 +23,11 @@
   в том же обменнике; layout запроса/ответа **не разобран (I)** — нужен Ghidra-проход по
   функциям, ссылающимся на строки `RQ_FOND_PORTFOLIO send failed/incorrect server response`.
 - `RQ_MARGIN_POS` (84) / `RQ_MARGIN_POS_LIST` (85) — маржинальные позиции; строки
-  `MarginPosRequest/MarginPosRequestList return incorrect buffer`, `RQ_MARGIN_POS(_LIST) write failed`;
-  layout — I.
+  `MarginPosRequest/MarginPosRequestList return incorrect buffer`, `RQ_MARGIN_POS(_LIST) write failed`.
+  Форматы запроса/ответа восстановлены (**D**) — см. `docs/protocol/margin.md`, раздел
+  «RQ_MARGIN_POS (84) и RQ_MARGIN_POS_LIST (85)». В DLL 6.47 оба обменника **недостижимы**
+  (мёртвый код: нет call/lea/указателей/relocations, только `.pdata`), поэтому оракул reply-84/85
+  невозможен и в живых сессиях эти запросы не встречаются (**D/O**).
 - `RQ_GET_RPSREPO` (82) — РПС/РЕПО-портфель: `RQ_GET_RPSREPO write failed`, `read failed`,
   `RQ_GET_RPSREPO Next failed`; `RQ_RPSREPO_SUBSCR` — подписка на изменения РПС/РЕПО;
   `TRN_NEWRPSREPO` — соответствующая транзакция; layout — I.
@@ -46,10 +49,15 @@
 - **RQ_FOND_PORTFOLIO (86 = 0x56)**, обменник `FUN_180383d30`: ответ читается как `G, G, W, W, W,
   W (+смещения +6, +7, +8, +9), W` — предварительно 2 packed-G + 7 W (точное назначение полей и
   наличие масок — I; строки `RQ_FOND_PORTFOLIO send failed / incorrect server response`).
-- **RQ_MARGIN_POS_LIST (85 = 0x55)**, обменник `FUN_180382940`: ответ — 7 × packed-G (I).
-- **RQ_MARGIN_POS (84 = 0x54)**, обменник `FUN_180383100`: ответ — ~19 полей в структуру со
-  смещениями: `G+8, G+0x10, W+0x18, W+0x40, W+0x1a, G+0x20, G+0x28, G+0x30, G+0x38, W+0x80,
-  W+0x82, W+0x84, W+0x86, B+0x88, G+0x48, G+0x50, G+0x58, G+0x60, …` (stride/семантика — I).
+- **RQ_MARGIN_POS_LIST (85 = 0x55)**, обменник `FUN_180382940` (**D**, недостижим):
+  запрос — `FUN_1801c2030(stream,1); L client_id; B flag; W secid ×N` (по элементу списка
+  stride 0x30, secid @+0); ответ — для каждого элемента 7 × packed-G в поля +0x28, +0x30, +0x38,
+  +0x40, +0x48, +0x50, +0x58. Единственный вызывающий — `FUN_180362600` (расчёт маржи по
+  клиенту/юниону), сам не вызывается ниоткуда — мёртвый код.
+- **RQ_MARGIN_POS (84 = 0x54)**, обменник `FUN_180383100` (**D**, недостижим): запрос —
+  `FUN_1801c2030(stream,1); L client_id; W secid; B flag`; ответ — структура 0x90 Б, две ветки
+  (обычный клиент / тип 4–5) и блок полей, читаемых при `B+0x88 != 0`; полная таблица смещений —
+  `docs/protocol/margin.md`. Семантика полей — **I** (обменник никем не вызывается).
 - **RQ_GET_RPSREPO (82 = 0x52)**: отправка найдена в функции, ссылающейся на строку `RQ_GET_RPSREPO`
   (в декомпилированной секции `FUN_1803b5c30` вместе с другими обменниками; точный адрес
   обменника требует отдельного прохода — I); ответ/поля не восстановлены.
@@ -57,10 +65,10 @@
 
 ## Oracle/фикстуры
 
-- Oracle-съёмка reply 84/85/86/82 через dump-редакцию + команды `get_portfolio*` — следующий шаг
+- Oracle-съёмка reply 86/82 через dump-редакцию + команды `get_portfolio*` — следующий шаг
   (схема RE-3 как task-24/35); фикстур `portfolio-*` пока нет.
-- Утренняя S-сессия: те же команды живьём; план — `docs/deepseek/re-session-checklist.md`.EOF
-echo ok
+- Oracle reply 84/85 невозможен: обменники недостижимы в DLL 6.47 (**D**, см. `margin.md`).
+- Утренняя S-сессия: те же команды живьём; план — `docs/deepseek/re-session-checklist.md`.
 
 ## O-находка: portfolio-команды — ЛОКАЛЬНЫЙ рендер (без запросов к серверу)
 
@@ -91,8 +99,7 @@ input-фикстуры (reply/hex) пока не применимы: commands lo
 `portfolio-*-inject.hex` + `*-dll.xml` (следующий шаг, вместе с построением стора).
 - I: как именно считаются equity/cover/init_req/maint_req/unrealized_pnl (формулы), поведение
   `get_portfolio_mct` (формат client), `<portfolio_tplus>`/`<portfolio_forts>`/`<united_portfolio>`
-  (в этом прогоне не отдались; в первом probe были `<portfolio_tplus>`×2 и `<united_portfolio>`).EOF
-echo ok
+  (в этом прогоне не отдались; в первом probe были `<portfolio_tplus>`×2 и `<united_portfolio>`).
 
 ## Статус (итог ночной RE-сессии)
 
@@ -100,8 +107,9 @@ echo ok
   отвечают success и рендерят XML локально из сторов (в C>S нет кадров 86/84/85/82) — подтверждено
   оракулом на записанной сессии; <portfolio_currency> и <mc_portfolio> формы сняты и лежат в
   фикстурах portfolio-currency-dll.xml, portfolio-mc-dll.xml (обезличены).
-- **D:** имена/строки обменников и preliminary-форматы 86/84/85/82 (FUN_180383d30/FUN_180382940/
-  FUN_180383100; RQ_GET_RPSREPO — адрес требует уточнения).
+- **D:** имена/строки обменников и preliminary-формат 86 (FUN_180383d30; RQ_GET_RPSREPO — адрес
+  требует уточнения); форматы 84/85 восстановлены полностью, но обменники недостижимы в 6.47 —
+  `docs/protocol/margin.md`.
 - **I (не восстановлено):** формулы equity/cover/init_req/maint_req/unrealized_pnl; формат параметра
   client для get_portfolio_mct (сейчас «{8} Неверное значение szClient»); <portfolio_tplus>,
   <portfolio_forts>, <united_portfolio>; RQ_FORTS_FIRM_MONEY (47) layout.
