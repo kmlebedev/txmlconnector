@@ -41,8 +41,8 @@
 | 21 | get_forts_positions/get_client_limits | 4 | **partial** | `client_positions.go`, `records/limits.go`, `session/limits.go`; oracle `<clientlimits>` ждёт; RQ_FORTS_FIRM_MONEY 47 не реализован (формат I) |
 | 22 | portfolio-команды | 4 | **partial** | `client_portfolio.go`, `records/portfolio.go`, `xmlcompat` local render; O-фикстуры `portfolio-currency/mc-dll.xml`; остальные формы/типы — I (5f3ef49, 5bd73dc) |
 | 23 | max buy/sell, cln_sec_permissions, leverage | 5 | **stub** | каркас 6a57f75: `model/margin.go`, `client_margin.go`, I-ошибки; ждёт RE-2 |
-| 24 | news/get_old_news/get_news_body | 6 | **stub** | каркас 6a57f75: `model/news.go`, `records/news.go`, `session/news.go`; ждёт RE-2 |
-| 25 | messages (R_MSG 0x01) | 6 | **stub** | каркас 6a57f75: `model/message.go`, `records/message.go`; layout I |
+| 24 | news/get_old_news/get_news_body | 6 | **partial** | 0x35/0x36 парсеры+splitter, `<news_header>` O-побайтно, RQ_GETNEWS payloads (7484ffc); `<news_body>` — I (reply-механика, task-56) |
+| 25 | messages (R_MSG 0x01) | 6 | **done** | unsized 0x01, batch одного RQ_MAIN, `<messages>` O-побайтно (73a4acc/6cb9697) |
 | 26 | change_pass | 6 | **none** | только RE-3 без живой смены пароля |
 | 27 | options | 7 | **none** | — |
 | 28 | RPS/REPO/отчёты | 8 | **none** | — |
@@ -92,11 +92,13 @@
 | get_max_buy_sell_tplus | done (local) | локальный рендер из сторов | O/D | `TestMarginMatchDLL`, `margin-dll.xml` | MCT -> ошибка; точная формула по R_SEC_RATE 0x0a (a217bc1) |
 | get_max_buy_sell | done (local) | локальный рендер | O/D | `TestMarginMatchDLL`, `TestMarginMCTBehavior` | MCT -> success 0/0; cross/шорт по margin.md (a217bc1) |
 | get_cln_sec_permissions | done (local) | локальный рендер | O/D | `TestClnSecPermissionsMatchDLL` | marketable из 0x0e; права/ставки I (FUN_18001a700) |
+| get_old_news | done | RQ_GETNEWS 73 (mode 1) | O/D | `TestOldNewsPayloadMatchesDLL`, `news-inject.hex` | заголовки — события 0x35/0x36; O-пейлоады 713e913e0201 / 017d217d0201 |
+| get_news_body | done (команда) | RQ_GETNEWS 73 (mode 2) | O/D | `TestGetNewsBodyRequest`, `TestNewsErrors` | payload 217d217d0102; `<news_body>` — I (task-56) |
 
 ### 2.3 Не реализовано в Connector (default → message not implemented)
 
 authenticate, set_csp (внешние криптопровайдеры; T29), cancelnegdeal, change_pass,
-get_family_strikes, get_news_body, get_old_news, get_option_families, get_options,
+get_family_strikes, get_option_families, get_options,
 makeordown, moveorder, newmrepoorder, newrepoorder, newrpsorder (14 имён). Соответствие задачам: T19 (moveorder/
 makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Плюс отсутствуют `newreport4`/`cancelreport4` (T28/T29).
 
@@ -104,7 +106,7 @@ makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Пл�
 
 | Tag | Запись | Splitter | Декодер/состояние | XML-форма | Факт | Тесты/фикстуры |
 |---|---|---|---|---|---|---|
-| 0x01 | R_MSG | — (нет case) | нет | `<messages>` нет (T25 stub) | D/I | — |
+| 0x01 | R_MSG | unsized walker (C-строки) | decodeMessage → Message, батч `<messages>` | `<messages>` | O | `message-inject.hex`, `TestMessagesMatchDLL/UrgentAndTimeBias` |
 | 0x02 | R_CLN_NEW (sized) | sizedTags | decodeClientNew → ClientAccount + pendingOrders | `<client>` (конец загрузки) | O | `snapshot-tail-live*`, `TestSnapshotTailMatchesDLL` |
 | 0x03 | R_ORD_NEW (sized) | sizedTags | decodeOrderNew → Order (фильтр client id) | `<orders>` | O | `order-new-*`, `TestConnectorOrders` |
 | 0x04 | R_TRD (sized) | sizedTags | decodeClientTrade → ClientTrade | `<trades>` | O | `trade-*`, `TestConnectorTradesCallback` |
@@ -120,8 +122,8 @@ makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Пл�
 | 0x18 | R_OVERNIGHT | 1 байт | decodeOvernight → Overnight | `<overnight>` | O | `TestOvernightRecordReachesStatus` |
 | 0x28 | R_SEC_NEW (sized) | sizedTags | нет декодера (каталог из RQ_STARTUP) | — | D/I | `TestParseSecNewSnapshot` (records) |
 | 0x34 | R_BOARD (sized) | sizedTags | нет декодера (каталог из RQ_STARTUP) | — | D/I | — |
-| 0x35 | R_NEWS | — (нет case; только TagNews) | нет (T24 stub) | `<news_header>` нет | D/I | — |
-| 0x36 | R_NEWS_UPLOAD | — (нет case) | нет (T24 stub) | — | D/I | — |
+| 0x35 | R_NEWS | unsized walker (C-строки) | decodeNewsHeader → NewsHeader + store | `<news_header>` | O | `news-inject.hex`, `TestNewsHeadersMatchDLL` |
+| 0x36 | R_NEWS_UPLOAD | unsized walker (C-строки) | decodeNewsUpload → NewsHeader + zlib body в стор | `<news_header>` | O | `news-inject.hex`; `<news_body>` I (task-56) |
 | 0x3a | R_ORD_RENEW (sized) | sizedTags | нет декодера | — | D/I | — |
 | 0x3b | R_CLIENT_ASSET (sized) | sizedTags | decodeClientAsset → MoneyPosition/SecPosition/Forts* | `<positions>/<sec_positions>/<forts_positions>` | O | `position-*`, `snapshot-tail*` |
 | 0x3d | R_DATE | special (L) | state-only | — | D | `TestParseEndOfLoadRecords` |
@@ -193,7 +195,9 @@ makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Пл�
 | `<marketord>` | MarketOrd | `MarketOrdXML` | `marketord-dll.xml` | O |
 | `<portfolio_tplus>`/`<portfolio_forts>`/`<united_portfolio>`/`<portfolio_mct>` | — | только литеральные скелеты, не в Render | — | I (T22 remaining) |
 | `<ticks>` | Tick | рендер не реализован | нет | T14 partial |
-| `<news_header>`/`<messages>` | NewsHeader/Message | нет | нет | T24/T25 stub |
+| `<news_header>` | NewsHeader | `NewsHeaderXML` | `news-dll.xml` | O |
+| `<news_body>` | NewsBody | `NewsBodyXML` (D-форма) | нет O | I (task-56) |
+| `<messages>` | Messages batch | `MessagesXML` | `message-dll.xml` | O |
 
 ## 6. Тесты и фикстуры по подсистемам
 
@@ -218,9 +222,10 @@ makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Пл�
 5. **T23**: local render 3 команд и <marketord> сделаны (b29b757/6867d83); maxbuy/maxsell — точная
    формула из R_SEC_RATE 0x0a + позиций (a217bc1, побайтно по margin-dll.xml). Остаются I:
    permissions=false/regrate=0 (mask/rates FUN_18001a700 не в RQ_MAIN), источник R и начальный V — I.
-   **T24–T25**: только каркас (6a57f75), явные I-ошибки; ждут RE-2/RE-3 материалы.
+   **T24**: заголовки/команды сделаны (7484ffc), `<news_body>` reply-механика — I (task-56).
+   **T25**: сделано (73a4acc/6cb9697), O-побайтно.
 6. **T26–T28**: не начаты (change_pass, options, RPS/REPO).
-7. **T29**: 29/43 XML-команд в Connector; native backend `server/`, матрица 45 имён и тексты
+7. **T29**: 31/43 XML-команд в Connector; native backend `server/`, матрица 45 имён и тексты
    ошибок (Task 29 Step 1/1b) — не сделаны; нет `newreport4`/`cancelreport4` (task-index `8.1).
 8. **Windows/Wine**: нативный клиент сборками `make server_build/queues_build` и `make verify`
    проверяется; отдельного прогона native на Windows не было (не проверено).
