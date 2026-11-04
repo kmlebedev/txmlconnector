@@ -22,13 +22,23 @@ var quote = string('"')
 // minutes, daylight -60), the value RQ_TIME carries after the timestamp.
 var russianZone = [16]byte{0x4c, 0xff, 0x00, 0x00, 0xc4, 0xff}
 
+// fakeUTCWall returns the local wall clock encoded as a fake UTC instant: the
+// calendar components of t in the local zone taken as UTC. The DLL compares wall
+// clocks this way (Windows wall time carries no zone), so tests built on it do
+// not depend on the host time zone.
+func fakeUTCWall(t time.Time) time.Time {
+	y, mo, d := t.Date()
+	h, mi, sec := t.Clock()
+	return time.Date(y, mo, d, h, mi, sec, 0, time.UTC)
+}
+
 // TestServerTimeDifference uses a testserver clock shifted by -2 s: the DLL gets
 // the server clock minus the local one, so the result must be about -2 s.
 func TestServerTimeDifference(t *testing.T) {
 	srv := newTestServer(t)
 	srv.Handle(session.RqTime, func([]byte) (byte, []byte) {
 		var w wire.Writer
-		w.Int32(int32(time.Now().Add(-2 * time.Second).Unix()))
+		w.Int32(int32(fakeUTCWall(time.Now()).Add(-2 * time.Second).Unix()))
 		w.Raw(russianZone[:])
 		return wire.KindReply, w.Bytes()
 	})
@@ -128,7 +138,7 @@ func TestServiceCommandsMatchDLL(t *testing.T) {
 	srv.SID = 0 // the fixture was captured on the demo server (SID 0)
 	srv.Handle(session.RqTime, func([]byte) (byte, []byte) {
 		var w wire.Writer
-		w.Int32(int32(time.Now().Add(-7200 * time.Second).Unix()))
+		w.Int32(int32(fakeUTCWall(time.Now()).Add(-7200 * time.Second).Unix()))
 		w.Raw(russianZone[:])
 		return wire.KindReply, w.Bytes()
 	})
@@ -446,4 +456,34 @@ func parseHexOrDecimal(t *testing.T, value string) int64 {
 		t.Fatalf("%q: %v", value, err)
 	}
 	return n
+}
+
+// TestServerTimeDifferenceLocalWall is the P2 regression of the wall-clock
+// semantics: a server reporting exactly the local wall clock gives diff≈0 on any
+// host time zone, while the old formula (server wall - time.Now().UTC()) added
+// the host offset (e.g. -18000 s on UTC+5).
+func TestServerTimeDifferenceLocalWall(t *testing.T) {
+	srv := newTestServer(t)
+	srv.Handle(session.RqTime, func([]byte) (byte, []byte) {
+		var w wire.Writer
+		w.Int32(int32(fakeUTCWall(time.Now()).Unix()))
+		w.Raw(russianZone[:])
+		return wire.KindReply, w.Bytes()
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, ClientConfig{
+		Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: srv.Dial,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	diff, err := c.ServerTimeDifference(ctx)
+	if err != nil {
+		t.Fatalf("ServerTimeDifference: %v", err)
+	}
+	if diff < -1*time.Second || diff > 1*time.Second {
+		t.Fatalf("ServerTimeDifference = %v, want 0 ±1s for a server reporting the local wall clock", diff)
+	}
 }
