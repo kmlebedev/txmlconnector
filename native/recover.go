@@ -247,6 +247,7 @@ func (c *Client) relogin(ctx context.Context) error {
 	c.mu.Lock()
 	c.resetAccountsLocked()
 	c.secSpecs = map[uint16]records.SecSpec{}
+	c.failHistoryParts(errors.New("transaq: connection was recovered"))
 	c.history = map[historyKey]*historyCollector{}
 	c.mu.Unlock()
 	// load re-runs the ClientConfig.OnDictionaries/OnSecurities callbacks, so
