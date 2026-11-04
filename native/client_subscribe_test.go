@@ -250,3 +250,63 @@ func TestConnectorQuotationsCommand(t *testing.T) {
 		}
 	}
 }
+
+// TestConnectorQuotesViaSubscription checks the <quotes> delivery path: mask
+// 0x02 is sent for a <quotes> command (not alltrades) and the R_QUOTES record
+// reaches the XML stream.
+func TestConnectorQuotesViaSubscription(t *testing.T) {
+	srv := newRunServer(t)
+	var w wire.Writer
+	w.Byte(records.TagQuotes)
+	w.Uint16(26)
+	w.Uint16(37)
+	w.Byte('B')
+	w.Int32(11203)
+	w.Int32(300)
+	w.Byte(0xff)
+	srv.AfterSubscribe = w.Bytes()
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	cmd := "<command id=" + quote + "subscribe" + quote + "><quotes><secid>26</secid></quotes></command>"
+	if got := send(t, c, cmd); got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("subscribe quotes = %s", got)
+	}
+	payloads := subscribePayloads(srv)
+	if got := payloads[len(payloads)-1]; got != "001a002502" {
+		t.Fatalf("RQ_SUBSCRIBE = %s, want 001a002502", got)
+	}
+	want := "<quotes><quote secid=" + quote + "26" + quote + "><board>TQBR</board>"
+	want += "<seccode>SBER</seccode><price>112.03</price><yield>0</yield><buy>300</buy></quote></quotes>"
+	if got := rec.next(t, "<quotes"); got != want {
+		t.Fatalf("quotes = %s, want %s", got, want)
+	}
+}
+
+// TestConnectorQuotesFirstElementOnly: several <quotes> blocks subscribe only
+// the first one (by analogy with <quotations>; S is proven for one block only).
+func TestConnectorQuotesFirstElementOnly(t *testing.T) {
+	srv := newRunServer(t)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	cmd := "<command id=" + quote + "subscribe" + quote + ">"
+	cmd += "<quotes><secid>26</secid></quotes><quotes><secid>379</secid></quotes></command>"
+	if got := send(t, c, cmd); got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("subscribe = %s", got)
+	}
+	payloads := subscribePayloads(srv)
+	if got := payloads[len(payloads)-1]; got != "001a002502" {
+		t.Fatalf("RQ_SUBSCRIBE = %s, want only the first block 001a002502", got)
+	}
+}

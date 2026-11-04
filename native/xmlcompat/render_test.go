@@ -126,3 +126,21 @@ func TestQuotationFixedMoney(t *testing.T) {
 }
 
 func ptrString(s string) *string { return &s }
+
+// TestQuotesDeletionRendersPrice pins the DLL order: <price> is built before the
+// deletion branch, so a deleted level still has its price (asm 0x1800faa27).
+func TestQuotesDeletionRendersPrice(t *testing.T) {
+	q := model.Quotes{SecID: 26, Symbol: model.Symbol{Board: "TQBR", SecCode: "SBER"}, Levels: []model.Quote{
+		{SecID: 26, Price: model.Decimal{Units: 0}, Buy: -1},
+		{SecID: 26, Price: model.Decimal{Units: 50, Scale: 2}, Sell: -1},
+	}}
+	got := xmlcompat.QuotesXML(q)
+	for _, want := range []string{
+		"<price>0</price><yield>0</yield><buy>-1</buy>",
+		"<price>0.5</price><yield>0</yield><sell>-1</sell>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("QuotesXML = %s, want substring %s", got, want)
+		}
+	}
+}

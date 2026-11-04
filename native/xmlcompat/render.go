@@ -285,9 +285,9 @@ func QuotesXML(book model.Quotes) string {
 		b.WriteString("<quote secid=" + quoteAttr(strconv.Itoa(int(level.SecID))) + ">")
 		b.WriteString("<board>" + escape(book.Board) + "</board>")
 		b.WriteString("<seccode>" + escape(book.Symbol.SecCode) + "</seccode>")
-		if level.Buy != -1 && level.Sell != -1 {
-			b.WriteString("<price>" + level.Price.String() + "</price>")
-		}
+		// The DLL builds <price> before the deletion branch, so even a deletion
+		// level keeps its price (asm 0x1800faa27/0x1800faad6).
+		b.WriteString("<price>" + level.Price.String() + "</price>")
 		yield := 0
 		if level.Yield != nil {
 			yield = *level.Yield
