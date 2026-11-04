@@ -1,6 +1,7 @@
 package native
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -80,5 +81,13 @@ func TestClientLimitsCommand(t *testing.T) {
 	}
 	if !sawLimits {
 		t.Fatal("no RQ_CLIENT_LIMITS request")
+	}
+}
+
+// TestClientLimitsUnknownClient: an unknown client code fails before any request.
+func TestClientLimitsUnknownClient(t *testing.T) {
+	c := &Client{}
+	if _, err := c.ClientLimits(context.Background(), "NOPE"); err == nil || !strings.Contains(err.Error(), "unknown client") {
+		t.Fatalf("err = %v, want unknown client", err)
 	}
 }

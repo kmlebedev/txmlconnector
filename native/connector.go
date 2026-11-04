@@ -457,6 +457,26 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure(err.Error()), nil
 		}
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(req.TransactionID, 10) + "\"/>", nil
+	case "cancelstoporder":
+		var req struct {
+			TransactionID uint64 `xml:"transactionid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.TransactionID == 0 {
+			return failure("You have to specify transactionid."), nil
+		}
+		if err := client.CancelStopOrder(ctx, model.TransactionID(req.TransactionID)); err != nil {
+			return failure(err.Error()), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(req.TransactionID, 10) + "\"/>", nil
 	case "get_client_limits":
 		var req struct {
 			Client string `xml:"client,attr"`
