@@ -29,6 +29,8 @@ const (
 	TxNewOrder TxKind = 1
 	// TxCancelOrder is TRN_CANCELORDER.
 	TxCancelOrder TxKind = 2
+	// TxCancelStopOrder is TRN_CANCELSTOPORDER (O payload 17 <packed L id>).
+	TxCancelStopOrder TxKind = 0x17
 )
 
 // ErrOutcomeUnknown reports a transaction whose fate is unknown: the request
