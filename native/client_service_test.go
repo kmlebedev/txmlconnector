@@ -2,13 +2,16 @@ package native
 
 import (
 	"context"
+	"encoding/hex"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kmlebedev/txmlconnector/native/cryptoprofile"
 	"github.com/kmlebedev/txmlconnector/native/session"
+	"github.com/kmlebedev/txmlconnector/native/testserver"
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
@@ -270,10 +273,177 @@ func TestConnectUTCTime(t *testing.T) {
 	}
 }
 
-// TestConnectOptionsMatchDLL checks that the Go connect requests are byte-equal
-// to the DLL capture for the same <connect> parameters: RQ_LOGIN, the RQ_PWD tail
-// after the proof for ru/en and the frame-type set. The fixture is the task-11
-// RE-2 capture; until it is committed the test is skipped.
+// connectFixture parses native/testdata/connect-options-live.txt: "key = value"
+// lines, '#' comments, surrounding quotes removed.
+func connectFixture(t *testing.T) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile("testdata/connect-options-live.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			t.Fatalf("bad fixture line %q", line)
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+			value = value[1 : len(value)-1]
+		}
+		out[key] = value
+	}
+	return out
+}
+
+// fixtureInt parses a decimal or 0x-prefixed fixture value.
+func fixtureInt(t *testing.T, fx map[string]string, key string) int64 {
+	t.Helper()
+	value, ok := fx[key]
+	if !ok {
+		t.Fatalf("fixture has no %s", key)
+	}
+	base := 10
+	text := value
+	if strings.HasPrefix(text, "0x") {
+		base, text = 16, text[2:]
+	}
+	n, err := strconv.ParseInt(text, base, 64)
+	if err != nil {
+		t.Fatalf("%s = %q: %v", key, value, err)
+	}
+	return n
+}
+
+// TestConnectOptionsMatchDLL compares the connect requests with the R6 live
+// capture (native/testdata/connect-options-live.txt): the RQ_LOGIN payload byte
+// for byte, the RQ_PWD tail after the proof for default/options (ru) and
+// language=en, and the frame-type set: <connect> options do not change the wire,
+// only language changes the RQ_PWD trailer.
 func TestConnectOptionsMatchDLL(t *testing.T) {
-	t.Skip("connect options fixture (R6 RE-2 runs, task-11) is not in the repository yet; enable the byte comparison when it lands")
+	fx := connectFixture(t)
+	if got := hex.EncodeToString(session.LoginPayload("TESTLOGIN")); got != fx["rq_login"] {
+		t.Fatalf("LoginPayload(TESTLOGIN) = %s, want %s", got, fx["rq_login"])
+	}
+
+	ci := session.ClientInfo{
+		ComputerName: fx["client.computer_name"],
+		UserName:     fx["client.user_name"],
+		OS:           fx["client.os"],
+		HardwareID:   fixtureInt(t, fx, "client.hardware_id"),
+	}
+	for _, address := range strings.Split(fx["client.addresses"], ",") {
+		ci.Addresses = append(ci.Addresses, int32(parseHexOrDecimal(t, address)))
+	}
+	pwKey, err := cryptoprofile.NewCipher(cryptoprofile.PasswordKey(testserver.Password))
+	if err != nil {
+		// testserver.Password is the captured password "TESTPASS".
+		t.Fatal(err)
+	}
+	for _, run := range []string{"default", "options", "lang_en"} {
+		proofLen := int(fixtureInt(t, fx, run+".rq_pwd_proof_len_excluded"))
+		ci.Trailer = byte(fixtureInt(t, fx, run+".rq_pwd_trailer"))
+		payload, err := session.PwdPayload(pwKey, make([]byte, proofLen), ci)
+		if err != nil {
+			t.Fatalf("%s: PwdPayload: %v", run, err)
+		}
+		if wantLen := int(fixtureInt(t, fx, run+".rq_pwd_payload_len")); len(payload) != wantLen {
+			t.Fatalf("%s: RQ_PWD payload = %d bytes, want %d", run, len(payload), wantLen)
+		}
+		got := hex.EncodeToString(payload[proofLen:])
+		if want := fx[run+".rq_pwd_tail"]; got != want {
+			t.Fatalf("%s: RQ_PWD tail = %s, want %s", run, got, want)
+		}
+	}
+
+	// The options must not change the frame types; language only changes the
+	// trailer. Compare the request type prefix with the capture (1,46,50,9)
+	// and the full type set of default vs options.
+	requests := func(t *testing.T, options string) (types []byte, pwd []byte) {
+		t.Helper()
+		srv := newTestServer(t)
+		c := New(Config{Dial: srv.Dial})
+		rec := newRecorder()
+		if err := c.Start(rec.handle); err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		connect := strings.Replace(connectCommand(), "</rqdelay>", "</rqdelay>"+options, 1)
+		send(t, c, connect)
+		rec.next(t, "<server_status")
+		for _, f := range srv.Requests() {
+			types = append(types, f.Type)
+			if f.Type == session.RqPwd {
+				pwd = f.Payload
+			}
+		}
+		return types, pwd
+	}
+	options := "<autopos>true</autopos><micex_registers>true</micex_registers>" +
+		"<utc_time>true</utc_time><push_u_limits>10</push_u_limits><push_pos_equity>10</push_pos_equity>"
+	baseTypes, basePWD := requests(t, "")
+	optTypes, optPWD := requests(t, options)
+	prefix := []byte{session.RqLogin, session.RqPwd, session.RqTime, session.RqStartup}
+	for _, c := range []struct {
+		name  string
+		types []byte
+	}{{"default", baseTypes}, {"options", optTypes}} {
+		if len(c.types) < len(prefix) {
+			t.Fatalf("%s: %d requests, want at least %d", c.name, len(c.types), len(prefix))
+		}
+		for i := range prefix {
+			if c.types[i] != prefix[i] {
+				t.Fatalf("%s: request %d = %d, want %d (capture starts 1,46,50,9)", c.name, i, c.types[i], prefix[i])
+			}
+		}
+	}
+	typeSet := func(types []byte) map[byte]bool {
+		set := map[byte]bool{}
+		for _, typ := range types {
+			set[typ] = true
+		}
+		return set
+	}
+	baseSet, optSet := typeSet(baseTypes), typeSet(optTypes)
+	if len(baseSet) != len(optSet) {
+		t.Fatalf("default types %v, options types %v: <connect> options changed the wire", baseSet, optSet)
+	}
+	for typ := range baseSet {
+		if !optSet[typ] {
+			t.Fatalf("default types %v, options types %v: <connect> options changed the wire", baseSet, optSet)
+		}
+	}
+	if len(basePWD) == 0 || basePWD[len(basePWD)-1] != 0 {
+		t.Fatalf("default RQ_PWD trailer = %x, want 0 (ru)", basePWD)
+	}
+	if len(optPWD) == 0 || optPWD[len(optPWD)-1] != 0 {
+		t.Fatalf("<connect> options changed the RQ_PWD trailer: %x", optPWD)
+	}
+	enTypes, enPWD := requests(t, "<language>en</language>")
+	if len(enPWD) == 0 || enPWD[len(enPWD)-1] != 1 {
+		t.Fatalf("language=en RQ_PWD trailer = %x, want 1", enPWD)
+	}
+	if len(enTypes) < len(prefix) || enTypes[0] != session.RqLogin || enTypes[1] != session.RqPwd {
+		t.Fatalf("language=en request prefix = %v, want the same flow", enTypes)
+	}
+}
+
+// parseHexOrDecimal parses a fixture number with an optional 0x prefix.
+func parseHexOrDecimal(t *testing.T, value string) int64 {
+	t.Helper()
+	value = strings.TrimSpace(value)
+	base := 10
+	if strings.HasPrefix(value, "0x") {
+		base, value = 16, value[2:]
+	}
+	n, err := strconv.ParseInt(value, base, 64)
+	if err != nil {
+		t.Fatalf("%q: %v", value, err)
+	}
+	return n
 }
