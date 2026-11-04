@@ -48,3 +48,45 @@ func TestRenderAllTradesUTCTime(t *testing.T) {
 		t.Fatalf("default rendering = %s", got)
 	}
 }
+
+// TestRenderClientAndPositions checks the end-of-load renders against the DLL
+// callback shapes of native/testdata/snapshot-tail-live.xml.
+func TestRenderClientAndPositions(t *testing.T) {
+	account := model.ClientAccount{
+		ID: "TESTCLIEN", Type: "leverage", Currency: "RUB", Market: 1,
+	}
+	if got, want := xmlcompat.ClientXML(account), `<client id="TESTCLIEN" remove="false"><market>1</market><currency>RUB</currency><type>leverage</type></client>`; got != want {
+		t.Fatalf("ClientXML = %s, want %s", got, want)
+	}
+	if got, want := xmlcompat.ClientXML(model.ClientAccount{ID: "TESTCLIEN", Removed: true}),
+		`<client id="TESTCLIEN" remove="true"/>`; got != want {
+		t.Fatalf("removed ClientXML = %s, want %s", got, want)
+	}
+	position := model.MoneyPosition{
+		Client: "TESTCLIEN", Currency: "RUR", Market: 1,
+		Asset: "FOND_MICEX", ShortName: "Деньги КЦБ ММВБ (RUR)",
+		SaldoIn:    model.Decimal{Units: 30000000, Scale: 2},
+		Saldo:      model.Decimal{Units: 30000000, Scale: 2},
+		Bought:     model.Decimal{Scale: 2},
+		Sold:       model.Decimal{Scale: 2},
+		OrdBuy:     model.Decimal{Scale: 2},
+		OrdBuyCond: model.Decimal{Scale: 2},
+		Comission:  model.Decimal{Scale: 2},
+	}
+	want := `<positions><money_position><currency>RUR</currency><client>TESTCLIEN</client><union></union><markets><market>1</market></markets><asset>FOND_MICEX</asset><shortname>Деньги КЦБ ММВБ (RUR)</shortname><saldoin>300000.0</saldoin><bought>0.0</bought><sold>0.0</sold><saldo>300000.0</saldo><ordbuy>0.0</ordbuy><ordbuycond>0.0</ordbuycond><comission>0.0</comission></money_position></positions>`
+	if got := xmlcompat.PositionsXML([]model.MoneyPosition{position}, false); got != want {
+		t.Fatalf("PositionsXML\n got %s\nwant %s", got, want)
+	}
+	// micex_registers adds the register name (RE-1 option).
+	position.Register = "T0"
+	if got := xmlcompat.PositionsXML([]model.MoneyPosition{position}, true); !strings.Contains(got, "<register>T0</register>") {
+		t.Fatalf("micex_registers PositionsXML = %s", got)
+	}
+	if got, want := xmlcompat.OvernightXML(false), `<overnight status="false"/>`; got != want {
+		t.Fatalf("OvernightXML = %s, want %s", got, want)
+	}
+	// The non-empty union is decompiler-backed only (docs/protocol/connect.md).
+	if got, want := xmlcompat.UnionXML(model.Union{ID: "TESTUNION"}), `<union id="TESTUNION" remove="false"/>`; got != want {
+		t.Fatalf("UnionXML = %s, want %s", got, want)
+	}
+}

@@ -2,8 +2,10 @@ package native
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/testserver"
+	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
 )
 
 const (
@@ -325,4 +328,146 @@ func TestEventlessMainStillDeliversSecurities(t *testing.T) {
 	if strings.Contains(msg, "<trade") {
 		t.Fatalf("unexpected trades in the securities chunk: %s", msg)
 	}
+}
+
+// snapshotTail returns the decoded E07 end-of-load RQ_MAIN tail (task 7).
+func snapshotTail(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile("testdata/snapshot-tail-live.hex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(strings.Fields(string(data)), "")
+	payload, err := hex.DecodeString(text)
+	if err != nil {
+		t.Fatalf("snapshot tail hex: %v", err)
+	}
+	return payload
+}
+
+// snapshotTailXML returns the non-comment callback lines of the E07 fixture.
+func snapshotTailXML(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile("testdata/snapshot-tail-live.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	inComment := false
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "<!--") {
+			inComment = true
+		}
+		if inComment {
+			if strings.HasSuffix(line, "-->") {
+				inComment = false
+			}
+			continue
+		}
+		if line == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// TestSnapshotTailMatchesDLL decodes the E07 end-of-load fixture through the
+// task 7 decoders and compares the renders with the DLL callbacks of
+// native/testdata/snapshot-tail-live.xml (comments stripped). The remainder of
+// the tail after R_CLIENT_ASSET (the 0x5b limits/parameters block) is not mapped
+// yet: that is task 12 ("прочие записи снапшота"), so Records stops there.
+func TestSnapshotTailMatchesDLL(t *testing.T) {
+	payload := snapshotTail(t)
+	recs, err := records.Records(payload)
+	var unknown *records.UnknownRecordError
+	if err != nil && !errors.As(err, &unknown) {
+		t.Fatalf("Records: %v", err)
+	}
+	c := &Client{}
+	c.cfg.OnDictionaries = nil
+	c.resetAccountsLocked()
+	for _, rec := range recs {
+		if decode := decoders[rec.Tag]; decode != nil {
+			if _, err := decode(c, rec.Body); err != nil {
+				t.Fatalf("decode %#02x: %v", rec.Tag, err)
+			}
+		}
+	}
+	accounts := c.Accounts()
+	if len(accounts) != 1 || accounts[0].ID != "TESTCLIEN" {
+		t.Fatalf("accounts = %+v", accounts)
+	}
+	positions := c.MoneyPositions()
+	if len(positions) != 1 {
+		t.Fatalf("money positions = %+v", positions)
+	}
+	got := []string{
+		xmlcompat.ClientXML(accounts[0]),
+		xmlcompat.PositionsXML(positions, false),
+		xmlcompat.OvernightXML(c.Overnight().Status),
+	}
+	want := snapshotTailXML(t)
+	if len(want) < len(got) {
+		t.Fatalf("fixture has %d lines", len(want))
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("message %d\n got %s\nwant %s", i, got[i], want[i])
+		}
+	}
+}
+
+// TestConnectorLoadTailOrder checks the DLL callback order at the end of the
+// load on the testserver: the last <securities>/<pits>, then <client>,
+// <positions>, <overnight>, <server_status connected="true"/>, and the overnight
+// line before every later server_status.
+func TestConnectorLoadTailOrder(t *testing.T) {
+	// The full demo RQ_MAIN payload is 65 379 bytes, so the tail is appended to
+	// a one-security snapshot: the ordering does not depend on the snapshot size.
+	snapshot := append(secNewRecord(t, "SBER", 26), snapshotTail(t)...)
+	srv := newTestServer(t)
+	srv.Snapshot = snapshot
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	rec.mu.Lock()
+	messages := append([]string(nil), rec.msgs...)
+	rec.mu.Unlock()
+	index := func(prefix string) int {
+		for i, m := range messages {
+			if strings.HasPrefix(m, prefix) {
+				return i
+			}
+		}
+		t.Fatalf("no %q callback in %d messages: %q", prefix, len(messages), messages)
+		return -1
+	}
+	client := index("<client")
+	positions := index("<positions")
+	overnight := index("<overnight")
+	status := index("<server_status")
+	securities := index("<securities")
+	pits := index("<pits")
+	if securities > client || pits > client {
+		t.Fatalf("end-of-load order broken: securities %d pits %d client %d", securities, pits, client)
+	}
+	if !(client < positions && positions < overnight && overnight < status) {
+		t.Fatalf("end-of-load order: client %d positions %d overnight %d status %d", client, positions, overnight, status)
+	}
+	if got, want := messages[client], snapshotTailXML(t)[0]; got != want {
+		t.Fatalf("client = %s, want %s", got, want)
+	}
+	// The server_status command repeats the overnight line before the status.
+	if got := send(t, c, "<command id="+quote+"server_status"+quote+"/>"); got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("server_status = %s", got)
+	}
+	rec.next(t, "<overnight")
+	rec.next(t, "<server_status")
 }

@@ -76,6 +76,15 @@ type Client struct {
 	dedup      records.TradeDedup
 	recovering bool // true while recover replaces the session
 	stats      Stats
+
+	// End-of-load state (task 7): the R_CLN_NEW client store, money
+	// positions, unions and the R_OVERNIGHT flag.
+	accounts      map[int64]*accountState
+	accountOrder  []int64
+	positions     map[positionKey]*positionState
+	positionOrder []positionKey
+	unions        []model.Union
+	overnight     model.Overnight
 }
 
 // Dial logs in, loads the dictionaries and the initial snapshot (RQ_TIME,
@@ -114,6 +123,7 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	cfg.RequestTimeout = normalizeRequestTimeout(cfg.RequestTimeout, effectiveSessionTTL(cfg.SessionTimeout, info))
 	conn.SetRequestTimeout(cfg.RequestTimeout)
 	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}}
+	c.resetAccountsLocked()
 	if err := c.load(ctx, conn); err != nil {
 		conn.Close()
 		return nil, err
