@@ -24,7 +24,8 @@ client.trailer_en = 1
 #
 # RQ_LOGIN payload = session.LoginPayload("TESTLOGIN"). The captured login was 8 bytes in a
 # 18-byte payload; Z12 is NUL-terminated and variable-length, so the anonymized payload is
-# 19 bytes. Everything after the Z12 field is byte-exact.
+# 19 bytes. The value is spliced from the captured payload: only the Z12 login field was
+# replaced (8 -> 9 bytes), every other byte (flags, tail ff e8) is the live capture.
 rq_login = 78004e0001021c544553544c4f47494e00ffe8
 rq_login_payload_len_captured = 18
 #
