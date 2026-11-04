@@ -33,6 +33,9 @@ type SecParam struct {
 	BgoNC       int64
 	BgoBuy      int64
 
+	// Board is the mode/board word that precedes the point_cost double
+	// (0x2a/0x2c in the E07 fixture; the exact semantics beyond the value are I).
+	Board        uint16
 	PointCost    float64
 	HasPointCost bool
 
@@ -81,8 +84,8 @@ func ParseSecParam(body []byte) (SecParam, error) {
 		p.BgoBuy = v
 	}
 	if p.Mask&0x8 != 0 {
-		if _, err := r.Raw(2); err != nil {
-			return p, fmt.Errorf("R_SEC_PARAM point cost header: %w", err)
+		if p.Board, err = r.Uint16(); err != nil {
+			return p, fmt.Errorf("R_SEC_PARAM point cost board: %w", err)
 		}
 		raw, err := r.Raw(8)
 		if err != nil {
@@ -118,6 +121,10 @@ func (p SecParam) SecInfoUpdate(sec SecNew) model.SecInfoUpdate {
 		Market: int(sec.Market),
 		Kind:   sec.Kind,
 	}
+	// The DLL's type switch throws "Wrong sectype" for a kind other than 4/5.
+	// The catalog always knows the kind on the wire; for a missing/unknown kind
+	// the bit 0x4 (bgo_buy) presence selects the OPT form as a documented
+	// fallback (I, unit-tested).
 	opt := sec.Kind == 5 || (sec.Kind != 4 && p.Mask&0x4 != 0)
 	if opt {
 		if p.Mask&0x1 != 0 {
@@ -141,10 +148,7 @@ func (p SecParam) SecInfoUpdate(sec SecNew) model.SecInfoUpdate {
 			v := moneyDecimal(p.SellDeposit)
 			u.SellDeposit = &v
 		}
-		decimals := uint8(0)
-		if len(sec.Pits) > 0 {
-			decimals = sec.Pits[0].Decimals
-		}
+		decimals := defaultPitDecimals(sec)
 		if p.HasMin {
 			v := model.Decimal{Units: p.MinPrice, Scale: decimals}
 			u.MinPrice = &v
@@ -161,6 +165,17 @@ func (p SecParam) SecInfoUpdate(sec SecNew) model.SecInfoUpdate {
 	return u
 }
 
+// defaultPitDecimals is the price scale of the default mode of a security.
+func defaultPitDecimals(sec SecNew) uint8 {
+	if pit, ok := sec.DefaultPit(); ok {
+		return pit.Decimals
+	}
+	if len(sec.Pits) > 0 {
+		return sec.Pits[0].Decimals
+	}
+	return 0
+}
+
 // moneyDecimal is the DLL money format: the wire value is hundredths.
 func moneyDecimal(units int64) model.Decimal {
 	return model.Decimal{Units: units, Scale: 2}
@@ -173,6 +188,32 @@ func pointCostDecimal(v float64) model.Decimal {
 	neg := strings.HasPrefix(s, "-")
 	if neg {
 		s = s[1:]
+	}
+	// %.6g uses the exponential form for |v| >= 1e6 and below 1e-4.
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		mantissa := s[:i]
+		exp, err := strconv.Atoi(s[i+1:])
+		if err != nil {
+			return model.Decimal{}
+		}
+		frac := 0
+		if d := strings.IndexByte(mantissa, '.'); d >= 0 {
+			frac = len(mantissa) - d - 1
+			mantissa = mantissa[:d] + mantissa[d+1:]
+		}
+		units, err := strconv.ParseInt(mantissa, 10, 64)
+		if err != nil {
+			return model.Decimal{}
+		}
+		scale := frac - exp
+		for scale < 0 {
+			units *= 10
+			scale++
+		}
+		if neg {
+			units = -units
+		}
+		return model.Decimal{Units: units, Scale: uint8(scale)}
 	}
 	if i := strings.IndexByte(s, '.'); i >= 0 {
 		units, err := strconv.ParseInt(s[:i]+s[i+1:], 10, 64)
