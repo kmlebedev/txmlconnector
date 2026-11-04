@@ -7,6 +7,7 @@ package records
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
@@ -137,6 +138,24 @@ func Records(p []byte) ([]Record, error) {
 			}
 			if _, err := r.Byte(); err != nil {
 				return out, fmt.Errorf("R_UNION unicat: %w", err)
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagQuotation:
+			start := len(p) - r.Len()
+			if _, err := r.Uint16(); err != nil {
+				return out, fmt.Errorf("R_QUOTATION secid: %w", err)
+			}
+			if _, err := r.Uint16(); err != nil {
+				return out, fmt.Errorf("R_QUOTATION board: %w", err)
+			}
+			mask, err := r.Int64()
+			if err != nil {
+				return out, fmt.Errorf("R_QUOTATION mask: %w", err)
+			}
+			for i := 0; i < bits.OnesCount64(uint64(mask)); i++ {
+				if _, err := r.Int32(); err != nil {
+					return out, fmt.Errorf("R_QUOTATION value: %w", err)
+				}
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == 0x69:
