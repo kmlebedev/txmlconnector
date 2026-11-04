@@ -215,6 +215,10 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 	case "disconnect":
 		return c.disconnect(ctx)
 	case "server_status":
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		c.emit(c.overnightXML(client))
 		c.emit(c.statusXML(true))
 		return success(), nil
 	case "get_connector_version":
@@ -342,13 +346,21 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 			switch e := ev.(type) {
 			case *model.Trade:
 				trades = append(trades, *e)
+			case *model.ClientAccount:
+				c.emit(xmlcompat.ClientXML(*e))
+			case *model.MoneyPosition:
+				c.emit(xmlcompat.PositionsXML([]model.MoneyPosition{*e}, c.micexRegisters))
+			case *model.Union:
+				c.emit(xmlcompat.UnionXML(*e))
 			case model.ServerStatus:
 				switch {
 				case e.Recover:
 					c.emit(c.recoveryStatusXML())
 				case e.Connected:
+					c.emit(c.overnightXML(client))
 					c.emit(c.statusXML(true))
 				default:
+					c.emit(c.overnightXML(client))
 					c.emit(c.statusXML(false))
 					reportedDown = true
 				}
@@ -426,6 +438,15 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 		return nil, mErr
 	}
 
+	// The DLL reports the end-of-load callbacks just before server_status:
+	// <client>, <positions>, <overnight>, <server_status connected="true"/>.
+	for _, account := range client.Accounts() {
+		c.emit(xmlcompat.ClientXML(account))
+	}
+	if positions := client.MoneyPositions(); len(positions) > 0 {
+		c.emit(xmlcompat.PositionsXML(positions, req.MicexRegisters))
+	}
+
 	c.mu.Lock()
 	if ctx.Err() != nil {
 		c.mu.Unlock()
@@ -435,8 +456,10 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 	c.client, c.state = client, stateConnected
 	c.withMillis, c.withUTC = req.Milliseconds, req.UtcTime
 	c.autoPos, c.micexRegisters = req.Autopos, req.MicexRegisters
+	overnight := c.overnightXML(client)
 	status := c.statusLocked(true)
 	c.mu.Unlock()
+	c.emit(overnight)
 	c.emit(status)
 	return client, nil
 }
@@ -524,6 +547,7 @@ func (c *Connector) disconnect(ctx context.Context) (string, error) {
 	<-done
 	c.mu.Lock()
 	client := c.client
+	overnight := c.overnightXML(client)
 	status := c.statusLocked(false)
 	c.state, c.client = stateDisconnected, nil
 	c.mu.Unlock()
@@ -532,7 +556,9 @@ func (c *Connector) disconnect(ctx context.Context) (string, error) {
 		_ = client.Logout(logoutCtx)
 		stop()
 	}
-	// The DLL reports connected="false" before disconnect returns.
+	// The DLL reports connected="false" (with the overnight line before it)
+	// before disconnect returns.
+	c.emitSync(overnight)
 	c.emitSync(status)
 	return success(), nil
 }
@@ -570,6 +596,16 @@ func (c *Connector) recoveryStatusXML() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return strings.TrimSuffix(c.statusLocked(true), "/>") + ` recover="true"/>`
+}
+
+// overnightXML renders the <overnight status="..."/> line the DLL puts before
+// every server_status callback; the session default is false.
+func (c *Connector) overnightXML(client *Client) string {
+	status := false
+	if client != nil {
+		status = client.Overnight().Status
+	}
+	return xmlcompat.OvernightXML(status)
 }
 
 func (c *Connector) statusXML(connected bool) string {
