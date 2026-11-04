@@ -76,3 +76,33 @@ func clientName(c *Client, numericID int64) string {
 	}
 	return ""
 }
+
+// ClientLimits runs get_client_limits: the numeric client id goes in
+// RQ_CLIENT_LIMITS (43), the limits come back in the reply stream (limits.md).
+// The session flags of the DLL exchange are I: the parser tries flags&2|&4 (the
+// full form) and falls back to the naked form.
+func (c *Client) ClientLimits(ctx context.Context, client string) (*model.ClientLimits, error) {
+	c.mu.Lock()
+	numericID, ok := c.clientNumericIDLocked(client, "")
+	c.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("transaq: unknown client %q", client)
+	}
+	conn := c.connection()
+	if conn == nil {
+		return nil, errors.New("transaq: client is not connected")
+	}
+	payload, err := conn.ClientLimits(ctx, numericID)
+	if err != nil {
+		return nil, err
+	}
+	limits, err := records.ParseClientLimits(payload, 2|4, false)
+	if err != nil {
+		limits, err = records.ParseClientLimits(payload, 0, false)
+	}
+	if err != nil {
+		return nil, err
+	}
+	limits.Client = client
+	return &limits, nil
+}
