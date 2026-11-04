@@ -52,6 +52,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return OrdersXML([]model.Order{*e}), true
 	case *model.ClientTrade:
 		return TradesXML([]model.ClientTrade{*e}), true
+	case *model.MarketOrd:
+		return MarketOrdXML(*e), true
 	}
 	return "", false
 }
@@ -854,4 +856,103 @@ func MCPortfolioXML(client string, p model.MoneyPosition) string {
 	b.WriteString("<estimated>" + fixed2(zero2) + "</estimated>")
 	b.WriteString("</value_part></money></mc_portfolio>")
 	return b.String()
+}
+
+// maxBuySellItemsXML renders the <security secid> items of both max_buy_sell
+// forms: identity from the catalog, integer maxbuy/maxsell (margin.md, D/O).
+func maxBuySellItemsXML(items []model.MaxBuySell) string {
+	var b strings.Builder
+	for _, item := range items {
+		b.WriteString("<security secid=" + quoteAttr(strconv.Itoa(int(item.SecID))) + ">")
+		b.WriteString("<market>" + strconv.Itoa(item.Market) + "</market>")
+		b.WriteString("<seccode>" + escape(item.SecCode) + "</seccode>")
+		b.WriteString("<maxbuy>" + strconv.FormatInt(item.MaxBuy, 10) + "</maxbuy>")
+		b.WriteString("<maxsell>" + strconv.FormatInt(item.MaxSell, 10) + "</maxsell>")
+		b.WriteString("</security>")
+	}
+	return b.String()
+}
+
+// MaxBuySellTPlusXML renders <max_buy_sell_tplus client="…"> (O).
+func MaxBuySellTPlusXML(client string, items []model.MaxBuySell) string {
+	return "<max_buy_sell_tplus client=" + quoteAttr(client) + ">" + maxBuySellItemsXML(items) + "</max_buy_sell_tplus>"
+}
+
+// MaxBuySellXML renders <max_buy_sell client="…"> or <max_buy_sell union="…">
+// depending on which selector the command carries (O).
+func MaxBuySellXML(client, union string, items []model.MaxBuySell) string {
+	root := "<max_buy_sell"
+	if client != "" {
+		root += " client=" + quoteAttr(client)
+	} else {
+		root += " union=" + quoteAttr(union)
+	}
+	return root + ">" + maxBuySellItemsXML(items) + "</max_buy_sell>"
+}
+
+// fixed2Decimal renders a Decimal with exactly two digits.
+func fixed2Decimal(d model.Decimal) string {
+	if d.Scale != 2 {
+		units := d.Units
+		if d.Scale > 2 {
+			for i := uint8(2); i < d.Scale; i++ {
+				units /= 10
+			}
+		}
+		for i := d.Scale; i < 2; i++ {
+			units *= 10
+		}
+		d = model.Decimal{Units: units, Scale: 2}
+	}
+	return fixedDecimal(d)
+}
+
+// ClnSecPermissionsXML renders <cln_sec_permissions>: client/union are
+// attributes here (unlike the command where they are elements), the security is
+// an element, then the rights and the rate branch (margin.md, D/O).
+func ClnSecPermissionsXML(p model.SecPermissions) string {
+	var b strings.Builder
+	b.WriteString("<cln_sec_permissions")
+	if p.Client != "" {
+		b.WriteString(" client=" + quoteAttr(p.Client))
+	}
+	if p.Union != "" {
+		b.WriteString(" union=" + quoteAttr(p.Union))
+	}
+	b.WriteString(" secid=" + quoteAttr(strconv.Itoa(int(p.SecID))) + ">")
+	b.WriteString("<security><seccode>" + escape(p.SecCode) + "</seccode>")
+	b.WriteString("<market>" + strconv.Itoa(p.Market) + "</market>")
+	b.WriteString("<board>" + escape(p.Board) + "</board></security>")
+	b.WriteString("<tradeable>" + strconv.FormatBool(p.Tradeable) + "</tradeable>")
+	b.WriteString("<marketable>" + strconv.FormatBool(p.Marketable) + "</marketable>")
+	b.WriteString("<longable>" + strconv.FormatBool(p.Longable) + "</longable>")
+	b.WriteString("<shortable>" + strconv.FormatBool(p.Shortable) + "</shortable>")
+	if p.RiskRateLong == nil {
+		b.WriteString("<regratelong>" + fixed2Decimal(p.RegRateLong) + "</regratelong>")
+		b.WriteString("<regrateshort>" + fixed2Decimal(p.RegRateShort) + "</regrateshort>")
+	} else {
+		if p.RiskRateLong != nil {
+			b.WriteString("<riskrate_long>" + fixed2Decimal(*p.RiskRateLong) + "</riskrate_long>")
+		}
+		if p.ReserateLong != nil {
+			b.WriteString("<reserate_long>" + fixed2Decimal(*p.ReserateLong) + "</reserate_long>")
+		}
+		if p.RiskRateShort != nil {
+			b.WriteString("<riskrate_short>" + fixed2Decimal(*p.RiskRateShort) + "</riskrate_short>")
+		}
+		if p.ReserateShort != nil {
+			b.WriteString("<reserate_short>" + fixed2Decimal(*p.ReserateShort) + "</reserate_short>")
+		}
+	}
+	b.WriteString("</cln_sec_permissions>")
+	return b.String()
+}
+
+// MarketOrdXML renders the <marketord secid permit seccode/> callback (O).
+func MarketOrdXML(m model.MarketOrd) string {
+	permit := "no"
+	if m.Permit {
+		permit = "yes"
+	}
+	return "<marketord secid=" + quoteAttr(strconv.Itoa(int(m.SecID))) + " permit=" + quoteAttr(permit) + " seccode=" + quoteAttr(m.SecCode) + "/>"
 }
