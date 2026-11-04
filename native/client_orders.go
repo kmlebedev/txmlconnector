@@ -28,6 +28,11 @@ func (c *Client) NewOrder(ctx context.Context, req model.NewOrder) (model.Transa
 	if req.ByMarket || req.UseCredit || req.NoSplit || req.ExpDate != nil || req.BrokerRef != "" {
 		return 0, fmt.Errorf("transaq: neworder flags bymarket/usecredit/nosplit/expdate/brokerref are not encoded yet (I)")
 	}
+	if req.Hidden != 0 {
+		// The DLL hidden flag is not mapped in the payload yet (I): reject it
+		// explicitly instead of writing it as part of the zero flag bytes.
+		return 0, fmt.Errorf("transaq: neworder hidden is not encoded yet (I)")
+	}
 	c.mu.Lock()
 	catalog := c.catalog
 	if catalog == nil {

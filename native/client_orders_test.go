@@ -498,3 +498,27 @@ func TestNewOrderExpDateRejected(t *testing.T) {
 		t.Fatalf("neworder expdate = %s, want the explicit I rejection", got)
 	}
 }
+
+// TestNewOrderHiddenRejected: the hidden payload field is not recovered (I); the
+// command must be rejected explicitly, not silently ignored.
+func TestNewOrderHiddenRejected(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = clientSnapshot(t)
+	srv.Handle(session.RqTransact, func([]byte) (byte, []byte) {
+		return wire.KindReply | wire.FlagPlain, mustHex(t, "00100010")
+	})
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	cmd := "<command id=" + quote + "neworder" + quote + "><secid>26</secid><client>TESTCLIEN</client>"
+	cmd += "<price>100</price><quantity>1</quantity><buysell>B</buysell><unfilled>PutInQueue</unfilled>"
+	cmd += "<hidden>1</hidden></command>"
+	if got := send(t, c, cmd); !strings.Contains(got, "hidden") || !strings.Contains(got, "not encoded") {
+		t.Fatalf("neworder hidden = %s, want the explicit I rejection", got)
+	}
+}
