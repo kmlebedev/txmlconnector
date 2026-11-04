@@ -25,8 +25,8 @@ const (
 	RqClientHoldings byte = 42  // RQ_CLIENT_HOLDINGS
 	RqPwd            byte = 46  // RQ_PWD
 	RqTime           byte = 50  // RQ_TIME
-	RqRelogin        byte = 63  // RQ_RELOGIN (not implemented)
-	RqRecover        byte = 64  // RQ_RECOVER (not implemented)
+	RqRelogin        byte = 63  // RQ_RELOGIN (short recovery path)
+	RqRecover        byte = 64  // RQ_RECOVER (short recovery path)
 	RqHandshake      byte = 106 // RQ_HANDSHAKE, external crypto providers only
 )
 
@@ -402,14 +402,18 @@ func (c *Conn) exchange(ctx context.Context, typ byte, payload []byte, wait bool
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	nc := c.nc
+	if nc == nil {
+		return wire.Frame{}, net.ErrClosed
+	}
 	deadline := time.Now().Add(c.timeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
-	if err := c.nc.SetDeadline(deadline); err != nil {
+	if err := nc.SetDeadline(deadline); err != nil {
 		return wire.Frame{}, err
 	}
-	stop := context.AfterFunc(ctx, func() { c.nc.SetDeadline(time.Unix(1, 0)) })
+	stop := context.AfterFunc(ctx, func() { nc.SetDeadline(time.Unix(1, 0)) })
 	defer stop()
 
 	// The DLL increments its send counter before every ordinary request; the
@@ -422,13 +426,13 @@ func (c *Conn) exchange(ctx context.Context, typ byte, payload []byte, wait bool
 	if err != nil {
 		return wire.Frame{}, err
 	}
-	if _, err := c.nc.Write(out); err != nil {
+	if _, err := nc.Write(out); err != nil {
 		return wire.Frame{}, ctxErr(ctx, err)
 	}
 	if !wait {
 		return wire.Frame{}, nil
 	}
-	f, err := c.keys.Decode(wire.ServerToClient, c.nc)
+	f, err := c.keys.Decode(wire.ServerToClient, nc)
 	if err != nil {
 		return wire.Frame{}, ctxErr(ctx, err)
 	}
@@ -448,7 +452,19 @@ func ctxErr(ctx context.Context, err error) error {
 	return err
 }
 
-func (c *Conn) Close() error { return c.nc.Close() }
+// Close closes the connection. The socket is read under the same lock Restore
+// swaps it with, so a concurrent short recovery cannot leave the new socket open
+// or race on the field.
+func (c *Conn) Close() error {
+	c.mu.Lock()
+	nc := c.nc
+	c.nc = nil
+	c.mu.Unlock()
+	if nc == nil {
+		return nil
+	}
+	return nc.Close()
+}
 
 // LastSeq returns the send counter value of the last ordinary request, the
 // lastSeq RQ_RECOVER carries.

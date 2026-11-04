@@ -18,26 +18,33 @@ import (
 // attempt is immediate, the pause between attempts is a fixed 1 s (there is no
 // exponential growth in the DLL), the whole window is session_timeout and the
 // TCP connect timeout is min(remaining window, 10 s). When the window expires
-// the DLL raises "Request timeout."; the typed API then falls back to a full
-// login (the plan's long path).
+// the DLL raises "Request timeout."; the typed API returns *RecoveryError and
+// offers the explicit Client.Reconnect for the new login.
 const (
 	recoveryRetryPause     = time.Second
 	recoveryConnectTimeout = 10 * time.Second
 	defaultSessionTTL      = 120 * time.Second
 )
 
-// recoveryError is returned by Run when the link could not be restored within
-// session_timeout (the DLL raises "Request timeout." there).
-type recoveryError struct {
+// ErrRecoveryTimeout reports that the recovery window (session_timeout) expired:
+// the DLL raises "Request timeout." there and leaves the new login to the XML
+// client's connect command.
+var ErrRecoveryTimeout = errors.New("transaq: session recovery timeout")
+
+// RecoveryError is returned by Run when the link could not be restored within
+// session_timeout. Check it with errors.As; it matches both ErrRecoveryTimeout
+// (the window expired) and the last recovery error (e.g. session.ErrBye).
+type RecoveryError struct {
 	SessionTimeout time.Duration
 	Err            error
 }
 
-func (e *recoveryError) Error() string {
+func (e *RecoveryError) Error() string {
 	return fmt.Sprintf("transaq: connection lost and not recovered within %v: %v", e.SessionTimeout, e.Err)
 }
 
-func (e *recoveryError) Unwrap() error { return e.Err }
+// Unwrap exposes both the timeout sentinel and the last attempt error.
+func (e *RecoveryError) Unwrap() []error { return []error{ErrRecoveryTimeout, e.Err} }
 
 // isTransportError reports whether err means the TCP link is unusable, so the
 // recovery loop should try to restore the session. Protocol errors (a bad
@@ -51,15 +58,24 @@ func isTransportError(err error) bool {
 	return errors.As(err, &netErr)
 }
 
-// isFatalRecoverError reports the recovery errors the DLL treats as fatal
-// ("Recover unavailable."): BYE, a CRC failure while a recovery frame was
-// expected, and another server (SID mismatch). In those cases the short path is
-// abandoned at once instead of retrying until the window expires.
+// isFatalRecoverError reports the recovery errors the DLL treats as fatal at
+// once (docs/protocol/connect.md, "Recover unavailable."):
+//   - BYE from the server (-0xd);
+//   - a wrong RELOGIN or RECOVER reply (the DLL throws "Incorrect server
+//     RELOGIN/RECOVER response");
+//   - a payload CRC failure only when the damaged frame is the RQ_RECOVER reply
+//     (type 0x40, error -0xb).
+//
+// A SID mismatch (-0xe) and a header CRC are NOT fatal: the DLL keeps retrying
+// them until session_timeout and only then raises "Request timeout.".
 func isFatalRecoverError(err error) bool {
-	return errors.Is(err, session.ErrBye) ||
-		errors.Is(err, session.ErrNotSameServer) ||
-		errors.Is(err, wire.ErrHeaderCRC) ||
-		errors.Is(err, wire.ErrPayloadCRC)
+	if errors.Is(err, session.ErrBye) ||
+		errors.Is(err, session.ErrIncorrectRelogin) ||
+		errors.Is(err, session.ErrIncorrectRecover) {
+		return true
+	}
+	var crc *wire.PayloadCRCError
+	return errors.As(err, &crc) && crc.Frame.Type == session.RqRecover
 }
 
 // sessionTimeout is the server session lifetime from the RQ_PWD reply, the
@@ -96,7 +112,7 @@ func (c *Client) sessionTimeout() time.Duration {
 // then RQ_RECOVER on the saved session keys. The catalog and the subscriptions
 // are not rebuilt (the server keeps the session, so the secids stay valid).
 // Attempts start immediately and repeat every second until session_timeout; a
-// fatal refusal or the expired window returns a recoveryError, exactly as the
+// fatal refusal or the expired window returns a RecoveryError, exactly as the
 // DLL gives up (it does not log in again by itself - the XML client issues the
 // connect command, which Client.Reconnect mirrors for the typed API).
 func (c *Client) recover(ctx context.Context) error {
@@ -133,14 +149,14 @@ func (c *Client) recover(ctx context.Context) error {
 	if lastErr == nil {
 		lastErr = errors.New("no attempt within the session timeout")
 	}
-	return &recoveryError{SessionTimeout: limit, Err: lastErr}
+	return &RecoveryError{SessionTimeout: limit, Err: lastErr}
 }
 
 // Reconnect performs the full connect the DLL leaves to the XML client after
 // the recovery window expired ("Request timeout."): a new TCP connection, login,
 // reload of the dictionaries and the snapshot, a rebuilt catalog and the
 // subscriptions restored by model.Symbol. Call it after Run returned a
-// recoveryError; the trade dedup state survives, so replayed trades are dropped.
+// RecoveryError; the trade dedup state survives, so replayed trades are dropped.
 func (c *Client) Reconnect(ctx context.Context) error {
 	return c.relogin(ctx)
 }
@@ -187,13 +203,17 @@ func (c *Client) relogin(ctx context.Context) error {
 	fail := func(err error) error {
 		// Detach the failed connection so concurrent callers see "not
 		// connected" instead of using a dead socket; the next attempt installs
-		// the fresh one.
+		// the fresh one. The previous socket is closed here too, otherwise a
+		// failed Reconnect would leak its file descriptor.
 		c.mu.Lock()
 		if c.conn == conn {
 			c.conn = nil
 		}
 		c.recovering = false
 		c.mu.Unlock()
+		if old != nil && old != conn {
+			old.Close()
+		}
 		conn.Close()
 		return err
 	}

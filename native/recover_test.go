@@ -1,18 +1,19 @@
 package native
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"bytes"
-	"encoding/hex"
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
-
 	"github.com/kmlebedev/txmlconnector/native/session"
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
@@ -86,34 +87,41 @@ func tradeRecord(t *testing.T, idx int, secID uint16) []byte {
 }
 
 // TestRecoverResubscribesBySymbol checks the long path (Review Focus 3): the
-// short recovery is refused by the new server (another SID), Run reports the
-// loss and returns a recovery error, and the explicit Client.Reconnect performs
-// a full login: the catalog is rebuilt (SBER secid 26 -> 27), the subscriptions
+// recovery window expires while the server is unreachable, Run reports the loss
+// and returns a recovery error, and the explicit Client.Reconnect performs a
+// full login: the catalog is rebuilt (SBER secid 26 -> 27), the subscriptions
 // are restored by model.Symbol (001b002504) and the replayed trade is not
 // delivered twice.
 func TestRecoverResubscribesBySymbol(t *testing.T) {
 	first := newTestServer(t)
+	// 300 is milliseconds per the RQ_PWD normalization (values below 300 are
+	// seconds): the recovery window stays short.
+	first.SessionTimeout = 300
 	first.Snapshot = mainPayload(secNewRecord(t, "SBER", 26))
 	first.AfterSubscribe = mainPayload(tradeRecord(t, 0, 26))
 
 	second := newTestServer(t)
 	second.Snapshot = mainPayload(secNewRecord(t, "SBER", 27))
 	second.AfterSubscribe = mainPayload(tradeRecord(t, 0, 27), tradeRecord(t, 1, 27))
-	// The new server does not recognise the old session (another SID): the
-	// short RQ_RELOGIN/RQ_RECOVER path fails at once (DLL error -0xe).
-	second.ReloginSID = 99
 
 	var mu sync.Mutex
 	connects := 0
+	allowReconnect := false
 	dial := func(ctx context.Context, address string) (net.Conn, error) {
 		mu.Lock()
 		connects++
 		n := connects
+		allow := allowReconnect
 		mu.Unlock()
-		if n == 1 {
+		switch {
+		case n == 1:
 			return first.Dial(ctx, address)
+		case !allow:
+			// The new server is unreachable while the recovery window runs.
+			return nil, errors.New("connection refused")
+		default:
+			return second.Dial(ctx, address)
 		}
-		return second.Dial(ctx, address)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -166,14 +174,14 @@ func TestRecoverResubscribesBySymbol(t *testing.T) {
 	select {
 	case runErr = <-done:
 	case <-time.After(10 * time.Second):
-		t.Fatal("Run did not return after the refused recovery")
+		t.Fatal("Run did not return after the recovery window expired")
 	}
-	var re *recoveryError
+	var re *RecoveryError
 	if !errors.As(runErr, &re) {
 		t.Fatalf("Run = %v, want a recovery error", runErr)
 	}
-	if !errors.Is(runErr, session.ErrNotSameServer) {
-		t.Fatalf("Run = %v, want ErrNotSameServer", runErr)
+	if errors.Is(runErr, session.ErrNotSameServer) {
+		t.Fatalf("Run = %v: the dial failure must not look like a different server", runErr)
 	}
 	st, tr := snapshot()
 	if len(tr) != 1 {
@@ -185,6 +193,9 @@ func TestRecoverResubscribesBySymbol(t *testing.T) {
 
 	// The DLL leaves the full connect to the XML client; the typed API has an
 	// explicit Reconnect for it.
+	mu.Lock()
+	allowReconnect = true
+	mu.Unlock()
 	if err := c.Reconnect(ctx); err != nil {
 		t.Fatalf("Reconnect: %v", err)
 	}
@@ -215,13 +226,16 @@ func TestRecoverResubscribesBySymbol(t *testing.T) {
 	}
 }
 
-// TestRecoverStrictSID checks the SID comparison the DLL does on RQ_RELOGIN: even
-// with a recorded SID of 0, a reply carrying another SID is ErrNotSameServer.
+// TestRecoverStrictSID checks two DLL rules of the RQ_RELOGIN SID check: it is
+// unconditional (a recorded SID of 0 must not skip it), and a mismatch (-0xe) is
+// not fatal: the DLL keeps retrying until session_timeout and only then raises
+// "Request timeout.".
 func TestRecoverStrictSID(t *testing.T) {
 	first := newTestServer(t)
-	first.SID = 0 // the RQ_PWD reply reports SID 0
+	first.SID = 0               // the RQ_PWD reply reports SID 0
+	first.SessionTimeout = 2000 // 2 s window, so several 1 s retries happen
 	second := newTestServer(t)
-	second.ReloginSID = 99
+	second.ReloginSID = 99 // always another server: every RQ_RELOGIN fails -0xe
 
 	var mu sync.Mutex
 	connects := 0
@@ -251,14 +265,29 @@ func TestRecoverStrictSID(t *testing.T) {
 		done <- c.Run(runCtx, RunOptions{RqDelay: 10 * time.Millisecond}, func([]model.Event) error { return nil })
 	}()
 	waitFor(t, func() bool { return countRequests(first, session.RqMain) >= 2 })
+	start := time.Now()
 	first.Drop()
+	var runErr error
 	select {
-	case err := <-done:
-		if !errors.Is(err, session.ErrNotSameServer) {
-			t.Fatalf("Run = %v, want ErrNotSameServer even with SID 0", err)
-		}
+	case runErr = <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("Run did not return")
+	}
+	elapsed := time.Since(start)
+	if !errors.Is(runErr, session.ErrNotSameServer) {
+		t.Fatalf("Run = %v, want ErrNotSameServer even with SID 0", runErr)
+	}
+	if elapsed < time.Second {
+		t.Fatalf("Run gave up after %v: -0xe must be retried until the window", elapsed)
+	}
+	var relogins int
+	for _, f := range second.Requests() {
+		if f.Type == session.RqRelogin {
+			relogins++
+		}
+	}
+	if relogins < 2 {
+		t.Fatalf("RQ_RELOGIN attempts = %d, want at least 2 before the window expired", relogins)
 	}
 }
 
@@ -404,5 +433,185 @@ func TestRecoverShortPathKeepsSession(t *testing.T) {
 	}
 	if polls == 0 {
 		t.Fatal("the client did not resume RQ_MAIN polling after the recovery")
+	}
+}
+
+// TestRecoverFatalClassification pins the DLL fatal conditions of the recovery
+// loop (docs/protocol/connect.md, "Recover unavailable."): BYE and a wrong
+// RELOGIN/RECOVER response throw at once; a payload CRC is fatal only when the
+// damaged frame is the RQ_RECOVER reply (type 0x40); a SID mismatch and a
+// header CRC are retried until the window expires.
+func TestRecoverFatalClassification(t *testing.T) {
+	cases := []struct {
+		name  string
+		err   error
+		fatal bool
+	}{
+		{"bye", session.ErrBye, true},
+		{"incorrect relogin", session.ErrIncorrectRelogin, true},
+		{"incorrect recover", session.ErrIncorrectRecover, true},
+		{"payload crc of rq_recover", &wire.PayloadCRCError{Frame: wire.Frame{Type: session.RqRecover}}, true},
+		{"payload crc of rq_main", &wire.PayloadCRCError{Frame: wire.Frame{Type: session.RqMain}}, false},
+		{"header crc", wire.ErrHeaderCRC, false},
+		{"not same server", session.ErrNotSameServer, false},
+		{"dial", errors.New("connection refused"), false},
+	}
+	for _, c := range cases {
+		if got := isFatalRecoverError(c.err); got != c.fatal {
+			t.Fatalf("%s: isFatalRecoverError(%v) = %v, want %v", c.name, c.err, got, c.fatal)
+		}
+	}
+}
+
+// recoveryStatusLines returns the <server_status> callback lines of an E05
+// fixture, in file order.
+func recoveryStatusLines(t *testing.T, file string) []string {
+	t.Helper()
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "<server_status") {
+			out = append(out, line)
+		}
+	}
+	if len(out) < 3 {
+		t.Fatalf("%s: %d server_status callbacks, want the load end and both recovery ones", file, len(out))
+	}
+	return out
+}
+
+// maskFixtureID rebases an E05 fixture status (taken on the demo server, id=0)
+// onto the testserver SID 7, the only difference of the deterministic parts.
+func maskFixtureID(line string) string {
+	return strings.ReplaceAll(line, "id="+quote+"0"+quote, "id="+quote+"7"+quote)
+}
+
+// TestConnectorRecoveryCallbacksMatchDLL renders the real Connector around a
+// loss and compares the callbacks with the DLL captures: the short open ended
+// recovery gives recover="true" then a plain connected status, the long one (the
+// window expires) gives recover="true" then connected="false".
+func TestConnectorRecoveryCallbacksMatchDLL(t *testing.T) {
+	shortLines := recoveryStatusLines(t, "session/testdata/recover-short-live.xml")
+	longLines := recoveryStatusLines(t, "session/testdata/recover-long-live.xml")
+
+	t.Run("short", func(t *testing.T) {
+		first := newTestServer(t)
+		second := newTestServer(t)
+		var mu sync.Mutex
+		connects := 0
+		dial := func(ctx context.Context, address string) (net.Conn, error) {
+			mu.Lock()
+			connects++
+			n := connects
+			mu.Unlock()
+			if n == 1 {
+				return first.Dial(ctx, address)
+			}
+			return second.Dial(ctx, address)
+		}
+		c := New(Config{Dial: dial})
+		rec := newRecorder()
+		if err := c.Start(rec.handle); err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		send(t, c, connectCommand())
+		rec.next(t, "<server_status") // the load end callback
+		first.Drop()
+		if got, want := rec.next(t, "<server_status"), maskFixtureID(shortLines[1]); got != want {
+			t.Fatalf("loss callback = %s, want %s", got, want)
+		}
+		if got, want := rec.next(t, "<server_status"), maskFixtureID(shortLines[2]); got != want {
+			t.Fatalf("recovered callback = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("long", func(t *testing.T) {
+		srv := newTestServer(t)
+		srv.SessionTimeout = 300 // 300 ms window, the proxy stays down
+		var mu sync.Mutex
+		connects := 0
+		dial := func(ctx context.Context, address string) (net.Conn, error) {
+			mu.Lock()
+			connects++
+			n := connects
+			mu.Unlock()
+			if n == 1 {
+				return srv.Dial(ctx, address)
+			}
+			return nil, errors.New("connection refused")
+		}
+		c := New(Config{Dial: dial})
+		rec := newRecorder()
+		if err := c.Start(rec.handle); err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		send(t, c, connectCommand())
+		rec.next(t, "<server_status") // the load end callback
+		srv.Drop()
+		if got, want := rec.next(t, "<server_status"), maskFixtureID(longLines[1]); got != want {
+			t.Fatalf("loss callback = %s, want %s", got, want)
+		}
+		if got, want := rec.next(t, "<server_status"), maskFixtureID(longLines[2]); got != want {
+			t.Fatalf("give-up callback = %s, want %s", got, want)
+		}
+	})
+}
+
+// TestDisconnectDuringRecoveryReportsOneFalse is the P2-1 regression: a
+// disconnect issued while the recovery loop runs reports connected="false"
+// exactly once (the disconnect callback), not once from the cancelled recovery
+// and once from the disconnect.
+func TestDisconnectDuringRecoveryReportsOneFalse(t *testing.T) {
+	srv := newTestServer(t)
+	srv.SessionTimeout = 300 // 300 ms window
+	var mu sync.Mutex
+	connects := 0
+	dial := func(ctx context.Context, address string) (net.Conn, error) {
+		mu.Lock()
+		connects++
+		n := connects
+		mu.Unlock()
+		if n == 1 {
+			return srv.Dial(ctx, address)
+		}
+		return nil, errors.New("connection refused")
+	}
+	c := New(Config{Dial: dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+
+	rec.mu.Lock()
+	base := len(rec.msgs)
+	rec.mu.Unlock()
+	srv.Drop()
+	if got := rec.next(t, "<server_status"); !strings.Contains(got, "recover="+quote+"true"+quote) {
+		t.Fatalf("loss callback = %s, want recover=true", got)
+	}
+	if got := send(t, c, "<command id="+quote+"disconnect"+quote+"/>"); got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("disconnect = %s", got)
+	}
+	time.Sleep(100 * time.Millisecond)
+	rec.mu.Lock()
+	messages := append([]string(nil), rec.msgs[base:]...)
+	rec.mu.Unlock()
+	var falseCount int
+	for _, m := range messages {
+		if strings.HasSuffix(m, "connected="+quote+"false"+quote+"/>") {
+			falseCount++
+		}
+	}
+	if falseCount != 1 {
+		t.Fatalf("connected=false callbacks = %d, want exactly one; messages: %q", falseCount, messages)
 	}
 }
