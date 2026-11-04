@@ -273,6 +273,45 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		c.emit(msg)
 		return success(), nil
+	case "subscribe_ticks":
+		var req struct {
+			Filter     string `xml:"filter"`
+			FilterAttr string `xml:"filter,attr"`
+			Securities []struct {
+				Board   string `xml:"board"`
+				SecCode string `xml:"seccode"`
+				TradeNo *int64 `xml:"tradeno"`
+			} `xml:"security"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		filter := strings.EqualFold(req.Filter, "true") || strings.EqualFold(req.FilterAttr, "true")
+		var reqs []TickRequest
+		for _, sec := range req.Securities {
+			// The DLL requires the tradeno child element (D: "Cannot find
+			// tradeno element."); the attribute form is I.
+			if sec.TradeNo == nil {
+				return failure("Cannot find tradeno element."), nil
+			}
+			symbol, ok := client.SymbolByBoard(sec.Board, sec.SecCode)
+			if !ok {
+				return failure("unknown security " + sec.SecCode), nil
+			}
+			reqs = append(reqs, TickRequest{Symbol: symbol, TradeNo: *sec.TradeNo})
+		}
+		// Without <security> elements the DLL sends the mask 0 and subscribes
+		// nothing (D/S r14): the filter byte alone is sent.
+		if err := client.SubscribeTicks(ctx, filter, reqs...); err != nil {
+			return failure(err.Error()), nil
+		}
+		return success(), nil
 	case "gethistorydata":
 		var req struct {
 			Security *struct {
