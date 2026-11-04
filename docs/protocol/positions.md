@@ -63,15 +63,43 @@ B mask2
 магазина (I для точных полей). Обновление позиции в `<orders>`-подобном виде не эмитится; каллбэк
 приходит на конец загрузки и по команде `get_forts_positions` (S/O).
 
-## `<forts_position>` — I, блокер
+## `get_forts_positions` и `<forts_position>` — D + O (оракул reply 42)
 
-Литерал `<forts_position>` в DLL есть (`0x18082f530`, `0x180837900`), но инъекция `0x3b*` с FORTS
-символом (SiZ6 secid=20583, mask=0x3f) **не рендерит** `<forts_position>` (O-негатив): FORTS-позиции
-DLL берёт не из `0x3b`-магазина, а из ответа **RQ_CLIENT_HOLDINGS (42)** на команду
-`get_forts_positions` (в логе видно `RQ_CLIENT_HOLDINGS return incorrect buffer (1)`); демо-счёт
-FORTS-позиций не имеет (S). Нужен либо пользовательский захват с FORTS-позицией, либо RE-3 с
-подменой reply type=42 в дампе (формат ответа ещё не разобран) — **блокер** для полной поддержки
-FORTS в T20.
+FORTS-позиции приходят **не** через RQ_MAIN, а через ответ **RQ_CLIENT_HOLDINGS (42)** на команду
+`<command id="get_forts_positions"/>` (обменник `FUN_1803b3e50`, `FUN_180355d50(...,0x2a,
+"RQ_CLIENT_HOLDINGS")`). Формат ответа (D, сверено оракулом):
+
+```
+G ×8            ; заголовок (нули); при сервере новее 0x4b читаются ещё G ×2 (всего 10)
+loop:
+  L client_id   ; -1 — конец списка
+  W secid
+  G startnet; G todaybuy; G todaysell; G totalnet; G openbuys; G opensells; G varmargin
+  B mask
+    0x01 -> G ? ; если > -1: L ?
+    0x02 -> G ?
+    0x04 -> G ?
+    0x08 -> G ×4 (optmargin/expirationpos/…)
+```
+
+XML-строитель `FUN_18011dcc0` (литеры `<forts_position>` `0x18082f530`/`0x180837900`,
+`<forts_money>` `0x18082e4c0`). Оракул (O): в копию расшифрованного дампа добавлен S>C кадр
+type=42 с сконструированным ответом (8 G-нулей; запись `client=4096, secid=20583`; G=100..700;
+`mask=0`; терминатор `L=-1`), harness шлёт `get_forts_positions`; DLL отдаёт:
+
+```xml
+<positions><forts_position><client></client><secid>20583</secid><union></union><seccode>SiZ6</seccode>
+<markets><market>4</market></markets><startnet>100</startnet><openbuys>500</openbuys>
+<opensells>600</opensells><totalnet>400</totalnet><todaybuy>200</todaybuy><todaysell>300</todaysell>
+<optmargin>0.0</optmargin><varmargin>7.0</varmargin><expirationpos>0</expirationpos></forts_position>
+<forts_money><client>TESTCLIEN</client><union></union><markets><market>4</market></markets>
+<shortname>Деньги FORTS</shortname><blocked>0.0</blocked><varmargin>7.0</varmargin>
+<current>0.0</current><free>0.0</free></forts_money></positions>
+```
+
+Маппинг: `startnet`=G1, `todaybuy`=G2, `todaysell`=G3, `totalnet`=G4, `openbuys`=G5,
+`opensells`=G6, `varmargin`=G7 (делится на 100); `optmargin`/`expirationpos` — из блока mask&8 (I).
+Демо-счёт FORTS-позиций не имеет (S) — форма снята оракулом; на живом потоке не проверена.
 
 ## Команда `get_forts_positions` — S/O
 
@@ -85,8 +113,11 @@ FORTS в T20.
 | `position-sec-inject.hex` | `0x02*` клиент TESTCLIEN (id 4096) + `0x3b*` бумажная позиция SBER (60 Б) | O |
 | `position-sec-dll.xml` | ожидаемые колбэки: `<client id="TESTCLIEN">` + `<positions><sec_position>…` | O |
 | `snapshot-tail-live.hex.gz` (ранее) | живой конец загрузки демо, включает `<money_position>` | S |
+| `position-forts-inject.hex` | тело ответа S>C type=42 (8 G-нулей; запись FORTS SiZ6; mask=0; `L=-1`), 29 Б | O |
+| `position-forts-dll.xml` | ожидаемый `<positions><forts_position>…<forts_money>…` | O |
 
 ## Не проверено
-- `<forts_position>`: layout/XML — блокер (см. выше), нужен FORTS-захват или разбор reply 42.
+- `<forts_position>` на живом потоке (демо без FORTS-позиций, S); блоки mask-полей
+  (optmargin/expirationpos и др.) — I.
 - Денежные поля bought/sold/ordbuy/ordsell/comission: точные источники в магазине — I.
 - `<register>` при `micex_registers=true` — D/S по connect.md, на живом не перепроверялось в этой задаче.
