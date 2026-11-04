@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/kmlebedev/txmlconnector/native/replay"
@@ -31,7 +32,7 @@ func main() {
 	dump := flag.String("dump", "", "session dump: output of wire-decode -payload -1")
 	listen := flag.String("listen", "127.0.0.1:39170", "listen address for the replayed client")
 	inject := flag.String("inject", "", "hex file with RQ_MAIN records to inject after -after")
-	after := flag.Int("after", int(session.RqSubscribe), "request type that arms the injection; 0 replays the recording")
+	after := flag.Int("after", int(session.RqSubscribe), "request type that arms the injection; 0 disables injection and cuts at RQ_SUBSCRIBE")
 	flag.Parse()
 	if *dump == "" {
 		fmt.Fprintln(os.Stderr, "usage: TC_PASSWORD=... replay-server -dump session.dump [-listen 127.0.0.1:39170] [-inject inject.hex -after 10]")
@@ -85,9 +86,18 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var (
+		mu     sync.Mutex
+		active net.Conn
+	)
 	go func() {
 		<-ctx.Done()
 		ln.Close()
+		mu.Lock()
+		if active != nil {
+			active.Close() // unblock Serve's read, not just the accept loop
+		}
+		mu.Unlock()
 	}()
 	injection := replay.Injection{AfterRequest: byte(*after), Payload: payload}
 	for {
@@ -99,8 +109,15 @@ func main() {
 			fmt.Fprintln(os.Stderr, "replay-server:", err)
 			os.Exit(1)
 		}
+		mu.Lock()
+		active = nc
+		mu.Unlock()
 		fmt.Printf("connection from %s\n", nc.RemoteAddr())
-		if err := sess.Serve(nc, injection); err != nil {
+		err = sess.Serve(nc, injection)
+		mu.Lock()
+		active = nil
+		mu.Unlock()
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "replay-server:", err)
 		} else {
 			fmt.Println("session finished")

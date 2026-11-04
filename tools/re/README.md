@@ -180,8 +180,8 @@ go run ./tools/native-trades -addr … -sec TQBR:SBER -nats nats://127.0.0.1:422
 
 ### Go-варианты прокси и проигрывателя
 
-Python-версии — эталон поведения; Go-версии (задача 1 плана) переносят оба инструмента на
-`native/wire` и принимают те же флаги. Демо-сервер и Wine для них не нужны, только loopback.
+Python-версии — эталон поведения; Go-версии (задача 1 плана) повторяют их CLI и формат
+захвата. Демо-сервер и Wine для них не нужны, только loopback.
 
 ```bash
 # RE-2: прокси вместо py/proxy.py; тот же формат захвата, что читает wire-decode
@@ -192,12 +192,14 @@ TC_PASSWORD=... go run ./tools/replay-server -dump ~/re/cap/session.dump -listen
   -inject /tmp/inject.hex -after 10
 ```
 
-- `tcproxy` принимает `-listen`, `-upstream` и `-out` (файл дописывается) и пишет строки
-  `"<conn> <секунды> C>S|S>C <len> <hex>"` — ровно то, что читают `../wire-decode` и
-  `../replay-server`.
-- `replay-server` принимает `-dump`, `-listen`, `-inject` и `-after` (по умолчанию 10 =
-  RQ_SUBSCRIBE), пароль — из `TC_PASSWORD`. `-after 0` отключает подмену и проигрывает все
-  записанные ответы RQ_MAIN.
+- `tcproxy` — логирующий TCP-прокси без разбора протокола (`native/wire` ему не нужен).
+  Принимает `-listen`, `-upstream` и `-out` (файл дописывается) и пишет raw-захват
+  `"<conn> <секунды> C>S|S>C <len> <hex>"`, который расшифровывает `../wire-decode`.
+- `replay-server` читает уже расшифрованный дамп (`../wire-decode -payload -1`), а не raw-захват:
+  принимает `-dump`, `-listen`, `-inject` и `-after` (по умолчанию 10 = RQ_SUBSCRIBE), пароль —
+  из `TC_PASSWORD`. У Python-версии dump и port — позиционные аргументы, у Go-версии —
+  именованные `-dump`/`-listen`. `-after 0` отключает подмену; записанный хвост RQ_MAIN после
+  RQ_SUBSCRIBE всё равно не проигрывается (правило py-эталона).
 - Проверка Go-версий без сети: `go test ./tools/tcproxy ./native/replay`.
 
 ## Пример: как восстанавливалась лента сделок

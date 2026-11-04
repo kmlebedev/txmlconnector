@@ -153,3 +153,41 @@ func TestStringLimits(t *testing.T) {
 		t.Fatalf("Len = %d", r.Len())
 	}
 }
+
+// TestEncodeServerPlainPayload checks the server side of FUN_1801bfb20: the
+// S>C direction keeps the header flags (0x82 = reply + plain payload) and
+// sends the payload unencrypted, while the client direction masks the plain
+// bit - the client never sends plain payloads.
+func TestEncodeServerPlainPayload(t *testing.T) {
+	keys := DefaultKeys()
+	payload := []byte("plain payload")
+	raw, err := keys.Encode(ServerToClient, Frame{Flags: KindReply | FlagPlain, Type: 5, Payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw[HeaderSize:], payload) {
+		t.Fatalf("server payload is encrypted on the wire: %x", raw[HeaderSize:])
+	}
+	f, err := keys.Decode(ServerToClient, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Flags&FlagPlain == 0 || f.Kind() != KindReply || f.Type != 5 || !bytes.Equal(f.Payload, payload) {
+		t.Fatalf("decoded server frame = %+v", f)
+	}
+
+	raw, err = keys.Encode(ClientToServer, Frame{Flags: KindRequest | FlagPlain, Type: 5, Payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(raw[HeaderSize:], payload) {
+		t.Fatal("client payload must be encrypted: the plain bit is server-only")
+	}
+	f, err = keys.Decode(ClientToServer, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Flags&FlagPlain != 0 || f.Kind() != KindRequest || f.Type != 5 || !bytes.Equal(f.Payload, payload) {
+		t.Fatalf("decoded client frame = %+v", f)
+	}
+}

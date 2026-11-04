@@ -154,3 +154,128 @@ func TestReplayServesRecordedSession(t *testing.T) {
 		t.Fatal("Serve did not return after the client disconnected")
 	}
 }
+
+// dumpFrame renders one frame in the wire-decode -payload -1 format with an
+// explicit timestamp, so a test can interleave both directions.
+func dumpFrame(b *bytes.Buffer, at float64, dir string, typ, flags byte, payload []byte) {
+	fmt.Fprintf(b, "%.3f 1 %s #1 flags=%#02x type=%d len=%d", at, dir, flags, typ, len(payload))
+	if len(payload) > 0 {
+		fmt.Fprintf(b, " %s", hex.EncodeToString(payload))
+	}
+	b.WriteString("\n")
+}
+
+// replayClient performs the recorded login handshake on top of Session.Serve
+// and then sends requests with the session keys, like the DLL/native client.
+type replayClient struct {
+	t    *testing.T
+	nc   net.Conn
+	keys *wire.Keys
+}
+
+func dialReplay(t *testing.T, sess *Session, inject Injection) *replayClient {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	errc := make(chan error, 1)
+	go func() {
+		nc, err := ln.Accept()
+		if err != nil {
+			errc <- err
+			return
+		}
+		errc <- sess.Serve(nc, inject)
+	}()
+	nc, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { nc.Close() })
+	c := &replayClient{t: t, nc: nc, keys: wire.DefaultKeys()}
+	f := c.roundTrip(session.RqLogin, nil)
+	if f.Type != session.RqLogin || len(f.Payload) != 10 {
+		t.Fatalf("RQ_LOGIN reply = %+v", f)
+	}
+	pwd := c.roundTrip(session.RqPwd, nil)
+	if f.Payload == nil {
+		t.Fatal("RQ_PWD reply carried no payload")
+	}
+	_, keys, err := session.SessionKeys(testPassword, pwd.Payload)
+	if err != nil {
+		t.Fatalf("session keys: %v", err)
+	}
+	c.keys = keys
+	return c
+}
+
+func (c *replayClient) roundTrip(typ byte, payload []byte) wire.Frame {
+	c.t.Helper()
+	out, err := c.keys.Encode(wire.ClientToServer, wire.Frame{Flags: wire.KindRequest, Type: typ, Payload: payload})
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	if _, err := c.nc.Write(out); err != nil {
+		c.t.Fatal(err)
+	}
+	f, err := c.keys.Decode(wire.ServerToClient, c.nc)
+	if err != nil {
+		c.t.Fatalf("decode reply to type %d: %v", typ, err)
+	}
+	return f
+}
+
+// TestReplayCutsRecordedMainAfterTrigger checks the Python replay_server.py
+// rule: Load keeps the first timestamp of every recorded request type, and
+// Serve does not replay recorded RQ_MAIN replies that came after the trigger
+// request (RQ_SUBSCRIBE by default) - with an injection and without one.
+func TestReplayCutsRecordedMainAfterTrigger(t *testing.T) {
+	pwd, err := wire.DefaultKeys().Decode(wire.ServerToClient, bytes.NewReader(unhex(t, stubPwdReply)))
+	if err != nil {
+		t.Fatalf("decode recorded RQ_PWD reply: %v", err)
+	}
+	before := readFixture(t, "alltrades-inject1.hex")
+	after := readFixture(t, "alltrades-inject2.hex")
+	inject := readFixture(t, "alltrades-inject3.hex")
+
+	var dump bytes.Buffer
+	dumpFrame(&dump, 0.100, "S>C", session.RqLogin, wire.KindReply, unhex(t, "00080102030405060708"))
+	dumpFrame(&dump, 0.200, "S>C", session.RqPwd, wire.KindReply, pwd.Payload)
+	dumpFrame(&dump, 0.300, "S>C", session.RqMain, wire.KindReply, before)
+	dumpFrame(&dump, 0.900, "C>S", session.RqMain, wire.KindRequest, nil)
+	dumpFrame(&dump, 1.500, "C>S", session.RqSubscribe, wire.KindRequest, []byte{0x00, 0x1a, 0x00, 0x25, 0x04})
+	dumpFrame(&dump, 1.600, "S>C", session.RqMain, wire.KindReply, after)
+	dumpFrame(&dump, 1.700, "C>S", session.RqMain, wire.KindRequest, nil)
+
+	sess, err := Load(&dump, testPassword)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	t.Run("no injection", func(t *testing.T) {
+		c := dialReplay(t, sess, Injection{})
+		if f := c.roundTrip(session.RqMain, nil); !bytes.Equal(f.Payload, before) {
+			t.Fatalf("pre-trigger RQ_MAIN = %x, want the recorded snapshot", f.Payload)
+		}
+		c.roundTrip(session.RqSubscribe, nil)
+		if f := c.roundTrip(session.RqMain, nil); len(f.Payload) != 0 {
+			t.Fatalf("post-trigger RQ_MAIN = %x, want an empty reply", f.Payload)
+		}
+	})
+
+	t.Run("with injection", func(t *testing.T) {
+		c := dialReplay(t, sess, Injection{AfterRequest: session.RqSubscribe, Payload: inject})
+		if f := c.roundTrip(session.RqMain, nil); !bytes.Equal(f.Payload, before) {
+			t.Fatalf("pre-trigger RQ_MAIN = %x, want the recorded snapshot", f.Payload)
+		}
+		c.roundTrip(session.RqSubscribe, nil)
+		if f := c.roundTrip(session.RqMain, nil); !bytes.Equal(f.Payload, inject) {
+			t.Fatalf("injected RQ_MAIN = %x, want the crafed payload", f.Payload)
+		}
+		if f := c.roundTrip(session.RqMain, nil); len(f.Payload) != 0 {
+			t.Fatalf("RQ_MAIN after injection = %x, want an empty reply", f.Payload)
+		}
+	})
+}
