@@ -80,16 +80,26 @@ func Records(p []byte) ([]Record, error) {
 			}
 			if tag == TagWrapper {
 				// The wrapper body carries nested records the DLL reads in
-				// place (for example R_EDP_RATE 0x6e): parse them so their
-				// lengths are verified and the splitter stays aligned.
-				if nested, err := Records(body); err == nil {
+				// place (for example R_EDP_RATE 0x6e). The body length is known,
+				// so a nested record without a recovered layout is skipped up to
+				// the wrapper end and surfaced as its own Record instead of
+				// being swallowed silently; the outer stream stays aligned.
+				nested, err := Records(body)
+				if err == nil {
 					out = append(out, nested...)
+					continue
 				}
-				// A wrapper body may carry records not mapped yet (the E07 tail
-				// wraps an 0x74 record, task 12 I): the outer stream stays
-				// aligned because the wrapper body length is known, so such a
-				// body is skipped rather than aborting the split.
-
+				var unknown *UnknownRecordError
+				if !errors.As(err, &unknown) {
+					return out, err
+				}
+				parsed := body[:unknown.Offset]
+				if len(parsed) > 0 {
+					if inner, innerErr := Records(parsed); innerErr == nil {
+						out = append(out, inner...)
+					}
+				}
+				out = append(out, Record{Tag: unknown.Tag, Body: body[unknown.Offset:]})
 				continue
 			}
 			out = append(out, Record{Tag: tag, Body: body})
@@ -170,12 +180,6 @@ func Records(p []byte) ([]Record, error) {
 			n := len(p[start:]) - c.Len()
 			r.Raw(n)
 			out = append(out, Record{Tag: tag, Body: p[start : start+n]})
-		case tag == TagFortsSession:
-			start := len(p) - r.Len()
-			if _, err := r.Int32(); err != nil {
-				return out, fmt.Errorf("R_FORTS_SESSION: %w", err)
-			}
-			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagUnion:
 			start := len(p) - r.Len()
 			if _, err := r.Int64(); err != nil {
@@ -237,27 +241,49 @@ func Records(p []byte) ([]Record, error) {
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagAmBook:
+			// W secid then a {B flags, 0xff end, conditional B/L/L/Z4/L}
+			// loop (RE-1 FUN_1803bea70; the live r10 body is 20 86 ff = an
+			// empty book). Flags bits: 1=<B>, 2=<L>, 4=<L>, 8=<Z4>, 16=<L> (I).
 			start := len(p) - r.Len()
 			if _, err := r.Uint16(); err != nil {
-				return out, fmt.Errorf("AmBOOK: %w", err)
+				return out, fmt.Errorf("AmBOOK secid: %w", err)
 			}
-			if _, err := r.Byte(); err != nil {
-				return out, fmt.Errorf("AmBOOK: %w", err)
-			}
-			if _, err := r.Byte(); err != nil {
-				return out, fmt.Errorf("AmBOOK: %w", err)
-			}
-			if _, err := r.Int32(); err != nil {
-				return out, fmt.Errorf("AmBOOK: %w", err)
-			}
-			if _, err := r.Int32(); err != nil {
-				return out, fmt.Errorf("AmBOOK: %w", err)
-			}
-			if _, err := r.String(4); err != nil {
-				return out, fmt.Errorf("AmBOOK: %w", err)
-			}
-			if _, err := r.Int32(); err != nil {
-				return out, fmt.Errorf("AmBOOK: %w", err)
+			for {
+				flags, err := r.Byte()
+				if err != nil {
+					return out, fmt.Errorf("AmBOOK flags: %w", err)
+				}
+				if flags == 0xff {
+					break
+				}
+				if flags&^0x1f != 0 {
+					return out, fmt.Errorf("AmBOOK: unsupported flags %#02x", flags)
+				}
+				if flags&0x01 != 0 {
+					if _, err := r.Byte(); err != nil {
+						return out, fmt.Errorf("AmBOOK byte: %w", err)
+					}
+				}
+				if flags&0x02 != 0 {
+					if _, err := r.Int32(); err != nil {
+						return out, fmt.Errorf("AmBOOK int1: %w", err)
+					}
+				}
+				if flags&0x04 != 0 {
+					if _, err := r.Int32(); err != nil {
+						return out, fmt.Errorf("AmBOOK int2: %w", err)
+					}
+				}
+				if flags&0x08 != 0 {
+					if _, err := r.String(4); err != nil {
+						return out, fmt.Errorf("AmBOOK text: %w", err)
+					}
+				}
+				if flags&0x10 != 0 {
+					if _, err := r.Int32(); err != nil {
+						return out, fmt.Errorf("AmBOOK int3: %w", err)
+					}
+				}
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagQuotation:
@@ -298,6 +324,25 @@ func Records(p []byte) ([]Record, error) {
 				return out, &UnknownRecordError{Tag: tag, Offset: start}
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagSysParams:
+			// R_SYSPARAMS: L size followed by size bytes of the serialized
+			// parameter dictionary (RE-1 FUN_18035bbb0; the blob format is I,
+			// only its length is needed to stay aligned).
+			start := len(p) - r.Len()
+			size, err := r.Int32()
+			if err != nil {
+				return out, fmt.Errorf("R_SYSPARAMS size: %w", err)
+			}
+			if size < 0 || int(size) > r.Len() {
+				return out, fmt.Errorf("R_SYSPARAMS size %d exceeds the payload (%d bytes left)", size, r.Len())
+			}
+			if _, err := r.Raw(int(size)); err != nil {
+				return out, fmt.Errorf("R_SYSPARAMS blob: %w", err)
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagState:
+			// 0x05 is an empty state record (dispatcher case 4).
+			out = append(out, Record{Tag: tag})
 		default:
 			return out, &UnknownRecordError{Tag: tag, Offset: len(p) - r.Len() - 1}
 		}

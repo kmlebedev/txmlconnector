@@ -14,6 +14,8 @@ const (
 	TagFortsSession byte = 0x6b // R_FORTS_SESSION
 	TagEdpRate      byte = 0x6e // R_EDP_RATE (also nested inside R_WRAPPER)
 	TagAmBook       byte = 0x5c // AmBOOK
+	TagSysParams    byte = 0x5b // R_SYSPARAMS: L size + size-byte blob
+	TagState        byte = 0x05 // empty state record (dispatcher case 4)
 	TagReadICA      byte = 0x7c // ReadICA, sized
 )
 
@@ -45,19 +47,25 @@ func ParseEdpRate(body []byte) (EdpRate, error) {
 	return r, nil
 }
 
-// AmBook is the AmBOOK body: W secid, B, B, L, L, Z4, L (D; not observed with
-// callbacks). The fields after the ids are not recovered (I).
-type AmBook struct {
-	SecID uint16
-	Byte1 byte
-	Byte2 byte
+// AmBookLevel is one level of the AmBOOK loop. The flags byte selects which
+// optional fields follow (bits 1,2,4,8,16 -> B, L, L, Z4, L; I).
+type AmBookLevel struct {
+	Flags byte
+	Byte  byte
 	Int1  int32
 	Int2  int32
 	Text  string
 	Int3  int32
 }
 
-// ParseAmBook decodes AmBOOK (0x5c, FUN_1803bea70).
+// AmBook is the AmBOOK body: W secid then the level loop; 0xff ends the record
+// (RE-1 FUN_1803bea70; live r10 body 20 86 ff = an empty book).
+type AmBook struct {
+	SecID  uint16
+	Levels []AmBookLevel
+}
+
+// ParseAmBook decodes AmBOOK (0x5c).
 func ParseAmBook(body []byte) (AmBook, error) {
 	var a AmBook
 	r := wire.NewReader(body)
@@ -65,30 +73,52 @@ func ParseAmBook(body []byte) (AmBook, error) {
 	if a.SecID, err = r.Uint16(); err != nil {
 		return a, fmt.Errorf("AmBOOK secid: %w", err)
 	}
-	if a.Byte1, err = r.Byte(); err != nil {
-		return a, fmt.Errorf("AmBOOK byte1: %w", err)
+	for {
+		flags, err := r.Byte()
+		if err != nil {
+			return a, fmt.Errorf("AmBOOK flags: %w", err)
+		}
+		if flags == 0xff {
+			return a, nil
+		}
+		if flags&^0x1f != 0 {
+			return a, fmt.Errorf("AmBOOK: unsupported flags %#02x", flags)
+		}
+		level := AmBookLevel{Flags: flags}
+		if flags&0x01 != 0 {
+			if level.Byte, err = r.Byte(); err != nil {
+				return a, fmt.Errorf("AmBOOK byte: %w", err)
+			}
+		}
+		if flags&0x02 != 0 {
+			if level.Int1, err = r.Int32(); err != nil {
+				return a, fmt.Errorf("AmBOOK int1: %w", err)
+			}
+		}
+		if flags&0x04 != 0 {
+			if level.Int2, err = r.Int32(); err != nil {
+				return a, fmt.Errorf("AmBOOK int2: %w", err)
+			}
+		}
+		if flags&0x08 != 0 {
+			if level.Text, err = r.String(4); err != nil {
+				return a, fmt.Errorf("AmBOOK text: %w", err)
+			}
+		}
+		if flags&0x10 != 0 {
+			if level.Int3, err = r.Int32(); err != nil {
+				return a, fmt.Errorf("AmBOOK int3: %w", err)
+			}
+		}
+		a.Levels = append(a.Levels, level)
 	}
-	if a.Byte2, err = r.Byte(); err != nil {
-		return a, fmt.Errorf("AmBOOK byte2: %w", err)
-	}
-	if a.Int1, err = r.Int32(); err != nil {
-		return a, fmt.Errorf("AmBOOK int1: %w", err)
-	}
-	if a.Int2, err = r.Int32(); err != nil {
-		return a, fmt.Errorf("AmBOOK int2: %w", err)
-	}
-	if a.Text, err = r.String(4); err != nil {
-		return a, fmt.Errorf("AmBOOK text: %w", err)
-	}
-	if a.Int3, err = r.Int32(); err != nil {
-		return a, fmt.Errorf("AmBOOK int3: %w", err)
-	}
-	return a, nil
 }
 
 // ParseFortsSession decodes R_FORTS_SESSION (0x6b): L session. The optional
-// trailing byte of the handler is not read: the live E07 records carry only the
-// packed session (D/I, docs/protocol/records.md).
+// trailing B (read by the DLL only "if bytes remain", records.md:37) is not
+// read: the live E07 records carry only the packed session, and reading it
+// unconditionally would swallow the next record's tag (I). A future RE pass can
+// pin the condition.
 func ParseFortsSession(body []byte) (int32, error) {
 	r := wire.NewReader(body)
 	session, err := r.Int32()

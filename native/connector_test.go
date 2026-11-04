@@ -1,10 +1,13 @@
 package native
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"io"
 	"math"
 	"net"
 	"os"
@@ -13,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/testserver"
 	"github.com/kmlebedev/txmlconnector/native/wire"
@@ -396,25 +400,22 @@ func snapshotTailXML(t *testing.T) []string {
 func TestSnapshotTailMatchesDLL(t *testing.T) {
 	payload := snapshotTail(t)
 	recs, err := records.Records(payload)
-	var unknown *records.UnknownRecordError
-	if !errors.As(err, &unknown) {
-		t.Fatalf("Records: %v, want the documented 0x5b boundary", err)
+	if err != nil {
+		t.Fatalf("Records: %v, want the whole E07 tail (task 12 parses 0x5b/0x05)", err)
 	}
-	// The mapped part of the E07 tail ends at the 0x5b limits/parameters block
-	// (its layout is task 12): pin the boundary so a silent shift is noticed.
-	if unknown.Tag != 0x5b || unknown.Offset != 249 {
-		t.Fatalf("unmapped tail starts at tag %#02x offset %d, want 0x5b at 249", unknown.Tag, unknown.Offset)
-	}
-	if len(recs) != 14 {
-		t.Fatalf("decoded %d records before the boundary, want 14 (the R_WRAPPER nested R_EDP_RATE records are parsed now): %v", len(recs), recs)
+	if len(recs) != 662 {
+		t.Fatalf("decoded %d records, want the full 662-record E07 tail", len(recs))
 	}
 	c := &Client{}
 	c.cfg.OnDictionaries = nil
 	c.resetAccountsLocked()
 	for _, rec := range recs {
-		if decode := decoders[rec.Tag]; decode != nil {
-			if _, err := decode(c, rec.Body); err != nil {
-				t.Fatalf("decode %#02x: %v", rec.Tag, err)
+		switch rec.Tag {
+		case records.TagClientNew, records.TagClientAsset, records.TagOvernight, records.TagUnion:
+			if decode := decoders[rec.Tag]; decode != nil {
+				if _, err := decode(c, rec.Body); err != nil {
+					t.Fatalf("decode %#02x: %v", rec.Tag, err)
+				}
 			}
 		}
 	}
@@ -752,4 +753,56 @@ func TestConnectorSecInfoUnknownSecID(t *testing.T) {
 			t.Fatalf("unknown secid produced a callback: %q", messages)
 		}
 	}
+}
+
+// TestE07TailHasNoUnknownRecordsAfterLoad is the Client/Stats version of the
+// task 12 goal: the full E07 RQ_MAIN tail (0x5b R_SYSPARAMS, 0x05 state,
+// R_WRAPPER, AmBOOK, ...) reaches Poll and Stats().UnknownRecords stays zero.
+func TestE07TailHasNoUnknownRecordsAfterLoad(t *testing.T) {
+	srv := newRunServer(t)
+	raw, err := os.ReadFile("records/testdata/e07-tail-live.hex.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := hex.DecodeString(strings.TrimSpace(string(decoded)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.AfterSubscribe = payload
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, ClientConfig{Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: srv.Dial})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	baseline := c.Stats().Polls
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = c.Run(ctx, RunOptions{}, func([]model.Event) error { return nil })
+	}()
+	if err := c.SubscribeAllTrades(ctx, model.Symbol{Board: "TQBR", SecCode: "SBER"}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.Stats().Polls >= baseline+2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := c.Stats().UnknownRecords; got != 0 {
+		t.Fatalf("UnknownRecords = %d, want 0", got)
+	}
+	cancel()
+	<-runDone
 }
