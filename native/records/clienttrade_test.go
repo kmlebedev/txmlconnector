@@ -183,3 +183,39 @@ func TestClientTradeNonzeroAccrued(t *testing.T) {
 		t.Fatalf("accruedint = %+v, want 1.50", ev.AccruedInt)
 	}
 }
+
+// TestClientTradeUnknownMaskBits: a mask bit outside the recovered 0x1ff set
+// must fail explicitly, not shift the body silently.
+func TestClientTradeUnknownMaskBits(t *testing.T) {
+	payload := readTradeFixture(t)
+	recs, err := records.Records(payload)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("trade fixture: %v", err)
+	}
+	body := append([]byte(nil), recs[0].Body...)
+	rd := wire.NewReader(body)
+	for _, step := range []func() error{
+		func() error { _, err := rd.Uint16(); return err },
+		func() error { _, err := rd.Uint16(); return err },
+		func() error { _, err := rd.Int64(); return err },
+		func() error { _, err := rd.Byte(); return err },
+		func() error { _, err := rd.Int64(); return err },
+		func() error { _, err := rd.Int64(); return err },
+		func() error { _, err := rd.Int32(); return err },
+		func() error { _, err := rd.Byte(); return err },
+		func() error { _, err := rd.String(20); return err },
+		func() error { _, err := rd.Int32(); return err },
+	} {
+		if err := step(); err != nil {
+			t.Fatalf("walk: %v", err)
+		}
+	}
+	mi := len(body) - rd.Len()
+	var w wire.Writer
+	w.Raw(body[:mi])
+	w.Uint16(0x200) // unrecovered bit
+	w.Raw(body[mi+2:])
+	if _, err := records.ParseClientTrade(w.Bytes()); err == nil {
+		t.Fatal("unknown mask bit accepted")
+	}
+}

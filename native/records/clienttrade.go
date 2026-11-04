@@ -82,6 +82,11 @@ func ParseClientTrade(body []byte) (ClientTrade, error) {
 		return t, fmt.Errorf("R_TRD mask: %w", err)
 	}
 	t.Mask = mask
+	if mask&^uint16(0x1ff) != 0 {
+		// The D mask fields cover bits 1..0x100; a higher bit would leave the
+		// body misaligned, so fail explicitly instead of silently misparsing.
+		return t, fmt.Errorf("R_TRD: unknown mask bits %#x (I)", mask&^uint16(0x1ff))
+	}
 	// Mask-selected values (types per orders.md); they are not rendered by the
 	// oracle-confirmed XML yet (I), but a valid record must never abort the poll.
 	skip := func(bit uint16, read func() error) error {
