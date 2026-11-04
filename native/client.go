@@ -386,7 +386,13 @@ func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) 
 				if herr := h([]model.Event{model.ServerStatus{Connected: true, Recover: true}}); herr != nil {
 					return herr
 				}
-				if rerr := c.recover(ctx); rerr != nil {
+				rerr := c.recover(ctx)
+				if ctx.Err() != nil {
+					// A disconnect cancelled the recovery: it owns the
+					// connected="false" callback, do not report a lost link.
+					return ctx.Err()
+				}
+				if rerr != nil {
 					// DLL: "Request timeout." -> connected="false".
 					if herr := h([]model.Event{model.ServerStatus{Err: rerr.Error()}}); herr != nil {
 						return herr

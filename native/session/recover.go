@@ -10,9 +10,18 @@ import (
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
-// ErrNotSameServer reports a reconnect to a server with another SID: the DLL
-// aborts the recovery with -0xe in that case (docs/protocol/connect.md).
+// ErrNotSameServer reports a reconnect to a server with another SID (-0xe).
+// It is NOT fatal for the recovery loop: the DLL retries such attempts until
+// session_timeout expires (docs/protocol/connect.md, "Recover unavailable.").
 var ErrNotSameServer = errors.New("transaq: reconnect to a different server")
+
+// ErrIncorrectRelogin is the DLL "Incorrect server RELOGIN response." throw: the
+// RQ_RELOGIN answer is not the expected reply, so the recovery stops at once.
+var ErrIncorrectRelogin = errors.New("transaq: incorrect server RELOGIN response")
+
+// ErrIncorrectRecover is the DLL "Incorrect server RECOVER response" throw: the
+// RQ_RECOVER answer is not the expected reply; the recovery stops at once.
+var ErrIncorrectRecover = errors.New("transaq: incorrect server RECOVER response")
 
 // ReloginPayload builds RQ_RELOGIN: Z12: the login up to 12 bytes plus NUL. The
 // request is sent on the default keys (RE-1).
@@ -98,11 +107,11 @@ func (c *Conn) Restore(ctx context.Context, nc net.Conn, login string) error {
 	case f.Kind() == wire.KindBye:
 		return ErrBye
 	case f.Kind() != wire.KindReply || f.Type != RqRelogin:
-		return fmt.Errorf("incorrect server RELOGIN response: flags %#x type %#x", f.Flags, f.Type)
+		return fmt.Errorf("%w: flags %#x type %#x", ErrIncorrectRelogin, f.Flags, f.Type)
 	}
 	reply, err := ParseReloginReply(f.Payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrIncorrectRelogin, err)
 	}
 	if reply.SID != c.sid {
 		// The DLL compares the SID unconditionally (including a recorded SID of
@@ -124,7 +133,7 @@ func (c *Conn) Restore(ctx context.Context, nc net.Conn, login string) error {
 		return ctxErr(ctx, err)
 	}
 	if f.Kind() != wire.KindReply || (f.Type != RqRecover && f.Type != lastType) {
-		return fmt.Errorf("incorrect server RECOVER response: flags %#x type %#x", f.Flags, f.Type)
+		return fmt.Errorf("%w: flags %#x type %#x", ErrIncorrectRecover, f.Flags, f.Type)
 	}
 
 	old := c.nc
