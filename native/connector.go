@@ -457,6 +457,31 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure(err.Error()), nil
 		}
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(req.TransactionID, 10) + "\"/>", nil
+	case "get_forts_positions":
+		var req struct {
+			Client string `xml:"client"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		clientCode := req.Client
+		if clientCode == "" {
+			if accounts := client.Accounts(); len(accounts) > 0 {
+				clientCode = accounts[0].ID
+			}
+		}
+		positions, money, err := client.GetFortsPositions(ctx, clientCode)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.FortsPositionsXML(positions, money))
+		return success(), nil
 	case "get_securities_info":
 		var req struct {
 			Security []struct {
@@ -581,6 +606,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.ClientXML(*e))
 			case *model.MoneyPosition:
 				c.emit(xmlcompat.PositionsXML([]model.MoneyPosition{*e}, c.micexRegisters))
+			case *model.SecPosition:
+				c.emit(xmlcompat.SecPositionXML(*e))
 			case *model.Union:
 				c.emit(xmlcompat.UnionXML(*e))
 			case *model.SecInfoUpdate:
@@ -697,6 +724,9 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 	// <client>, <positions>, <overnight>, <server_status connected="true"/>.
 	for _, account := range client.Accounts() {
 		c.emit(xmlcompat.ClientXML(account))
+	}
+	for _, pos := range client.SecPositions() {
+		c.emit(xmlcompat.SecPositionXML(pos))
 	}
 	if positions := client.MoneyPositions(); len(positions) > 0 {
 		c.emit(xmlcompat.PositionsXML(positions, req.MicexRegisters))
