@@ -144,7 +144,8 @@ tools/reference-harness/       # создать на M1
 - [ ] RQ_RELOGIN/RQ_RECOVER и обрывы связи; сравнить с поведением DLL (эксперимент E05).
 - [x] **Фаза 0** плана [native client](superpowers/plans/2026-11-04-native-transaq-client.md) (2026-11-04, ветка `plan/native-client`): RE-инструменты на Go (`tools/tcproxy`, `tools/replay-server`, `native/replay`), пакеты `native/model`/`native/records` (SPLIT XML и бинарных записей), событийный API `Client.Run` с реестром декодеров, единая точка `xmlcompat.Render` и oracle-помощник; `make verify`/`-race`/`server_build`/`queues_build` зелёные, фикстуры — `native/records/testdata`. Итог и решения — [docs/deepseek/task-index.md](deepseek/task-index.md) §11.
 - [x] **Фаза 1** плана (2026-11-04, `plan/native-client`): задачи 5–7 — DLL-faithful восстановление (RQ_RELOGIN/RQ_RECOVER, `Recover`/`Reconnect`), служебные команды и параметры `connect`, конец загрузки (`<client>`/`<positions>`/`<overnight>`/`<union>`); живые RE-4 PASS, фикстуры E05/R6/E07 в `native/*/testdata`. Итог и отклонения — [docs/deepseek/task-index.md](deepseek/task-index.md) §12.
-- [ ] **Фаза 2** плана: задачи 8–12 (`<sec_info_upd>`, `<quotations>`, `<quotes>`, `<sec_info>`, остальные записи снапшота).
+- [x] **Фаза 2** плана (2026-11-04, `plan/native-client`): задачи 8–12 — `<sec_info_upd>` из R_SEC_PARAM, `<quotations>` (0x06), стакан `<quotes>` (0x07), `get_securities_info`/RQ_SEC_SPEC/`<sec_info>`, все остальные живые записи снапшота (0x5b/0x05/0x5c/0x6b/0x6e, strict R_WRAPPER, `UnknownRecords==0` на E07-хвосте 662 записи); oracle-фикстуры и статусы в `docs/protocol/`. Итог — [docs/deepseek/task-index.md](deepseek/task-index.md) §13.
+- [ ] **Фаза 3** плана: задачи 13–14 (история `<candles>`, тики `<ticks>`).
 
 ## Результат проверки: macOS arm64 + Rosetta + Wine (3 ноября 2026)
 
