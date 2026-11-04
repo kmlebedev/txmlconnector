@@ -1,2 +1,6 @@
 /logs/
 /bin/
+# reverse-engineering runs and captures (contain account data)
+/.re-run/
+*.cap
+*.dump
