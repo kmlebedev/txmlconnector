@@ -511,20 +511,23 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		return failure("layout not recovered (I)"), nil
 	case "newstoporder":
 		var req struct {
-			SecID    int    `xml:"secid"`
-			Client   string `xml:"client"`
-			Union    string `xml:"union"`
-			BuySell  string `xml:"buysell"`
-			Quantity int64  `xml:"quantity"`
+			SecID    int     `xml:"secid"`
+			Client   string  `xml:"client"`
+			Union    string  `xml:"union"`
+			BuySell  *string `xml:"buysell"`
+			Quantity *int64  `xml:"quantity"`
 			StopLoss *struct {
-				ActivationPrice string `xml:"activationprice"`
-				OrderPrice      string `xml:"orderprice"`
-				Quantity        int64  `xml:"quantity"`
+				ActivationPrice *string `xml:"activationprice"`
+				OrderPrice      *string `xml:"orderprice"`
+				Quantity        *int64  `xml:"quantity"`
 			} `xml:"stoploss"`
 			TakeProfit *struct {
-				ActivationPrice string `xml:"activationprice"`
-				Quantity        int64  `xml:"quantity"`
+				ActivationPrice *string `xml:"activationprice"`
+				OrderPrice      *string `xml:"orderprice"`
+				Quantity        *int64  `xml:"quantity"`
 			} `xml:"takeprofit"`
+			LinkedOrderNo uint64 `xml:"linkedorderno"`
+			BrokerRef     string `xml:"brokerref"`
 		}
 		if err := xml.Unmarshal([]byte(command), &req); err != nil {
 			return failure(err.Error()), nil
@@ -536,46 +539,74 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure(msgNeedsConnection), nil
 		}
 		if req.SecID == 0 {
-			return failure("Не указан элемент secid"), nil
+			return failure("Не указан элемент \"secid\""), nil
 		}
 		if req.Client == "" && req.Union == "" {
 			return failure("Должен быть указан клиент и/или юнион"), nil
 		}
-		if req.StopLoss == nil || req.StopLoss.ActivationPrice == "" {
-			return failure("Cannot find activationprice element."), nil
+		if req.BuySell == nil {
+			return failure("Cannot find buysell tag."), nil
+		}
+		if len(*req.BuySell) != 1 || ((*req.BuySell)[0] != 'B' && (*req.BuySell)[0] != 'S') {
+			return failure("Buisell can be only 'B' or 'S'."), nil
+		}
+		if req.StopLoss == nil && req.TakeProfit == nil {
+			return failure("Cannot find stop-loss activation price."), nil
+		}
+		parse := func(text *string) (model.Decimal, error) {
+			if text == nil || *text == "" {
+				return model.Decimal{}, fmt.Errorf("empty price")
+			}
+			return model.ParseDecimal(*text)
+		}
+		var sl *model.StopLoss
+		if req.StopLoss != nil {
+			if req.StopLoss.ActivationPrice == nil {
+				return failure("Cannot find stop-loss activation price."), nil
+			}
+			if req.StopLoss.OrderPrice == nil {
+				return failure("Cannot find stop-loss order price."), nil
+			}
+			if req.StopLoss.Quantity == nil || *req.StopLoss.Quantity <= 0 {
+				return failure("Cannot find stop-loss quantity."), nil
+			}
+			act, err := parse(req.StopLoss.ActivationPrice)
+			if err != nil {
+				return failure(err.Error()), nil
+			}
+			orderPrice, err := parse(req.StopLoss.OrderPrice)
+			if err != nil {
+				return failure(err.Error()), nil
+			}
+			sl = &model.StopLoss{ActivationPrice: act, OrderPrice: orderPrice, Quantity: *req.StopLoss.Quantity}
+		}
+		var tp *model.TakeProfit
+		if req.TakeProfit != nil {
+			if req.TakeProfit.ActivationPrice == nil {
+				return failure("Cannot find take-profit activation price."), nil
+			}
+			act, err := parse(req.TakeProfit.ActivationPrice)
+			if err != nil {
+				return failure(err.Error()), nil
+			}
+			var qty int64
+			if req.TakeProfit.Quantity != nil {
+				qty = *req.TakeProfit.Quantity
+			}
+			tp = &model.TakeProfit{ActivationPrice: act, Quantity: qty}
 		}
 		symbol, ok := client.SymbolBySecID(uint16(req.SecID))
 		if !ok {
 			return failure(fmt.Sprintf("unknown secid %d", req.SecID)), nil
 		}
-		parse := func(text string) (model.Decimal, error) {
-			if text == "" {
-				return model.Decimal{}, nil
-			}
-			return model.ParseDecimal(text)
-		}
-		slAct, err := parse(req.StopLoss.ActivationPrice)
-		if err != nil {
-			return failure(err.Error()), nil
-		}
-		slOrder, _ := parse(req.StopLoss.OrderPrice)
-		var tpAct model.Decimal
-		var tpQty int64
-		if req.TakeProfit != nil {
-			tpAct, err = parse(req.TakeProfit.ActivationPrice)
-			if err != nil {
-				return failure(err.Error()), nil
-			}
-			tpQty = req.TakeProfit.Quantity
-		}
-		buySell := byte(0)
-		if len(req.BuySell) == 1 {
-			buySell = req.BuySell[0]
+		var topQuantity int64
+		if req.Quantity != nil {
+			topQuantity = *req.Quantity
 		}
 		order := model.NewStopOrder{
-			Client: req.Client, Union: req.Union, Symbol: symbol, Quantity: req.Quantity, BuySell: buySell,
-			StopLoss:   model.StopLoss{ActivationPrice: slAct, OrderPrice: slOrder, Quantity: req.StopLoss.Quantity},
-			TakeProfit: model.TakeProfit{ActivationPrice: tpAct, Quantity: tpQty},
+			Client: req.Client, Union: req.Union, Symbol: symbol, Quantity: topQuantity,
+			BuySell: (*req.BuySell)[0], StopLoss: sl, TakeProfit: tp,
+			LinkedOrderNo: req.LinkedOrderNo, BrokerRef: req.BrokerRef,
 		}
 		id, err := client.NewStopOrder(ctx, order)
 		if err != nil {
@@ -584,16 +615,17 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(id), 10) + "\"/>", nil
 	case "newcondorder":
 		var req struct {
-			SecID       int    `xml:"secid"`
-			Client      string `xml:"client"`
-			Union       string `xml:"union"`
-			Price       string `xml:"price"`
-			Quantity    int64  `xml:"quantity"`
-			BuySell     string `xml:"buysell"`
-			CondType    string `xml:"cond_type"`
-			CondValue   string `xml:"cond_value"`
-			ValidAfter  string `xml:"validafter"`
-			ValidBefore string `xml:"validbefore"`
+			SecID       int     `xml:"secid"`
+			Client      string  `xml:"client"`
+			Union       string  `xml:"union"`
+			BuySell     *string `xml:"buysell"`
+			Quantity    *int64  `xml:"quantity"`
+			Price       *string `xml:"price"`
+			CondType    *string `xml:"cond_type"`
+			CondValue   *string `xml:"cond_value"`
+			ValidAfter  *string `xml:"validafter"`
+			ValidBefore *string `xml:"validbefore"`
+			BrokerRef   string  `xml:"brokerref"`
 		}
 		if err := xml.Unmarshal([]byte(command), &req); err != nil {
 			return failure(err.Error()), nil
@@ -605,47 +637,68 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure(msgNeedsConnection), nil
 		}
 		if req.SecID == 0 {
-			return failure("Не указан элемент secid"), nil
+			return failure("Не указан элемент \"secid\""), nil
 		}
 		if req.Client == "" && req.Union == "" {
 			return failure("Должен быть указан клиент и/или юнион"), nil
+		}
+		if req.BuySell == nil {
+			return failure("Cannot find buysell tag."), nil
+		}
+		if len(*req.BuySell) != 1 || ((*req.BuySell)[0] != 'B' && (*req.BuySell)[0] != 'S') {
+			return failure("Buisell can be only 'B' or 'S'."), nil
+		}
+		if req.CondType == nil || *req.CondType == "" {
+			return failure("You have to specify condition type."), nil
+		}
+		if req.CondValue == nil || *req.CondValue == "" {
+			return failure("You have to specify cond_value"), nil
+		}
+		if req.ValidAfter == nil || *req.ValidAfter == "" {
+			return failure("Cannot find validafter param."), nil
+		}
+		if req.ValidBefore == nil || *req.ValidBefore == "" {
+			return failure("Cannot find validbefore param."), nil
+		}
+		if req.Price == nil || *req.Price == "" {
+			return failure("Price not found."), nil
+		}
+		parse := func(text string) (model.Decimal, error) { return model.ParseDecimal(text) }
+		price, err := parse(*req.Price)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		condValue, err := parse(*req.CondValue)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		parseTime := func(text string) (*time.Time, error) {
+			t, err := time.Parse("02.01.2006 15:04:05", text)
+			if err != nil {
+				return nil, fmt.Errorf("Bad validafter: Incorrect DateTime format. Should be: \"DD.MM.YYYY hh:mm:ss\".")
+			}
+			return &t, nil
+		}
+		after, err := parseTime(*req.ValidAfter)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		before, err := parseTime(*req.ValidBefore)
+		if err != nil {
+			return failure(err.Error()), nil
 		}
 		symbol, ok := client.SymbolBySecID(uint16(req.SecID))
 		if !ok {
 			return failure(fmt.Sprintf("unknown secid %d", req.SecID)), nil
 		}
-		parse := func(text string) (model.Decimal, error) {
-			if text == "" {
-				return model.Decimal{}, nil
-			}
-			return model.ParseDecimal(text)
-		}
-		price, err := parse(req.Price)
-		if err != nil {
-			return failure(err.Error()), nil
-		}
-		condValue, err := parse(req.CondValue)
-		if err != nil {
-			return failure(err.Error()), nil
-		}
-		parseTime := func(text string) *time.Time {
-			if text == "" {
-				return nil
-			}
-			t, err := time.Parse("02.01.2006 15:04:05", text)
-			if err != nil {
-				return nil
-			}
-			return &t
-		}
-		buySell := byte(0)
-		if len(req.BuySell) == 1 {
-			buySell = req.BuySell[0]
+		var quantity int64
+		if req.Quantity != nil {
+			quantity = *req.Quantity
 		}
 		order := model.NewCondOrder{
-			Client: req.Client, Union: req.Union, Symbol: symbol, Price: price, Quantity: req.Quantity,
-			BuySell: buySell, CondType: req.CondType, CondValue: condValue,
-			ValidAfter: parseTime(req.ValidAfter), ValidBefore: parseTime(req.ValidBefore),
+			Client: req.Client, Union: req.Union, Symbol: symbol, Price: price, Quantity: quantity,
+			BuySell: (*req.BuySell)[0], CondType: *req.CondType, CondValue: condValue,
+			ValidAfter: after, ValidBefore: before, BrokerRef: req.BrokerRef,
 		}
 		id, err := client.NewCondOrder(ctx, order)
 		if err != nil {

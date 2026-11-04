@@ -32,15 +32,16 @@ type TakeProfit struct {
 	Quantity        int64
 }
 
-// NewStopOrder is the newstoporder command (PDF 3.10).
+// NewStopOrder is the newstoporder command (PDF 3.10). Both legs are optional
+// (the DLL accepts SL-only and TP-only commands); at least one is required.
 type NewStopOrder struct {
 	Client        string
 	Union         string
 	Symbol        Symbol
 	Quantity      int64
 	BuySell       byte
-	StopLoss      StopLoss
-	TakeProfit    TakeProfit
+	StopLoss      *StopLoss
+	TakeProfit    *TakeProfit
 	LinkedOrderNo uint64
 	BrokerRef     string
 }
@@ -49,16 +50,24 @@ type NewStopOrder struct {
 // only the oracle-rendered fields are typed, the rest is I).
 type StopOrder struct {
 	TransactionID uint64
-	SecID         uint16
-	Board         string
-	SecCode       string
-	Union         string
-	Client        string
-	BuySell       byte
-	Author        string
-	Status        int
-	WithdrawTime  int64
-	Result        string
+	// Mask and the presence flags are needed for the mask-aware render: a
+	// status-only update must not print fields the record does not carry.
+	Mask         uint64
+	HasSec       bool
+	HasBoard     bool
+	HasClient    bool
+	HasBuySell   bool
+	HasStatus    bool
+	SecID        uint16
+	Board        string
+	SecCode      string
+	Union        string
+	Client       string
+	BuySell      byte
+	Author       string
+	Status       int
+	WithdrawTime int64
+	Result       string
 }
 
 func (*StopOrder) isEvent() {}

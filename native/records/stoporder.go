@@ -22,6 +22,8 @@ type StopOrder struct {
 	BuySell     byte
 	Status      int
 	HasStatus   bool
+	HasBoard    bool
+	HasBuySell  bool
 }
 
 // stopStatusResult is the DLL <result> for a stop order without a status.
@@ -62,7 +64,7 @@ func ParseStopOrder(body []byte) (StopOrder, error) {
 		}},
 		reader{0x200, func() error {
 			board, err := r.Uint16()
-			out.BoardID = board
+			out.BoardID, out.HasBoard = board, err == nil
 			return err
 		}},
 		reader{0x400, func() error {
@@ -72,7 +74,7 @@ func ParseStopOrder(body []byte) (StopOrder, error) {
 		}},
 		reader{0x800, func() error {
 			side, err := r.Byte()
-			out.BuySell = side
+			out.BuySell, out.HasBuySell = side, err == nil
 			return err
 		}},
 		reader{0x1000, func() error { _, err := r.Uint16(); return err }},
@@ -88,11 +90,22 @@ func ParseStopOrder(body []byte) (StopOrder, error) {
 			return out, fmt.Errorf("R_STOP mask %#x: %w", rd.bit, err)
 		}
 	}
+	// The status-dependent block (D): status 4/6 carry one extra value/string.
+	// Other statuses in our data do not; consume leniently and let the decoder
+	// drop an unusable update instead of aborting the poll (P3).
 	if out.Mask&0x80 != 0 {
-		return out, fmt.Errorf("R_STOP: status block mask 0x80 is not recovered (I)")
+		flag, err := r.Byte()
+		if err != nil {
+			return out, fmt.Errorf("R_STOP mask 0x80: %w", err)
+		}
+		if flag != 0 && out.Status == 6 {
+			if _, err := r.String(512); err != nil {
+				return out, fmt.Errorf("R_STOP mask 0x80 text: %w", err)
+			}
+		}
 	}
 	if out.Mask&^uint64(0xffff) != 0 {
-		return out, fmt.Errorf("R_STOP: mask bits above 0x8000 are not recovered (I)")
+		return out, fmt.Errorf("R_STOP: mask bits above 0x8000 are not recovered (I; mask %#x)", out.Mask)
 	}
 	return out, nil
 }
@@ -102,10 +115,16 @@ func ParseStopOrder(body []byte) (StopOrder, error) {
 func (s StopOrder) Event(cat *Catalog) model.StopOrder {
 	ev := model.StopOrder{
 		TransactionID: s.StopOrderID,
+		Mask:          s.Mask,
 		SecID:         s.SecID,
 		BuySell:       s.BuySell,
 		Status:        s.Status,
 		Result:        stopStatusResult,
+		HasSec:        s.HasSec,
+		HasBoard:      s.HasBoard,
+		HasClient:     s.HasClient,
+		HasBuySell:    s.HasBuySell,
+		HasStatus:     s.HasStatus,
 	}
 	if cat != nil {
 		if s.HasSec {
