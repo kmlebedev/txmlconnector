@@ -97,7 +97,7 @@ func TestParseQuotesNegatives(t *testing.T) {
 		valid[:4],
 		valid[:5],
 		valid[:7],
-		append([]byte{0x00, 0x1a, 0x00, 0x25, 'X', 0x00, 0x00, 0xff}),
+		[]byte{0x00, 0x1a, 0x00, 0x25, 'X', 0x00, 0x00, 0xff},
 		valid[:len(valid)-1], // no 0xff terminator
 	}
 	for i, body := range cases {
