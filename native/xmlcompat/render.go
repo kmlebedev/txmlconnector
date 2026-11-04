@@ -708,3 +708,36 @@ func UnitedLimitsXML(l model.UnitedLimits) string {
 	b.WriteString("</united_limits>")
 	return b.String()
 }
+
+// StopOrdersXML renders the R_STOP callback: the DLL uses the <orders> envelope
+// with one <stoporder transactionid> element (orders.md, O).
+func StopOrdersXML(orders []model.StopOrder) string {
+	var b strings.Builder
+	b.WriteString("<orders>")
+	for _, order := range orders {
+		b.WriteString("<stoporder transactionid=" + quoteAttr(strconv.FormatUint(order.TransactionID, 10)) + ">")
+		b.WriteString("<secid>" + strconv.Itoa(int(order.SecID)) + "</secid>")
+		b.WriteString("<union>" + escape(order.Union) + "</union>")
+		b.WriteString("<board>" + escape(order.Board) + "</board>")
+		b.WriteString("<seccode>" + escape(order.SecCode) + "</seccode>")
+		b.WriteString("<client>" + escape(order.Client) + "</client>")
+		b.WriteString("<buysell>" + escape(string(order.BuySell)) + "</buysell>")
+		b.WriteString("<author>" + escape(order.Author) + "</author>")
+		b.WriteString("<status>" + stopOrderStatusName(order.Status) + "</status>")
+		b.WriteString("<withdrawtime>" + strconv.FormatInt(order.WithdrawTime, 10) + "</withdrawtime>")
+		b.WriteString("<result>" + escape(order.Result) + "</result>")
+		b.WriteString("</stoporder>")
+	}
+	b.WriteString("</orders>")
+	return b.String()
+}
+
+// stopOrderStatusName maps the R_STOP status codes (only none is O-confirmed).
+func stopOrderStatusName(status int) string {
+	switch status {
+	case 0:
+		return "none"
+	default:
+		return strconv.Itoa(status)
+	}
+}
