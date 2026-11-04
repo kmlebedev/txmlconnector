@@ -56,6 +56,9 @@ type Server struct {
 	AfterSubscribe []byte
 	// MainDelay delays every RQ_MAIN reply.
 	MainDelay time.Duration
+	// SessionTimeout is the RQ_PWD session timeout in seconds; 0 means the
+	// demo-server value of 120. The client uses it as the recovery limit.
+	SessionTimeout int32
 	// Password wraps the session key; New sets it to Password.
 	Password string
 
@@ -156,7 +159,11 @@ func (s *Server) serve(nc net.Conn) {
 	defer nc.Close()
 	s.mu.Lock()
 	snapshot, afterSubscribe, password := s.Snapshot, s.AfterSubscribe, s.Password
+	sessionTimeout := s.SessionTimeout
 	s.mu.Unlock()
+	if sessionTimeout <= 0 {
+		sessionTimeout = 120
+	}
 
 	keys := wire.DefaultKeys()
 	pwKey, err := cryptoprofile.NewCipher(cryptoprofile.PasswordKey(password))
@@ -215,7 +222,7 @@ func (s *Server) serve(nc net.Conn) {
 			w.Raw(encSync)
 			// Byte1..3, SessionTimeout, Byte4..7, Int1
 			w.Raw([]byte{0, 0, 0})
-			w.Int32(120)
+			w.Int32(sessionTimeout)
 			w.Raw([]byte{0, 0, 0, 0})
 			w.Int32(0)
 			// Flags, Byte8, SubBroker, Text1, Byte9, Text2, Text3, Byte10

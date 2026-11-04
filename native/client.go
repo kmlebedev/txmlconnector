@@ -52,10 +52,11 @@ type Client struct {
 	serverTZ string
 	bias     time.Duration // UTC = wall + bias
 
-	mu    sync.Mutex
-	subs  map[[2]uint16]byte // (secid, board) -> mask
-	dedup records.TradeDedup
-	stats Stats
+	mu         sync.Mutex
+	subs       map[model.Symbol]byte // stable board+seccode -> subscription mask
+	dedup      tradeDedup
+	recovering bool // true while recover replaces the session
+	stats      Stats
 }
 
 // Dial logs in, loads the dictionaries and the initial snapshot (RQ_TIME,
@@ -81,8 +82,8 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 		nc.Close()
 		return nil, err
 	}
-	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[[2]uint16]byte{}}
-	if err := c.load(ctx); err != nil {
+	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}}
+	if err := c.load(ctx, conn); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -93,17 +94,19 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 // Events seen while loading are dropped: trades are not expected before the
 // subscription (the DLL delivers none either), and other event families only
 // start flowing after it; unknown layouts are counted in Stats, not reported.
-func (c *Client) load(ctx context.Context) error {
-	st, err := c.conn.Time(ctx)
+func (c *Client) load(ctx context.Context, conn *session.Conn) error {
+	st, err := conn.Time(ctx)
 	if err != nil {
 		return err
 	}
-	c.zone = st.Zone
-	c.serverTZ, _ = records.TimeZoneName(st.Zone)
 	// Bytes 0..1 of the zone block hold the bias in minutes (-180 for MSK),
 	// with Windows sign: UTC = local + bias.
-	c.bias = time.Duration(int16(uint16(st.Zone[0])|uint16(st.Zone[1])<<8)) * time.Minute
-	payload, err := c.conn.Startup(ctx)
+	bias := time.Duration(int16(uint16(st.Zone[0])|uint16(st.Zone[1])<<8)) * time.Minute
+	serverTZ, _ := records.TimeZoneName(st.Zone)
+	c.mu.Lock()
+	c.zone, c.serverTZ, c.bias = st.Zone, serverTZ, bias
+	c.mu.Unlock()
+	payload, err := conn.Startup(ctx)
 	if err != nil {
 		return err
 	}
@@ -111,7 +114,11 @@ func (c *Client) load(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	c.catalog = records.NewCatalog(startup)
+	catalog := records.NewCatalog(startup)
+	c.mu.Lock()
+	c.catalog = catalog
+	c.dedup.bind(catalog)
+	c.mu.Unlock()
 	if c.cfg.OnDictionaries != nil {
 		c.cfg.OnDictionaries(startup)
 	}
@@ -135,12 +142,48 @@ func (c *Client) load(ctx context.Context) error {
 	return nil
 }
 
-func (c *Client) Info() *session.Info              { return c.info }
-func (c *Client) Catalog() *records.Catalog        { return c.catalog }
-func (c *Client) ServerTZ() string                 { return c.serverTZ }
-func (c *Client) Conn() *session.Conn              { return c.conn }
-func (c *Client) Close() error                     { return c.conn.Close() }
-func (c *Client) Logout(ctx context.Context) error { return c.conn.Logout(ctx) }
+func (c *Client) Info() *session.Info {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.info
+}
+
+func (c *Client) Catalog() *records.Catalog {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.catalog
+}
+
+func (c *Client) ServerTZ() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.serverTZ
+}
+
+// connection returns the current session connection.
+func (c *Client) connection() *session.Conn {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn
+}
+
+func (c *Client) Conn() *session.Conn { return c.connection() }
+
+func (c *Client) Close() error {
+	conn := c.connection()
+	if conn == nil {
+		return nil
+	}
+	return conn.Close()
+}
+
+func (c *Client) Logout(ctx context.Context) error {
+	conn := c.connection()
+	if conn == nil {
+		return nil
+	}
+	return conn.Logout(ctx)
+}
 
 // Stats returns a snapshot of the counters.
 func (c *Client) Stats() Stats {
@@ -160,19 +203,14 @@ func (c *Client) UnsubscribeAllTrades(ctx context.Context, symbols ...model.Symb
 }
 
 // update sends the full new mask of every touched security, as the DLL does.
+// Subscriptions are kept per stable model.Symbol, so they survive a reconnect
+// that changes the session-local secids; the ids are resolved on every send.
 func (c *Client) update(ctx context.Context, symbols []model.Symbol, bit byte, on bool) error {
 	c.mu.Lock()
-	var items []session.SubscribeItem
-	next := map[[2]uint16]byte{}
+	next := make(map[model.Symbol]byte, len(symbols))
 	for _, s := range symbols {
-		sec, board, ok := c.catalog.Lookup(s.Board, s.SecCode)
-		if !ok {
-			c.mu.Unlock()
-			return fmt.Errorf("unknown security %s", s)
-		}
-		key := [2]uint16{sec.SecID, board.Num}
-		mask := c.subs[key]
-		if m, ok := next[key]; ok {
+		mask := c.subs[s]
+		if m, ok := next[s]; ok {
 			mask = m
 		}
 		if on {
@@ -180,22 +218,41 @@ func (c *Client) update(ctx context.Context, symbols []model.Symbol, bit byte, o
 		} else {
 			mask &^= bit
 		}
-		next[key] = mask
+		next[s] = mask
 	}
-	for key, mask := range next {
-		items = append(items, session.SubscribeItem{SecID: key[0], Board: key[1], Mask: mask})
+	if c.recovering {
+		c.mu.Unlock()
+		return errors.New("transaq: connection is being recovered")
 	}
+	conn := c.conn
+	catalog := c.catalog
 	c.mu.Unlock()
-	sort.Slice(items, func(i, j int) bool { return items[i].SecID < items[j].SecID })
-	if err := c.conn.Subscribe(ctx, items); err != nil {
+	if conn == nil || catalog == nil {
+		return errors.New("transaq: client is not connected")
+	}
+	items := make([]session.SubscribeItem, 0, len(next))
+	for s, mask := range next {
+		sec, board, ok := catalog.Lookup(s.Board, s.SecCode)
+		if !ok {
+			return fmt.Errorf("unknown security %s", s)
+		}
+		items = append(items, session.SubscribeItem{SecID: sec.SecID, Board: board.Num, Mask: mask})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].SecID != items[j].SecID {
+			return items[i].SecID < items[j].SecID
+		}
+		return items[i].Board < items[j].Board
+	})
+	if err := conn.Subscribe(ctx, items); err != nil {
 		return err
 	}
 	c.mu.Lock()
-	for key, mask := range next {
+	for s, mask := range next {
 		if mask == 0 {
-			delete(c.subs, key)
+			delete(c.subs, s)
 		} else {
-			c.subs[key] = mask
+			c.subs[s] = mask
 		}
 	}
 	c.mu.Unlock()
@@ -210,7 +267,8 @@ func (c *Client) update(ctx context.Context, symbols []model.Symbol, bit byte, o
 // layout). Poll keeps the client lock only while decoding, so Run can hand the
 // events to a callback without the lock held.
 func (c *Client) Poll(ctx context.Context) (events []model.Event, more bool, err error) {
-	reply, err := c.conn.Main(ctx)
+	conn := c.connection()
+	reply, err := conn.Main(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -292,7 +350,21 @@ func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) 
 		for {
 			events, more, err := c.Poll(ctx)
 			if err != nil {
-				return err
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if !isTransportError(err) {
+					return err
+				}
+				if rerr := c.recover(ctx); rerr != nil {
+					return rerr
+				}
+				// The link is restored: hand the recovery status to the caller
+				// like any other batch and continue polling after the delay.
+				if herr := h([]model.Event{model.ServerStatus{Connected: true, Recover: true}}); herr != nil {
+					return herr
+				}
+				break
 			}
 			if err := h(events); err != nil {
 				return err
@@ -302,6 +374,57 @@ func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) 
 			}
 		}
 	}
+}
+
+// tradeDedup drops replays whose trade number is not above the last one seen
+// for the same security, as the DLL does ("old ALLTRADE No" in its log). The
+// key is the stable model.Symbol (board code + seccode), not the session-local
+// secid, so the replay a reconnected server sends for a trade already delivered
+// is dropped; records that cannot be resolved fall back to (secid, board).
+type tradeDedup struct {
+	catalog *records.Catalog
+	last    map[model.Symbol]int64
+	raw     map[[2]uint16]int64
+}
+
+// Fresh reports whether t is new and records it.
+func (d *tradeDedup) Fresh(t model.AllTrade) bool {
+	if d.last == nil {
+		d.last = map[model.Symbol]int64{}
+		d.raw = map[[2]uint16]int64{}
+	}
+	if key, ok := d.symbol(t); ok {
+		if last, seen := d.last[key]; seen && t.TradeNo <= last {
+			return false
+		}
+		d.last[key] = t.TradeNo
+		return true
+	}
+	key := [2]uint16{t.SecID, t.Board}
+	if last, seen := d.raw[key]; seen && t.TradeNo <= last {
+		return false
+	}
+	d.raw[key] = t.TradeNo
+	return true
+}
+
+// bind points the dedup at the catalog of the current session; the recorded
+// last trade numbers stay, which is what makes the cross-session dedup work.
+func (d *tradeDedup) bind(c *records.Catalog) { d.catalog = c }
+
+func (d *tradeDedup) symbol(t model.AllTrade) (model.Symbol, bool) {
+	if d.catalog == nil {
+		return model.Symbol{}, false
+	}
+	sec, ok := d.catalog.Security(t.SecID)
+	if !ok {
+		return model.Symbol{}, false
+	}
+	board, ok := d.catalog.Board(t.Board)
+	if !ok {
+		return model.Symbol{}, false
+	}
+	return model.Symbol{Board: board.Code, SecCode: sec.SecCode}, true
 }
 
 // WallTime renders the trade time as the server (and the DLL) shows it.

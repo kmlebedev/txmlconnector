@@ -288,8 +288,13 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 	err = client.Run(ctx, RunOptions{RqDelay: delay}, func(events []model.Event) error {
 		var trades []model.Trade
 		for _, ev := range events {
-			if t, ok := ev.(*model.Trade); ok {
-				trades = append(trades, *t)
+			switch e := ev.(type) {
+			case *model.Trade:
+				trades = append(trades, *e)
+			case model.ServerStatus:
+				if e.Recover {
+					c.emit(c.recoveryStatusXML())
+				}
 			}
 		}
 		if len(trades) > 0 {
@@ -476,6 +481,16 @@ func (c *Connector) Close() error {
 	close(c.out)
 	<-c.outDone
 	return nil
+}
+
+// recoveryStatusXML renders the <server_status> the DLL reports after it has
+// restored a lost connection: connected="true" with recover="true". The exact
+// attribute order is not verified against the DLL yet (needs the RE-2 capture
+// of the recovery scenario, docs/protocol/connect.md).
+func (c *Connector) recoveryStatusXML() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.TrimSuffix(c.statusLocked(true), "/>") + ` recover="true"/>`
 }
 
 func (c *Connector) statusXML(connected bool) string {
