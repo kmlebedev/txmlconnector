@@ -126,3 +126,30 @@ func ParseMarginPosListReply(body []byte) ([]int64, error) {
 	}
 	return out, nil
 }
+
+// ParseSecRate decodes R_SEC_RATE (0x0a): W secid then a packed L value, the
+// cost of the lot in kopecks (SBER 291.46*1*100=29146; margin.md, O/D). The
+// value is the price P of the max-buy/sell formula (task-52).
+func ParseSecRate(body []byte) (SecRate, error) {
+	var out SecRate
+	r := wire.NewReader(body)
+	secID, err := r.Uint16()
+	if err != nil {
+		return out, fmt.Errorf("R_SEC_RATE secid: %w", err)
+	}
+	value, err := r.Int64()
+	if err != nil {
+		return out, fmt.Errorf("R_SEC_RATE value: %w", err)
+	}
+	if r.Len() > 0 {
+		return out, fmt.Errorf("R_SEC_RATE: %d trailing bytes", r.Len())
+	}
+	out.SecID, out.Value = secID, value
+	return out, nil
+}
+
+// SecRate is one R_SEC_RATE record: the lot price in kopecks.
+type SecRate struct {
+	SecID uint16
+	Value int64
+}

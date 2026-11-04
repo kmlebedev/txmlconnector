@@ -64,3 +64,20 @@ func TestSecMktPermitNegatives(t *testing.T) {
 		t.Fatal("trailing byte accepted")
 	}
 }
+
+// TestParseSecRate: R_SEC_RATE is W secid + packed L lot value in kopecks.
+func TestParseSecRate(t *testing.T) {
+	var w wire.Writer
+	w.Uint16(26)
+	w.Int32(29146)
+	rate, err := records.ParseSecRate(w.Bytes())
+	if err != nil || rate.SecID != 26 || rate.Value != 29146 {
+		t.Fatalf("rate = %+v, %v", rate, err)
+	}
+	if _, err := records.ParseSecRate([]byte{0x00}); err == nil {
+		t.Fatal("short body accepted")
+	}
+	if _, err := records.ParseSecRate(append(w.Bytes(), 0xff)); err == nil {
+		t.Fatal("trailing byte accepted")
+	}
+}

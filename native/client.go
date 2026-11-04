@@ -97,6 +97,9 @@ type Client struct {
 	orderOrder       []uint64
 	secPositions     map[positionKey]model.SecPosition
 	secPositionOrder []positionKey
+	// marginRates is the R_SEC_RATE (0x0a) price P per secid (lot cost in
+	// kopecks) used by the local max-buy/sell formula (task 23/52).
+	marginRates map[uint16]int64
 }
 
 // Dial logs in, loads the dictionaries and the initial snapshot (RQ_TIME,
