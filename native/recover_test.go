@@ -14,7 +14,6 @@ import (
 	"github.com/kmlebedev/txmlconnector/native/records"
 
 	"github.com/kmlebedev/txmlconnector/native/session"
-	"github.com/kmlebedev/txmlconnector/native/testserver"
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
@@ -86,10 +85,12 @@ func tradeRecord(t *testing.T, idx int, secID uint16) []byte {
 	return sizedRecord(records.TagAllTrade, body)
 }
 
-// TestRecoverResubscribesBySymbol checks Review Focus 3: after a lost link the
-// client logs in again, rebuilds the catalog (SBER changes secid 26 -> 27),
-// re-subscribes by model.Symbol (001b002504) and drops the replay of an
-// already delivered trade (same trade number under the new secid).
+// TestRecoverResubscribesBySymbol checks the long path (Review Focus 3): the
+// short recovery is refused by the new server (another SID), Run reports the
+// loss and returns a recovery error, and the explicit Client.Reconnect performs
+// a full login: the catalog is rebuilt (SBER secid 26 -> 27), the subscriptions
+// are restored by model.Symbol (001b002504) and the replayed trade is not
+// delivered twice.
 func TestRecoverResubscribesBySymbol(t *testing.T) {
 	first := newTestServer(t)
 	first.Snapshot = mainPayload(secNewRecord(t, "SBER", 26))
@@ -98,9 +99,8 @@ func TestRecoverResubscribesBySymbol(t *testing.T) {
 	second := newTestServer(t)
 	second.Snapshot = mainPayload(secNewRecord(t, "SBER", 27))
 	second.AfterSubscribe = mainPayload(tradeRecord(t, 0, 27), tradeRecord(t, 1, 27))
-	// The new server does not recognise the old session (different SID), so the
-	// short RQ_RELOGIN/RQ_RECOVER path fails and the client falls back to a full
-	// login: that is the long path this test covers.
+	// The new server does not recognise the old session (another SID): the
+	// short RQ_RELOGIN/RQ_RECOVER path fails at once (DLL error -0xe).
 	second.ReloginSID = 99
 
 	var mu sync.Mutex
@@ -119,7 +119,7 @@ func TestRecoverResubscribesBySymbol(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	c, err := Dial(ctx, ClientConfig{
-		Address: "testserver:0", Login: testserver.Login, Password: testserver.Password, Dial: dial,
+		Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: dial,
 	})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
@@ -127,6 +127,9 @@ func TestRecoverResubscribesBySymbol(t *testing.T) {
 	defer c.Close()
 	if err := c.SubscribeAllTrades(ctx, model.Symbol{Board: "TQBR", SecCode: "SBER"}); err != nil {
 		t.Fatalf("subscribe: %v", err)
+	}
+	if subs := subscribePayloads(first); len(subs) != 1 || subs[0] != "001a002504" {
+		t.Fatalf("first RQ_SUBSCRIBE = %v, want [001a002504]", subs)
 	}
 
 	var hmu sync.Mutex
@@ -137,63 +140,69 @@ func TestRecoverResubscribesBySymbol(t *testing.T) {
 		defer hmu.Unlock()
 		return append([]model.ServerStatus(nil), statuses...), append([]model.Trade(nil), trades...)
 	}
+	handler := func(events []model.Event) error {
+		hmu.Lock()
+		defer hmu.Unlock()
+		for _, ev := range events {
+			switch e := ev.(type) {
+			case model.ServerStatus:
+				statuses = append(statuses, e)
+			case *model.Trade:
+				trades = append(trades, *e)
+			}
+		}
+		return nil
+	}
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 	done := make(chan error, 1)
-	go func() {
-		done <- c.Run(runCtx, RunOptions{RqDelay: 10 * time.Millisecond}, func(events []model.Event) error {
-			hmu.Lock()
-			defer hmu.Unlock()
-			for _, ev := range events {
-				switch e := ev.(type) {
-				case model.ServerStatus:
-					statuses = append(statuses, e)
-				case *model.Trade:
-					trades = append(trades, *e)
-				}
-			}
-			return nil
-		})
-	}()
-
-	// Wait for the first trade, then break the link.
+	go func() { done <- c.Run(runCtx, RunOptions{RqDelay: 10 * time.Millisecond}, handler) }()
 	waitFor(t, func() bool {
 		_, tr := snapshot()
 		return len(tr) >= 1
 	})
 	first.Drop()
-
-	// The client logs in again, re-subscribes and reports the recovery; the
-	// second session replays trade 1 and then sends trade 2.
-	waitFor(t, func() bool {
-		st, tr := snapshot()
-		recovered := false
-		for _, s := range st {
-			if s.Connected && s.Recover {
-				recovered = true
-			}
-		}
-		for _, trd := range tr {
-			if trd.TradeNo == 9000000002 {
-				return recovered
-			}
-		}
-		return false
-	})
+	var runErr error
+	select {
+	case runErr = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after the refused recovery")
+	}
+	var re *recoveryError
+	if !errors.As(runErr, &re) {
+		t.Fatalf("Run = %v, want a recovery error", runErr)
+	}
+	if !errors.Is(runErr, session.ErrNotSameServer) {
+		t.Fatalf("Run = %v, want ErrNotSameServer", runErr)
+	}
 	st, tr := snapshot()
-	runCancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("Run = %v, want context.Canceled", err)
+	if len(tr) != 1 {
+		t.Fatalf("trades before the reconnect = %d, want 1", len(tr))
+	}
+	if len(st) != 2 || !st[0].Connected || !st[0].Recover || st[1].Connected || st[1].Err == "" {
+		t.Fatalf("statuses = %+v, want recover=true then connected=false with Err", st)
 	}
 
-	var recovered int
-	for _, s := range st {
-		if s.Connected && s.Recover {
-			recovered++
-		}
+	// The DLL leaves the full connect to the XML client; the typed API has an
+	// explicit Reconnect for it.
+	if err := c.Reconnect(ctx); err != nil {
+		t.Fatalf("Reconnect: %v", err)
 	}
-	if recovered != 1 {
-		t.Fatalf("recovery statuses = %d in %+v, want exactly one", recovered, st)
+	if subs := subscribePayloads(second); len(subs) != 1 || subs[0] != "001b002504" {
+		t.Fatalf("recovery RQ_SUBSCRIBE = %v, want [001b002504]", subs)
+	}
+	runCtx2, runCancel2 := context.WithCancel(ctx)
+	defer runCancel2()
+	done2 := make(chan error, 1)
+	go func() { done2 <- c.Run(runCtx2, RunOptions{RqDelay: 10 * time.Millisecond}, handler) }()
+	waitFor(t, func() bool {
+		_, tr := snapshot()
+		return len(tr) >= 2
+	})
+	_, tr = snapshot()
+	runCancel2()
+	if err := <-done2; !errors.Is(err, context.Canceled) {
+		t.Fatalf("second Run = %v, want context.Canceled", err)
 	}
 	if len(tr) != 2 {
 		t.Fatalf("trades = %d, want 2 (trade 1 once, trade 2): %+v", len(tr), tr)
@@ -204,11 +213,52 @@ func TestRecoverResubscribesBySymbol(t *testing.T) {
 	if tr[1].SecCode != "SBER" || tr[1].SecID != 27 {
 		t.Fatalf("trade 2 = %+v, want SBER resolved from the rebuilt catalog (secid 27)", tr[1])
 	}
-	if subs := subscribePayloads(second); len(subs) != 1 || subs[0] != "001b002504" {
-		t.Fatalf("recovery RQ_SUBSCRIBE = %v, want [001b002504]", subs)
+}
+
+// TestRecoverStrictSID checks the SID comparison the DLL does on RQ_RELOGIN: even
+// with a recorded SID of 0, a reply carrying another SID is ErrNotSameServer.
+func TestRecoverStrictSID(t *testing.T) {
+	first := newTestServer(t)
+	first.SID = 0 // the RQ_PWD reply reports SID 0
+	second := newTestServer(t)
+	second.ReloginSID = 99
+
+	var mu sync.Mutex
+	connects := 0
+	dial := func(ctx context.Context, address string) (net.Conn, error) {
+		mu.Lock()
+		connects++
+		n := connects
+		mu.Unlock()
+		if n == 1 {
+			return first.Dial(ctx, address)
+		}
+		return second.Dial(ctx, address)
 	}
-	if subs := subscribePayloads(first); len(subs) != 1 || subs[0] != "001a002504" {
-		t.Fatalf("first RQ_SUBSCRIBE = %v, want [001a002504]", subs)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, ClientConfig{
+		Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: dial,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Run(runCtx, RunOptions{RqDelay: 10 * time.Millisecond}, func([]model.Event) error { return nil })
+	}()
+	waitFor(t, func() bool { return countRequests(first, session.RqMain) >= 2 })
+	first.Drop()
+	select {
+	case err := <-done:
+		if !errors.Is(err, session.ErrNotSameServer) {
+			t.Fatalf("Run = %v, want ErrNotSameServer even with SID 0", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return")
 	}
 }
 
@@ -301,14 +351,22 @@ func TestRecoverShortPathKeepsSession(t *testing.T) {
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run = %v, want context.Canceled", err)
 	}
-	var recovered int
-	for _, s := range st {
+	// DLL sequence: recover="true" right on the loss, then a plain connected
+	// status after "Recover succeeded.".
+	recoverAt := -1
+	for i, s := range st {
 		if s.Connected && s.Recover {
-			recovered++
+			if recoverAt >= 0 {
+				t.Fatalf("more than one recover status in %+v", st)
+			}
+			recoverAt = i
 		}
 	}
-	if recovered != 1 {
-		t.Fatalf("recovery statuses = %d in %+v, want exactly one", recovered, st)
+	if recoverAt < 0 {
+		t.Fatalf("no recover status in %+v", st)
+	}
+	if recoverAt+1 >= len(st) || !st[recoverAt+1].Connected || st[recoverAt+1].Recover {
+		t.Fatalf("status after the recovery = %+v, want a plain connected one", st)
 	}
 	sec, _, ok := c.Catalog().Lookup("TQBR", "SBER")
 	if !ok {

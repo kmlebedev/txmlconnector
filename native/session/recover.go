@@ -104,7 +104,9 @@ func (c *Conn) Restore(ctx context.Context, nc net.Conn, login string) error {
 	if err != nil {
 		return err
 	}
-	if c.sid != 0 && reply.SID != 0 && reply.SID != c.sid {
+	if reply.SID != c.sid {
+		// The DLL compares the SID unconditionally (including a recorded SID of
+		// 0) and aborts the recovery with -0xe on a mismatch.
 		return fmt.Errorf("%w: SID %d instead of %d", ErrNotSameServer, reply.SID, c.sid)
 	}
 

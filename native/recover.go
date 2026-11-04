@@ -26,7 +26,8 @@ const (
 	defaultSessionTTL      = 120 * time.Second
 )
 
-// recoveryError is returned when the link could not be restored in time.
+// recoveryError is returned by Run when the link could not be restored within
+// session_timeout (the DLL raises "Request timeout." there).
 type recoveryError struct {
 	SessionTimeout time.Duration
 	Err            error
@@ -83,11 +84,13 @@ func (c *Client) sessionTimeout() time.Duration {
 }
 
 // recover restores the session after a transport failure the way the DLL does:
-// a fresh TCP connection, RQ_RELOGIN on the default keys, the SID check, then
-// RQ_RECOVER on the saved session keys. The catalog and the subscriptions are
-// not rebuilt (the server keeps the session, so the secids stay valid). Attempts
-// repeat every second until session_timeout; a fatal refusal or the expired
-// window falls back to a full login (rebuilt catalog and resubscribed symbols).
+// a fresh TCP connection, RQ_RELOGIN on the default keys, the strict SID check,
+// then RQ_RECOVER on the saved session keys. The catalog and the subscriptions
+// are not rebuilt (the server keeps the session, so the secids stay valid).
+// Attempts start immediately and repeat every second until session_timeout; a
+// fatal refusal or the expired window returns a recoveryError, exactly as the
+// DLL gives up (it does not log in again by itself - the XML client issues the
+// connect command, which Client.Reconnect mirrors for the typed API).
 func (c *Client) recover(ctx context.Context) error {
 	limit := c.sessionTimeout()
 	deadline := time.Now().Add(limit)
@@ -119,15 +122,19 @@ func (c *Client) recover(ctx context.Context) error {
 			break
 		}
 	}
-	// "Request timeout." in the DLL means the XML client must connect again;
-	// the typed API keeps working with a full login instead.
-	if err := c.relogin(ctx); err != nil {
-		if lastErr != nil {
-			return &recoveryError{SessionTimeout: limit, Err: fmt.Errorf("%v (short recovery: %w)", err, lastErr)}
-		}
-		return &recoveryError{SessionTimeout: limit, Err: err}
+	if lastErr == nil {
+		lastErr = errors.New("no attempt within the session timeout")
 	}
-	return nil
+	return &recoveryError{SessionTimeout: limit, Err: lastErr}
+}
+
+// Reconnect performs the full connect the DLL leaves to the XML client after
+// the recovery window expired ("Request timeout."): a new TCP connection, login,
+// reload of the dictionaries and the snapshot, a rebuilt catalog and the
+// subscriptions restored by model.Symbol. Call it after Run returned a
+// recoveryError; the trade dedup state survives, so replayed trades are dropped.
+func (c *Client) Reconnect(ctx context.Context) error {
+	return c.relogin(ctx)
 }
 
 // shortRecover makes one DLL short-recovery attempt on a fresh TCP connection.
@@ -149,7 +156,7 @@ func (c *Client) shortRecover(ctx context.Context) error {
 
 // relogin opens a new session with the configured credentials and restores the
 // client state on it: catalog, securities callbacks and subscriptions. It is the
-// fallback used when the short recovery is rejected or its window expired.
+// explicit Client.Reconnect path.
 func (c *Client) relogin(ctx context.Context) error {
 	nc, err := c.cfg.Dial(ctx, c.cfg.Address)
 	if err != nil {
