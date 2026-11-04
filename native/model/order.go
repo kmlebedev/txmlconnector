@@ -27,19 +27,24 @@ type NewOrder struct {
 // Order is one <order> of the <orders> feed (PDF 4.10). Only the fields the
 // DLL render shows are typed; the rest of the 52-read body is I (orders.md).
 type Order struct {
-	TransactionID  uint64
-	OrderNo        uint64
-	SecID          uint16
-	Board          string
-	SecCode        string
-	Union          string
-	Client         string
-	Status         int
-	BuySell        byte
-	Time           int32 // seconds of day
-	AcceptTime     int32 // seconds of day
-	BrokerRef      string
-	Balance        int64
+	TransactionID uint64
+	OrderNo       uint64
+	SecID         uint16
+	Board         string
+	SecCode       string
+	Union         string
+	Client        string
+	Status        int
+	BuySell       byte
+	Time          int32 // seconds of day
+	AcceptTime    int32 // seconds of day
+	BrokerRef     string
+	Balance       int64
+	// UpdateTime/UpdateBalance are the raw fields the DLL renders as <time> /
+	// <balance> for a cancelled (disabled) order; the oracle shows time=11 and
+	// balance=1 for the disabled fixture (I until the D offsets are confirmed).
+	UpdateTime     int32
+	UpdateBalance  int64
 	Price          Decimal
 	Quantity       int64
 	Yield          Decimal
