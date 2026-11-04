@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kmlebedev/txmlconnector/native/records"
+	"github.com/kmlebedev/txmlconnector/native/session"
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
@@ -30,6 +31,18 @@ func TestMarginMatchDLL(t *testing.T) {
 	defer c.Close()
 	send(t, c, connectCommand())
 	rec.next(t, "<server_status")
+	// O: all three commands are a local render; the capture has no 84/85/86/82
+	// frames. Track every non-MAIN request and require zero new ones.
+	requestKinds := func() int {
+		n := 0
+		for _, f := range srv.Requests() {
+			if f.Type != session.RqMain {
+				n++
+			}
+		}
+		return n
+	}
+	baselineRequests := requestKinds()
 	base := "<command id=" + quote + "get_max_buy_sell_tplus" + quote + " client=" + quote + "TESTCLIEN" + quote + ">"
 	base += "<security><seccode>SBER</seccode><market>1</market></security></command>"
 	if got := send(t, c, base); got != "<result success="+quote+"true"+quote+"/>" {
@@ -47,6 +60,9 @@ func TestMarginMatchDLL(t *testing.T) {
 	wantMax := "<max_buy_sell client=" + quote + "TESTCLIEN" + quote + "><security secid=" + quote + "26" + quote + "><market>1</market><seccode>SBER</seccode><maxbuy>0</maxbuy><maxsell>0</maxsell></security></max_buy_sell>"
 	if got := rec.next(t, "<max_buy_sell"); got != wantMax {
 		t.Fatalf("max_buy_sell XML\n got %s\nwant %s", got, wantMax)
+	}
+	if got := requestKinds(); got != baselineRequests {
+		t.Fatalf("local-render commands sent %d non-RQ_MAIN request(s), want 0", got-baselineRequests)
 	}
 }
 
