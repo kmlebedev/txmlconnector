@@ -96,3 +96,33 @@ func TestRenderClientAndPositions(t *testing.T) {
 		t.Fatalf("UnionXML = %s, want %s", got, want)
 	}
 }
+
+// TestQuotationFixedMoney checks the fixed formats of the <quotation> money
+// fields: valtoday keeps three decimals, the deposits two (the DLL emits
+// 1.000/7601.40/7516.00, while plain Decimal.String trims the zeros).
+func TestQuotationFixedMoney(t *testing.T) {
+	q := model.Quotation{
+		SecID: 26, Board: "TQBR",
+		Symbol: model.Symbol{Board: "TQBR", SecCode: "SBER"},
+		Fields: model.QuotationFields{
+			Status:      ptrString("A"),
+			ValToday:    &model.Decimal{Units: 1000, Scale: 3},
+			BuyDeposit:  &model.Decimal{Units: 760140, Scale: 2},
+			SellDeposit: &model.Decimal{Units: 751600, Scale: 2},
+			Last:        &model.Decimal{Units: 4968, Scale: 4},
+		},
+	}
+	got := xmlcompat.QuotationXML(q)
+	for _, want := range []string{
+		"<valtoday>1.000</valtoday>",
+		"<buydeposit>7601.40</buydeposit>",
+		"<selldeposit>7516.00</selldeposit>",
+		"<last>0.4968</last>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("QuotationXML = %s, want substring %s", got, want)
+		}
+	}
+}
+
+func ptrString(s string) *string { return &s }

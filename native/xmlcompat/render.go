@@ -233,6 +233,13 @@ func QuotationXML(q model.Quotation) string {
 			b.WriteString("<" + name + ">" + v.String() + "</" + name + ">")
 		}
 	}
+	// The DLL prints the money fields with fixed digits: valtoday keeps three
+	// decimals (1000 -> 1.000), the deposits keep two (7601.40, 7516.00).
+	fixedField := func(name string, v *model.Decimal, scale int) {
+		if v != nil {
+			b.WriteString("<" + name + ">" + fixedMoney(*v, scale) + "</" + name + ">")
+		}
+	}
 	stringField("status", f.Status)
 	stringField("tradingstatus", f.TradingStatus)
 	decField("last", f.Last)
@@ -256,12 +263,12 @@ func QuotationXML(q model.Quotation) string {
 	decField("lowoffer", f.LowOffer)
 	intField("voltoday", f.VolToday)
 	intField("numtrades", f.NumTrades)
-	decField("valtoday", f.ValToday)
+	fixedField("valtoday", f.ValToday, 3)
 	decField("waprice", f.WaPrice)
 	decField("closeprice", f.ClosePrice)
 	decField("lcurrentprice", f.LCurrentPrice)
-	decField("buydeposit", f.BuyDeposit)
-	decField("selldeposit", f.SellDeposit)
+	fixedField("buydeposit", f.BuyDeposit, 2)
+	fixedField("selldeposit", f.SellDeposit, 2)
 	b.WriteString("</quotation></quotations>")
 	return b.String()
 }
@@ -373,6 +380,27 @@ func SecInfoXML(info model.SecInfo) string {
 	}
 	b.WriteString("</sec_info>")
 	return b.String()
+}
+
+// fixedMoney prints exactly scale digits after the point, re-scaling the
+// decimal (the DLL keeps trailing zeros in the quotation money fields).
+func fixedMoney(d model.Decimal, scale int) string {
+	units := d.Units
+	switch {
+	case int(d.Scale) < scale:
+		units *= pow10Int(scale - int(d.Scale))
+	case int(d.Scale) > scale:
+		units /= pow10Int(int(d.Scale) - scale)
+	}
+	return fixedDecimal(model.Decimal{Units: units, Scale: uint8(scale)})
+}
+
+func pow10Int(n int) int64 {
+	v := int64(1)
+	for i := 0; i < n; i++ {
+		v *= 10
+	}
+	return v
 }
 
 // fixedDecimal prints exactly Scale digits after the point (the DLL keeps the

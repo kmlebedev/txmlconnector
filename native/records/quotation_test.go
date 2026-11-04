@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kmlebedev/txmlconnector/native/internal/oracle"
 	"github.com/kmlebedev/txmlconnector/native/model"
@@ -21,6 +20,8 @@ var (
 	quotationCostRe    = regexp.MustCompile("<point_cost>([^<]*)</point_cost>")
 )
 
+// Limitation: docs/deepseek/task-index.md §8.12 (the fixture window is outside
+// the recorded main1 chunk; the catalog identity is seeded from the callbacks).
 // quotationDecimals is the price scale per secid from the r9 capture (S): the
 // quotation fixture's window securities are outside the recorded main1 chunk,
 // so the catalog identity is seeded from the DLL callback lines, while all the
@@ -68,8 +69,6 @@ func TestQuotationsMatchDLL(t *testing.T) {
 			Pits: []records.Pit{{Board: b.Num, Decimals: quotationDecimals[secid], PointCost: pointCost, Default: true}},
 		})
 	}
-	// The capture is the Moscow session: the DLL wall clock is UTC+3.
-	bias := -180 * time.Minute
 	for i, rec := range recs {
 		if rec.Tag != records.TagQuotation {
 			t.Fatalf("record %d has tag %#02x", i, rec.Tag)
@@ -78,7 +77,7 @@ func TestQuotationsMatchDLL(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ParseQuotation %d: %v", i, err)
 		}
-		ev := q.Event(catalog, bias)
+		ev := q.Event(catalog)
 		got, ok := xmlcompat.Render(catalog, &ev, xmlcompat.Options{})
 		if !ok {
 			t.Fatalf("record %d has no XML form", i)
@@ -115,7 +114,7 @@ func TestQuotationUsesBoardDecimals(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ParseQuotation: %v", err)
 		}
-		return q.Event(catalog, 0)
+		return q.Event(catalog)
 	}
 	tqbrEv := build(tqbr.Num, 4968)
 	mctEv := build(mct.Num, 3590)
