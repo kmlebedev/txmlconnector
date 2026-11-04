@@ -82,24 +82,79 @@ func ParseClientTrade(body []byte) (ClientTrade, error) {
 		return t, fmt.Errorf("R_TRD mask: %w", err)
 	}
 	t.Mask = mask
-	// Mask-selected block (D): consume by type, no render yet (I).
+	// Mask-selected values (types per orders.md); they are not rendered by the
+	// oracle-confirmed XML yet (I), but a valid record must never abort the poll.
+	skip := func(bit uint16, read func() error) error {
+		if mask&bit == 0 {
+			return nil
+		}
+		return read()
+	}
 	reads := []struct {
 		bit  uint16
 		read func() error
 	}{
-		{0x1, func() error { return skipN(r, 4) }},
-		{0x2, func() error { return skipN(r, 3) }},
-		{0x4, func() error { return skipN(r, 3+6+4+1) }},
-		{0x8, func() error { return skipN(r, 2+2) }},
-		{0x10, func() error { return skipN(r, 2) }},
-		{0x20, func() error { return skipN(r, 1) }},
-		{0x40, func() error { return skipN(r, 1) }},
+		{0x1, func() error {
+			if _, err := r.Int32(); err != nil {
+				return err
+			}
+			if _, err := r.Int64(); err != nil {
+				return err
+			}
+			_, err := r.Int64()
+			return err
+		}},
+		{0x2, func() error {
+			for i := 0; i < 3; i++ {
+				if _, err := r.Int32(); err != nil {
+					return err
+				}
+			}
+			return nil
+		}},
+		{0x4, func() error {
+			for i := 0; i < 3; i++ {
+				if _, err := r.Int32(); err != nil {
+					return err
+				}
+			}
+			for i := 0; i < 3; i++ {
+				if _, err := r.Int64(); err != nil {
+					return err
+				}
+			}
+			for i := 0; i < 4; i++ {
+				if _, err := r.Int32(); err != nil {
+					return err
+				}
+			}
+			_, err := r.Byte()
+			return err
+		}},
+		{0x8, func() error {
+			if _, err := r.Int32(); err != nil {
+				return err
+			}
+			if _, err := r.Int32(); err != nil {
+				return err
+			}
+			_, err := r.Int64()
+			return err
+		}},
+		{0x10, func() error {
+			if _, err := r.Uint16(); err != nil {
+				return err
+			}
+			_, err := r.Int64()
+			return err
+		}},
+		{0x20, func() error { _, err := r.Int32(); return err }},
+		{0x40, func() error { _, err := r.Byte(); return err }},
 	}
-	_ = reads
-	// The mask field of the demo fixture is 0; a non-zero mask is consumed via
-	// the generic skip below only after the unconditional part (I).
-	if mask != 0 {
-		return t, fmt.Errorf("R_TRD: mask %#x fields are not recovered (I)", mask)
+	for _, rd := range reads {
+		if err := skip(rd.bit, rd.read); err != nil {
+			return t, fmt.Errorf("R_TRD mask %#x: %w", rd.bit, err)
+		}
 	}
 	quantity, err := r.Int64()
 	if err != nil {
@@ -138,6 +193,16 @@ func ParseClientTrade(body []byte) (ClientTrade, error) {
 	if _, err := r.Int64(); err != nil {
 		return t, fmt.Errorf("R_TRD: %w", err)
 	}
+	if mask&0x80 != 0 {
+		if _, err := r.Uint16(); err != nil {
+			return t, fmt.Errorf("R_TRD mask 0x80: %w", err)
+		}
+	}
+	if mask&0x100 != 0 {
+		if _, err := r.String(12); err != nil {
+			return t, fmt.Errorf("R_TRD mask 0x100: %w", err)
+		}
+	}
 	if r.Len() > 0 {
 		if _, err := r.Raw(r.Len()); err != nil {
 			return t, fmt.Errorf("R_TRD tail: %w", err)
@@ -162,9 +227,13 @@ func (t ClientTrade) Event(cat *Catalog) model.ClientTrade {
 		Price:     model.Decimal{Units: t.Price, Scale: 2},
 		Value:     model.Decimal{Units: t.Value, Scale: 2},
 		Comission: model.Decimal{Units: t.Comission, Scale: 2},
-		Quantity:  t.Quantity, Items: t.Quantity, CurrentPos: -t.Quantity,
-		Yield: model.Decimal{}, AccruedInt: model.Decimal{},
-		Bypass: t.Bypass,
+		Quantity:  t.Quantity, Items: t.Quantity,
+		// P2: no wire field for currentpos was recovered (the oracle value equals
+		// -quantity by coincidence); keep 0 instead of fabricating (I).
+		CurrentPos: 0,
+		Yield:      model.Decimal{},
+		AccruedInt: model.Decimal{Units: int64(math.Round(t.Accrued * 100)), Scale: 2},
+		Bypass:     t.Bypass,
 	}
 	if cat != nil {
 		if sec, ok := cat.Security(t.SecID); ok {

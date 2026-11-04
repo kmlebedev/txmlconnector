@@ -10,6 +10,7 @@ type ClientTrade struct {
 	TradeNo    uint64
 	OrderNo    uint64
 	Client     string
+	Union      string
 	BrokerRef  string
 	SettleCode string
 	TradeType  byte

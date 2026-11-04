@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"encoding/binary"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,13 +35,12 @@ func patchTradeClient(t *testing.T, payload []byte, clientID int64) []byte {
 	return record
 }
 
-// TestClientTradesFilter is the O filter: a trade of the session client is
-// delivered as a ClientTrade event, a trade of another numeric client id is
-// dropped.
+// TestClientTradesFilter is the O filter: the decoder drops another numeric
+// client's trade (unit-level, deterministic) and the Run path delivers the own
+// trade.
 func TestClientTradesFilter(t *testing.T) {
 	srv := newRunServer(t)
 	srv.Snapshot = clientSnapshot(t)
-	payload := readOrderFixture(t, "trade-inject.hex")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	c, err := Dial(ctx, ClientConfig{Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: srv.Dial})
@@ -48,19 +48,35 @@ func TestClientTradesFilter(t *testing.T) {
 		t.Fatalf("Dial: %v", err)
 	}
 	defer c.Close()
-	clientID, ok := c.clientNumericIDLocked("TESTCLIEN", "")
-	if !ok {
-		t.Fatal("the client snapshot has no numeric client id")
+	clientID := snapshotClientID(t)
+	ownRecord := patchTradeClient(t, readOrderFixture(t, "trade-inject.hex"), clientID)
+	foreignRecord := patchTradeClient(t, readOrderFixture(t, "trade-inject.hex"), clientID+12345)
+	// Deterministic decoder check: foreign is dropped, own has an event.
+	for _, tc := range []struct {
+		name   string
+		record []byte
+		want   bool
+	}{
+		{"own", ownRecord, true},
+		{"foreign", foreignRecord, false},
+	} {
+		recs, err := records.Records(tc.record)
+		if err != nil || len(recs) != 1 {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		events, err := decodeClientTrade(c, recs[0].Body)
+		if err != nil {
+			t.Fatalf("%s decode: %v", tc.name, err)
+		}
+		if got := len(events) > 0; got != tc.want {
+			t.Fatalf("%s events = %d, want delivered=%v", tc.name, len(events), tc.want)
+		}
 	}
-	// The trade fixture is masked to client id 4096; make an own-client record
-	// with the session's numeric id before delivering it.
-	own := patchTradeClient(t, payload, clientID)
 	trades := make(chan model.ClientTrade, 4)
 	runDone := make(chan struct{})
-	var runErr error
 	go func() {
 		defer close(runDone)
-		runErr = c.Run(ctx, RunOptions{}, func(events []model.Event) error {
+		_ = c.Run(ctx, RunOptions{}, func(events []model.Event) error {
 			for _, ev := range events {
 				if trade, ok := ev.(*model.ClientTrade); ok {
 					trades <- *trade
@@ -72,29 +88,75 @@ func TestClientTradesFilter(t *testing.T) {
 	if err := c.SubscribeAllTrades(ctx, model.Symbol{Board: "TQBR", SecCode: "SBER"}); err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
-	// Queue the own-client record after the subscribe: the subscribe reply
-	// replaces the server's pending RQ_MAIN payload with AfterSubscribe.
-	srv.QueueMain(own)
+	srv.QueueMain(ownRecord)
 	select {
 	case trade := <-trades:
 		if trade.Client != "TESTCLIEN" || trade.SecCode != "SBER" || trade.Quantity != 4444 || trade.TradeNo != 2222 {
 			t.Fatalf("trade = %+v", trade)
 		}
 	case <-time.After(5 * time.Second):
-		var types []byte
-		for _, f := range srv.Requests() {
-			types = append(types, f.Type)
-		}
-		t.Fatalf("the own-client trade was not delivered (runErr=%v requests=%v accounts=%+v)", runErr, types, c.Accounts())
-	}
-	// A foreign numeric client id must be filtered out.
-	foreign := patchTradeClient(t, payload, clientID+12345)
-	srv.QueueMain(foreign)
-	select {
-	case trade := <-trades:
-		t.Fatalf("foreign trade was not filtered: %+v", trade)
-	case <-time.After(500 * time.Millisecond):
+		t.Fatal("the own-client trade was not delivered")
 	}
 	cancel()
 	<-runDone
+}
+
+// TestClientTradesMulti: two trades in one RQ_MAIN reply produce two events.
+func TestClientTradesMulti(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = clientSnapshot(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, ClientConfig{Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: srv.Dial})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	record := patchTradeClient(t, readOrderFixture(t, "trade-inject.hex"), snapshotClientID(t))
+	trades := make(chan model.ClientTrade, 4)
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = c.Run(ctx, RunOptions{}, func(events []model.Event) error {
+			for _, ev := range events {
+				if trade, ok := ev.(*model.ClientTrade); ok {
+					trades <- *trade
+				}
+			}
+			return nil
+		})
+	}()
+	if err := c.SubscribeAllTrades(ctx, model.Symbol{Board: "TQBR", SecCode: "SBER"}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	srv.QueueMain(append(append([]byte(nil), record...), record...))
+	for i := 0; i < 2; i++ {
+		select {
+		case <-trades:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("trade %d was not delivered", i+1)
+		}
+	}
+	cancel()
+	<-runDone
+}
+
+// TestConnectorTradesCallback: the Connector renders the own trade callback.
+func TestConnectorTradesCallback(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = clientSnapshot(t)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	record := patchTradeClient(t, readOrderFixture(t, "trade-inject.hex"), snapshotClientID(t))
+	srv.QueueMain(record)
+	msg := rec.next(t, "<trades")
+	if !strings.Contains(msg, "<seccode>SBER</seccode>") || !strings.Contains(msg, "<quantity>4444</quantity>") {
+		t.Fatalf("trades = %s", msg)
+	}
 }
