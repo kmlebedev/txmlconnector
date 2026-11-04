@@ -29,6 +29,8 @@
 | `subscribe`/`unsubscribe` с `<alltrades>` (`secid` или `security`) | `<result success="true"/>` | `<alltrades>` при поступлении сделок, см. [alltrades.md](alltrades.md) |
 | `get_securities` | `<result success="true"/>` | `<securities>` со всем каталогом, см. [dictionaries.md](dictionaries.md) |
 | `get_securities_info` | `<result success="true"/>` | по колбэку `<sec_info secid="…">` на каждую бумагу; **без запроса к серверу** — рендер из кэша каталога и RQ_SEC_SPEC, см. раздел ниже |
+| `gethistorydata` | `<result success="true"/>` | RQ_HISTORY_EXT (148) и запись 0x09 в RQ_MAIN → колбэк `<candles>`; см. [history.md](history.md) |
+| `subscribe_ticks` | `<result success="true"/>` | RQ_SUBSCRIBE_TICKS (120); тики на демо вечером не пришли (S-негатив), см. [history.md](history.md) |
 
 Атрибуты `server_status` в порядке DLL: `sys_ver` (SYS# из ответа RQ_PWD), `build` (BLD#), `server_tz`, `id` (SID#), `connected`.
 
@@ -110,6 +112,22 @@ lot_volume, isin, regnumber, buybackprice, buybackdate, currencyid`; пусты�
 пропускаются. Живые примеры и байты spec-ответов — `native/testdata/secinfo-live.hex.gz`,
 `secinfo-dll.xml.gz`, описание — `native/testdata/secinfo-live.md` (**S** для значений, **D** для
 порядка).
+
+## `gethistorydata` и `subscribe_ticks` (S/D)
+
+Обе команды проверены живьём r14–r16 (2026-11-04); подробности, форматы запросов и фикстуры —
+[history.md](history.md). Кратко:
+
+- `gethistorydata` принимает `<security><board>…</board><seccode>…</seccode></security>` +
+  элементы `period`, `count`, `reset` либо те же значения атрибутами команды (атрибутная форма
+  требует уже установленного соединения). DLL шлёт **RQ_HISTORY_EXT (148)**; RQ_HISTORY (11) не
+  наблюдался. Свечи приходят записью **0x09** через RQ_MAIN и рендерятся в `<candles
+  secid=… board=… seccode=… period=… status=…>` с `<candle date=… open=… close=… high=… low=…
+  volume=…/>`; `status=1` — заказанное выдано, `status=2` — продолжение (на демо не встречался).
+  Фикстуры: `native/records/testdata/candles-live.hex.gz` + `candles-dll.xml.gz`.
+- `subscribe_ticks` требует элемент `filter` и у каждого `security` — дочерний `tradeno`; payload
+  RQ_SUBSCRIBE_TICKS: `B filter; {W secid, W board, G tradeno}*`. В вечерней сессии демо тиков не
+  было (ни RQ_TICKS 13, ни `<ticks>`) — **S-негатив**; для сверки нужен прогон в основную сессию.
 
 ## Нативная реализация
 
