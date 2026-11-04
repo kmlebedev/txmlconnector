@@ -1,0 +1,15 @@
+<!-- E05 short break: DLL callbacks around the recovery (2026-11-04, demo server). -->
+<!-- Source: $RE_WORKDIR/last-run.out of the reference harness; only account-independent lines. -->
+<!-- Load end: -->
+<overnight status="false"/>
+<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="0" connected="true"/>
+<!-- link lost: the DLL reports recover="true" (first ReConnecting line in *_ts.log) -->
+<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="0" connected="true" recover="true"/>
+<!-- recovery succeeded (Recover succeeded. in *_ts.log) -->
+<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="0" connected="true"/>
+<!-- reply to <command id="server_status"/> -->
+<overnight status="false"/>
+<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="0" connected="true"/>
+<!-- <command id="disconnect"/> -->
+<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="0" connected="false"/>
+<!-- No dictionary/securities/client callbacks were re-emitted after the recovery. -->
