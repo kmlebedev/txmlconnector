@@ -262,3 +262,26 @@ client→TESTCLIEN, author/login→TESTLOGIN).
   таблице транзакций DLL.
 - RQ_TRANSACT-payloads этих команд пока не сняты: нужен валидный XML + fake success reply type=14
   (схема RE-3 как в task-24) — следующий шаг; в фикстурах будут обезличены client/union/orderno.
+
+## RQ_TRANSACT payloads команд Task 18 (O, oracle + tcproxy)
+
+Снято цепочкой DLL → tcproxy → replay-server (127.0.0.1) с fake success reply type=14; реальных
+торговых команд не отправлялось, client id/строки замаскированы (22 69 1a → 02 00 01,
+virt/9993 → TESTCLIEN, длины сохранены).
+
+- **newstoporder** (35 Б): `14 00 00 1a 00 25 02 00 01 42 03 11 0000 0000 02 71 02 82 32 02 10 00
+  00 02 53 07 00 00 10 00 00 00`. Начало как у neworder (`B тип 0x14`, `B 00`, `W secid`,
+  `W board`, `G client`, `B buysell`), затем stop-поля (цена/условия стоп-лосса и тейк-профита;
+  точные смещения — I). Фикстура: `transact-newstoporder-payload.hex`.
+- **cancelstoporder** (2 Б): `17 10` = `B 0x17` (тип TRN_CANCELSTOPORDER) + `L transactionid=1`.
+  Фикстура: `transact-cancelstoporder-payload.hex`.
+- **newcondorder** (39 Б): `01 00 00 1a 00 25 02 00 01 42 00 02 71 02 10 00 01 82 14 07 04 3a c5
+  ae 06 04 42 cc ae 06 00 00 00 00 00 00 00 00`. Первый байт `0x01` — как у TRN_NEWORDER:
+  условная заявка уходит базовым типом neworder с дополнительными cond-полями (тип условия,
+  значение, validafter/validbefore — I по смещениям). Фикстура:
+  `transact-newcondorder-payload.hex`.
+
+Подтверждена успешная валидация XML DLL (fake reply: `<result success="true" transactionid="…"/>`
+для newstoporder/newcondorder; cancelstoporder — success без id). Точная семантика каждого байта
+в stop-полях — I, нужна одна итерация с записью R_STOP-обновления (следующий шаг).EOF
+echo ok
