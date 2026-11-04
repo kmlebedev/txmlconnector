@@ -57,10 +57,10 @@ func (e *UnknownRecordError) Error() string {
 
 func (e *UnknownRecordError) Is(target error) bool { return target == ErrUnknownRecord }
 
-// Records splits an RQ_MAIN reply payload. R_WRAPPER bodies are not
-// returned: the wrapped records follow it and are yielded themselves. On a
-// record whose layout is not implemented it returns the records before it
-// and an error wrapping ErrUnknownRecord.
+// Records splits an RQ_MAIN reply payload. R_WRAPPER bodies are read and
+// skipped: their nested records (0x6e R_EDP_RATE) belong to task 12 and are not
+// yielded yet. On a record whose layout is not implemented it returns the
+// records before it and an error wrapping ErrUnknownRecord.
 func Records(p []byte) ([]Record, error) {
 	var out []Record
 	r := wire.NewReader(p)
@@ -72,12 +72,14 @@ func Records(p []byte) ([]Record, error) {
 			if err != nil {
 				return out, fmt.Errorf("%s size: %w", sizedTags[tag], err)
 			}
-			if tag == TagWrapper {
-				continue
-			}
 			body, err := r.Raw(int(n))
 			if err != nil {
 				return out, fmt.Errorf("%s body: %w", sizedTags[tag], err)
+			}
+			if tag == TagWrapper {
+				// The wrapper body carries nested records the DLL reads in
+				// place; the tail fields are still followed by later records.
+				continue
 			}
 			out = append(out, Record{Tag: tag, Body: body})
 		case tag == TagDate:
@@ -101,6 +103,62 @@ func Records(p []byte) ([]Record, error) {
 				return out, fmt.Errorf("%s: %w", attrTags[tag], err)
 			}
 			out = append(out, Record{Tag: tag, Body: body})
+		case tag == TagOvernight:
+			body, err := r.Raw(1)
+			if err != nil {
+				return out, fmt.Errorf("R_OVERNIGHT: %w", err)
+			}
+			out = append(out, Record{Tag: tag, Body: body})
+		case tag == 0x62 || tag == 0x67:
+			// ReadMarCat/ReadUnicat: two state bytes, no callbacks (RE-1).
+			body, err := r.Raw(2)
+			if err != nil {
+				return out, fmt.Errorf("record %#02x: %w", tag, err)
+			}
+			out = append(out, Record{Tag: tag, Body: body})
+		case tag == 0x6b:
+			// R_FORTS_SESSION: state only. The three-byte body is inferred from
+			// the fixture alignment, not from a decompiled layout (I).
+			body, err := r.Raw(3)
+			if err != nil {
+				return out, fmt.Errorf("R_FORTS_SESSION: %w", err)
+			}
+			out = append(out, Record{Tag: tag, Body: body})
+		case tag == TagUnion:
+			start := len(p) - r.Len()
+			if _, err := r.Int64(); err != nil {
+				return out, fmt.Errorf("R_UNION id: %w", err)
+			}
+			if _, err := r.String(20); err != nil {
+				return out, fmt.Errorf("R_UNION name: %w", err)
+			}
+			if _, err := r.String(32); err != nil {
+				return out, fmt.Errorf("R_UNION category: %w", err)
+			}
+			if _, err := r.Byte(); err != nil {
+				return out, fmt.Errorf("R_UNION unicat: %w", err)
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == 0x69:
+			// ReadURTUpdate: bytes up to and including 0xff (RE-1); state only.
+			// Without the terminator the rest of the payload cannot be split, so
+			// this is an unknown-layout record, not a silent swallow.
+			start := len(p) - r.Len()
+			terminated := false
+			for r.Len() > 0 {
+				b, err := r.Byte()
+				if err != nil {
+					return out, fmt.Errorf("record 0x69: %w", err)
+				}
+				if b == 0xff {
+					terminated = true
+					break
+				}
+			}
+			if !terminated {
+				return out, &UnknownRecordError{Tag: tag, Offset: start}
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		default:
 			return out, &UnknownRecordError{Tag: tag, Offset: len(p) - r.Len() - 1}
 		}

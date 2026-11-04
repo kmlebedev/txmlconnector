@@ -82,11 +82,15 @@ tools/re/run_dll.sh 1s '<command id="get_connector_version"/>'
 `tools/re/demo.env.example`): `set -a; . ~/re/demo.env; set +a` перед живыми командами.
 Заполненный `*.env` в git не попадает.
 
-Проект Ghidra создаётся один раз, анализ занимает несколько минут. Каталог проекта держите вне репозитория:
+Проект Ghidra создаётся один раз, анализ занимает несколько минут. Каталог проекта держите вне репозитория
+и **без элементов пути, начинающихся с точки**: Ghidra 12.2 отвергает `.re-run/ghproj`
+(`Path element starting with '.' is not permitted`). Проверенный рабочий путь — `${TMPDIR:-/tmp}/txc-ghproj`
+(2026-11-04: `Import succeeded`, exit 0, ~3 м 50 с):
 
 ```bash
-mkdir -p ~/re/ghproj
-"$GHIDRA_HEADLESS" ~/re/ghproj txc -import "$TXC_DLL" -analysisTimeoutPerFile 3000 -max-cpu 8
+GHIDRA_PROJ="${TMPDIR:-/tmp}/txc-ghproj"
+mkdir -p "$GHIDRA_PROJ"
+"$GHIDRA_HEADLESS" "$GHIDRA_PROJ" txc -import "$TXC_DLL" -analysisTimeoutPerFile 3000 -max-cpu 8
 ```
 
 ## Процедуры
@@ -96,7 +100,8 @@ mkdir -p ~/re/ghproj
 ### RE-1. Декомпиляция
 
 ```bash
-G() { "$GHIDRA_HEADLESS" ~/re/ghproj txc -process txmlconnector64-6.47.2.26.4.dll -noanalysis -readOnly \
+GHIDRA_PROJ="${TMPDIR:-/tmp}/txc-ghproj"   # Ghidra 12.2 не принимает '.'-пути (.re-run/ghproj)
+G() { "$GHIDRA_HEADLESS" "$GHIDRA_PROJ" txc -process txmlconnector64-6.47.2.26.4.dll -noanalysis -readOnly \
         -scriptPath tools/re/ghidra -postScript "$@" > /dev/null 2>&1; }
 G XrefDecomp.java /tmp/out.c 1 a:1803bf700            # функция и её вызовы на 1 уровень
 G XrefDecomp.java /tmp/out.c 0 "s:incorrect server response"   # все функции со ссылкой на строку

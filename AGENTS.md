@@ -39,7 +39,12 @@ XML), `native/cryptoprofile`, `native/natsout`, `native.Client` (логин, к�
 `tools/tcproxy`, `tools/replay-server`, `native/replay`, `native/model`, `native/records`, событийный
 `Client.Run` с реестром декодеров, `xmlcompat.Render` и oracle-помощник `native/internal/oracle`;
 фикстуры — `native/records/testdata`. Решения по расхождениям — `docs/deepseek/task-index.md` §11.
-Следующий шаг — **Фаза 1, задачи 5–7**.
+
+**Обновление 2026-11-04 (2):** **Фаза 1 плана закрыта** (задачи 5–7): DLL-faithful восстановление
+(RQ_RELOGIN/RQ_RECOVER, `Client.Reconnect`), служебные команды и параметры `connect`, конец загрузки
+(`<client>`/`<positions>`/`<overnight>`/`<union>`); RE-2/RE-3/RE-4 использовались живьём с согласия
+пользователя (E05/R6/E07). Итог и отклонения — `docs/deepseek/task-index.md` §12; новые RE-документы —
+`docs/protocol/records.md`, `docs/protocol/history.md`. Следующий шаг — **Фаза 2, задачи 8–12**.
 
 ## 2. Обязательные скиллы
 
@@ -161,9 +166,11 @@ Teammates не пушут и не мержат. Ветка `main` не комм�
 
   Без `mkdir -p` JVM падает с `User home directory does not exist`, без остального —
   `analyzeHeadless` не стартует или падает на записи `~/Library/ghidra` вне workspace (`-help` при
-  этом печатает usage и возвращает exit code 1 — это норма). Проект Ghidra держи
-  в `.re-run/ghproj` (gitignored; `~/re` под sandbox создать нельзя); DLL — в корне репозитория.
-  Полный импорт DLL под sandbox ещё не проверялся.
+  этом печатает usage и возвращает exit code 1 — это норма). Проект Ghidra держи в
+  `${TMPDIR:-/tmp}/txc-ghproj`: Ghidra 12.2 **отвергает** '.'-пути (`.re-run/ghproj`); для удобства —
+  симлинк `.re-run/ghproj` (gitignored). DLL — в корне репозитория. Полный импорт проверен 2026-11-04
+  (`Import succeeded`, ~3 м 50 с, лог `.re-run/logs/import.log`); после перезагрузки машины проект в
+  `$TMPDIR` импортируется заново.
 - **Wine 11.21 — установлен и проверен** (2026-11-04): `wine-11.21` из
   `~/re/wine/Wine Devel.app/Contents/Resources/wine/bin/wine`, prefix `~/re/wine-prefix`;
   `tools/re/run_dll.sh 1s '<command id="get_connector_version"/>'` вернул
@@ -171,8 +178,10 @@ Teammates не пушут и не мержат. Ветка `main` не комм�
   DLL (нужен `TC_PASSWORD`), RE-3 — оракул (нужна записанная сессия + `TC_PASSWORD`). Оракул догадками
   не подменять; фикстуры обезличивать.
 - **Демо-сервер** `tr1-demo5.finam.ru:3939`, 09:50–23:50 МСК, будни, кроме праздников. Логин/пароль
-  только из окружения. Факт на 2026-11-04: `TC_LOGIN` задан, `TC_PASSWORD` — **нет**, поэтому живой
-  логин, `wire-decode` с расшифровкой и RE-4 пока недоступны; значения переменных никогда не печатать.
+  только из окружения. **2026-11-04:** пользователь заполнил `~/re/demo.env` (`TC_LOGIN`/`TC_PASSWORD`)
+  и дал явное согласие на живые операции (Wine+DLL и демо-сервер; торговые команды — только по
+  отдельному согласию в чате), поэтому RE-2/RE-3/RE-4 и `wire-decode` доступны; перед живыми
+  командами `set -a; . ~/re/demo.env; set +a`, значения переменных никогда не печатать.
 - **Секреты и Wine-окружение — в `~/re/demo.env`** (вне репозитория, `chmod 600`, шаблон
   [`tools/re/demo.env.example`](tools/re/demo.env.example)). Загрузка перед живыми командами:
   `set -a; . ~/re/demo.env; set +a`. Файл содержит `TC_LOGIN`/`TC_PASSWORD` и экспорт
@@ -268,7 +277,7 @@ Teammates не пушут и не мержат. Ветка `main` не комм�
 ## 7. Команды (минимум перед каждым commit)
 
 ```bash
-gofmt -l .                          # должно быть пусто
+gofmt -l $(git ls-files '*.go')     # должно быть пусто (в .re-run/ лежат scratch-файлы RE, они gitignored; make verify проверяет только tracked)
 go vet ./...                        # без диагностик
 go build ./...                      # текущая платформа
 CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build ./native/...
@@ -325,12 +334,13 @@ const review = await agent(
 return review;
 ```
 
-- Если ответ `null` или ошибка `404 InvalidParameter: Not support` — провайдер `qwen-token-plan` в
-  профиле DSH смотрит на `…/apps/anthropic` без `/v1`; правильный baseURL —
-  `https://token-plan.maas.qwencloudapi.com/apps/anthropic/v1` (проверено запросом к API 2026-11-04).
-  Правка `~/.dsh/profiles/desktop/cordis.patch.yml` — только с согласия пользователя; до этого
-  используй fallback `{ provider: "joingonka", model: "zai-org/GLM-5.3-Flash" }` или отдельного
-  `deepseek-flash`-субагента. Чем ревьюили — указать в отчёте.
+- Если ответ `null`, `404 InvalidParameter: Not support` или `child LLM route "qwen-token-plan/…" is not
+  allowed for this Session` — проверь baseURL провайдера: он должен быть
+  `https://token-plan.maas.qwencloudapi.com/apps/anthropic/v1` (пользователь поправил 2026-11-04).
+  Ошибка «route not allowed for this Session» означает ограничение маршрута в текущей сессии — нужен
+  перезапуск DSH/новая сессия, правка `~/.dsh/profiles/desktop/cordis.patch.yml` — только с согласия
+  пользователя. До этого fallback: `{ provider: "joingonka", model: "zai-org/GLM-5.3-Flash" }` или
+  отдельный `deepseek-flash`-субагент. Чем ревьюили — указать в отчёте.
 - Замечания P1/P2 ревьюера обязательны к исправлению в той же задаче; P3 — на усмотрение Lead.
   Ревьюер не заменяет `go test -race` и `go vet`: сначала проверки, потом ревью.
 
@@ -352,12 +362,12 @@ RE-процедуры доступны или фикстуры уже сняты
 
 ## 10. Что делать прямо сейчас (стартовый порядок)
 
-1. **Фаза 0, задачи 1→2→3→4** (план, строки 84–173): инструменты RE на Go (`tools/tcproxy`,
-   `native/internal/replay`, `tools/replay-server`), пакеты `native/model` + `native/records`,
-   событийный API `Client.Run` с реестром декодеров, шаблон `checkDLL`/`Render`.
-   Безопасная последовательность — **1 → 2 → 3 → 4**: план не связывает 1 и 2 через Interfaces, но
-   внутри фазы предписан порядок, и они делят каталог фикстур (`native/xmlcompat/testdata`
-   переносится в задачу 2); 3 зависит от 2; 4 — после 3.
+1. **Фазы 0–1 закрыты** (задачи 1–7; ветка `plan/native-client`; Фаза 0 влита в `main`, PR #47).
+   Текущая — **Фаза 2 (задачи 8–12)**: `<sec_info_upd>`, `<quotations>`, `<quotes>`, `<sec_info>`,
+   остальные записи снапшота. Порядок — полоса `native/xmlcompat/render.go`/`native/connector.go`
+   (по одной карточке). RE-1…RE-4 доступны: Ghidra-проект — `${TMPDIR:-/tmp}/txc-ghproj`, секреты —
+   `~/re/demo.env`, согласие пользователя на Wine+демо-сервер получено (торговые команды — только по
+   отдельному согласию; в фазах 2–3 не требуются).
 2. Дальше — группы из [docs/deepseek/task-index.md](docs/deepseek/task-index.md) §6. Реальный
    параллелизм ограничен общими файлами: **полоса `native/xmlcompat/render.go` и `native/connector.go`
    (13 задач фаз 1–8) идёт строго по одной карточке**. Параллельно с ней можно вести только задачи,
@@ -365,10 +375,10 @@ RE-процедуры доступны или фикстуры уже сняты
    §8 task-index). Перед наймом сверять write-scope по §5 task-index.
 3. Финальная фаза 9 (задачи 29–30) — после всех остальных: XML-коннектор целиком, нативный backend
    gRPC без Wine, матрица покрытия `docs/protocol/coverage.md`, soak-тест.
-4. Перед стартом команды: закоммитить подготовку (в worktree незакоммиченные `AGENTS.md`/`docs/deepseek/*`
-   не попадают); **перезапустить DSH**, чтобы применились `.worktrees` и `mcp-jetbrains`; положить
-   `TC_PASSWORD` в `~/re/demo.env` (без него RE-4/RE-2/RE-3 и `wire-decode` недоступны); учитывать окно
-   демо-сервера 09:50–23:50 МСК; Qwen-ревью — fallback GLM до фикса baseURL. Wine установлен, RE-2/RE-3
+4. Окружение Фазы 1: **перезапустить DSH**, чтобы применились `.worktrees` и `mcp-jetbrains`;
+   `TC_PASSWORD` уже в `~/re/demo.env`, загружать `set -a; . ~/re/demo.env; set +a`; учитывать окно
+   демо-сервера 09:50–23:50 МСК; Qwen-ревью — после перезапуска DSH (baseURL поправлен, но маршрут
+   `qwen-token-plan` пока не разрешён сессии), fallback — GLM/deepseek. Wine установлен, RE-2/RE-3/RE-4
    доступны.
 
 ## 11. Известные расхождения плана и дерева (не решать молча)

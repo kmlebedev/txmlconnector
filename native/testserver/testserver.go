@@ -25,6 +25,10 @@ import (
 const (
 	Login    = "TESTLOGIN"
 	Password = "TESTPASS"
+	// DefaultReloginToken is the token returned in the RQ_RELOGIN reply.
+	DefaultReloginToken = "TESTTOKEN"
+	// defaultSID is the server id reported in RQ_PWD and in RQ_RELOGIN.
+	defaultSID byte = 7
 )
 
 // rqTimeReply is the demo-server RQ_TIME reply: 2026-11-03 21:03:03, Russian
@@ -56,6 +60,19 @@ type Server struct {
 	AfterSubscribe []byte
 	// MainDelay delays every RQ_MAIN reply.
 	MainDelay time.Duration
+	// SessionTimeout is the RQ_PWD session timeout in seconds; 0 means the
+	// demo-server value of 120. The client uses it as the recovery limit.
+	SessionTimeout int32
+	// SID is the server id reported in RQ_PWD (and used by RQ_RELOGIN when
+	// ReloginSID is 0); New sets it to defaultSID.
+	SID int
+	// ReloginToken is the token returned in the RQ_RELOGIN reply; New sets it
+	// to DefaultReloginToken.
+	ReloginToken []byte
+	// ReloginSID overrides the SID of the RQ_RELOGIN reply: 0 reports the RQ_PWD
+	// SID (the same server), another value simulates a different server (the
+	// DLL error -0xe, forcing the full-login fallback).
+	ReloginSID int
 	// Password wraps the session key; New sets it to Password.
 	Password string
 
@@ -72,7 +89,7 @@ type Server struct {
 
 // New returns a server that reports protocol errors through t.
 func New(t testing.TB) *Server {
-	return &Server{t: t, Password: Password, handlers: map[byte]replyHandler{}}
+	return &Server{t: t, Password: Password, SID: int(defaultSID), ReloginToken: []byte(DefaultReloginToken), handlers: map[byte]replyHandler{}}
 }
 
 // Dial opens a loopback TCP connection to a fresh server-side session and
@@ -156,7 +173,14 @@ func (s *Server) serve(nc net.Conn) {
 	defer nc.Close()
 	s.mu.Lock()
 	snapshot, afterSubscribe, password := s.Snapshot, s.AfterSubscribe, s.Password
+	sessionTimeout := s.SessionTimeout
+	reloginToken := append([]byte(nil), s.ReloginToken...)
+	reloginSID := s.ReloginSID
+	serverSID := byte(s.SID)
 	s.mu.Unlock()
+	if sessionTimeout <= 0 {
+		sessionTimeout = 120
+	}
 
 	keys := wire.DefaultKeys()
 	pwKey, err := cryptoprofile.NewCipher(cryptoprofile.PasswordKey(password))
@@ -193,7 +217,7 @@ func (s *Server) serve(nc net.Conn) {
 			if err := reply(flags, f.Type, payload); err != nil {
 				return
 			}
-			if f.Type == session.RqPwd {
+			if f.Type == session.RqPwd || f.Type == session.RqRelogin {
 				if keys, err = wire.NewKeys(sessionKey, sessionSync); err != nil {
 					s.t.Errorf("testserver: session keys: %v", err)
 					return
@@ -215,14 +239,14 @@ func (s *Server) serve(nc net.Conn) {
 			w.Raw(encSync)
 			// Byte1..3, SessionTimeout, Byte4..7, Int1
 			w.Raw([]byte{0, 0, 0})
-			w.Int32(120)
+			w.Int32(sessionTimeout)
 			w.Raw([]byte{0, 0, 0, 0})
 			w.Int32(0)
 			// Flags, Byte8, SubBroker, Text1, Byte9, Text2, Text3, Byte10
 			w.Raw([]byte{0, 0, 0, 0, 0, 0, 0, 0})
-			w.Int32(4242) // UID
-			w.Byte(0)     // Byte11
-			w.Byte(7)     // SID
+			w.Int32(4242)     // UID
+			w.Byte(0)         // Byte11
+			w.Byte(serverSID) // SID
 			w.Raw([]byte{0, 0})
 			w.Int32(626) // SYS#
 			w.Int32(4)   // BLD#
@@ -251,6 +275,22 @@ func (s *Server) serve(nc net.Conn) {
 			s.mu.Lock()
 			s.pending, afterSubscribe = afterSubscribe, nil
 			s.mu.Unlock()
+			err = reply(wire.KindReply, f.Type, nil)
+		case session.RqRelogin:
+			sid := serverSID
+			if reloginSID != 0 {
+				sid = byte(reloginSID)
+			}
+			var w wire.Writer
+			w.Byte(byte(len(reloginToken)))
+			w.Raw(reloginToken)
+			w.Byte(sid)
+			if err = reply(wire.KindReply, f.Type, w.Bytes()); err == nil {
+				keys, err = wire.NewKeys(sessionKey, sessionSync)
+			}
+		case session.RqRecover:
+			// RQ_RECOVER already carries the session keys: answer on the same
+			// keys, the DLL does not parse the payload.
 			err = reply(wire.KindReply, f.Type, nil)
 		case session.RqLogout:
 			s.mu.Lock()

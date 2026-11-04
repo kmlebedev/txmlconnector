@@ -3,10 +3,11 @@
 // messages, so it can stand in for connector.New where a command is supported.
 //
 // Supported commands: connect, disconnect, server_status,
-// get_connector_version, get_securities, and subscribe/unsubscribe for
-// <alltrades>. Other commands registered by the DLL answer with an explicit
-// "not implemented" error. See docs/protocol/commands.md. Client is the typed
-// API without XML.
+// get_connector_version, get_securities, get_server_id,
+// get_servtime_difference, get_markets, and subscribe/unsubscribe for
+// <alltrades>. The remaining commands registered by the DLL answer with an
+// explicit "not implemented" error. See docs/protocol/commands.md. Client is the
+// typed API without XML.
 package native
 
 import (
@@ -14,6 +15,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"os/user"
@@ -91,14 +93,17 @@ type Connector struct {
 
 	cmdMu sync.Mutex // serializes SendCommand like the DLL
 
-	mu         sync.Mutex
-	started    bool
-	closed     bool
-	state      state
-	client     *Client
-	withMillis bool // connect <milliseconds>: <time> carries .fff
-	cancel     context.CancelFunc
-	done       chan struct{}
+	mu             sync.Mutex
+	started        bool
+	closed         bool
+	state          state
+	client         *Client
+	withMillis     bool // connect <milliseconds>: <time> carries .fff
+	withUTC        bool // connect <utc_time>: <time> carries the UTC instant
+	autoPos        bool // connect <autopos>: stored, its XML effect is not recovered yet
+	micexRegisters bool // connect <micex_registers>: affects <positions> (task 7)
+	cancel         context.CancelFunc
+	done           chan struct{}
 
 	out     chan message
 	outDone chan struct{}
@@ -210,6 +215,10 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 	case "disconnect":
 		return c.disconnect(ctx)
 	case "server_status":
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		c.emit(c.overnightXML(client))
 		c.emit(c.statusXML(true))
 		return success(), nil
 	case "get_connector_version":
@@ -223,6 +232,44 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure(msgNeedsConnection), nil
 		}
 		c.emit(xmlcompat.SecuritiesDumpXML(client.Catalog().Startup(), client.Catalog().List()))
+		return success(), nil
+	case "get_server_id":
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		// DLL FUN_180197ea0: <current_server id="SID"/> from the RQ_PWD cache.
+		c.emit(fmt.Sprintf("<current_server id=%q/>", strconv.Itoa(client.ServerID())))
+		return success(), nil
+	case "get_servtime_difference":
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		// DLL FUN_180197d20 sends RQ_TIME and reports server minus local time
+		// in seconds.
+		diff, err := client.ServerTimeDifference(ctx)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		seconds := int64(math.Round(diff.Seconds()))
+		return fmt.Sprintf("<result success=%q diff=%q/>", "true", strconv.FormatInt(seconds, 10)), nil
+	case "get_markets":
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		msg, err := xmlcompat.Marshal(xmlcompat.MarketsXML(client.Catalog().Startup()))
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(msg)
 		return success(), nil
 	case "subscribe", "unsubscribe":
 		return c.subscribe(ctx, command, id == "subscribe")
@@ -250,6 +297,13 @@ func (c *Connector) connect(command string) (string, error) {
 	if req.Host == "" || req.Port == "" || req.Login == "" {
 		c.mu.Unlock()
 		return failure("host, port and login are required"), nil
+	}
+	switch req.Language {
+	case "", "ru", "en":
+	default:
+		// The DLL statcard of FUN_1801196a0: unknown values fail the command.
+		c.mu.Unlock()
+		return failure("Unknown language."), nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.state = stateConnecting
@@ -285,15 +339,39 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 	// Run polls RQ_MAIN and returns its events in wire order; the connector
 	// renders them as the DLL callbacks and keeps the securities chunks, which
 	// the catalog queues while polling.
+	reportedDown := false
 	err = client.Run(ctx, RunOptions{RqDelay: delay}, func(events []model.Event) error {
 		var trades []model.Trade
 		for _, ev := range events {
-			if t, ok := ev.(*model.Trade); ok {
-				trades = append(trades, *t)
+			switch e := ev.(type) {
+			case *model.Trade:
+				trades = append(trades, *e)
+			case *model.ClientAccount:
+				c.emit(xmlcompat.ClientXML(*e))
+			case *model.MoneyPosition:
+				c.emit(xmlcompat.PositionsXML([]model.MoneyPosition{*e}, c.micexRegisters))
+			case *model.Union:
+				c.emit(xmlcompat.UnionXML(*e))
+			case model.ServerStatus:
+				switch {
+				case e.Recover:
+					c.emit(c.recoveryStatusXML())
+				case e.Connected:
+					// The DLL does not put an overnight line before the
+					// recovery statuses (E05 fixtures): S wins over the D-only
+					// "before every status" claim.
+					c.emit(c.statusXML(true))
+				default:
+					c.emit(c.statusXML(false))
+					reportedDown = true
+				}
 			}
 		}
 		if len(trades) > 0 {
-			c.emit(xmlcompat.AllTradesXML(trades, c.withMillis))
+			c.emit(xmlcompat.AllTradesXMLOptions(trades, xmlcompat.Options{
+				Milliseconds: c.withMillis,
+				UTCTime:      c.withUTC,
+			}))
 		}
 		if secs := client.Catalog().DrainPending(); len(secs) > 0 {
 			st := client.Catalog().Startup()
@@ -304,6 +382,12 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 	})
 	if ctx.Err() != nil {
 		return // disconnect cancelled the run; it owns the RQ_LOGOUT
+	}
+	if reportedDown {
+		// The client already reported the give-up (DLL order: recover status on
+		// the loss, connected="false" when the recovery window expires).
+		c.finish(ctx, client, nil)
+		return
 	}
 	c.finish(ctx, client, func() string { return c.statusLocked(false) })
 }
@@ -320,6 +404,12 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 	client, err := Dial(ctx, ClientConfig{
 		Address: net.JoinHostPort(req.Host, req.Port), Login: req.Login, Password: req.Password,
 		Client: c.cfg.Client, RequestTimeout: timeout, Dial: c.cfg.Dial,
+		Language: req.Language, Milliseconds: req.Milliseconds, UTCTime: req.UtcTime,
+		AutoPos: req.Autopos, MicexRegisters: req.MicexRegisters,
+		RqDelay:        time.Duration(req.Rqdelay) * time.Millisecond,
+		SessionTimeout: time.Duration(req.SessionTimeout) * time.Second,
+		PushULimits:    time.Duration(req.PushUlimits) * time.Second,
+		PushPosEquity:  time.Duration(req.PushPosEquity) * time.Second,
 		OnDictionaries: func(s *model.Startup) {
 			st = s
 			for _, v := range []any{xmlcompat.MarketsXML(s), xmlcompat.BoardsXML(s), xmlcompat.CandleKindsXML(s)} {
@@ -349,15 +439,34 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 		return nil, mErr
 	}
 
+	// The DLL reports the end-of-load callbacks just before server_status:
+	// <client>, <positions>, <overnight>, <server_status connected="true"/>.
+	for _, account := range client.Accounts() {
+		c.emit(xmlcompat.ClientXML(account))
+	}
+	if positions := client.MoneyPositions(); len(positions) > 0 {
+		c.emit(xmlcompat.PositionsXML(positions, req.MicexRegisters))
+	}
+	// A non-empty union is not in the live capture (the demo union is empty):
+	// the DLL position is inferred, so the callbacks go right after
+	// <positions> (I) and are not lost silently.
+	for _, union := range client.Unions() {
+		c.emit(xmlcompat.UnionXML(union))
+	}
+
 	c.mu.Lock()
 	if ctx.Err() != nil {
 		c.mu.Unlock()
 		client.Close()
 		return nil, ctx.Err()
 	}
-	c.client, c.withMillis, c.state = client, req.Milliseconds, stateConnected
+	c.client, c.state = client, stateConnected
+	c.withMillis, c.withUTC = req.Milliseconds, req.UtcTime
+	c.autoPos, c.micexRegisters = req.Autopos, req.MicexRegisters
+	overnight := c.overnightXML(client)
 	status := c.statusLocked(true)
 	c.mu.Unlock()
+	c.emit(overnight)
 	c.emit(status)
 	return client, nil
 }
@@ -418,13 +527,18 @@ func (c *Connector) finish(ctx context.Context, client *Client, report func() st
 		c.mu.Unlock()
 		return
 	}
-	message := report() // called with c.mu held
+	var message string
+	if report != nil {
+		message = report() // called with c.mu held
+	}
 	c.state, c.client = stateDisconnected, nil
 	c.mu.Unlock()
 	if client != nil {
 		client.Close()
 	}
-	c.emit(message)
+	if message != "" {
+		c.emit(message)
+	}
 }
 
 func (c *Connector) disconnect(ctx context.Context) (string, error) {
@@ -448,7 +562,8 @@ func (c *Connector) disconnect(ctx context.Context) (string, error) {
 		_ = client.Logout(logoutCtx)
 		stop()
 	}
-	// The DLL reports connected="false" before disconnect returns.
+	// The DLL reports connected="false" without an overnight line before
+	// disconnect returns (E07 snapshot-tail-live.xml).
 	c.emitSync(status)
 	return success(), nil
 }
@@ -476,6 +591,26 @@ func (c *Connector) Close() error {
 	close(c.out)
 	<-c.outDone
 	return nil
+}
+
+// recoveryStatusXML renders the <server_status> the DLL reports when the link
+// is lost and the reconnect starts: connected="true" with recover="true" right
+// after it (E05 capture: native/session/testdata/recover-short-live.xml,
+// docs/protocol/connect.md).
+func (c *Connector) recoveryStatusXML() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.TrimSuffix(c.statusLocked(true), "/>") + ` recover="true"/>`
+}
+
+// overnightXML renders the <overnight status="..."/> line the DLL puts before
+// every server_status callback; the session default is false.
+func (c *Connector) overnightXML(client *Client) string {
+	status := false
+	if client != nil {
+		status = client.Overnight().Status
+	}
+	return xmlcompat.OvernightXML(status)
 }
 
 func (c *Connector) statusXML(connected bool) string {

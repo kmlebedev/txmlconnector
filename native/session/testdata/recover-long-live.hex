@@ -1,0 +1,8 @@
+# E05 long break (RE-2): the DLL gave up on the lost connection, 2026-11-04.
+# The logging proxy was down for ~150 s; session_timeout from RQ_PWD is 120000 ms.
+# The DLL retried every ~1.004 s: 120 "ReConnecting to 127.0.0.1:39100..." lines from
+# 21:42:32.510 to 21:44:32.050 local, then at 21:44:33.055 it threw
+# "RQ_MAIN [-1] Request timeout." and reported <server_status connected="false"/>.
+# The proxy came back at 21:45:02 but the DLL did NOT reconnect: no new login.
+# Therefore this scenario has no RQ_RELOGIN (63) / RQ_RECOVER (64) frames - on purpose.
+# See recover-long-live.md for the timeline and recover-long-live.xml for the callbacks.

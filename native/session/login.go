@@ -25,8 +25,8 @@ const (
 	RqClientHoldings byte = 42  // RQ_CLIENT_HOLDINGS
 	RqPwd            byte = 46  // RQ_PWD
 	RqTime           byte = 50  // RQ_TIME
-	RqRelogin        byte = 63  // RQ_RELOGIN (not implemented)
-	RqRecover        byte = 64  // RQ_RECOVER (not implemented)
+	RqRelogin        byte = 63  // RQ_RELOGIN (short recovery path)
+	RqRecover        byte = 64  // RQ_RECOVER (short recovery path)
 	RqHandshake      byte = 106 // RQ_HANDSHAKE, external crypto providers only
 )
 
@@ -146,6 +146,15 @@ type Conn struct {
 
 	mu   sync.Mutex
 	keys *wire.Keys
+
+	// sid is the server id from the RQ_PWD reply, compared on RQ_RELOGIN.
+	sid byte
+	// seq counts the ordinary requests sent (63/64 excluded): RQ_RECOVER
+	// carries it as lastSeq.
+	seq int32
+	// lastType is the type of the last ordinary request; the RQ_RECOVER reply
+	// may carry it instead of type 64.
+	lastType byte
 }
 
 // Dial connects to addr and performs the login sequence.
@@ -204,6 +213,7 @@ func Login(ctx context.Context, nc net.Conn, cfg Config) (*Conn, *Info, error) {
 	}
 	c.mu.Lock()
 	c.keys = keys
+	c.sid = info.SID
 	c.mu.Unlock()
 	return c, info, nil
 }
@@ -392,27 +402,37 @@ func (c *Conn) exchange(ctx context.Context, typ byte, payload []byte, wait bool
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	nc := c.nc
+	if nc == nil {
+		return wire.Frame{}, net.ErrClosed
+	}
 	deadline := time.Now().Add(c.timeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
-	if err := c.nc.SetDeadline(deadline); err != nil {
+	if err := nc.SetDeadline(deadline); err != nil {
 		return wire.Frame{}, err
 	}
-	stop := context.AfterFunc(ctx, func() { c.nc.SetDeadline(time.Unix(1, 0)) })
+	stop := context.AfterFunc(ctx, func() { nc.SetDeadline(time.Unix(1, 0)) })
 	defer stop()
 
+	// The DLL increments its send counter before every ordinary request; the
+	// recovery requests 63/64 do not count (docs/protocol/connect.md).
+	if typ != RqRelogin && typ != RqRecover {
+		c.seq++
+		c.lastType = typ
+	}
 	out, err := c.keys.Encode(wire.ClientToServer, wire.Frame{Flags: wire.KindRequest, Type: typ, Payload: payload})
 	if err != nil {
 		return wire.Frame{}, err
 	}
-	if _, err := c.nc.Write(out); err != nil {
+	if _, err := nc.Write(out); err != nil {
 		return wire.Frame{}, ctxErr(ctx, err)
 	}
 	if !wait {
 		return wire.Frame{}, nil
 	}
-	f, err := c.keys.Decode(wire.ServerToClient, c.nc)
+	f, err := c.keys.Decode(wire.ServerToClient, nc)
 	if err != nil {
 		return wire.Frame{}, ctxErr(ctx, err)
 	}
@@ -432,4 +452,40 @@ func ctxErr(ctx context.Context, err error) error {
 	return err
 }
 
-func (c *Conn) Close() error { return c.nc.Close() }
+// Close closes the connection. The socket is read under the same lock Restore
+// swaps it with, so a concurrent short recovery cannot leave the new socket open
+// or race on the field.
+func (c *Conn) Close() error {
+	c.mu.Lock()
+	nc := c.nc
+	c.nc = nil
+	c.mu.Unlock()
+	if nc == nil {
+		return nil
+	}
+	return nc.Close()
+}
+
+// SetRequestTimeout replaces the per-exchange timeout. The client calls it after
+// the RQ_PWD reply, when request_timeout is normalized against session_timeout
+// (docs/protocol/connect.md: request_timeout >= session_timeout -> half).
+func (c *Conn) SetRequestTimeout(d time.Duration) {
+	c.mu.Lock()
+	c.timeout = d
+	c.mu.Unlock()
+}
+
+// LastSeq returns the send counter value of the last ordinary request, the
+// lastSeq RQ_RECOVER carries.
+func (c *Conn) LastSeq() int32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.seq
+}
+
+// SID returns the server id from the RQ_PWD reply.
+func (c *Conn) SID() byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sid
+}

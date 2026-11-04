@@ -1,0 +1,65 @@
+# Anonymized DLL reference for TestConnectOptionsMatchDLL.
+# Source: R6 live runs of txmlconnector64-6.47.2.26.4.dll under Wine 11.21 against the
+# Finam demo server through a logging proxy, 2026-11-04 (raw data .re-run/r6, not in git).
+# Frames were decrypted with tools/wire-decode -payload -1.
+# Format: "key = value", "#" comments; run prefixes: default, options, lang_en.
+#
+# The rq_pwd_tail values below are the REAL captured RQ_PWD payload bytes after the proof,
+# masked IN PLACE: secret values were replaced by same-length bytes at the same positions,
+# NUL terminators and the packed-value structure were preserved, and no Go encoder was used.
+# Strings: computer name -> TESTHOSTXXXXXXX (15 bytes), user -> TESTUSER (8 bytes),
+# OS -> TESTOSXXXXXXXXXXXXXXXXXX (24 bytes). Packed values were replaced by canonical dummy
+# values of the SAME packed length: hardware_id 0x0000100000000000 (7 packed bytes),
+# addresses 0x00100000 (4 packed bytes) and 0x10000000 (5 packed bytes) in that order.
+# The trailer byte is the captured language flag: 0 for ru (default/options), 1 for en.
+# Excluded on purpose: password, real login, challenge/proof, session keys, UID/SID,
+# client/union ids, RQ_LOGIN reply payload, RQ_PWD proof.
+client.computer_name = "TESTHOSTXXXXXXX"
+client.user_name = "TESTUSER"
+client.os = "TESTOSXXXXXXXXXXXXXXXXXX"
+client.hardware_id = 0x0000100000000000
+client.addresses = 0x00100000,0x10000000
+client.trailer_ru = 0
+client.trailer_en = 1
+#
+# RQ_LOGIN payload = session.LoginPayload("TESTLOGIN"). The captured login was 8 bytes in a
+# 18-byte payload; Z12 is NUL-terminated and variable-length, so the anonymized payload is
+# 19 bytes. The value is spliced from the captured payload: only the Z12 login field was
+# replaced (8 -> 9 bytes), every other byte (flags, tail ff e8) is the live capture.
+rq_login = 78004e0001021c544553544c4f47494e00ffe8
+rq_login_payload_len_captured = 18
+#
+# Frame lists are run-length compressed request/reply type sequences (NxM = type N repeated M
+# times). RQ_MAIN (5) counts depend on poll timing; RQ_TIME (50) near the end belongs to the
+# get_servtime_difference command in the same harness script, RQ_LOGOUT (2) to disconnect.
+#
+# --- run: default ---
+default.rq_pwd_payload_len = 196
+default.rq_pwd_proof_len_excluded = 128
+default.rq_pwd_tail = 54455354484f53545858585858585800544553545553455200544553544f5358585858585858585858585858585858585800060000000000010300000104000000010000
+default.rq_pwd_trailer = 0
+default.rq_startup_reply_len = 4355
+default.rq_startup_reply_sha256 = b2dff620c6cde947ebefab50f8a590374124367e4ed9cb3fb58883c06cdfd8ba
+default.c2s_types = 1,46,50,9,50,5x35,42,5x346,50,5x51,2
+default.s2c_types = 1,46,50,9,50,5x35,42,5x346,50,5x51
+#
+# --- run: options ---
+options.rq_pwd_payload_len = 204
+options.rq_pwd_proof_len_excluded = 136
+options.rq_pwd_tail = 54455354484f53545858585858585800544553545553455200544553544f5358585858585858585858585858585858585800060000000000010300000104000000010000
+options.rq_pwd_trailer = 0
+options.rq_startup_reply_len = 4355
+options.rq_startup_reply_sha256 = b2dff620c6cde947ebefab50f8a590374124367e4ed9cb3fb58883c06cdfd8ba
+options.c2s_types = 1,46,50,9,50,5x35,42,5x361,50,5x51,2
+options.s2c_types = 1,46,50,9,50,5x35,42,5x361,50,5x51
+#
+# --- run: lang_en ---
+lang_en.rq_pwd_payload_len = 197
+lang_en.rq_pwd_proof_len_excluded = 129
+lang_en.rq_pwd_tail = 54455354484f53545858585858585800544553545553455200544553544f5358585858585858585858585858585858585800060000000000010300000104000000010001
+lang_en.rq_pwd_trailer = 1
+lang_en.rq_startup_reply_len = 4219
+lang_en.rq_startup_reply_sha256 = 07e800e52a470bb34e2bd65620ba0231a1f0a93c61f0d2437b3400ff79886e90
+lang_en.c2s_types = 1,46,50,9,50,5x35,42,5x62,2
+lang_en.s2c_types = 1,46,50,9,50,5x35,42,5x62
+#
