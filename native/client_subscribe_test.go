@@ -113,3 +113,99 @@ func TestConnectorQuotation(t *testing.T) {
 		}
 	}
 }
+
+// TestSubscribeQuotesMask checks the RQ_SUBSCRIBE masks of the r10 capture:
+// quotes 0x02, alltrades+quotes 0x06, and the 0x00 unsubscribe form.
+func TestSubscribeQuotesMask(t *testing.T) {
+	srv := newRunServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, ClientConfig{Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: srv.Dial})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	sber := model.Symbol{Board: "TQBR", SecCode: "SBER"}
+	steps := []struct {
+		name string
+		run  func() error
+		want string
+	}{
+		{"quotes mask 0x02", func() error {
+			return c.Subscribe(ctx, Subscription{Quotes: []model.Symbol{sber}})
+		}, "001a002502"},
+		{"alltrades+quotes mask 0x06", func() error {
+			return c.Subscribe(ctx, Subscription{AllTrades: []model.Symbol{sber}})
+		}, "001a002506"},
+		{"unsubscribe quotes mask 0x04", func() error {
+			return c.Unsubscribe(ctx, Subscription{Quotes: []model.Symbol{sber}})
+		}, "001a002504"},
+	}
+	for _, step := range steps {
+		if err := step.run(); err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+		payloads := subscribePayloads(srv)
+		if got := payloads[len(payloads)-1]; got != step.want {
+			t.Fatalf("%s: RQ_SUBSCRIBE = %s, want %s", step.name, got, step.want)
+		}
+	}
+}
+
+// TestConnectorQuotesNeedsConnection checks the S-nuance: a quotes subscription
+// before the load is complete is rejected like the DLL, after the load it works.
+func TestConnectorQuotesNeedsConnection(t *testing.T) {
+	srv := newRunServer(t)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	cmd := "<command id=" + quote + "subscribe" + quote + "><quotes><secid>26</secid></quotes></command>"
+	if got := send(t, c, cmd); !strings.Contains(got, "without connection") {
+		t.Fatalf("subscribe before connect = %s", got)
+	}
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	if got := send(t, c, cmd); got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("subscribe after connect = %s", got)
+	}
+	payloads := subscribePayloads(srv)
+	if got := payloads[len(payloads)-1]; got != "001a002502" {
+		t.Fatalf("RQ_SUBSCRIBE = %s, want 001a002502", got)
+	}
+}
+
+// TestConnectorQuotes is the e2e check: an R_QUOTES record fetched after the
+// subscription reaches the Connector as a <quotes> callback.
+func TestConnectorQuotes(t *testing.T) {
+	srv := newRunServer(t)
+	var w wire.Writer
+	w.Byte(records.TagQuotes)
+	w.Uint16(26) // SBER
+	w.Uint16(37) // TQBR
+	w.Byte('B')
+	w.Int32(11203) // absolute price 112.03
+	w.Int32(300)
+	w.Byte(0xff)
+	srv.AfterSubscribe = w.Bytes()
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	sub := "<command id=" + quote + "subscribe" + quote + "><alltrades>"
+	sub += "<security><board>TQBR</board><seccode>SBER</seccode></security></alltrades></command>"
+	if got := send(t, c, sub); got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("subscribe = %s", got)
+	}
+	want := "<quotes><quote secid=" + quote + "26" + quote + "><board>TQBR</board>"
+	want += "<seccode>SBER</seccode><price>112.03</price><yield>0</yield><buy>300</buy></quote></quotes>"
+	if got := rec.next(t, "<quotes"); got != want {
+		t.Fatalf("quotes = %s, want %s", got, want)
+	}
+}
