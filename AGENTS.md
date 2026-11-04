@@ -329,7 +329,7 @@ const review = await agent(
 return review;
 ```
 
-- If ответ `null`, `404 InvalidParameter: Not support` или `child LLM route "qwen-token-plan/…" is not
+- Если ответ `null`, `404 InvalidParameter: Not support` или `child LLM route "qwen-token-plan/…" is not
   allowed for this Session` — проверь baseURL провайдера: он должен быть
   `https://token-plan.maas.qwencloudapi.com/apps/anthropic/v1` (пользователь поправил 2026-11-04).
   Ошибка «route not allowed for this Session» означает ограничение маршрута в текущей сессии — нужен
