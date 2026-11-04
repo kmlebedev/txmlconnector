@@ -306,3 +306,9 @@ echo ok
 **Итог:** task-44 требует либо S-сессии (утром), либо более полного fake-ответа neworder;
 фикстур moveorder/makeordown пока нет. Зафиксировано честно; после утренней S-съёмки — добрать.EOF
 echo ok
+
+**Доп. oracle-попытка (O):** инъекция RQ_MAIN `0x03`-заявки (order-new-inject, transactionid=1) +
+fake success reply type=14, затем `moveorder transactionid=1, moveflag=0` — DLL всё равно отвечает
+`{32} Недопустимое значение параметра TransactionID для данной транзакции`: таблица транзакций
+moveorder не заполняется из RQ_MAIN-записей. Без живой торговой сессии payload moveorder не снять;
+подтверждено с двух заходов.
