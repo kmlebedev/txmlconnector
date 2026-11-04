@@ -124,11 +124,13 @@ type Candles struct {
 }
 
 type OpMask struct {
-	UseCredit string `xml:"usecredit,attr"` // yes/no
-	ByMarket  string `xml:"bymarket,attr"`  // yes/no
-	NoSplit   string `xml:"nosplit,attr"`   // yes/no
-	Fok       string `xml:"fok,attr"`       // yes/no
-	Ioc       string `xml:"ioc,attr"`       // yes/no
+	UseCredit     string `xml:"usecredit,attr"`     // yes/no
+	ByMarket      string `xml:"bymarket,attr"`      // yes/no
+	NoSplit       string `xml:"nosplit,attr"`       // yes/no
+	Fok           string `xml:"fok,attr"`           // yes/no
+	Ioc           string `xml:"ioc,attr"`           // yes/no
+	ImmOrCancel   string `xml:"immorcancel,attr"`   // yes/no
+	CancelBalance string `xml:"cancelbalance,attr"` // yes/no
 }
 
 type SecTimeZone struct {
