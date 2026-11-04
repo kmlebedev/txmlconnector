@@ -1,4 +1,4 @@
-package xmlcompat
+package records
 
 // The server describes a time zone with a 16-byte block (RQ_TIME reply and
 // the R_SEC_NEW tail). It looks like Windows TIME_ZONE_INFORMATION reduced to

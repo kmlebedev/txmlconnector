@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/session"
-	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
 )
 
 // ClientConfig configures a typed session.
@@ -27,44 +28,14 @@ type ClientConfig struct {
 	// OnDictionaries is called once after RQ_STARTUP is parsed, before the
 	// first RQ_MAIN poll, so the session owner can emit <markets>/<boards>/
 	// <candlekinds> callbacks in the DLL's order.
-	OnDictionaries func(*xmlcompat.Startup)
+	OnDictionaries func(*model.Startup)
 	// OnSecurities is called after every RQ_MAIN poll that carried new
 	// R_SEC_NEW records, with exactly those records, as the DLL emits
 	// <securities> chunks while the snapshot arrives.
-	OnSecurities func([]xmlcompat.SecNew)
+	OnSecurities func([]records.SecNew)
 }
 
-// Symbol identifies a security on a board, the stable key across sessions.
-type Symbol struct {
-	Board   string
-	SecCode string
-}
-
-func (s Symbol) String() string { return s.Board + ":" + s.SecCode }
-
-// Trade is one market trade from the <alltrades> feed, decoded without XML.
-type Trade struct {
-	SecID   uint16 // session-local id
-	Board   string
-	SecCode string
-	TradeNo int64
-	// Time is the trade instant in UTC: the server's wall-clock time shifted
-	// by the server time-zone bias from RQ_TIME.
-	Time time.Time
-	// Price is exact: Price × 10^-Decimals.
-	Price    int64
-	Decimals uint8
-	Quantity int64
-	BuySell  byte // 'B', 'S' or 0
-	Period   byte // 'O', 'N', 'C' or 0
-	// OpenInterest is set for futures and options (HasOpenInterest).
-	OpenInterest    int64
-	HasOpenInterest bool
-	// Raw is the decoded record, including fields not mapped above.
-	Raw xmlcompat.AllTrade
-}
-
-// Stats counts what Poll has seen.
+// Stats counts what decoding has seen.
 type Stats struct {
 	Polls, Trades, Duplicates, UnknownRecords int64
 	// LastUnknownTag is the tag that stopped decoding of a payload.
@@ -76,14 +47,14 @@ type Client struct {
 	cfg      ClientConfig
 	conn     *session.Conn
 	info     *session.Info
-	catalog  *xmlcompat.Catalog
+	catalog  *records.Catalog
 	zone     [16]byte
 	serverTZ string
 	bias     time.Duration // UTC = wall + bias
 
 	mu    sync.Mutex
 	subs  map[[2]uint16]byte // (secid, board) -> mask
-	dedup xmlcompat.TradeDedup
+	dedup records.TradeDedup
 	stats Stats
 }
 
@@ -118,13 +89,17 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	return c, nil
 }
 
+// load consumes the RQ_STARTUP dictionaries and the initial RQ_MAIN snapshot.
+// Events seen while loading are dropped: trades are not expected before the
+// subscription (the DLL delivers none either), and other event families only
+// start flowing after it; unknown layouts are counted in Stats, not reported.
 func (c *Client) load(ctx context.Context) error {
 	st, err := c.conn.Time(ctx)
 	if err != nil {
 		return err
 	}
 	c.zone = st.Zone
-	c.serverTZ, _ = xmlcompat.TimeZoneName(st.Zone)
+	c.serverTZ, _ = records.TimeZoneName(st.Zone)
 	// Bytes 0..1 of the zone block hold the bias in minutes (-180 for MSK),
 	// with Windows sign: UTC = local + bias.
 	c.bias = time.Duration(int16(uint16(st.Zone[0])|uint16(st.Zone[1])<<8)) * time.Minute
@@ -132,21 +107,24 @@ func (c *Client) load(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	startup, err := xmlcompat.ParseStartup(payload)
+	startup, err := records.ParseStartup(payload)
 	if err != nil {
 		return err
 	}
-	c.catalog = xmlcompat.NewCatalog(startup)
+	c.catalog = records.NewCatalog(startup)
 	if c.cfg.OnDictionaries != nil {
 		c.cfg.OnDictionaries(startup)
 	}
 	for more := true; more; {
-		var batch []Trade
-		if batch, more, err = c.Poll(ctx); err != nil {
+		events, m, err := c.Poll(ctx)
+		if err != nil {
 			return err
 		}
-		if len(batch) != 0 {
-			return errors.New("trades before subscription")
+		more = m
+		for _, ev := range events {
+			if _, ok := ev.(*model.Trade); ok {
+				return errors.New("trades before subscription")
+			}
 		}
 		if c.cfg.OnSecurities != nil {
 			if secs := c.catalog.DrainPending(); len(secs) > 0 {
@@ -158,7 +136,7 @@ func (c *Client) load(ctx context.Context) error {
 }
 
 func (c *Client) Info() *session.Info              { return c.info }
-func (c *Client) Catalog() *xmlcompat.Catalog      { return c.catalog }
+func (c *Client) Catalog() *records.Catalog        { return c.catalog }
 func (c *Client) ServerTZ() string                 { return c.serverTZ }
 func (c *Client) Conn() *session.Conn              { return c.conn }
 func (c *Client) Close() error                     { return c.conn.Close() }
@@ -172,17 +150,17 @@ func (c *Client) Stats() Stats {
 }
 
 // SubscribeAllTrades adds symbols to the <alltrades> feed.
-func (c *Client) SubscribeAllTrades(ctx context.Context, symbols ...Symbol) error {
+func (c *Client) SubscribeAllTrades(ctx context.Context, symbols ...model.Symbol) error {
 	return c.update(ctx, symbols, session.SubAllTrades, true)
 }
 
 // UnsubscribeAllTrades removes symbols from the <alltrades> feed.
-func (c *Client) UnsubscribeAllTrades(ctx context.Context, symbols ...Symbol) error {
+func (c *Client) UnsubscribeAllTrades(ctx context.Context, symbols ...model.Symbol) error {
 	return c.update(ctx, symbols, session.SubAllTrades, false)
 }
 
 // update sends the full new mask of every touched security, as the DLL does.
-func (c *Client) update(ctx context.Context, symbols []Symbol, bit byte, on bool) error {
+func (c *Client) update(ctx context.Context, symbols []model.Symbol, bit byte, on bool) error {
 	c.mu.Lock()
 	var items []session.SubscribeItem
 	next := map[[2]uint16]byte{}
@@ -224,77 +202,110 @@ func (c *Client) update(ctx context.Context, symbols []Symbol, bit byte, on bool
 	return nil
 }
 
-// Poll sends one RQ_MAIN and returns the new trades it carried; more reports
-// that the reply filled the buffer and the server has queued data. Records
-// with an unimplemented layout end decoding of that payload; they are
-// counted in Stats.
-func (c *Client) Poll(ctx context.Context) (trades []Trade, more bool, err error) {
+// Poll sends one RQ_MAIN and returns the events of that reply in wire order;
+// more reports that the reply filled the buffer and the server has queued data.
+// Records with an unimplemented layout end decoding of that payload: they are
+// counted in Stats and reported as one model.UnknownRecord whose Payload is
+// the remaining tail (the rest of the payload cannot be split without the
+// layout). Poll keeps the client lock only while decoding, so Run can hand the
+// events to a callback without the lock held.
+func (c *Client) Poll(ctx context.Context) (events []model.Event, more bool, err error) {
 	reply, err := c.conn.Main(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	recs, splitErr := xmlcompat.Records(reply.Payload)
+	recs, splitErr := records.Records(reply.Payload)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stats.Polls++
+	var unknown *records.UnknownRecordError
 	if splitErr != nil {
-		if !errors.Is(splitErr, xmlcompat.ErrUnknownRecord) {
+		if !errors.Is(splitErr, records.ErrUnknownRecord) {
 			return nil, reply.More, splitErr
 		}
+		errors.As(splitErr, &unknown)
 		c.stats.UnknownRecords++
-		var unknown *xmlcompat.UnknownRecordError
-		if errors.As(splitErr, &unknown) {
+		if unknown != nil {
 			c.stats.LastUnknownTag = unknown.Tag
 		}
 	}
 	for _, r := range recs {
 		if _, err := c.catalog.ApplyMutations(r); err != nil {
-			return trades, reply.More, err
+			return events, reply.More, err
 		}
-		if r.Tag != xmlcompat.TagAllTrade {
+		decode := decoders[r.Tag]
+		if decode == nil {
 			continue
 		}
-		raw, err := xmlcompat.ParseAllTrade(r.Body)
+		evs, err := decode(c, r.Body)
 		if err != nil {
-			return trades, reply.More, err
+			return events, reply.More, err
 		}
-		if !c.dedup.Fresh(raw) {
-			c.stats.Duplicates++
-			continue
-		}
-		trades = append(trades, c.trade(raw))
+		events = append(events, evs...)
 	}
-	c.stats.Trades += int64(len(trades))
-	return trades, reply.More, nil
+	if unknown != nil {
+		events = append(events, model.UnknownRecord{
+			Tag:     unknown.Tag,
+			Offset:  unknown.Offset,
+			Payload: reply.Payload[unknown.Offset:],
+		})
+	}
+	return events, reply.More, nil
 }
 
-func (c *Client) trade(raw xmlcompat.AllTrade) Trade {
-	t := Trade{SecID: raw.SecID, TradeNo: raw.TradeNo, Price: raw.Price, Quantity: raw.Quantity,
-		BuySell: raw.BuySell, Period: raw.Period, Raw: raw}
-	if s, ok := c.catalog.Security(raw.SecID); ok {
-		t.SecCode = s.SecCode
+const (
+	defaultRunRqDelay = 100 * time.Millisecond
+	minRunRqDelay     = 10 * time.Millisecond
+)
+
+// RunOptions configures Run.
+type RunOptions struct {
+	// RqDelay is the pause between RQ_MAIN poll rounds. Zero means 100ms;
+	// values below 10ms are raised to 10ms, as the DLL does.
+	RqDelay time.Duration
+}
+
+// Run polls RQ_MAIN and hands every reply's events to h in wire order until the
+// context is cancelled, an exchange fails or h returns an error (the error is
+// returned to the caller). h is called exactly once per RQ_MAIN reply,
+// including replies without events (e.g. one that carried only catalog
+// mutations); a nil/empty slice means there were no events. h runs on the Run
+// goroutine with the client lock released, so it may use Client methods. An
+// unknown record ends a batch: its model.UnknownRecord is the last event of
+// that batch and polling continues with the next RQ_MAIN.
+func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) error) error {
+	delay := opt.RqDelay
+	if delay == 0 {
+		delay = defaultRunRqDelay
 	}
-	if b, ok := c.catalog.Board(raw.Board); ok {
-		t.Board = b.Code
+	if delay < minRunRqDelay {
+		delay = minRqDelay
 	}
-	t.Decimals, _ = c.catalog.Decimals(raw.SecID, raw.Board)
-	if raw.Flags&xmlcompat.AllTradeOpenInterest != 0 {
-		t.OpenInterest, t.HasOpenInterest = raw.OpenInt, true
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		for {
+			events, more, err := c.Poll(ctx)
+			if err != nil {
+				return err
+			}
+			if err := h(events); err != nil {
+				return err
+			}
+			if !more {
+				break
+			}
+		}
 	}
-	wall := raw.Time
-	if wall == 0 {
-		wall = c.catalog.TradeDate()
-	}
-	ts := time.Unix(wall, 0).Add(c.bias)
-	if raw.Millis < 1000 {
-		ts = ts.Add(time.Duration(raw.Millis) * time.Millisecond)
-	}
-	t.Time = ts.UTC()
-	return t
 }
 
 // WallTime renders the trade time as the server (and the DLL) shows it.
-func (c *Client) WallTime(t Trade) time.Time { return t.Time.Add(-c.bias) }
+func (c *Client) WallTime(t model.Trade) time.Time { return t.Time.Add(-c.bias) }
 
 func isZeroClient(ci session.ClientInfo) bool {
 	return ci.ComputerName == "" && ci.UserName == "" && ci.OS == "" && ci.HardwareID == 0 && len(ci.Addresses) == 0

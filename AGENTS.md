@@ -34,7 +34,12 @@
 Текущее состояние `main`: есть `native/wire`, `native/session`, `native/xmlcompat` (разбор записей и
 XML), `native/cryptoprofile`, `native/natsout`, `native.Client` (логин, каталог, `alltrades`,
 `securities`), `native.Connector` (часть команд) и инструменты `tools/{wire-decode,reference-harness,native-login,native-trades}`.
-Следующий шаг — **Фаза 0, задачи 1–4**; до её завершения остальные фазы не начинаются.
+
+**Обновление 2026-11-04:** на ветке `plan/native-client` выполнена **Фаза 0** плана (задачи 1–4):
+`tools/tcproxy`, `tools/replay-server`, `native/replay`, `native/model`, `native/records`, событийный
+`Client.Run` с реестром декодеров, `xmlcompat.Render` и oracle-помощник `native/internal/oracle`;
+фикстуры — `native/records/testdata`. Решения по расхождениям — `docs/deepseek/task-index.md` §11.
+Следующий шаг — **Фаза 1, задачи 5–7**.
 
 ## 2. Обязательные скиллы
 

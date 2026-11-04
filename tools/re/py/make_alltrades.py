@@ -2,7 +2,7 @@
 
 usage: python3 make_alltrades.py SET OUT_HEX     SET = 1, 2 or 3
 
-Sets 1-3 are the records behind native/xmlcompat/testdata/alltrades-inject*.hex;
+Sets 1-3 are the records behind native/records/testdata/alltrades-inject*.hex;
 the DLL's <alltrades> answers are alltrades-dll*.xml. They use secids of the
 recorded demo session (SBER 26, GAZP 379, LKOH 4, VTBR 889; TQBR = board 37).
 Copy a set and change one field at a time to learn what it means.

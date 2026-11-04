@@ -1,7 +1,8 @@
 # Окружение: фактическое состояние
 
 **Дата проверки:** 2026-11-04 · **Хост:** macOS (darwin 25.6.0, Apple Silicon arm64) ·
-**Репозиторий:** `/Users/whitefox/GolandProjects/txmlconnector`, ветка `main`, HEAD `b940f9a`.
+**Репозиторий:** `/Users/whitefox/GolandProjects/txmlconnector`, ветка `plan/native-client`, HEAD `a2a4c85`
+(Фаза 0 плана выполнена, см. [task-index.md](task-index.md) §11).
 **Кто проверял:** env-scout (task-1). Все факты ниже — результат реальных команд; там, где прогона не
 было, так и написано («не проверено»).
 
@@ -43,14 +44,14 @@ tools/re/check_env.sh --full   # + go build, go test, go test -race, кросс-
   захват DLL) и RE-3 (оракул) доступны**; им нужны `TC_PASSWORD` и/или записанная сессия. Секреты —
   `~/re/demo.env` (шаблон `tools/re/demo.env.example`), не в репозитории.
 - **Python 3.15.0, `txproto selftest: OK`** — Python-инструменты RE рабочие.
-- **`TC_LOGIN` — set, `TC_PASSWORD` — unset** (значения не печатаются и не должны попадать в файлы).
-  Живой логин, RE-4 и `wire-decode` с расшифровкой пока недоступны; пароль положить в
-  `~/re/demo.env` (chmod 600) и загружать: `set -a; . ~/re/demo.env; set +a`.
+- **`TC_LOGIN` — set; `TC_PASSWORD` в среде агента не экспортирован** (значения не печатаются и не
+  должны попадать в файлы). Файл `~/re/demo.env` найден; перед живыми шагами (RE-2/RE-3/RE-4,
+  `wire-decode` с расшифровкой) загружать: `set -a; . ~/re/demo.env; set +a`.
 - **Демо-сервер:** `tr1-demo5.finam.ru:3939`, 09:50–23:50 МСК, будни (кроме праздников). Любые живые
   операции — только с явного согласия пользователя в чате.
 - **Эталонная DLL** в корне репозитория, sha256 совпадает с эталоном.
-- **Стартовое состояние Фазы 0:** `tools/tcproxy`, `tools/replay-server`, `native/internal/replay`,
-  `native/model`, `native/records` ещё отсутствуют — это ожидаемо, их создают задачи 1–2.
+- **Фаза 0 завершена (2026-11-04):** `tools/tcproxy`, `tools/replay-server`, `native/replay`,
+  `native/model`, `native/records` созданы; фикстуры — `native/records/testdata` (12 файлов).
 
 ---
 
@@ -84,18 +85,20 @@ tools/re/check_env.sh --full   # + go build, go test, go test -race, кросс-
 | `~/re/demo.env` (секреты) | `test -f ~/re/demo.env` | файла нет; шаблон — `tools/re/demo.env.example` | **WARN** | положить `TC_LOGIN`/`TC_PASSWORD` + Wine-экспорты в `~/re/demo.env` (chmod 600); значения не печатать и не коммитить |
 | `TC_HOST` / `TC_TARGET` | имена переменных | set (адрес/цель демо-сервера; значения в отчёты не выводятся) | **INFO** | живой режим по расписанию, только с согласия пользователя |
 | Эталонная DLL | `shasum -a 256 txmlconnector64-6.47.2.26.4.dll` | `a197e2625e53c0df453687ae1b20ef2ae1a05e034cd20c424a7014b0c9726342` — совпадает с эталоном, 10 МБ | **PASS** | RE-1/RE-2/RE-3 против правильного бинаря; DLL не модифицируется |
-| Стартовые инструменты | `test -e tools/tcproxy` и др. | отсутствуют: `tools/tcproxy`, `tools/replay-server`, `native/internal/replay`, `native/model`, `native/records` | **INFO** | ожидаемо: их создают задачи 1–2 Фазы 0 |
+| Стартовые инструменты | `test -e tools/tcproxy` и др. | присутствуют: `tools/tcproxy`, `tools/replay-server`, `native/replay`, `native/model`, `native/records` (Фаза 0, 2026-11-04) | **PASS** | задачи 1–2 Фазы 0 закрыты |
 | Существующие инструменты | `ls tools` | есть `tools/{wire-decode,reference-harness,native-login,native-trades}` и `tools/re/{py,ghidra}` | **PASS** | вход в задачу 1 |
-| Фикстуры | `find native/xmlcompat/testdata -type f` | 12 файлов: `*.hex[.gz]` + эталонный `*-dll*.xml`/`*-demo.xml` | **INFO** | работа без Wine: сверка разбора и XML-рендера. `native/records/testdata` появится в задаче 2 |
-| Git | `git branch --show-current`, `git status --short` | ветка `main`, HEAD `b940f9a`; незакоммичены только подготовительные правки Lead (`M .gitignore`, `M Makefile`) и новые файлы (`AGENTS.md`, `docs/deepseek/`, `tools/re/check_env.sh`) | **PASS** (см. WARN скрипта) | правок исходников нет; свои изменения агент делает в своей ветке/задаче |
+| Фикстуры | `find native/records/testdata -type f` | 12 файлов: `*.hex[.gz]` + эталонный `*-dll*.xml`/`*-demo.xml` | **INFO** | работа без Wine: сверка разбора (`native/records`) и XML-рендера (`native/xmlcompat`) |
+| Git | `git branch --show-current`, `git status --short` | ветка `plan/native-client`, HEAD `a2a4c85`; отслеживаемых правок нет; Фаза 0 — 8 коммитов (см. task-index §11) | **PASS** | свои изменения агент делает в своей ветке/задаче |
 | GoLand MCP: сервер | `POST 127.0.0.1:64422/stream` MCP `initialize` | отвечает: `GoLand MCP Server 2026.2.3`, протокол 2024-11-05, `mcp-session-id` выдаётся | **PASS** | сервер жив, доступен по HTTP |
 | GoLand MCP: форма инструментов | `tools/list` | один tool `execute_tool` (`command` = `get_file_problems --filePath …`, `projectPath` = путь проекта); под-инструменты: `analyze_calls, get_file_problems, get_symbol_info, search_symbol, lint_files, read_file, git_status, list_directory_tree, search_file, search_text, …` | **INFO** | в сессии DSH это будет `mcp__jetbrains__execute_tool`, а не отдельные `get_file_problems` |
 | GoLand MCP: привязка к проекту | `get_file_problems --filePath …/native/client.go` | сервер привязан к проекту GoLand `clickhouse-import-rosstat`; project-scoped инструменты отвечают `points to the location outside of the project directory` даже для `native/client.go`; `projectPath` проект не переключает; `read_file` и `search_symbol` по абсолютным путям работают | **WARN** | MCP видит файлы (VFS/индекс), но инспекции — только для проекта, открытого в этом окне GoLand; открыть `txmlconnector`/worktree в нём или взять MCP-порт его инстанса |
 | DSH MCP-клиент | `~/.dsh/profiles/desktop/cordis.patch.yml` | патч `mcp-jetbrains` **добавлен** 2026-11-04 (бэкап `cordis.patch.yml.bak-*`); до перезапуска DSH инструментов в сессии нет | **INFO** | перезапустить DSH; после — `mcp__jetbrains__execute_tool` |
 | Worktree-плагин | `create_worktree` в DSH | включён; по умолчанию создавал `.agents/worktrees/<branch>` (проверено вызовом: `/Users/whitefox/GolandProjects/txmlconnector/.agents/worktrees/<name>`, `baseCommit` = HEAD); патч `worktree.directory: .worktrees` добавлен 2026-11-04 | **INFO** | после перезапуска DSH пул — `.worktrees/<branch>`; worktree от HEAD не содержит незакоммиченных AGENTS.md/docs |
 
-Полный вывод текущего прогона: `tools/re/check_env.sh` → `PASS=12 WARN=4 FAIL=0`, exit 0 (~1 с);
-`--full` → `PASS=18 WARN=4 FAIL=0`, exit 0 (~12 с, тёплый кэш).
+Полный вывод прогона перед Фазой 0: `tools/re/check_env.sh` → `PASS=12 WARN=4 FAIL=0`; `--full` →
+`PASS=18 WARN=4 FAIL=0`. После Фазы 0 (HEAD `a2a4c85`, 2026-11-04): `PASS=13 WARN=3 FAIL=0` и
+`PASS=19 WARN=3 FAIL=0` (`--full`), exit 0; WARN — sandbox-кэш Go, Ghidra `~/Library/ghidra` и
+незагруженный `TC_PASSWORD`, как и раньше.
 
 ---
 
@@ -258,7 +261,7 @@ shasum -a 256 txmlconnector64-6.47.2.26.4.dll
 | `TC_PASSWORD`, `TC_LOGIN` | живой логин на демо-сервере, RE-4, расшифровка захватов `wire-decode` | положить в `~/re/demo.env` (chmod 600; шаблон `tools/re/demo.env.example`); значения в файлы/логи/коммиты не вносить |
 | `TXC_DLL` (или `TC_DLL_PATH`) | `tools/re/run_dll.sh` (RE-2) | не нужен: скрипт подставляет DLL из корня репозитория (переопределяется через env) |
 | protobuf, nats-server, `protoc-gen-go` | фаза с NATS/protobuf (позже) | [tools/re/README.md §Окружение](../../tools/re/README.md#окружение); сейчас не требуется |
-| `tools/tcproxy`, `tools/replay-server`, `native/internal/replay`, `native/model`, `native/records` | задачи 1–2 Фазы 0 | это **работа плана**, а не установка; создаются в своих задачах |
+| `tools/tcproxy`, `tools/replay-server`, `native/replay`, `native/model`, `native/records` | задачи 1–2 Фазы 0 | созданы в Фазе 0 (2026-11-04), см. task-index §11 |
 
 Ничего из этого списка в task-1 не устанавливалось и не запрашивалось — фиксируется только состояние.
 
@@ -319,11 +322,13 @@ Ghidra 12.2 и JDK 25 есть, скрипты `tools/re/ghidra` на месте
 Нужны `TC_LOGIN` + `TC_PASSWORD` и окно демо-сервера; сейчас `TC_PASSWORD` нет. До появления пароля
 RE-4 не выполняется, сверка идёт по фикстурам.
 
-### Стартовое состояние Фазы 0
+### Состояние после Фазы 0
 
-Отсутствуют `tools/tcproxy`, `tools/replay-server`, `native/internal/replay`, `native/model`,
-`native/records` — это норма для старта: их создают задачи 1–2. До завершения Фазы 0 остальные фазы
-не начинаются (AGENTS.md §10).
+Фаза 0 закрыта (2026-11-04, ветка `plan/native-client`): созданы `tools/tcproxy`, `tools/replay-server`,
+`native/replay` (RE-2/RE-3 на Go), пакеты `native/model` и `native/records`, событийный API
+`Client.Run` с реестром декодеров и `xmlcompat.Render`/`native/internal/oracle`; фикстуры перенесены в
+`native/records/testdata`. Детали и решения — [task-index.md](task-index.md) §11. Следующая — Фаза 1
+(задачи 5–7).
 
 ---
 
@@ -362,11 +367,12 @@ RE-4 не выполняется, сверка идёт по фикстурам.
 | Ghidra | 12.2 PUBLIC; JDK 25.0.5; `analyzeHeadless -help` — usage, exit code **1** (с обходом `user.home`; код 1 у `-help` — норма) |
 | DLL sha256 | `a197e2625e53c0df453687ae1b20ef2ae1a05e034cd20c424a7014b0c9726342` (эталон) |
 | Wine | `wine-11.21` (`~/re/wine/Wine Devel.app/Contents/Resources/wine/bin/wine`), prefix `~/re/wine-prefix`; `get_connector_version` через `run_dll.sh` — `<connector_version>6.47.2.26.4</connector_version>` |
-| Секреты | `~/re/demo.env` пока нет (шаблон `tools/re/demo.env.example`); `TC_LOGIN` set, `TC_PASSWORD` unset |
+| Секреты | `~/re/demo.env` найден (значения не читаются; шаблон `tools/re/demo.env.example`); `TC_LOGIN` set, в среде агента `TC_PASSWORD` не экспортирован |
 | DSH-профиль | 2026-11-04 добавлены `worktree.directory: .worktrees` и `mcp-jetbrains` (бэкап `cordis.patch.yml.bak-*`); применяются после перезапуска DSH |
-| Git | `main` @ `b940f9a`; незакоммичены только подготовительные правки Lead (`.gitignore`, `Makefile`) и новые `AGENTS.md`, `docs/deepseek/`, `tools/re/check_env.sh` |
+| Git | `plan/native-client` @ `a2a4c85`; Фаза 0 (задачи 1–4) закоммичена (8 коммитов), незакоммиченного нет |
 | Worktree (DSH) | `create_worktree` → `/Users/whitefox/GolandProjects/txmlconnector/.agents/worktrees/<name>`, default `.agents/worktrees`; probe-ветки удалены |
 | GoLand MCP | `GoLand MCP Server 2026.2.3` на `127.0.0.1:64422/stream`; 1 tool `execute_tool`; привязан к `clickhouse-import-rosstat` (не к `txmlconnector`) |
 
-**История:** 2026-11-04 — первичная проверка окружения (env-scout, task-1). При изменении окружения
-обновляйте эту страницу и сверяйтесь с `tools/re/check_env.sh`.
+**История:** 2026-11-04 — первичная проверка окружения (env-scout, task-1); 2026-11-04 — Фаза 0
+плана закрыта (`plan/native-client` @ `a2a4c85`), статусы путей/фикстур обновлены. При изменении
+окружения обновляйте эту страницу и сверяйтесь с `tools/re/check_env.sh`.

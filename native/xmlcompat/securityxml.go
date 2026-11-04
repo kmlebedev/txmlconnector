@@ -1,13 +1,12 @@
 package xmlcompat
 
 import (
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/kmlebedev/txmlconnector/client/commands"
-	"github.com/kmlebedev/txmlconnector/native/wire"
+	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector/native/records"
 )
 
 // Attribute order in the DLL output, fixed by FUN_18011f4a0 and verified
@@ -24,106 +23,34 @@ func yesNo(b bool) string {
 	return "no"
 }
 
-// SecurityFlags is the per-security derived state the DLL uses for
-// <security>: the opmask byte, the tradability gates and quotestype.
-// The model is recovered from FUN_180398640 (record parse and opmask seed),
-// FUN_1801dc810/FUN_1801dcb20/FUN_1803035c0/FUN_1801dcf80 (trading checks),
-// FUN_1801dfaa0/FUN_1801e0080 (quotestype) and FUN_18011f4a0 (output), and
-// matches the DLL on all 499 demo-server instruments of the snapshot fixture.
-type SecurityFlags struct {
-	OpMask    byte // opmask byte: ioc 0x01, fok 0x02, bymarket 0x04, nosplit 0x08, usecredit 0x10
-	Trading   bool // symbols&3==3, not an index, not MCT DCF, futures/options not blocked
-	Active    bool // Trading and the security has a default pit
-	ByMarket  bool // Trading and both opmask and the record byte carry the market-permit bit
-	QuotesTyp byte // 0 - none, 1 - OrderBook, 2 - Level2
-}
-
-// SecurityFlags derives the DLL state of a record. DefaultPit and board
-// lookups follow the DLL: the pit flagged default, else the first one; the
-// quotestype gate reads the Byte2 of that pit's board from RQ_STARTUP.
-func (st *Startup) SecurityFlags(s SecNew) SecurityFlags {
-	f := SecurityFlags{}
-	if t, ok := findSecType(st.SecTypes, s.Kind); ok && len(t.Raw) > 1 {
-		f.OpMask = t.Raw[1]
-	}
-	if s.Props&2 != 0 {
-		f.OpMask |= 1
-	}
-	if s.Props&4 != 0 {
-		f.OpMask |= 2
-	}
-	pit, hasPit := s.DefaultPit()
-	f.Trading = s.Flags&3 == 3 && s.Kind != 7 &&
-		!(s.Market == 0x0e && s.Tail2 == 7) &&
-		!((s.Kind == 4 || s.Kind == 5) && s.DerivFlags&4 != 0 && s.DerivFlags&8 == 0)
-	f.Active = hasPit && f.Trading
-	f.ByMarket = f.Trading && f.OpMask&4 != 0 && s.Flags&4 != 0
-	// quotestype: the default board must allow quotes (RQ_STARTUP boards
-	// Byte2&2), indices and swaps report 0, MCT takes the value from the
-	// record tail, market 12 reports Level2, everything else OrderBook.
-	if s.Kind != 0x11 && hasPit {
-		if b, ok := st.boardByNum(pit.Board); ok && b.Byte2&2 != 0 {
-			switch {
-			case s.Market == 0x0e:
-				f.QuotesTyp = s.Tail1
-			case s.Kind == 7:
-				f.QuotesTyp = 0
-			case s.Market == 12:
-				f.QuotesTyp = 2
-			default:
-				f.QuotesTyp = 1
-			}
-		}
-	}
-	return f
-}
-
-func findSecType(list []SecType, id byte) (SecType, bool) {
-	for _, t := range list {
-		if t.ID == id {
-			return t, true
-		}
-	}
-	return SecType{}, false
-}
-
-func (st *Startup) boardByNum(num uint16) (Board, bool) {
-	for _, b := range st.Boards {
-		if b.Num == num {
-			return b, true
-		}
-	}
-	return Board{}, false
-}
-
 // secTZN returns the security time zone name and whether the DLL would print
 // the <sec_tz> element for this record.
-func (st *Startup) secTZN(s SecNew) string {
+func secTZN(s records.SecNew) string {
 	if !s.HasTimeZone {
 		return ""
 	}
-	name, _ := TimeZoneName(s.TimeZone)
+	name, _ := records.TimeZoneName(s.TimeZone)
 	return name
 }
 
 // SecurityXML renders one <security> exactly in the DLL's snapshot-chunk
 // element order (verified byte-for-byte against the load callbacks).
-func (st *Startup) SecurityXML(s SecNew) string {
-	return st.securityXML(s, false)
+func SecurityXML(st *model.Startup, s records.SecNew) string {
+	return securityXML(st, s, false)
 }
 
 // SecurityDumpXML renders one <security> in the order of the get_securities
 // dump writer FUN_18011f4a0: sec_tz, board, seccode, instrclass, currency,
-// shortname, decimals, market, minstep…, point_cost, opmask, MIC, ticker,
-// sectype, quotestype, currencyid — different from the load-chunk writer.
-func (st *Startup) SecurityDumpXML(s SecNew) string {
-	return st.securityXML(s, true)
+// shortname, decimals, market, minstep..., point_cost, opmask, MIC, ticker,
+// sectype, quotestype, currencyid - different from the load-chunk writer.
+func SecurityDumpXML(st *model.Startup, s records.SecNew) string {
+	return securityXML(st, s, true)
 }
 
-func (st *Startup) securityXML(s SecNew, dump bool) string {
-	f := st.SecurityFlags(s)
+func securityXML(st *model.Startup, s records.SecNew, dump bool) string {
+	f := DeriveSecurityFlags(st, s)
 	var tz, seccode, instr, currency, board, shortname, decimals, market, sectype, opmask, pitBlock, quotes, mic, ticker, currencyid string
-	if t := st.secTZN(s); t != "" {
+	if t := secTZN(s); t != "" {
 		tz = "<sec_tz><![CDATA[" + t + "]]></sec_tz>"
 	}
 	seccode = tagText("seccode", s.SecCode)
@@ -144,7 +71,7 @@ func (st *Startup) securityXML(s SecNew, dump bool) string {
 	pit, hasPit := s.DefaultPit()
 	boardCode := ""
 	if hasPit {
-		boardCode = st.boardCode(pit.Board)
+		boardCode = st.BoardCode(pit.Board)
 	}
 	board = tagText("board", boardCode)
 	shortname = tagText("shortname", s.ShortName)
@@ -187,7 +114,7 @@ func (st *Startup) securityXML(s SecNew, dump bool) string {
 	if s.Ticker != "" {
 		ticker = tagText("ticker", s.Ticker)
 	}
-	if cid := st.currencyID(pit, cur, hasPit); cid != "" {
+	if cid := currencyID(pit, cur, hasPit); cid != "" {
 		currencyid = tagText("currencyid", cid)
 	}
 	var b strings.Builder
@@ -208,7 +135,7 @@ func (st *Startup) securityXML(s SecNew, dump bool) string {
 // currencyID resolves the settlement currency of the emitted security: the
 // default board's, else the security currency, RUR reported as RUB (verified
 // on 17 176 demo-server instruments).
-func (st *Startup) currencyID(pit Pit, cur string, hasPit bool) string {
+func currencyID(pit records.Pit, cur string, hasPit bool) string {
 	id := ""
 	if hasPit {
 		id = pit.Currency
@@ -220,14 +147,6 @@ func (st *Startup) currencyID(pit Pit, cur string, hasPit bool) string {
 		id = "RUB"
 	}
 	return id
-}
-
-func pow10(n int) float64 {
-	v := 1.0
-	for i := 0; i < n; i++ {
-		v *= 10
-	}
-	return v
 }
 
 func writeText(b *strings.Builder, tag, value string) {
@@ -273,11 +192,11 @@ func xmlEscape(s string) string {
 }
 
 // SecuritiesXML renders a list of records as the DLL emits it during load.
-func (st *Startup) SecuritiesXML(secs []SecNew) string {
+func SecuritiesXML(st *model.Startup, secs []records.SecNew) string {
 	var b strings.Builder
 	b.WriteString("<securities>")
 	for _, s := range secs {
-		b.WriteString(st.SecurityXML(s))
+		b.WriteString(SecurityXML(st, s))
 	}
 	b.WriteString("</securities>")
 	return b.String()
@@ -287,9 +206,9 @@ func (st *Startup) SecuritiesXML(secs []SecNew) string {
 // iterates its catalog grouped by the record market byte (ascending) and
 // sorted by seccode byte order within a group (verified on the
 // 17 199-instrument live dump).
-func (st *Startup) SecuritiesDumpXML(secs []SecNew) string {
+func SecuritiesDumpXML(st *model.Startup, secs []records.SecNew) string {
 	sorted := slices.Clone(secs)
-	slices.SortStableFunc(sorted, func(a, b SecNew) int {
+	slices.SortStableFunc(sorted, func(a, b records.SecNew) int {
 		if a.Market != b.Market {
 			return int(a.Market) - int(b.Market)
 		}
@@ -298,31 +217,31 @@ func (st *Startup) SecuritiesDumpXML(secs []SecNew) string {
 	var b strings.Builder
 	b.WriteString("<securities>")
 	for _, s := range sorted {
-		b.WriteString(st.SecurityDumpXML(s))
+		b.WriteString(SecurityDumpXML(st, s))
 	}
 	b.WriteString("</securities>")
 	return b.String()
 }
 
 // PitsXML renders the <pits> chunk for the given securities: the default pit
-// of each first, then the remaining pits in record order — the order the DLL
+// of each first, then the remaining pits in record order - the order the DLL
 // emits (verified byte-for-byte on the live 35-chunk snapshot; every
 // multi-pit demo security has its default as the second record pit, so
 // "default first" and "board number descending" agree on all observed data).
-func (st *Startup) PitsXML(secs []SecNew) string {
+func PitsXML(st *model.Startup, secs []records.SecNew) string {
 	var b strings.Builder
 	b.WriteString("<pits>")
 	for _, s := range secs {
 		ordered := s.Pits
 		for i, p := range s.Pits {
 			if p.Default && i != 0 {
-				ordered = append([]Pit{}, s.Pits...)
-				ordered = append([]Pit{s.Pits[i]}, append(ordered[:i], ordered[i+1:]...)...)
+				ordered = append([]records.Pit{}, s.Pits...)
+				ordered = append([]records.Pit{s.Pits[i]}, append(ordered[:i], ordered[i+1:]...)...)
 				break
 			}
 		}
 		for _, p := range ordered {
-			board, ok := st.boardByNum(p.Board)
+			board, ok := st.BoardByNum(p.Board)
 			if !ok {
 				continue
 			}
@@ -362,80 +281,4 @@ func (st *Startup) PitsXML(secs []SecNew) string {
 	return b.String()
 }
 
-// Apply updates derived state for record tags that mutate a security: the
-// attribute tags R_SEC_ZALOG/OBLIG/ONOFF/MKT_PERMIT rewrite bytes of the
-// record the same way FUN_180264150 does, so later <securities> output
-// reflects them.
-func (c *Catalog) ApplyMutations(rec Record) (bool, error) {
-	switch rec.Tag {
-	case TagSecNew, TagDate:
-		return c.Apply(rec)
-	}
-	if !isAttrTag(rec.Tag) {
-		return false, nil
-	}
-	if len(rec.Body) < 3 {
-		return false, fmt.Errorf("attribute record %#02x: short body", rec.Tag)
-	}
-	r := wire.NewReader(rec.Body)
-	id, _ := r.Uint16()
-	v, _ := r.Byte()
-	s, ok := c.secs[id]
-	if !ok {
-		return true, nil // the DLL logs Unknown secid and skips
-	}
-	switch rec.Tag {
-	case 0x0d: // R_SEC_ONOFF: low two bits of the flags byte
-		s.Flags = s.Flags&0xfc | v
-		c.secs[id] = s
-	case 0x0e: // R_SEC_MKT_PERMIT: market-permission bit
-		if v != 0 {
-			s.Flags |= 4
-		} else {
-			s.Flags &^= 4
-		}
-		c.secs[id] = s
-	}
-	return true, nil
-}
-
-func isAttrTag(tag byte) bool { return attrTags[tag] != "" }
-
-// List returns the known securities in R_SEC_NEW arrival order.
-func (c *Catalog) List() []SecNew {
-	out := make([]SecNew, 0, len(c.order))
-	for _, id := range c.order {
-		if s, ok := c.secs[id]; ok {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-// SecuritiesDumpXML renders the whole catalog for get_securities (dump order).
-func (c *Catalog) SecuritiesDumpXML() string {
-	return c.startup.SecuritiesDumpXML(c.List())
-}
-
 func xmlAttr(s string) string { return xmlEscape(s) }
-
-// update commands.Security with the derived fields so parsed consumers see
-// the same values the DLL callbacks carry.
-func (st *Startup) applyDerived(sec *commands.Security, s SecNew, f SecurityFlags) {
-	sec.Active = strconv.FormatBool(f.Active)
-	sec.QuotesType = int(f.QuotesTyp)
-	sec.MIC = s.MIC
-	sec.Ticker = s.Ticker
-	if !f.Active {
-		return
-	}
-	sec.OpMask = commands.OpMask{
-		UseCredit:     yesNo(f.OpMask&0x10 != 0),
-		ByMarket:      yesNo(f.ByMarket),
-		NoSplit:       yesNo(f.OpMask&8 != 0),
-		Fok:           yesNo(f.OpMask&2 != 0),
-		Ioc:           yesNo(f.OpMask&1 != 0),
-		ImmOrCancel:   yesNo(f.OpMask&2 != 0),
-		CancelBalance: yesNo(f.OpMask&1 != 0),
-	}
-}

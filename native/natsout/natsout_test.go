@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/kmlebedev/txmlconnector/native"
+	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/proto/marketdata"
 )
 
@@ -32,10 +32,10 @@ func (f *fakePublisher) Publish(subject string, data []byte) error {
 func TestPublishTrades(t *testing.T) {
 	pub := &fakePublisher{}
 	sink := NewTradeSink(pub, "")
-	trades := []native.Trade{
-		{SecID: 26, Board: "TQBR", SecCode: "SBER", TradeNo: 9000000001, Price: 30512, Decimals: 2, Quantity: 3,
+	trades := []model.Trade{
+		{SecID: 26, Board: "TQBR", SecCode: "SBER", TradeNo: 9000000001, Price: model.Decimal{Units: 30512, Scale: 2}, Quantity: 3,
 			BuySell: 'B', Period: 'N', Time: time.Date(2026, 11, 3, 20, 53, 22, 250e6, time.UTC)},
-		{SecID: 20583, Board: "FUT", SecCode: "SiZ6", TradeNo: 1, Price: -5, Quantity: 1, BuySell: 'S',
+		{SecID: 20583, Board: "FUT", SecCode: "SiZ6", TradeNo: 1, Price: model.Decimal{Units: -5}, Quantity: 1, BuySell: 'S',
 			HasOpenInterest: true, OpenInterest: 777, Time: time.Unix(0, 0)},
 		{SecID: 1, Board: "MCT", SecCode: "1093.XHKG", TradeNo: 2},
 	}
@@ -74,7 +74,7 @@ func TestPublishTrades(t *testing.T) {
 
 func TestPublishStopsOnError(t *testing.T) {
 	pub := &fakePublisher{err: errors.New("closed")}
-	if err := NewTradeSink(pub, "x").Publish([]native.Trade{{Board: "TQBR", SecCode: "SBER"}}); err == nil {
+	if err := NewTradeSink(pub, "x").Publish([]model.Trade{{Board: "TQBR", SecCode: "SBER"}}); err == nil {
 		t.Fatal("expected error")
 	}
 }

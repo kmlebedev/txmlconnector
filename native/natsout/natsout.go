@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/kmlebedev/txmlconnector/native"
+	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/proto/marketdata"
 )
 
@@ -35,12 +35,12 @@ func NewTradeSink(pub Publisher, prefix string) *TradeSink {
 }
 
 // Subject returns the subject a trade is published to.
-func (s *TradeSink) Subject(t native.Trade) string {
+func (s *TradeSink) Subject(t model.Trade) string {
 	return s.prefix + "." + token(t.Board) + "." + token(t.SecCode)
 }
 
 // Publish sends trades in order; it stops at the first error.
-func (s *TradeSink) Publish(trades []native.Trade) error {
+func (s *TradeSink) Publish(trades []model.Trade) error {
 	for _, t := range trades {
 		data, err := proto.Marshal(Message(t))
 		if err != nil {
@@ -54,14 +54,14 @@ func (s *TradeSink) Publish(trades []native.Trade) error {
 }
 
 // Message converts a trade to its protobuf form.
-func Message(t native.Trade) *marketdata.Trade {
+func Message(t model.Trade) *marketdata.Trade {
 	m := &marketdata.Trade{
 		Board:    t.Board,
 		Seccode:  t.SecCode,
 		Tradeno:  t.TradeNo,
 		TimeMs:   t.Time.UnixMilli(),
-		Price:    t.Price,
-		Decimals: uint32(t.Decimals),
+		Price:    t.Price.Units,
+		Decimals: uint32(t.Price.Scale),
 		Quantity: t.Quantity,
 		Period:   uint32(t.Period),
 		Secid:    uint32(t.SecID),

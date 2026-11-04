@@ -103,15 +103,22 @@ func (k *Keys) Encode(dir Direction, f Frame) ([]byte, error) {
 	if len(f.Payload) > MaxPayload {
 		return nil, ErrTooLarge
 	}
+	// FUN_1801bfb20: the server keeps the header flags it was given (0x82 is
+	// a reply with a plain payload) and, with FlagPlain set, sends the payload
+	// unencrypted; the client masks the plain bit and always encrypts.
+	flags := f.Flags
+	if dir == ClientToServer {
+		flags &= 0x7f
+	}
 	out := make([]byte, HeaderSize+len(f.Payload))
-	out[0] = f.Flags & 0x7f
+	out[0] = flags
 	out[1] = f.Type
 	binary.BigEndian.PutUint16(out[2:], uint16(len(f.Payload)))
 	binary.BigEndian.PutUint16(out[4:], CRC16(f.Payload))
 	binary.BigEndian.PutUint16(out[6:], CRC16(out[:6]))
 	copy(out[HeaderSize:], f.Payload)
 	k.encrypt(dir, out[:HeaderSize])
-	if len(f.Payload) > 0 {
+	if len(f.Payload) > 0 && flags&FlagPlain == 0 {
 		k.encrypt(dir, out[HeaderSize:])
 	}
 	return out, nil
