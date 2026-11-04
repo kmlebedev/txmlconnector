@@ -1,0 +1,503 @@
+# Индекс задач плана нативного TRANSAQ-клиента
+
+Служебный документ команды DeepSeek Harness. Источник задач — план
+[`docs/superpowers/plans/2026-11-04-native-transaq-client.md`](../superpowers/plans/2026-11-04-native-transaq-client.md)
+(636 строк, 30 задач, 10 фаз 0–9). План не переписывается: расхождения плана с кодом и деревом
+зафиксированы в §8, а не «исправлены по ходу».
+
+**Как собран индекс.** План прочитан целиком; прочитаны [`tools/re/README.md`](../../tools/re/README.md),
+[`.kimi-code/skills/go-engineer/SKILL.md`](../../.kimi-code/skills/go-engineer/SKILL.md),
+[`docs/ROADMAP-GO.md`](../ROADMAP-GO.md), `docs/protocol/{connect,dictionaries,commands,alltrades}.md`;
+наличие файлов проверено `git ls-files native tools docs`, `ls native/*/`, `ls tools`, точечными
+`grep`/`read`. Состояние зафиксировано на `main` = `b940f9a` (Merge PR #45). Незакоммиченные файлы
+рабочего дерева (`AGENTS.md`, `docs/deepseek/*`, правки `Makefile`/`.gitignore`) как «существующие в
+main» не учитывались.
+
+**Обозначения в таблицах:**
+- `RE-1` — Ghidra-декомпиляция — **доступна сейчас** (скрипты в `tools/re/ghidra`, DLL — в корне).
+  В песочнице DSH нужны `JAVA_HOME=openjdk@25`, `mkdir -p "${TMPDIR:-/tmp}/dsh-ghidra-home"` и
+  `JAVA_TOOL_OPTIONS=-Duser.home=…`, а проект Ghidra — в `.re-run/ghproj` внутри workspace
+  (см. [environment.md](environment.md#песочница-dsh-gocache-и-запись-вне-workspace)).
+- `RE-2` (живой захват DLL) и `RE-3` (оракул) — **доступны** (2026-11-04: Wine 11.21 установлен,
+  `run_dll.sh` + `get_connector_version` проверены). RE-2 требует `TC_PASSWORD` и окно демо-сервера,
+  RE-3 — записанную сессию + `TC_PASSWORD`. `RE-4` (живая проверка Go) — **пока нет**: нужен
+  `TC_PASSWORD`. Секреты/Wine-экспорты — `~/re/demo.env` (шаблон `tools/re/demo.env.example`), в
+  таблицах ниже вместо «(нет)» указано, что именно нужно. Подробности —
+  `docs/deepseek/environment.md`.
+- «выв.» — зависимость выведена из общих файлов/порядка, а не написана в плане дословно.
+- `T#` — id карточки на доске для задачи # плана (`blocked_by` принимает id карточек, не номера).
+
+---
+
+## 1. Сводка
+
+| Параметр | Значение |
+|---|---|
+| Задач в плане | 30 (нумерация 1–30 без пропусков) |
+| Фаз | 10: 0 «Фундамент», 1 «Сеанс», 2 «Рыночные данные», 3 «История и тики», 4 «Торговля», 5 «Позиции и портфели», 6 «Новости, сообщения, пароль», 7 «Опционы», 8 «РПС/РЕПО», 9 «Интеграция» |
+| Обязательный старт | Фаза 0 (задачи 1–4); задачи 1 и 2 независимы, 3 зависит от 2, 4 — после 3 |
+| Review Focus плана | 5 штук: №1 и №5 → задача 3; №2 → задача 15; №3 → задача 5; №4 → задача 9 |
+| Задач с RE-шагами | 24 из 30; RE-2 нужен в 17 задачах, RE-3 в 12, RE-4 в 10 (см. таблицу §4) |
+| Файлов, в которые пишут несколько задач | 18 строк (21 путь; см. §5); главные — `native/xmlcompat/render.go` (создаёт задача 4, дописывают 13 задач), `native/connector.go` (12), `native/client.go` (4), `native/events.go` (все задачи-декодеры) |
+| Задач, которые нельзя вести параллельно между собой | 14 задач «полосы render.go/connector.go» (включая создание `render.go` в задаче 4), цепочка 2→3→4 и 29→30 (см. §7) |
+
+---
+
+## 2. Фазы: задачи, результат, что уже есть в `main`
+
+| Фаза | Задачи | Результат фазы (из плана) | Что уже есть в `main` (проверено) | Чего нет |
+|---|---|---|---|---|
+| 0. Фундамент | 1–4 | Инструменты RE на Go (`tools/tcproxy`, `native/internal/replay`, `tools/replay-server`), пакеты `native/model`/`native/records`, событийный API `Client.Run`, шаблон `Render`/`checkDLL` | `native/wire` (`codec.go`, `frame.go`), `native/cryptoprofile`, `native/session` (`login.go`, `requests.go` — 11 констант RQ_*), `native/xmlcompat` (`catalog.go`, `records.go`, `alltrade.go`, `security.go`+`securityxml.go`, `startup.go`, `timezone.go`, 12 файлов `testdata/`), `native/client.go` (`Dial`, `Poll` только сделки, `SubscribeAllTrades`, `Stats`), `native/connector.go`, `native/natsout`, `tools/{wire-decode,reference-harness,native-login,native-trades,re}` | `native/model`, `native/records`, `native/events.go`, `native/xmlcompat/render.go`, `native/internal/{replay,testserver}`, `tools/{tcproxy,replay-server}` |
+| 1. Сеанс | 5–7 | Переподключение/восстановление, служебные команды и параметры `connect`, сообщения конца загрузки `<client>/<positions>/<overnight>` | `docs/protocol/connect.md` и `commands.md`; `session.Conn`/`Request`/`exchange`; константы `RqRelogin`/`RqRecover` есть, реализация — нет; `fakeServer` (тестовый, в `native/connector_test.go`) умеет `drop()`, но не экспортирован | `native/session/recover.go`, `native/recover.go`, `native/client_service.go`, `native/client_accounts.go`, `native/records/client.go`, `native/model/client.go`, `native/internal/testserver/testserver.go`, `native/testdata/` |
+| 2. Рыночные данные | 8–12 | `<sec_info_upd>`, `<quotations>`, `<quotes>`, `<sec_info>`, остальные записи снапшота | `docs/protocol/alltrades.md` (RQ_SUBSCRIBE, биты масок, R_ALLTRADE, R_SEC_RATE/ZALOG/OBLIG/ONOFF), `docs/protocol/dictionaries.md` (RQ_STARTUP, R_SEC_NEW, производные поля, R_SEC_PARAM: маски, сеттеры, XML-форма `<sec_info_upd>`; эмиттера нет); теги 0x0a (R_SEC_RATE) и 0x0b–0x0e (атрибуты бумаги) уже разбираются `xmlcompat.Records`, но событий не порождают | `native/records/{quotation,quote,secparam,secinfo,misc}.go`, `native/model/{quotation,quote,secinfo,misc}.go`, `native/client_subscribe.go`, `native/client_secinfo.go`; констант RQ_SEC_SPEC (15)/RQ_INQUIRE_SECURITY (111) нет; фикстур `secparam-live.hex.gz`, `sec_info_upd-dll.xml.gz` и quotation/quote-live в репозитории нет |
+| 3. История и тики | 13–14 | `gethistorydata`, `subscribe_ticks` | — (ничего по теме: нет констант RQ_HISTORY 11 / RQ_HISTORY_EXT 148 / RQ_TICKS 13 / RQ_SUBSCRIBE_TICKS 120, нет декодеров, нет `docs/protocol/history.md`) | `native/session/{history,ticks}.go`, `native/records/{candles,ticks}.go`, `native/model/{candle,tick}.go`, `native/client_{history,ticks}.go` |
+| 4. Торговля | 15–19 | RQ_TRANSACT, заявки, сделки клиента, стоп-/условные заявки, `moveorder` | — (нет `session/transact.go`, нет констант RQ_TRANSACT 14 / RQ_TRNS_IN_PROGRESS 156 / RQ_ENFORCE_TRN_RELEASE 157; есть `session.Conn.Request`/`exchange`, на которых это строится) | `native/session/transact.go`, `native/model/{transaction,order,clienttrade,stoporder}.go`, `native/records/{order,clienttrade,stoporder}.go`, `native/client_{orders,stoporders}.go` |
+| 5. Позиции и портфели | 20–23 | позиции, лимиты, портфели, max buy/sell, разрешения | XML-типы в `client/commands`: `MoneyPosition`, `SecPosition`, `FortsPosition`, `UnitedPortfolio`, `UnitedEquity` (используются только XML-путём `xmlcompat`) | `native/model/{position,limits,portfolio,margin}.go`, `native/records/{positions,limits,portfolio,margin}.go`, `native/client_{positions,portfolio,margin}.go`, `native/session/{limits,portfolio,margin}.go` |
+| 6. Новости, сообщения, пароль | 24–26 | новости, текстовые сообщения, `change_pass` | — (нет констант RQ_GETNEWS 73 / RQ_CHANGE_PWD 3, нет декодеров R_MSG 0x01) | `native/session/{news,changepwd}.go`, `native/records/{news,message}.go`, `native/model/{news,message}.go`, `native/client_{news,password}.go` |
+| 7. Опционы | 27 | семейства, страйки, опционы | — (обработчики и типы запросов 149/153/150/151 упомянуты в плане, в коде отсутствуют) | `native/session/options.go`, `native/records/options.go`, `native/model/option.go`, `native/client_options.go` |
+| 8. РПС/РЕПО | 28 | раздел 5 PDF | — (нет `session.Transact` задачи 15, нет RQ_RPSREPO_SUBSCR 72 / RQ_GET_RPSREPO 82 / RQ_REPORT_INFO 21 / RQ_GET_REPORT 22) | `native/records/rps.go`, `native/model/rps.go`, `native/client_rps.go` |
+| 9. Интеграция | 29–30 | XML-коннектор целиком, gRPC-сервер без Wine, матрица покрытия | `native/connector.go`: `dllCommands` — **43** имени (без `newreport4`, `cancelreport4`), реализованы `connect`, `disconnect`, `server_status`, `get_connector_version`, `get_securities`, `subscribe`/`unsubscribe` (только `<alltrades>`); `server/server.go` `Config` без `Backend`; `examples/grpc-client`; `docs/protocol/{connect,commands,dictionaries,alltrades}.md`; в README есть раздел «Native Go client», но он про gRPC-клиент (`make client`), примера `native.Dial/Subscribe/Run` нет | `server.Config.Backend` и `TC_BACKEND`, `native/connector_matrix_test.go`, `docs/protocol/errors.md`, `docs/protocol/coverage.md`, `tools/native-soak` |
+
+---
+
+## 3. Процедуры RE и доступность сейчас
+
+Полные команды и ловушки — [`tools/re/README.md`](../../tools/re/README.md). Пока не сделана задача 1,
+эталоном остаются Python-версии `tools/re/py/proxy.py` и `tools/re/py/replay_server.py`; Go-версии
+появляются в задаче 1.
+
+| Процедура | Что даёт | Доступность сейчас | Чем |
+|---|---|---|---|
+| RE-1 Декомпиляция | Чтение полей записей и запросов, карты обработчиков | **Да**, с оговорками песочницы (см. §1 и environment.md) | Ghidra 12.2 headless, `tools/re/ghidra/*.java`, `tools/re/py/dll_maps.py`; проект Ghidra — `.re-run/ghproj` (gitignored), DLL в корне |
+| RE-2 Живой захват DLL | Байты запросов/ответов, XML-колбэки DLL | **Да**, с оговорками: нужен `TC_PASSWORD` и окно демо-сервера; захваты — в `.re-run/` (gitignored) | Wine 11.21 (`~/re/wine/.../wine`, `~/re/wine-prefix`, проверено `run_dll.sh`), `tools/re/py/proxy.py`, `tools/wire-decode` |
+| RE-3 Оракул | XML DLL для записей, которых нет на демо (сделки, заявки, позиции, РПС) | **Да**, при наличии записанной сессии и `TC_PASSWORD` | Wine 11.21 + `replay_server.py` (или Go-версия из задачи 1), `TC_PASSWORD` из `~/re/demo.env` |
+| RE-4 Живая проверка Go | Сверка Go-клиента с сервером через прокси | **Нет** (в `~/re/demo.env` пока нет `TC_PASSWORD`) | `TC_LOGIN`/`TC_PASSWORD` + демо-сервер `tr1-demo5.finam.ru:3939` |
+
+Практическое следствие для планирования: RE-2/RE-3 теперь доступны (Wine есть), но их шагам нужны
+`TC_PASSWORD` (`~/re/demo.env`) и/или записанная сессия. Задачи, у которых в шагах есть RE-2/RE-3 **и
+нет фикстуры в репозитории**, закрываются по DoD только после снятия фикстур (живой захват или оракул)
+либо остаются `blocked` с явной причиной. Список таких задач — §8, пункты 11–13, 17.
+
+---
+
+## 4. Таблица задач 1–30
+
+Столбец «Write-scope» — только то, что задача **создаёт/меняет** (репо-относительные пути из секции
+Files; тесты включены; `Exists`-файлы не повторяются). Столбец «RE» — процедуры из шагов задачи и их
+доступность сейчас.
+
+| № | Задача (название из плана) | Фаза | Зависимости | Write-scope | RE | Приёмочные тесты | Commit (из плана) | RF |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Прокси и проигрыватель на Go | 0 | — (независима от кода `native`; Python-эталон уже в `tools/re`) | `tools/tcproxy/main.go`, `tools/tcproxy/main_test.go`, `native/internal/replay/replay.go`, `native/internal/replay/replay_test.go`, `tools/replay-server/main.go`; `tools/re/README.md` (шаг 8) | — (перенос инструментов; py-версии — эталон) | `TestProxyForwardsAndLogs`, `TestReplayServesRecordedSession` | `feat(re): logging proxy, replay server and Ghidra scripts in the repository` | — |
+| 2 | Пакеты `native/model` и `native/records` | 0 | — (рефакторинг существующего кода; должно завершиться до 3) | Create `native/model/{decimal,symbol,trade,security,dictionary}.go`, `native/model/decimal_test.go`; Move `native/xmlcompat/{records,startup,security,alltrade,catalog,timezone}.go` + их тесты + `testdata/*` → `native/records/` (см. §8 п.5); Modify `native/xmlcompat/*.go`, `native/client.go`, `native/connector.go`, `native/natsout/natsout.go`, `tools/*` | — | `TestDecimalString`; `go test -race ./...`; `TXML_DEMO_MAIN/TXML_DEMO_XML go test -run SecuritiesFull ./native/records` (существующий `TestSecuritiesFullCapture`) | `refactor(native): split binary records and typed model out of xmlcompat` | — |
+| 3 | Событийный API `Client.Run` | 0 | 2 (`Consumes records.Records`, `records.Catalog`, `model`) | Create `native/model/event.go`, `native/events.go`, `native/internal/testserver/testserver.go`; Modify `native/client.go`, `native/client_test.go`, `native/connector.go`, `native/connector_test.go` (вынести `fakeServer`), `tools/native-trades/main.go` | — | `TestRunReportsUnknownRecord`, `TestConcurrentRequestsDuringRun` | `feat(native): event API Client.Run with a decoder registry` | **RF1, RF5** |
+| 4 | Шаблон задачи «семейство» и сверка XML | 0 | 2, 3 (`records.Catalog`, `model.Event`; шаблон для 5–28) | Create `native/records/oracle_test.go`, `native/xmlcompat/render.go` | — | `TestRenderAllTradesThroughRender` | `feat(xmlcompat): single Render entry point and DLL oracle test helper` | — |
+| 5 | Переподключение и восстановление (RQ_RELOGIN 63, RQ_RECOVER 64) | 1 | 3 (testserver), 4 (`records.Catalog`, Render); добавляет `testserver.Drop()` (выв.) | Create `native/session/recover.go`, `native/session/recover_test.go`, `native/recover.go`, `native/recover_test.go`; Modify `native/client.go`, `native/connector.go`, `native/internal/testserver/testserver.go` (Drop, выв.), `docs/protocol/connect.md` | RE-1; RE-2 (Wine есть) — эксперимент E05; RE-4 (нужен TC_PASSWORD) | `TestRecoverPayloadMatchesDLL`, `TestRecoverResubscribesBySymbol` | `feat(native): reconnect and recover like the DLL` | **RF3** |
+| 6 | Служебные команды и параметры `connect` | 1 | 3, 4 (выв.: `Run`, `Render`); RE-3 — существующая фикстура alltrades | Create `native/client_service.go`, `native/client_service_test.go`; Modify `native/connector.go`, `native/xmlcompat/render.go`, `docs/protocol/commands.md`, `docs/protocol/connect.md` (шаг 0) | RE-1; RE-2 (Wine есть); RE-3 (Wine есть; нужна запись+TC_PASSWORD) | `TestConnectOptionsMatchDLL`, `TestServiceCommandsMatchDLL`, `TestServerTimeDifference` | `feat(native): get_servtime_difference, get_server_id, get_markets` | — |
+| 7 | Сообщения конца загрузки: `<client>`, `<positions>`, `<overnight>`, `<union>` | 1 | 3, 4 (выв.); фактически `<positions>` требует типов задачи 20 — см. §8 п.10 | Create `native/records/client.go`, `native/records/client_test.go`, `native/model/client.go`, `native/client_accounts.go`; Modify `native/xmlcompat/render.go`, `native/connector.go` | RE-1; RE-2 (Wine есть); RE-4 (нужен TC_PASSWORD) | `TestSnapshotTailMatchesDLL` | `feat(native): client accounts, overnight and union at the end of the load` | — |
+| 8 | `<sec_info_upd>` из R_SEC_PARAM (0x5e) | 2 | 3 (реестр), 4 (Render) | Create `native/records/secparam.go`, `native/records/secparam_test.go`, `native/model/secinfo.go`; Modify `native/xmlcompat/render.go`, `native/events.go` | — (форма/маски уже разобраны в #44: `docs/protocol/dictionaries.md`, статус D/S; шагов RE-1/2/3 в плане нет) | `TestSecInfoUpdMatchesDLL` | `feat(native): sec_info_upd from R_SEC_PARAM` | — |
+| 9 | `<quotations>` — подписка (маска 0x01) и запись 0x06 | 2 | 3, 4 (выв.) | Create `native/records/quotation.go`, `native/records/quotation_test.go`, `native/model/quotation.go`, `native/client_subscribe.go`; Modify `native/client.go`, `native/connector.go`, `native/xmlcompat/render.go` | RE-1; RE-2 (Wine есть); RE-3 (Wine есть; нужна запись+TC_PASSWORD); RE-4 (нужен TC_PASSWORD) | `TestQuotationsMatchDLL`, `TestSubscribeMasksMatchDLL`, `TestQuotationUsesBoardDecimals` | `feat(native): quotations subscription and updates` | **RF4** |
+| 10 | `<quotes>` — стакан (маска 0x02) и запись 0x07 | 2 | 9 (`client_subscribe.go`), 3, 4 | Create `native/records/quote.go`, `native/records/quote_test.go`, `native/model/quote.go`; Modify `native/client_subscribe.go`, `native/xmlcompat/render.go` | RE-1; RE-2 (Wine есть); RE-4 (нужен TC_PASSWORD) | `TestQuotesMatchDLL`, `TestSubscribeQuotesMask` | `feat(native): order book quotes` | — |
+| 11 | `get_securities_info` → `<sec_info>` (RQ_SEC_SPEC 15, RQ_INQUIRE_SECURITY 111) | 2 | 8 (`native/model/secinfo.go`), 3, 4 | Create `native/session/secspec.go` + тест, `native/records/secinfo.go` + тест, `native/client_secinfo.go`; Modify `native/model/secinfo.go`, `native/xmlcompat/render.go`, `native/connector.go` | RE-1; RE-2 (Wine есть); RE-4 (нужен TC_PASSWORD) | `TestSecSpecPayloadMatchesDLL`, `TestSecInfoMatchesDLL` | `feat(native): get_securities_info` | — |
+| 12 | Остальные записи снапшота и обновлений справочников | 2 | 3, 4 | Create `native/records/misc.go` + тест, `native/model/misc.go` | RE-1; RE-3 (Wine есть; нужна запись+TC_PASSWORD) | `TestFullLiveSessionHasNoUnknownRecords` | `feat(records): remaining snapshot and dictionary update records` | — |
+| 13 | `gethistorydata` → `<candles>` (RQ_HISTORY 11, RQ_HISTORY_EXT 148) | 3 | 3, 4 (выв.) | Create `native/session/history.go` + тест, `native/records/candles.go` + тест, `native/model/candle.go`, `native/client_history.go` + тест; Modify `native/xmlcompat/render.go`, `native/connector.go` | RE-1; RE-2 (Wine есть); RE-4 (нужен TC_PASSWORD) | `TestHistoryPayloadMatchesDLL`, `TestCandlesMatchDLL`, `TestHistoryCollectsParts` | `feat(native): gethistorydata` | — |
+| 14 | `subscribe_ticks` → `<ticks>` (RQ_SUBSCRIBE_TICKS 120, RQ_TICKS 13) | 3 | 3, 4 (выв.) | Create `native/session/ticks.go` + тест, `native/records/ticks.go` + тест, `native/model/tick.go`, `native/client_ticks.go` | RE-1; RE-2 (Wine есть); RE-4 (нужен TC_PASSWORD) | `TestTicksPayloadMatchesDLL`, `TestTicksMatchDLL` | `feat(native): subscribe_ticks` | — |
+| 15 | Транзакции RQ_TRANSACT (14): номер, ответ, неопределённый исход | 4 | 2 (`model`), 3 (testserver) | Create `native/session/transact.go`, `native/session/transact_test.go`, `native/model/transaction.go` | RE-1; RE-3 (Wine есть; нужна запись+TC_PASSWORD) | `TestNewOrderLostReplyIsUncertain` | `feat(session): RQ_TRANSACT with explicit unknown outcome` | **RF2** |
+| 16 | `neworder`, `cancelorder` и поток заявок `<orders>` | 4 | 15 (`session.Transact`), 3, 4 | Create `native/records/order.go` + тест, `native/model/order.go`, `native/client_orders.go` + тест; Modify `native/xmlcompat/render.go`, `native/connector.go` | RE-1; RE-2 (Wine есть, с согласия); RE-3 (Wine есть; нужна запись+TC_PASSWORD) | `TestNewOrderPayloadMatchesDLL`, `TestCancelOrderPayloadMatchesDLL`, `TestOrdersMatchDLL` | `feat(native): neworder, cancelorder and order updates` | — |
+| 17 | Сделки клиента `<trades>` (R_TRD 0x04) | 4 | 3, 4 (выв.; от 16 не зависит) | Create `native/records/clienttrade.go` + тест, `native/model/clienttrade.go`; Modify `native/xmlcompat/render.go` | RE-1; RE-3 (Wine есть; нужна запись+TC_PASSWORD) | `TestClientTradesMatchDLL` | `feat(native): client trades` | — |
+| 18 | `newcondorder`, `newstoporder`, `cancelstoporder`, R_STOP (0x54) | 4 | 15, 16 (`model/order.go`), 3, 4 | Create `native/records/stoporder.go` + тест, `native/model/stoporder.go`, `native/client_stoporders.go`; Modify `native/model/order.go`, `native/xmlcompat/render.go` | RE-1; RE-2 (Wine есть, с согласия); RE-3 (Wine есть; нужна запись+TC_PASSWORD) | тесты «по образцу задачи 16» для трёх команд (имена в плане не заданы), `TestStopOrdersMatchDLL` | `feat(native): conditional and stop orders` | — |
+| 19 | `moveorder` и `makeordown` | 4 | 15, 16 | Modify `native/client_orders.go` + тест, `native/session/transact.go` | RE-1; RE-2 (Wine есть) | `TestMoveOrderPayloadMatchesDLL` | `feat(native): moveorder` | — |
+| 20 | Поток `<positions>`: деньги, бумаги, FORTS | 5 | 3, 4 (выв.) | Create `native/records/positions.go` + тест, `native/model/position.go`, `native/client_positions.go`; Modify `native/xmlcompat/render.go` | RE-1; RE-2 (Wine есть); RE-3 (Wine есть; нужна запись+TC_PASSWORD); RE-4 (нужен TC_PASSWORD) | `TestPositionsMatchDLL` | `feat(native): positions` | — |
+| 21 | `get_forts_positions`, `get_client_limits` (RQ_CLIENT_LIMITS 43, RQ_FORTS_FIRM_MONEY 47) | 5 | 20 (`client_positions.go`), 3, 4 | Create `native/session/limits.go` + тест, `native/records/limits.go` + тест, `native/model/limits.go`; Modify `native/client_positions.go`, `native/xmlcompat/render.go`, `native/connector.go` | RE-1; RE-2 или RE-3 (Wine есть; нужна запись+TC_PASSWORD) | `TestClientLimitsPayloadMatchesDLL`, `TestClientLimitsMatchDLL` | `feat(native): forts positions and client limits` | — |
+| 22 | Портфели: `get_portfolio`, `get_portfolio_mct`, `get_mc_portfolio`, `get_united_portfolio`, `get_united_equity`, `get_united_go` | 5 | 3, 4 (выв.) | Create `native/session/portfolio.go` + тест, `native/records/portfolio.go` + тест, `native/model/portfolio.go`, `native/client_portfolio.go`; Modify `native/xmlcompat/render.go`, `native/connector.go` | RE-1; RE-2 (Wine есть); RE-4 (нужен TC_PASSWORD) | пары (`…PayloadMatchesDLL`, `…MatchesDLL`) на каждую команду; имена в плане не заданы | `feat(native): portfolios` | — |
+| 23 | `get_max_buy_sell_tplus`, `get_max_buy_sell`, `get_cln_sec_permissions`, режим кредитования | 5 | 3, 4 (выв.; Consumes в плане не указаны) | Create `native/session/margin.go` + тест, `native/records/margin.go` + тест, `native/model/margin.go`, `native/client_margin.go` | RE-1; RE-2 (Wine есть) | пары на команду; имена не заданы | `feat(native): max buy/sell and security permissions` | — |
+| 24 | Новости: `get_old_news`, `get_news_body`, поток `<news_header>` | 6 | 3, 4 (выв.) | Create `native/session/news.go` + тест, `native/records/news.go` + тест, `native/model/news.go`, `native/client_news.go` | RE-1; RE-2 (Wine есть) | `TestOldNewsPayloadMatchesDLL`, `TestNewsMatchDLL` | `feat(native): news` | — |
+| 25 | Текстовые сообщения `<messages>` (R_MSG 0x01) | 6 | 3, 4 (выв.) | Create `native/records/message.go` + тест, `native/model/message.go` | RE-1; RE-3 (Wine есть; нужна запись+TC_PASSWORD) | `TestMessagesMatchDLL` | `feat(native): text messages` | — |
+| 26 | `change_pass` (RQ_CHANGE_PWD 3) | 6 | 5 (ключ `recover`), 3, 4 | Create `native/session/changepwd.go` + тест, `native/client_password.go` | RE-1; RE-3 (Wine есть; живая смена пароля запрещена без согласия) | `TestChangePasswordPayloadMatchesDLL` | `feat(native): change_pass` | — |
+| 27 | `get_option_families`, `get_family_strikes`, `get_options` | 7 | 3, 4 (выв.) | Create `native/session/options.go` + тест, `native/records/options.go` + тест, `native/model/option.go`, `native/client_options.go` | RE-1; RE-2 (Wine есть) | пары на команду; имена не заданы | `feat(native): options` | — |
+| 28 | `newrpsorder`, `newrepoorder`, `newmrepoorder`, `cancelnegdeal`, `newreport4`, `cancelreport4`; сделки и отчёты | 8 | 15 (`session.Transact`), 3, 4 | Create `native/records/rps.go` + тест, `native/model/rps.go`, `native/client_rps.go` | RE-1; RE-3 (Wine есть; нужна запись+TC_PASSWORD) | пары на команду; имена не заданы | `feat(native): RPS and REPO` | — |
+| 29 | XML-коннектор целиком и gRPC-сервер без Wine | 9 | 1 (RE-4 через `tools/tcproxy`), 5–28 (все методы `Client` + `Render`) | Modify `native/connector.go`, `server/server.go`, `docs/protocol/commands.md`; Create `native/connector_matrix_test.go`, `docs/protocol/errors.md`, тест(ы) в `server/` | RE-1 (`set_csp`, `authenticate`); RE-3 (Wine есть, тексты ошибок); RE-4 (нужен TC_PASSWORD) | `TestEveryDLLCommandIsHandled`, `TestServerErrorTexts`, `TestServerRunsNativeBackend` | `feat(server): native backend without Wine` | — |
+| 30 | Матрица покрытия, длительный прогон, выпуск | 9 | 29 (фактически все) | Create `docs/protocol/coverage.md`, `tools/native-soak/main.go`; Modify `docs/ROADMAP-GO.md`, `README.md` | — (soak использует `tools/tcproxy` из задачи 1; критерии: `UnknownRecords==0`, восстановления, RSS) | именованных тестов нет; критерии прогона в шаге 2 | `docs: native client coverage matrix and soak results` | — |
+
+---
+
+## 5. Общие файлы — узкие места
+
+Файлы/каталоги, в которые пишут несколько задач. Пока такие задачи не разведены по разным файлам,
+их **нельзя вести параллельно** (совпадение write-scope — предупреждение, а не блокировка; конфликт
+будет при merge).
+
+| Файл / каталог | Кто пишет (задачи плана) | Характер записи | Как сериализовать |
+|---|---|---|---|
+| `native/xmlcompat/render.go` | 4 (создаёт), 6, 7, 8, 9, 10, 11, 13, 16, 17, 18, 20, 21, 22 | Каждая задача добавляет `case` в `Render` | Только по одной карточке одновременно; порядок — по фазам плана. Альтернатива (в плане отсутствует): в задаче 4 разнести dispatch по файлам `render_<record>.go` — тогда часть задач распараллелится; требует согласования со Lead |
+| `native/connector.go` | 2 (импорты), 3, 5, 6, 7, 9, 11, 13, 16, 21, 22, 29 | Таблица команд/рендер/статусы | Сериализовать; таблицу команд для всех 45 имён собирает задача 29 |
+| `native/client.go` | 2, 3, 5, 9 | API клиента, подписки, `Run`/`Poll`, `subs` | Сериализовать (2 → 3 → 5 → 9) |
+| `native/events.go` | 3 (создаёт реестр `registerDecoder`), 8 (меняет) | Реестр декодеров RQ_MAIN | **Точка не определена планом:** задачи 9–28 добавляют декодеры, но файл регистрации в их Files не указан. Пока не решено в задаче 3 (регистрация в собственном файле задачи или отдельный файл на запись), считать `native/events.go` общим для всех декодеров |
+| `native/xmlcompat/testdata/` → `native/records/testdata/` | 2 (переносит), 3, 4 (читают в тестах), далее все задачи кладут фикстуры | Фикстуры записей | Задача 2 переносит каталог; до её закрытия никто не добавляет фикстуры. Новые фикстуры — только `native/records/testdata/` |
+| `native/model/order.go` | 16 (создаёт), 18 (условия `newcondorder`) | Один тип заявки | 16 → 18 |
+| `native/model/secinfo.go` | 8 (создаёт), 11 (дополняет `SecInfo`) | Типы sec_info | 8 → 11 |
+| `native/session/transact.go` | 15 (создаёт), 19 (добавляет `moveorder`/`makeordown`) | Транзакции | 15 → 19 |
+| `native/client_subscribe.go` | 9 (создаёт), 10 (расширяет `Subscription`) | Подписки | 9 → 10 |
+| `native/client_positions.go` | 20 (создаёт), 21 (добавляет лимиты) | Позиции/лимиты | 20 → 21 |
+| `native/client_orders.go` | 16 (создаёт), 19 (добавляет `MoveOrder`) | Заявки | 16 → 19 |
+| `native/internal/testserver/testserver.go` | 3 (создаёт, выносит `fakeServer`), 5 (`Drop()` — Consumes) | Тестовый сервер | 3 → 5; см. §8 п.2/п.15 о тестовом API и `internal` |
+| `docs/protocol/connect.md` | 5, 6 | Формат RQ_RELOGIN/RQ_RECOVER, параметры `connect` | 5 → 6 |
+| `docs/protocol/commands.md` | 6, 29 | Ответы команд, тексты ошибок | 6 → 29 |
+| `docs/protocol/coverage.md`, `docs/ROADMAP-GO.md`, `README.md` | 30 | Итоговые документы | Только задача 30 |
+| `tools/re/README.md` | 1 | Go-варианты RE-2/RE-3 | Только задача 1 |
+| `server/server.go` | 29 | `Backend`, `TC_BACKEND` | Только задача 29 |
+| `native/session/login.go` (константы RQ_*) | фактически задачи 11, 13, 14, 15, 16, 17, 21, 22, 23, 24, 26, 28 | Новые константы типов запросов | Планом не назначено: либо задача 6/11 заводит отдельный файл констант, либо `login.go` становится общим — см. §8 п.16 |
+
+---
+
+## 6. Параллельные группы
+
+Группы учитывают: (а) зависимости Interfaces/Consumes, (б) пересечение write-scope из §5,
+(в) порядок фаз. Внутри группы карточки можно запускать одновременно; между группами — только после
+закрытия `blocked_by`.
+
+### G0. Фундамент (обязателен первым; без него остальные фазы не начинаются)
+
+| Шаг | Задачи | Параллельность |
+|---|---|---|
+| G0a | 1 и 2 | План не связывает их через Interfaces, но внутри фазы предписан порядок и у них общий каталог фикстур: тест задачи 1 читает `native/xmlcompat/testdata/{startup-demo.hex,main1-demo.hex.gz,alltrades-inject1.hex}` и `native/session/login_test.go`, а задача 2 переносит `testdata/*` в `native/records/testdata`. Безопаснее: **1, затем 2**; при параллельном запуске задача 2 не трогает `testdata` до закрытия задачи 1 (см. §8 п.4) |
+| G0b | 3 | После 2 (и закрытия задачи 1, если выбрана последовательность 1→2) |
+| G0c | 4 | После 2 и 3 |
+
+### G1. Первая параллельная волна после фундамента
+
+`{5, 12, 14, 15}` — 4 карточки одновременно. Write-scope не пересекаются (оговорки ниже):
+- 5 — `native/session/recover.go`, `native/recover.go`, `native/client.go`, `native/connector.go`,
+  `native/internal/testserver/testserver.go`, `docs/protocol/connect.md`;
+- 12 — `native/records/misc.go`, `native/model/misc.go`;
+- 14 — `native/session/ticks.go`, `native/records/ticks.go`, `native/model/tick.go`, `native/client_ticks.go`;
+- 15 — `native/session/transact.go`, `native/model/transaction.go`.
+
+Оговорки: (1) 5 — единственный писатель `connector.go` в этой волне, поэтому полоса G2 (см. ниже)
+стартует после неё; (2) 12, 14, 15 добавляют декодеры/события — если регистрация окажется в
+`native/events.go`, задачи 12/14 пересекутся с 8 (см. §8 п.9).
+
+### G2. Полоса `render.go`/`connector.go` — строго последовательно
+
+`{6, 7, 8, 9, 10, 11, 13, 16, 17, 18, 20, 21, 22}` — **только по одной карточке одновременно**.
+Внутренние зависимости: 5 → 6 (общий `connect.md`); 6 → 7 (общие `render.go`/`connector.go`); 9 → 10; 8 → 11; 15 → 16; 16 → 18; 20 → 21.
+Задачи 13, 17, 22 не имеют внутренних зависимостей и встают в любое окно полосы.
+
+### G3. Параллельно полосе G2 (не пишут `render.go`/`connector.go`)
+
+Карточки, которые можно вести одновременно с G2, как только закрыты их `blocked_by`:
+
+| Задача | blocked_by | Оговорка |
+|---|---|---|
+| 19 | 16 | Пишет `client_orders.go` и `session/transact.go`; с задачами 17/18/20 не пересекается |
+| 23 | 4 | План не перечисляет Consumes; write-scope изолирован |
+| 24 | 4 | **Проверить:** `<news_header>` — XML-форма, `render.go` в Files не указан (§5; §8 п.8–9); если формы нет — параллельно, если есть — в G2 |
+| 25 | 4 | **Проверить:** `<messages>` — XML-форма, `render.go` в Files не указан (§5; §8 п.8–9) |
+| 26 | 5 | Изолирован (`session/changepwd.go`, `client_password.go`) |
+| 27 | 4 | **Проверить:** XML-формы опционов, `render.go`/`connector.go` в Files не указаны (§5; §8 п.8–9) |
+| 28 | 15 | **Проверить:** события `RPSTradeForExecution`/`ExecutionReport` требуют XML-формы (§5; §8 п.8–9); зависит от `session.Transact` |
+
+### G4. Интеграция
+
+| Шаг | Задачи | blocked_by |
+|---|---|---|
+| G4a | 29 | Все 5–28 (методы `Client` и `Render`), 1 (`tools/tcproxy` для RE-4) |
+| G4b | 30 | 29 |
+
+### Черновики `team_task_create`
+
+`T#` — id карточки задачи # (подставить фактические id при создании; `blocked_by` принимает id
+карточек, не номера плана).
+
+**G0a**
+
+- `subject`: `Task 1: Прокси и проигрыватель на Go`
+  `write_scopes`: `["tools/tcproxy/", "native/internal/replay/", "tools/replay-server/", "tools/re/README.md"]`
+  `blocked_by`: `[]`
+  Кратко: перенести `py/proxy.py` и `py/replay_server.py` на Go поверх `native/wire`; формат захвата
+  `"<conn> <sec> C>S|S>C <len> <hex>"`; `replay.Session{Load,Serve}`, `Injection`.
+- `subject`: `Task 2: Пакеты native/model и native/records`
+  `write_scopes`: `["native/model/", "native/records/", "native/xmlcompat/", "native/client.go", "native/connector.go", "native/natsout/natsout.go", "tools/"]`
+  `blocked_by`: `[]`
+  Кратко: `model.Decimal`/`Symbol`/`Trade`/`Security`/`Board`/`Market`/`CandleKind`; перенос разбора
+  записей и каталога из `xmlcompat` в `records`; `xmlcompat` — только XML. Не запускать одновременно
+  с T1, если T1 держит `native/xmlcompat/testdata` (см. §8 п.4).
+
+**G0b**
+
+- `subject`: `Task 3: Событийный API Client.Run`
+  `write_scopes`: `["native/model/event.go", "native/events.go", "native/internal/testserver/", "native/client.go", "native/client_test.go", "native/connector.go", "native/connector_test.go", "tools/native-trades/main.go"]`
+  `blocked_by`: `[T2]`
+  Кратко: `model.Event`/`UnknownRecord`, `Poll`/`Run`/`RunOptions`, реестр `registerDecoder`,
+  `testserver.Server` (`Snapshot`, `AfterSubscribe`, `MainDelay`, `Handle`, `Requests`); перевести
+  `R_ALLTRADE` на реестр, `Connector` и `native-trades` — на `Run`.
+
+**G0c**
+
+- `subject`: `Task 4: Шаблон задачи «семейство» и сверка XML`
+  `write_scopes`: `["native/records/oracle_test.go", "native/xmlcompat/render.go"]`
+  `blocked_by`: `[T2, T3]`
+  Кратко: `records.LoadFixture`, `xmlcompat.Render`, шаблон `checkDLL`; case `*model.Trade` на
+  существующем `AllTradesXML`. **Проверить** размещение помощника: `_test.go` в `records` нельзя
+  импортировать из других пакетов (§8 п.3).
+
+**G1**
+
+- `subject`: `Task 5: Переподключение и восстановление (RQ_RELOGIN 63, RQ_RECOVER 64)`
+  `write_scopes`: `["native/session/recover.go", "native/session/recover_test.go", "native/recover.go", "native/recover_test.go", "native/client.go", "native/connector.go", "native/internal/testserver/testserver.go", "docs/protocol/connect.md"]`
+  `blocked_by`: `[T3, T4]`
+  Кратко: RE-1 по `FUN_1803d31c0`/`FUN_1803d27b0`; RE-2 E05 (Wine есть; нужен `TC_PASSWORD` — фикстуры из захвата
+  или `blocked`); `session.RecoverPayload`, `Client.recover`, `model.ServerStatus`.
+- `subject`: `Task 12: Остальные записи снапшота и обновлений справочников`
+  `write_scopes`: `["native/records/misc.go", "native/records/misc_test.go", "native/model/misc.go"]`
+  `blocked_by`: `[T4]`
+  Кратко: R_DOUBLELEG 0x66, R_BOARD 0x34, 0x38, 0x43, R_CURRENCY_RATE 0x42, R_FORTS_SESSION 0x6b,
+  R_EDP_RATE 0x6e, R_DELAY 0x4f, R_OPT_EXPIRATION 0x39, 0x5d, 0x6f–0x7c; RE-1 + RE-3 (Wine есть; нужна запись+TC_PASSWORD).
+- `subject`: `Task 14: subscribe_ticks → <ticks> (RQ_SUBSCRIBE_TICKS 120, RQ_TICKS 13)`
+  `write_scopes`: `["native/session/ticks.go", "native/session/ticks_test.go", "native/records/ticks.go", "native/records/ticks_test.go", "native/model/tick.go", "native/client_ticks.go"]`
+  `blocked_by`: `[T4]`
+  Кратко: RE-1, RE-2 (Wine есть); `TickRequest`/`SubscribeTicks`, событие `model.Tick`.
+- `subject`: `Task 15: Транзакции RQ_TRANSACT (14): номер, ответ, неопределённый исход`
+  `write_scopes`: `["native/session/transact.go", "native/session/transact_test.go", "native/model/transaction.go"]`
+  `blocked_by`: `[T2, T3]`
+  Кратко: `TxKind`, `session.Transact`, `ErrOutcomeUnknown`/`OutcomeError`, `TransactionsInProgress`;
+  RE-1 + RE-3 (Wine есть; нужна запись+TC_PASSWORD). Review Focus 2.
+
+**G2 (полоса; по одной карточке)**
+
+- `subject`: `Task 6: Служебные команды и параметры connect`; `write_scopes`:
+  `["native/client_service.go", "native/client_service_test.go", "native/connector.go", "native/xmlcompat/render.go", "docs/protocol/commands.md", "docs/protocol/connect.md"]`;
+  `blocked_by`: `[T4, T5]`; RE-1/RE-2 (Wine есть)/RE-3 (Wine есть; нужна запись+TC_PASSWORD).
+- `subject`: `Task 7: Сообщения конца загрузки: <client>, <positions>, <overnight>, <union>`;
+  `write_scopes`: `["native/records/client.go", "native/records/client_test.go", "native/model/client.go", "native/client_accounts.go", "native/xmlcompat/render.go", "native/connector.go"]`;
+  `blocked_by`: `[T4, T6]`; **проверить** зависимость от задачи 20 (§8 п.10).
+- `subject`: `Task 8: <sec_info_upd> из R_SEC_PARAM (0x5e)`; `write_scopes`:
+  `["native/records/secparam.go", "native/records/secparam_test.go", "native/model/secinfo.go", "native/xmlcompat/render.go", "native/events.go"]`;
+  `blocked_by`: `[T4]`; RE не нужен, но фикстур #44 в репозитории нет (§8 п.11).
+- `subject`: `Task 9: <quotations> — подписка (маска 0x01) и запись 0x06`; `write_scopes`:
+  `["native/records/quotation.go", "native/records/quotation_test.go", "native/model/quotation.go", "native/client_subscribe.go", "native/client.go", "native/connector.go", "native/xmlcompat/render.go"]`;
+  `blocked_by`: `[T4]`; Review Focus 4; RE-1/2/3/4 (нет).
+- `subject`: `Task 10: <quotes> — стакан (маска 0x02) и запись 0x07`; `write_scopes`:
+  `["native/records/quote.go", "native/records/quote_test.go", "native/model/quote.go", "native/client_subscribe.go", "native/xmlcompat/render.go"]`;
+  `blocked_by`: `[T9]`.
+- `subject`: `Task 11: get_securities_info → <sec_info> (RQ_SEC_SPEC 15, RQ_INQUIRE_SECURITY 111)`;
+  `write_scopes`: `["native/session/secspec.go", "native/session/secspec_test.go", "native/records/secinfo.go", "native/records/secinfo_test.go", "native/client_secinfo.go", "native/model/secinfo.go", "native/xmlcompat/render.go", "native/connector.go"]`;
+  `blocked_by`: `[T8]`.
+- `subject`: `Task 13: gethistorydata → <candles> (RQ_HISTORY 11, RQ_HISTORY_EXT 148)`;
+  `write_scopes`: `["native/session/history.go", "native/session/history_test.go", "native/records/candles.go", "native/records/candles_test.go", "native/model/candle.go", "native/client_history.go", "native/client_history_test.go", "native/xmlcompat/render.go", "native/connector.go"]`;
+  `blocked_by`: `[T4]`.
+- `subject`: `Task 16: neworder, cancelorder и поток заявок <orders>`; `write_scopes`:
+  `["native/records/order.go", "native/records/order_test.go", "native/model/order.go", "native/client_orders.go", "native/client_orders_test.go", "native/xmlcompat/render.go", "native/connector.go"]`;
+  `blocked_by`: `[T15]` (+ общий `render.go`/`connector.go`).
+- `subject`: `Task 17: Сделки клиента <trades> (R_TRD 0x04)`; `write_scopes`:
+  `["native/records/clienttrade.go", "native/records/clienttrade_test.go", "native/model/clienttrade.go", "native/xmlcompat/render.go"]`;
+  `blocked_by`: `[T4]` (+ полоса `render.go`).
+- `subject`: `Task 18: newcondorder, newstoporder, cancelstoporder, R_STOP (0x54)`;
+  `write_scopes`: `["native/records/stoporder.go", "native/records/stoporder_test.go", "native/model/stoporder.go", "native/client_stoporders.go", "native/model/order.go", "native/xmlcompat/render.go"]`;
+  `blocked_by`: `[T15, T16]`.
+- `subject`: `Task 20: Поток <positions>: деньги, бумаги, FORTS`; `write_scopes`:
+  `["native/records/positions.go", "native/records/positions_test.go", "native/model/position.go", "native/client_positions.go", "native/xmlcompat/render.go"]`;
+  `blocked_by`: `[T4]`.
+- `subject`: `Task 21: get_forts_positions, get_client_limits`; `write_scopes`:
+  `["native/session/limits.go", "native/session/limits_test.go", "native/records/limits.go", "native/records/limits_test.go", "native/model/limits.go", "native/client_positions.go", "native/xmlcompat/render.go", "native/connector.go"]`;
+  `blocked_by`: `[T20]`.
+- `subject`: `Task 22: Портфели`; `write_scopes`:
+  `["native/session/portfolio.go", "native/session/portfolio_test.go", "native/records/portfolio.go", "native/records/portfolio_test.go", "native/model/portfolio.go", "native/client_portfolio.go", "native/xmlcompat/render.go", "native/connector.go"]`;
+  `blocked_by`: `[T4]` (+ полоса).
+
+**G3 (параллельно полосе G2)**
+
+- `Task 19`: `["native/client_orders.go", "native/client_orders_test.go", "native/session/transact.go"]`,
+  `blocked_by: [T16]`.
+- `Task 23`: `["native/session/margin.go", "native/session/margin_test.go", "native/records/margin.go", "native/records/margin_test.go", "native/model/margin.go", "native/client_margin.go"]`,
+  `blocked_by: [T4]`.
+- `Task 24`: `["native/session/news.go", "native/session/news_test.go", "native/records/news.go", "native/records/news_test.go", "native/model/news.go", "native/client_news.go"]`,
+  `blocked_by: [T4]`; проверить `render.go`/регистрацию (§5; §8 п.8–9).
+- `Task 25`: `["native/records/message.go", "native/records/message_test.go", "native/model/message.go"]`,
+  `blocked_by: [T4]`; проверить `render.go`/регистрацию R_MSG.
+- `Task 26`: `["native/session/changepwd.go", "native/session/changepwd_test.go", "native/client_password.go"]`,
+  `blocked_by: [T5]`.
+- `Task 27`: `["native/session/options.go", "native/session/options_test.go", "native/records/options.go", "native/records/options_test.go", "native/model/option.go", "native/client_options.go"]`,
+  `blocked_by: [T4]`; проверить `render.go`/`connector.go`.
+- `Task 28`: `["native/records/rps.go", "native/records/rps_test.go", "native/model/rps.go", "native/client_rps.go"]`,
+  `blocked_by: [T15]`; проверить XML-формы и `connector.go`.
+
+**G4 (интеграция)**
+
+- `Task 29`: `["native/connector.go", "server/server.go", "native/connector_matrix_test.go", "server/", "docs/protocol/commands.md", "docs/protocol/errors.md"]`,
+  `blocked_by: [T1, T5–T28]`; RE-1/RE-3 (Wine есть; нужна запись+TC_PASSWORD)/RE-4 (нужен TC_PASSWORD).
+- `Task 30`: `["docs/protocol/coverage.md", "tools/native-soak/main.go", "docs/ROADMAP-GO.md", "README.md"]`,
+  `blocked_by: [T29]`.
+
+---
+
+## 7. Задачи, которые нельзя распараллелить вообще
+
+1. **Цепочка фундамента:** `2 → 3 → 4` — строго последовательно (3 `Consumes records`, 4 использует
+   `model.Event` и `records.Catalog`). Задача 1 формально независима, но делит с задачей 2 каталог
+   фикстур (см. §8 п.4) — безопасный вариант `1 → 2 → 3 → 4`.
+2. **Полоса `render.go`/`connector.go`:** 13 задач (6, 7, 8, 9, 10, 11, 13, 16, 17, 18, 20, 21, 22)
+   не могут выполняться одновременно ни между собой, ни с задачами 3, 5, 29, которые тоже пишут
+   `connector.go`. Это фактически сериализует фазы 2–8 плана, хотя план (строка 38) утверждает, что
+   фазы 1–8 зависимы между собой только по Interfaces.
+3. **Интеграция:** 29 → 30.
+4. Итог: **ни одна задача плана не может идти одновременно с другой, если обе пишут в
+   `native/xmlcompat/render.go` или `native/connector.go`** (14 задач), а также 2→3→4 и 29→30.
+   Остальные пары из §6 распараллеливаются только после решения вопроса с `native/events.go`
+   (регистрация декодеров).
+
+---
+
+## 8. Противоречия и пробелы
+
+Проверено по фактическому дереву на `main` = `b940f9a` и по тексту плана. Спорное помечено
+«проверить». Ничего не додумано: где данных нет — так и написано.
+
+1. **45 имён команд против 43 в коде.** План (карта команд, строка 57) перечисляет **45** имён и
+   задача 29 требует «для каждого из 45 имён `dllCommands`». Фактически `dllCommands` в
+   `native/connector.go` содержит **43** имени; отсутствуют `newreport4` и `cancelreport4` (оба
+   упомянуты в карте плана и в задаче 28). `docs/protocol/commands.md` тоже пишет «43 имени».
+   → Задаче 28/29 нужно добавить обе команды в `dllCommands`, а расхождение 43/45 — снять в
+   `docs/protocol/commands.md`.
+2. **`native/internal/testserver` не сможет использовать `server/`.** Задача 3 создаёт
+   `native/internal/testserver` «чтобы его могли использовать тесты всех пакетов», но пакеты внутри
+   `native/internal/...` импортируемы только из поддерева `native/`. Задача 29 требует
+   `TestServerRunsNativeBackend` в `server/` с testserver → из `server/` этот пакет импортировать
+   нельзя. → Решение на задачу 3: либо `native/testserver` (не `internal`), либо тестовая копия в
+   `server/`.
+3. **`checkDLL` в `native/records/oracle_test.go`.** `_test.go`-файлы не экспортируются в другие
+   пакеты, а `checkDLL` нужен тестам `native/xmlcompat` (задачи 6–22) и, возможно, другим. План
+   называет помощника «тестовый шаблон», но не решает, где он живёт. → Задача 4 должна определить
+   место, например `native/internal/oracle` (но см. п.2 об `internal`) или экспортируемый
+   `native/records/oracle.go` с build-тегом `//go:build !prod` — **проверить/согласовать с Lead**.
+4. **Фикстуры задачи 1 против переноса в задаче 2.** Задача 1 (тест `TestReplayServesRecordedSession`)
+   читает `startup-demo.hex`, `main1-demo.hex.gz`, `alltrades-inject1.hex` (сейчас —
+   `native/xmlcompat/testdata/`) и `stubPwdReply` из `native/session/login_test.go`. Задача 2
+   переносит `native/xmlcompat/testdata/*` в `native/records/testdata/`, но `native/internal/replay`
+   в Files задачи 2 не указан. → Либо 1 строго до 2 и задача 2 правит пути теста задачи 1, либо
+   задача 1 читает фикстуры через путь-константу.
+5. **«Move» смешанных файлов в задаче 2.** `native/xmlcompat/security.go` содержит не только
+   `ParseSecNew`/`SecNew`/`Pit`, но и XML-конверсию (`Security`, `boardCode`, `FormatMinStep`,
+   `FormatPointCost`) и импортирует `client/commands`; `startup.go` импортирует `client/commands` и
+   `golang.org/x/text/encoding/charmap`; `catalog.go` зависит от типов `startup.go`/`security.go`. План говорит «Move … в
+   `records`» и одновременно «`xmlcompat` остаётся только для XML». → Это не перенос, а разделение
+   файлов; задача 2 должна быть сформулирована как «split», иначе `records` начнёт зависеть от
+   `client/commands` и XML-структур.
+6. **`native/model/venue`-типы.** `model.Board`, `model.Market`, `model.CandleKind` план создаёт в
+   `native/model/dictionary.go`, но сейчас эти типы живут в `xmlcompat/startup.go` с XML-тегами и
+   используются `commands.*`. Нужно развести модель и XML-представление — план этого не описывает.
+   **Проверить** в задаче 2.
+7. **`docs/protocol/orders.md`.** Задача 19 ссылается на `docs/protocol/orders.md`, но файла нет, и
+   ни одна задача плана его не создаёт (в отличие от `errors.md`/`coverage.md`, которые создаются
+   задачами 29/30). → Добавить создание в задачу 19 (или заменить ссылку на существующий документ).
+8. **Документация после каждой фазы.** «Как устроен план» требует «документация обновлена» после
+   каждой фазы, но `docs/protocol/*.md` в секции Files есть только у задач 5 и 6 (у задач 29–30 —
+   `errors.md`/`coverage.md` из шагов; `tools/re/README.md` — у задачи 1); задача 8 ссылается на `dictionaries.md`, но не перечисляет её в Files; задачи 9–28
+   не указывают, где фиксируются статусы S/O/D/I для новых записей. → Пробел: назначить файл
+   документации в каждой задаче (или отдельную карточку RE-документации на фазу).
+9. **Точка регистрации декодеров.** План: «декодеры регистрируются через `registerDecoder` в
+   `native/events.go` — так задачи 6–28 добавляют записи, не трогая цикл опроса». Но `events.go`
+   указан в Files только у задач 3 и 8; у остальных (9–28) файл регистрации не указан. Если каждая
+   задача правит `native/events.go`, это второй по важности общий файл после `render.go`.
+   → Задача 3 должна задать конвенцию (регистрация в собственном `native/client_<...>.go` или
+   отдельный файл на запись). **Проверить.**
+10. **`<positions>` в задаче 7 требует типов задачи 20.** Шаг 4 задачи 7 требует порядка колбэков
+    `Connector`: `<client>`, `<positions>`, `<overnight>` перед `server_status`, но типы позиций
+    (`model.SecPosition` и т. п.) создаются в задаче 20 (фаза 5). Зависимость через фазы в плане не
+    объявлена. → Либо задача 7 отдаёт `<positions>` в виде уже существующих `client/commands`
+    структур, либо её шаг с `<positions>` переносится/блокируется задачей 20. **Проверить.**
+11. **Отсутствующие фикстуры, названные в задачах** (ни одного из этих файлов в репозитории нет;
+    каталогов `native/records/testdata`, `native/session/testdata`, `native/testdata` тоже нет):
+    `secparam-live.hex.gz` + `sec_info_upd-dll.xml.gz` (задача 8, «из захвата #44»; `dictionaries.md`
+    прямо пишет, что полная сверка — на локальном захвате вне репозитория), `snapshot-tail-live.hex` +
+    `snapshot-tail-dll.xml` (задача 7), `recover-{short,long}-live.*` (задача 5), `service-dll.xml`
+    (задача 6), `quotation-live.hex`/`quotations-dll.xml` (9), `quote-live.hex`/`quotes-dll.xml` (10),
+    а также фикстуры задач 13, 14, 16, 18, 20. → Создание этих фикстур требует RE-2/RE-3 (Wine и/или
+    демо-доступ), которых сейчас нет: соответствующие задачи по DoD не закрываются, пока фикстуры не
+    появятся (или не будут взяты из захватов пользователя вне git).
+12. **Задача 8 может оказаться не сверяемой побайтно.** Шаг 1 требует «живая фикстура R_SEC_PARAM +
+    684 колбэка DLL побайтно», но `dictionaries.md` фиксирует: форма — **S**, а соответствие
+    «бит сети → бит события» и распаковка значений — только **D**, «значения не сверялись».
+    → Либо нужен новый RE-3-прогон, либо тест сверяет только форму, не значения. **Проверить** и
+    явно записать статус.
+13. **Числа из захватов в задачах 6, 11.** Задача 6 ссылается на «два живых логина DLL» и
+    `native/testdata/service-dll.xml`, задача 11 — на payload `00040379017b001a` и «273 байта на
+    4 бумаги»; этих материалов в репозитории нет. → Источник — захват пользователя вне git;
+    воспроизводимость сейчас не гарантирована. **Проверить.**
+14. **`RQ_SEC_SPEC` для Go.** `docs/protocol/alltrades.md` пишет: «После подписки DLL дополнительно
+    шлёт `RQ_SEC_SPEC` (15) … Go-клиенту он не нужен». Задача 11, наоборот, реализует
+    `get_securities_info` через RQ_SEC_SPEC (15) и RQ_INQUIRE_SECURITY (111). Это не обязательно
+    противоречие (нужен не для подписки, а для команды), но формулировку в `alltrades.md` надо
+    уточнить. **Проверить.**
+15. **`fakeServer` ≠ `testserver.Server`.** Задача 3 говорит «вынести `fakeServer`», но у текущего
+    `fakeServer` (`native/connector_test.go`) нет `Handle`, `Requests`, `AfterSubscribe`; есть
+    `snapshot`, `trades`, `mainDelay`, `subscribes [][]byte`, `pending`, неэкспортированный `drop()`.
+    → Задача 3 — это новый API, а не перенос; `Drop()` (задача 5) должен быть экспортированным.
+16. **Константы типов запросов.** План вводит RQ_HISTORY (11), RQ_TICKS (13), RQ_TRANSACT (14),
+    RQ_SEC_SPEC (15), RQ_DEPO_POS (16), RQ_MONEY_POS (17), RQ_REPORT_INFO (21), RQ_GET_REPORT (22),
+    RQ_CLIENT_HOLDINGS (42), RQ_CLIENT_LIMITS (43), RQ_FORTS_FIRM_MONEY (47), RQ_POSITIONS (81),
+    RQ_MARGIN_POS (84/85), RQ_FOND_PORTFOLIO (86), RQ_INQUIRE_UT (152), RQ_RPSREPO_SUBSCR (72),
+    RQ_GET_RPSREPO (82), RQ_GETNEWS (73), RQ_CHANGE_PWD (3) и др. В `native/session` сейчас 11
+    констант (в `login.go`), остальных нет. Ни одна задача не указывает файл, куда их добавлять;
+    `login.go`/`requests.go` станут общими файлами. → Назначить файл констант в задаче 3 или 6.
+    **Проверить.**
+17. **RE-2/RE-3 доступны, но упираются в секреты и записанные сессии.** Wine 11.21 установлен и
+    проверен (`run_dll.sh` + `get_connector_version`), поэтому RE-2 (живые шаги задач 5, 6, 7, 9, 10,
+    11, 13, 14, 16, 18, 19, 20, 21, 22, 23, 24, 27) и RE-3 (6, 9, 10, 12, 15, 16, 17, 18, 25, 26, 28,
+    29) технически возможны. Для них нужны `TC_PASSWORD` в `~/re/demo.env` и/или записанная сессия;
+    без этого шаг остаётся `blocked` с причиной. Оракул догадками не подменять; живые торговые
+    команды — только с согласия пользователя.
+18. **Служебные документы команды.** `docs/deepseek/environment.md`, `docs/deepseek/README.md` и
+    `tools/re/check_env.sh` подготовлены (task-1/Lead) и являются источником статуса окружения;
+    индекс ссылается на них. При изменении окружения обновлять `environment.md` и сверяться с
+    `tools/re/check_env.sh`, а не с этим индексом.
+19. **README уже содержит раздел «Native Go client», но о другом.** Задача 30 требует «раздел
+    «Нативный клиент» с примером `Dial`/`Subscribe`/`Run`»; в README есть `## Native Go client` про
+    gRPC-клиент и `make client`. → Задаче 30 нужно не добавить раздел, а переписать/дополнить
+    существующий, не потеряв документацию по gRPC.
+20. **`go.mod`/Tech Stack.** План: Go 1.27.2, `golang.org/x/text` (CP1251), protobuf/NATS только в
+    `natsout`/`tools` — совпадает с `go.mod` и текущим деревом; новых зависимостей не требуется.
+    Расхождений нет, проверено.
+
+---
+
+## 9. Проверки (Definition of Done) для любой задачи
+
+Из Global Constraints плана, `SKILL.md` §8–§9 и `AGENTS.md` §7/§9:
+
+```bash
+gofmt -l .                       # пусто
+go vet ./...
+go build ./...
+CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build ./native/...
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ./native/...
+go test -race ./...
+make verify                      # цель есть в Makefile: gofmt/vet/build/кроссы/race
+```
+
+В песочнице DSH (`workspace-write`) глобальный кэш Go недоступен: перед ручными `go build`/`go vet`/
+`go test` нужен `export GOCACHE="$PWD/.cache/go-build"` (см. AGENTS.md §7; `make verify` подставляет
+его сам).
+
+Дополнительно по профилю: `make server_build` и `make queues_build` (Windows, `CGO_ENABLED=0`);
+`make compile` — только при изменении `proto/`. Живые прогоны (`TXML_DEMO_*`, `TC_*`) — только под
+env-переменными и `t.Skip` без них; тесты не ходят в сеть и не требуют DLL/Wine. Секреты и обезличенные
+фикстуры (`TESTCLIENT`/`TESTUNION`/`TESTLOGIN`) — по AGENTS.md §6. Коммит — с сообщением из таблицы §4.
+
+---
+
+## 10. Источники и чем проверено
+
+| Утверждение | Чем проверено |
+|---|---|
+| Список/содержание 30 задач, фазы, Review Focus, тесты, commit | `read` плана целиком (636 строк) |
+| Процедуры RE-1…RE-4, состав `tools/re` | `read tools/re/README.md` (187 строк) |
+| Правила Go и DoD | `read .kimi-code/skills/go-engineer/SKILL.md` (209 строк) |
+| Этапы M1–M7, что уже закрыто | `read docs/ROADMAP-GO.md` (171 строка) |
+| Что восстановлено по протоколу | `read docs/protocol/{connect,commands,dictionaries,alltrades}.md` |
+| Наличие файлов/пакетов/типов | `git ls-files native tools docs`, `ls native/*/`, `ls tools`, `grep` по символам (`FormatPrice`, `TradeDedup`, `Catalog.Apply`, `stubPwdReply`, `dllCommands`, `fakeServer`, `ClientConfig`, `Connect`, `Config`) |
+| 43 против 45 имён `dllCommands` | подсчёт по `native/connector.go` и строке 57 плана (Python-regex) |
+| Отсутствие `native/model`, `native/records`, `native/internal`, `tools/tcproxy`, `tools/replay-server`, `tools/native-soak`, `docs/protocol/errors.md`, `docs/protocol/coverage.md`, `docs/protocol/orders.md` | `test -e` по полному списку путей из секций Files плана |
+| Отсутствие фикстур `secparam-*`, `snapshot-tail-*`, `service-dll.xml` и каталогов `native/records/testdata`, `native/session/testdata`, `native/testdata` | `ls`/`test -e`; сверено с `docs/protocol/dictionaries.md` |
+| Ссылки плана, которые **существуют** (проверены): `native/xmlcompat/testdata/alltrades-inject{1,2,3}.hex` и `alltrades-dll{1,2,3}.xml`, `native/session/login_test.go` (`stubPwdReply`, `SessionKeys`), `native/wire` (`DefaultKeys`), `native.Dial`, `tools/{native-trades,reference-harness,wire-decode}`, `docs/protocol/{connect,dictionaries,commands,alltrades}.md`, `client/commands.Connect` | `git ls-files`, `ls`, `grep` по символам |
+| Доступность RE | по AGENTS.md §4 и ограничениям текущей среды (Wine/демо-доступ отсутствуют) |
