@@ -457,6 +457,29 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure(err.Error()), nil
 		}
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(req.TransactionID, 10) + "\"/>", nil
+	case "get_client_limits":
+		var req struct {
+			Client string `xml:"client,attr"`
+			Union  string `xml:"union,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Client == "" {
+			return failure("Client not specified."), nil
+		}
+		limits, err := client.ClientLimits(ctx, req.Client)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.ClientLimitsXML(*limits))
+		return success(), nil
 	case "get_forts_positions":
 		var req struct {
 			Client string `xml:"client"`
