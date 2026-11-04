@@ -25,9 +25,9 @@ type Tick struct {
 // ParseTicksReply decodes one RQ_TICKS reply payload.
 func ParseTicksReply(payload []byte) ([]Tick, error) {
 	var (
-		out           []Tick
-		tradeNo, tm   int64
-		price         int64
+		out         []Tick
+		tradeNo, tm int64
+		price       int64
 	)
 	r := wire.NewReader(payload)
 	for {
