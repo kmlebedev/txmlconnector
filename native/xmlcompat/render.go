@@ -754,16 +754,92 @@ func PortfoliosXML(inner string) string { return "<portfolios>" + inner + "</por
 // PortfolioTPlusXML is the literal <portfolio_tplus/> skeleton (fields I).
 func PortfolioTPlusXML() string { return "<portfolio_tplus/>" }
 
-// PortfolioCurrencyXML is the literal <portfolio_currency> skeleton (fields I).
-func PortfolioCurrencyXML() string { return "<portfolio_currency></portfolio_currency>" }
-
-// PortfolioMCTXML is the literal <portfolio_mct client> skeleton (fields I).
-func PortfolioMCTXML(client string) string {
-	return "<portfolio_mct client=" + quoteAttr(client) + "></portfolio_mct>"
-}
-
-// MCPortfolioXML is the literal <mc_portfolio> skeleton (fields I).
-func MCPortfolioXML() string { return "<mc_portfolio></mc_portfolio>" }
-
 // UnitedPortfolioXML is the literal <united_portfolio/> skeleton (fields I).
 func UnitedPortfolioXML() string { return "<united_portfolio/>" }
+
+// portfolioCurrencyName maps the wire currency to the DLL <currency> literal.
+// Only the demo RUR->RUB mapping is confirmed (I for the rest).
+func portfolioCurrencyName(currency string) string {
+	if currency == "RUR" {
+		return "RUB"
+	}
+	return currency
+}
+
+// fixed2 renders a money Decimal with exactly two digits (the portfolio forms
+// keep the trailing zeros: 300000.00).
+func fixed2(d model.Decimal) string {
+	return fixedDecimal(model.Decimal{Units: rescaleMoneyUnits(d), Scale: 2})
+}
+
+func rescaleMoneyUnits(d model.Decimal) int64 {
+	units := d.Units
+	if d.Scale > 2 {
+		for i := uint8(2); i < d.Scale; i++ {
+			units /= 10
+		}
+	}
+	for i := d.Scale; i < 2; i++ {
+		units *= 10
+	}
+	return units
+}
+
+// zero2 is the DLL zero for the derived portfolio numbers (I formulas).
+var zero2 = model.Decimal{Units: 0, Scale: 2}
+
+// PortfolioCurrencyXML renders one <portfolio_currency> of get_portfolio (O).
+// equity/cover are rendered from the stored balance; the derived formulas are
+// I (the demo fixture has all of them equal to the balance).
+func PortfolioCurrencyXML(p model.MoneyPosition) string {
+	var b strings.Builder
+	b.WriteString("<portfolio_currency currency=" + quoteAttr(portfolioCurrencyName(p.Currency)) + ">")
+	b.WriteString("<cross_rate>1</cross_rate>")
+	b.WriteString("<open_balance>" + fixed2(p.SaldoIn) + "</open_balance>")
+	b.WriteString("<balance>" + fixed2(p.Saldo) + "</balance>")
+	b.WriteString("<equity>" + fixed2(p.Saldo) + "</equity>")
+	b.WriteString("<cover>" + fixed2(p.Saldo) + "</cover>")
+	b.WriteString("<init_req>" + fixed2(zero2) + "</init_req>")
+	b.WriteString("<maint_req>" + fixed2(zero2) + "</maint_req>")
+	b.WriteString("<unrealized_pnl>" + fixed2(zero2) + "</unrealized_pnl>")
+	b.WriteString("</portfolio_currency>")
+	return b.String()
+}
+
+// MCPortfolioXML renders one <mc_portfolio client> with the nested
+// <portfolio_currency>, the demo <money> block and its <value_part register>.
+// The money name is the demo literal; balance_prc is 0.0000 in the fixture (I).
+func MCPortfolioXML(client string, p model.MoneyPosition) string {
+	var b strings.Builder
+	b.WriteString("<mc_portfolio client=" + quoteAttr(client) + ">")
+	b.WriteString("<open_equity>" + fixed2(p.Saldo) + "</open_equity>")
+	b.WriteString("<equity>" + fixed2(p.Saldo) + "</equity>")
+	b.WriteString("<pl>" + fixed2(zero2) + "</pl>")
+	b.WriteString("<go>" + fixed2(zero2) + "</go>")
+	b.WriteString("<cover>" + fixed2(p.Saldo) + "</cover>")
+	b.WriteString("<init_req>" + fixed2(zero2) + "</init_req>")
+	b.WriteString("<maint_req>" + fixed2(zero2) + "</maint_req>")
+	b.WriteString("<unrealized_pnl>" + fixed2(zero2) + "</unrealized_pnl>")
+	b.WriteString(PortfolioCurrencyXML(p))
+	b.WriteString("<money name=" + quoteAttr("Фондовый рынок МБ") + " currency=" + quoteAttr(portfolioCurrencyName(p.Currency)) + ">")
+	b.WriteString("<balance_prc>0.0000</balance_prc>")
+	b.WriteString("<open_balance>" + fixed2(p.SaldoIn) + "</open_balance>")
+	b.WriteString("<bought>" + fixed2(p.Bought) + "</bought>")
+	b.WriteString("<sold>" + fixed2(p.Sold) + "</sold>")
+	b.WriteString("<balance>" + fixed2(p.Saldo) + "</balance>")
+	b.WriteString("<blocked>" + fixed2(zero2) + "</blocked>")
+	b.WriteString("<estimated>" + fixed2(zero2) + "</estimated>")
+	b.WriteString("<fee>" + fixed2(zero2) + "</fee>")
+	b.WriteString("<vm>" + fixed2(zero2) + "</vm>")
+	b.WriteString("<finres>" + fixed2(zero2) + "</finres>")
+	b.WriteString("<cover>" + fixed2(p.Saldo) + "</cover>")
+	b.WriteString("<value_part register=" + quoteAttr(p.Register) + ">")
+	b.WriteString("<open_balance>" + fixed2(p.SaldoIn) + "</open_balance>")
+	b.WriteString("<bought>" + fixed2(p.Bought) + "</bought>")
+	b.WriteString("<sold>" + fixed2(p.Sold) + "</sold>")
+	b.WriteString("<balance>" + fixed2(p.Saldo) + "</balance>")
+	b.WriteString("<blocked>" + fixed2(zero2) + "</blocked>")
+	b.WriteString("<estimated>" + fixed2(zero2) + "</estimated>")
+	b.WriteString("</value_part></money></mc_portfolio>")
+	return b.String()
+}
