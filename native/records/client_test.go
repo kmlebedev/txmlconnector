@@ -107,3 +107,48 @@ func TestParseOvernightAndUnion(t *testing.T) {
 		t.Fatalf("union name = %q, %v", name, err)
 	}
 }
+
+// TestParseShortBodies covers the negative paths of the end-of-load parsers.
+func TestParseShortBodies(t *testing.T) {
+	if _, err := ParseClientNew(nil); !errors.Is(err, wire.ErrShortBuffer) {
+		t.Fatalf("ParseClientNew(nil) = %v, want ErrShortBuffer", err)
+	}
+	if _, err := ParseClientNew([]byte{0x01}); !errors.Is(err, wire.ErrShortBuffer) {
+		t.Fatalf("ParseClientNew(short) = %v, want ErrShortBuffer", err)
+	}
+	if _, err := ParseClientAsset(nil); !errors.Is(err, wire.ErrShortBuffer) {
+		t.Fatalf("ParseClientAsset(nil) = %v, want ErrShortBuffer", err)
+	}
+	if _, err := ParseUnion(nil); !errors.Is(err, wire.ErrShortBuffer) {
+		t.Fatalf("ParseUnion(nil) = %v, want ErrShortBuffer", err)
+	}
+	if _, err := ParseOvernight(nil); !errors.Is(err, wire.ErrShortBuffer) {
+		t.Fatalf("ParseOvernight(nil) = %v, want ErrShortBuffer", err)
+	}
+}
+
+// TestStateOnlyRecords checks the tail records that must yield no events:
+// 0x62/0x67/0x6b/0x69 are state updates, and 0x69 must be terminated by 0xff.
+func TestStateOnlyRecords(t *testing.T) {
+	payload := []byte{
+		0x62, 0x00, 0x00,
+		0x67, 0x01, 0x02,
+		0x6b, 0x01, 0x02, 0x03,
+		0x69, 0x01, 0x02, 0xff,
+	}
+	recs, err := Records(payload)
+	if err != nil || len(recs) != 4 {
+		t.Fatalf("records = %v, %v", tags(recs), err)
+	}
+	for _, rec := range recs {
+		if rec.Tag != 0x62 && rec.Tag != 0x67 && rec.Tag != 0x6b && rec.Tag != 0x69 {
+			t.Fatalf("unexpected tag %#02x", rec.Tag)
+		}
+	}
+	// Without the 0xff terminator the rest of the frame cannot be split.
+	_, err = Records([]byte{0x69, 0x01, 0x02})
+	var unknown *UnknownRecordError
+	if !errors.As(err, &unknown) || unknown.Tag != 0x69 {
+		t.Fatalf("unterminated 0x69: err = %v, want UnknownRecordError(0x69)", err)
+	}
+}

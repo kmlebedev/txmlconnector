@@ -13,6 +13,7 @@ import (
 
 	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/testserver"
+	"github.com/kmlebedev/txmlconnector/native/wire"
 	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
 )
 
@@ -172,6 +173,9 @@ func TestLostConnectionReportsDisconnected(t *testing.T) {
 	defer c.Close()
 	send(t, c, connectCommand())
 	rec.next(t, `<server_status`)
+	rec.mu.Lock()
+	base := len(rec.msgs)
+	rec.mu.Unlock()
 	srv.Drop()
 	// The DLL reports recover="true" on the loss, then connected="false" when
 	// the session cannot be restored.
@@ -184,6 +188,15 @@ func TestLostConnectionReportsDisconnected(t *testing.T) {
 	}
 	if got := send(t, c, `<command id="disconnect"/>`); !strings.Contains(got, "Соединение не установлено") {
 		t.Fatalf("disconnect = %s", got)
+	}
+	// The give-up path has no overnight line before connected="false" (E05).
+	rec.mu.Lock()
+	messages := append([]string(nil), rec.msgs[base:]...)
+	rec.mu.Unlock()
+	for _, m := range messages {
+		if strings.HasPrefix(m, "<overnight") {
+			t.Fatalf("overnight line in the give-up callbacks: %q", messages)
+		}
 	}
 }
 
@@ -382,8 +395,16 @@ func TestSnapshotTailMatchesDLL(t *testing.T) {
 	payload := snapshotTail(t)
 	recs, err := records.Records(payload)
 	var unknown *records.UnknownRecordError
-	if err != nil && !errors.As(err, &unknown) {
-		t.Fatalf("Records: %v", err)
+	if !errors.As(err, &unknown) {
+		t.Fatalf("Records: %v, want the documented 0x5b boundary", err)
+	}
+	// The mapped part of the E07 tail ends at the 0x5b limits/parameters block
+	// (its layout is task 12): pin the boundary so a silent shift is noticed.
+	if unknown.Tag != 0x5b || unknown.Offset != 249 {
+		t.Fatalf("unmapped tail starts at tag %#02x offset %d, want 0x5b at 249", unknown.Tag, unknown.Offset)
+	}
+	if len(recs) != 7 {
+		t.Fatalf("decoded %d records before the boundary, want 7: %v", len(recs), recs)
 	}
 	c := &Client{}
 	c.cfg.OnDictionaries = nil
@@ -467,6 +488,118 @@ func TestConnectorLoadTailOrder(t *testing.T) {
 	// The server_status command repeats the overnight line before the status.
 	if got := send(t, c, "<command id="+quote+"server_status"+quote+"/>"); got != "<result success="+quote+"true"+quote+"/>" {
 		t.Fatalf("server_status = %s", got)
+	}
+	rec.next(t, "<overnight")
+	rec.next(t, "<server_status")
+
+	// The disconnect callback carries no overnight line (E07 fixture).
+	rec.mu.Lock()
+	base := len(rec.msgs)
+	rec.mu.Unlock()
+	if got := send(t, c, "<command id="+quote+"disconnect"+quote+"/>"); got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("disconnect = %s", got)
+	}
+	rec.mu.Lock()
+	tail := append([]string(nil), rec.msgs[base:]...)
+	rec.mu.Unlock()
+	var falseN, overnightN int
+	for _, m := range tail {
+		if strings.HasPrefix(m, "<overnight") {
+			overnightN++
+		}
+		if strings.HasSuffix(m, "connected="+quote+"false"+quote+"/>") {
+			falseN++
+		}
+	}
+	if falseN != 1 || overnightN != 0 {
+		t.Fatalf("disconnect callbacks: %d false, %d overnight; want 1 and 0: %q", falseN, overnightN, tail)
+	}
+}
+
+// TestNoOvernightBeforeRecoveryStatuses is the P2 regression: the DLL puts the
+// overnight line only before the load-end and command server_status callbacks,
+// not before the recovery/disconnect ones (E05/E07 fixtures).
+func TestNoOvernightBeforeRecoveryStatuses(t *testing.T) {
+	first := newTestServer(t)
+	second := newTestServer(t)
+	var mu sync.Mutex
+	connects := 0
+	dial := func(ctx context.Context, address string) (net.Conn, error) {
+		mu.Lock()
+		connects++
+		n := connects
+		mu.Unlock()
+		if n == 1 {
+			return first.Dial(ctx, address)
+		}
+		return second.Dial(ctx, address)
+	}
+	c := New(Config{Dial: dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	rec.mu.Lock()
+	base := len(rec.msgs)
+	rec.mu.Unlock()
+	first.Drop()
+	rec.next(t, "<server_status") // recover="true"
+	rec.next(t, "<server_status") // plain connected="true"
+	rec.mu.Lock()
+	messages := append([]string(nil), rec.msgs[base:]...)
+	rec.mu.Unlock()
+	for _, m := range messages {
+		if strings.HasPrefix(m, "<overnight") {
+			t.Fatalf("overnight line in the recovery callbacks: %q", messages)
+		}
+	}
+}
+
+// TestOvernightRecordReachesStatus checks R_OVERNIGHT=1: the load-end status is
+// prefixed with <overnight status="true"/>.
+func TestOvernightRecordReachesStatus(t *testing.T) {
+	srv := newTestServer(t)
+	var w wire.Writer
+	// The session starts with a one-security snapshot and the overnight record.
+	srv.Snapshot = append(secNewRecord(t, "SBER", 26), []byte{records.TagOvernight, 1}...)
+	_ = w
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	if got := rec.next(t, "<overnight"); got != "<overnight status="+quote+"true"+quote+"/>" {
+		t.Fatalf("overnight = %s, want status=true", got)
+	}
+	rec.next(t, "<server_status")
+}
+
+// TestUnionRecordReachesLoadEnd checks the non-empty union path: the record has
+// no live capture (I), but it must not be lost; the callback is emitted after
+// <positions> and before the overnight line.
+func TestUnionRecordReachesLoadEnd(t *testing.T) {
+	srv := newTestServer(t)
+	var w wire.Writer
+	w.Byte(records.TagUnion)
+	w.Int64(42)
+	w.String("TESTUNION", 20)
+	w.String("TESTCAT", 32)
+	w.Byte(1)
+	srv.Snapshot = w.Bytes()
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	if got := rec.next(t, "<union"); got != "<union id="+quote+"TESTUNION"+quote+" remove="+quote+"false"+quote+"/>" {
+		t.Fatalf("union = %s", got)
 	}
 	rec.next(t, "<overnight")
 	rec.next(t, "<server_status")

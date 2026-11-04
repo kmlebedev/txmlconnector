@@ -17,6 +17,9 @@ type Options struct {
 	// UTCTime renders <time> in UTC instead of the server wall clock, as a
 	// connection opened with <utc_time>true</utc_time> does.
 	UTCTime bool
+	// MicexRegisters renders the <register> tag of a money position, as a
+	// connection opened with <micex_registers>true</micex_registers> does.
+	MicexRegisters bool
 }
 
 // Render returns the XML message the DLL emits for an event, and false when the
@@ -30,7 +33,7 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 	case *model.ClientAccount:
 		return ClientXML(*e), true
 	case *model.MoneyPosition:
-		return PositionsXML([]model.MoneyPosition{*e}, false), true
+		return PositionsXML([]model.MoneyPosition{*e}, opt.MicexRegisters), true
 	case *model.Union:
 		return UnionXML(*e), true
 	}

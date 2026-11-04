@@ -57,10 +57,10 @@ func (e *UnknownRecordError) Error() string {
 
 func (e *UnknownRecordError) Is(target error) bool { return target == ErrUnknownRecord }
 
-// Records splits an RQ_MAIN reply payload. R_WRAPPER bodies are not
-// returned: the wrapped records follow it and are yielded themselves. On a
-// record whose layout is not implemented it returns the records before it
-// and an error wrapping ErrUnknownRecord.
+// Records splits an RQ_MAIN reply payload. R_WRAPPER bodies are read and
+// skipped: their nested records (0x6e R_EDP_RATE) belong to task 12 and are not
+// yielded yet. On a record whose layout is not implemented it returns the
+// records before it and an error wrapping ErrUnknownRecord.
 func Records(p []byte) ([]Record, error) {
 	var out []Record
 	r := wire.NewReader(p)
@@ -117,7 +117,8 @@ func Records(p []byte) ([]Record, error) {
 			}
 			out = append(out, Record{Tag: tag, Body: body})
 		case tag == 0x6b:
-			// R_FORTS_SESSION: three state bytes, no callback (RE-1).
+			// R_FORTS_SESSION: state only. The three-byte body is inferred from
+			// the fixture alignment, not from a decompiled layout (I).
 			body, err := r.Raw(3)
 			if err != nil {
 				return out, fmt.Errorf("R_FORTS_SESSION: %w", err)
@@ -140,15 +141,22 @@ func Records(p []byte) ([]Record, error) {
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == 0x69:
 			// ReadURTUpdate: bytes up to and including 0xff (RE-1); state only.
+			// Without the terminator the rest of the payload cannot be split, so
+			// this is an unknown-layout record, not a silent swallow.
 			start := len(p) - r.Len()
+			terminated := false
 			for r.Len() > 0 {
 				b, err := r.Byte()
 				if err != nil {
 					return out, fmt.Errorf("record 0x69: %w", err)
 				}
 				if b == 0xff {
+					terminated = true
 					break
 				}
+			}
+			if !terminated {
+				return out, &UnknownRecordError{Tag: tag, Offset: start}
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		default:

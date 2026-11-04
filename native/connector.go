@@ -357,10 +357,11 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				case e.Recover:
 					c.emit(c.recoveryStatusXML())
 				case e.Connected:
-					c.emit(c.overnightXML(client))
+					// The DLL does not put an overnight line before the
+					// recovery statuses (E05 fixtures): S wins over the D-only
+					// "before every status" claim.
 					c.emit(c.statusXML(true))
 				default:
-					c.emit(c.overnightXML(client))
 					c.emit(c.statusXML(false))
 					reportedDown = true
 				}
@@ -445,6 +446,12 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 	}
 	if positions := client.MoneyPositions(); len(positions) > 0 {
 		c.emit(xmlcompat.PositionsXML(positions, req.MicexRegisters))
+	}
+	// A non-empty union is not in the live capture (the demo union is empty):
+	// the DLL position is inferred, so the callbacks go right after
+	// <positions> (I) and are not lost silently.
+	for _, union := range client.Unions() {
+		c.emit(xmlcompat.UnionXML(union))
 	}
 
 	c.mu.Lock()
@@ -547,7 +554,6 @@ func (c *Connector) disconnect(ctx context.Context) (string, error) {
 	<-done
 	c.mu.Lock()
 	client := c.client
-	overnight := c.overnightXML(client)
 	status := c.statusLocked(false)
 	c.state, c.client = stateDisconnected, nil
 	c.mu.Unlock()
@@ -556,9 +562,8 @@ func (c *Connector) disconnect(ctx context.Context) (string, error) {
 		_ = client.Logout(logoutCtx)
 		stop()
 	}
-	// The DLL reports connected="false" (with the overnight line before it)
-	// before disconnect returns.
-	c.emitSync(overnight)
+	// The DLL reports connected="false" without an overnight line before
+	// disconnect returns (E07 snapshot-tail-live.xml).
 	c.emitSync(status)
 	return success(), nil
 }
