@@ -153,7 +153,7 @@ func TestConnectorAllTradesMatchDLL(t *testing.T) {
 	if got := send(t, c, `<command id="subscribe"><quotations><secid>26</secid></quotations></command>`); got != `<result success="true"/>` {
 		t.Fatalf("quotations = %s", got)
 	}
-	if got := send(t, c, `<command id="subscribe"><quotes><secid>26</secid></quotes></command>`); !strings.Contains(got, "not implemented") {
+	if got := send(t, c, `<command id="subscribe"><quotes><secid>26</secid></quotes></command>`); got != `<result success="true"/>` {
 		t.Fatalf("quotes = %s", got)
 	}
 }
