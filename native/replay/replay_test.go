@@ -129,10 +129,16 @@ func TestReplayServesRecordedSession(t *testing.T) {
 		c.Close()
 		t.Fatalf("subscribe: %v", err)
 	}
-	trades, _, err := c.Poll(ctx)
+	events, _, err := c.Poll(ctx)
 	if err != nil {
 		c.Close()
 		t.Fatalf("poll: %v", err)
+	}
+	var trades []model.Trade
+	for _, ev := range events {
+		if tr, ok := ev.(*model.Trade); ok {
+			trades = append(trades, *tr)
+		}
 	}
 	if len(trades) != 5 {
 		c.Close()

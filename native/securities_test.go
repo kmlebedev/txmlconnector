@@ -14,7 +14,7 @@ import (
 // instruments, <pits>, then server_status.
 func TestConnectorSecuritiesOnLoad(t *testing.T) {
 	srv := marketServer(t, "alltrades-inject1.hex")
-	c := New(Config{Dial: srv.dial})
+	c := New(Config{Dial: srv.Dial})
 	rec := newRecorder()
 	if err := c.Start(rec.handle); err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestConnectorSecuritiesOnLoad(t *testing.T) {
 // with the whole catalog, in the DLL's element order.
 func TestGetSecurities(t *testing.T) {
 	srv := marketServer(t, "alltrades-inject1.hex")
-	c := New(Config{Dial: srv.dial})
+	c := New(Config{Dial: srv.Dial})
 	rec := newRecorder()
 	if err := c.Start(rec.handle); err != nil {
 		t.Fatal(err)

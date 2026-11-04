@@ -35,7 +35,7 @@ type ClientConfig struct {
 	OnSecurities func([]records.SecNew)
 }
 
-// Stats counts what Poll has seen.
+// Stats counts what decoding has seen.
 type Stats struct {
 	Polls, Trades, Duplicates, UnknownRecords int64
 	// LastUnknownTag is the tag that stopped decoding of a payload.
@@ -89,6 +89,10 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	return c, nil
 }
 
+// load consumes the RQ_STARTUP dictionaries and the initial RQ_MAIN snapshot.
+// Events seen while loading are dropped: trades are not expected before the
+// subscription (the DLL delivers none either), and other event families only
+// start flowing after it; unknown layouts are counted in Stats, not reported.
 func (c *Client) load(ctx context.Context) error {
 	st, err := c.conn.Time(ctx)
 	if err != nil {
@@ -112,12 +116,15 @@ func (c *Client) load(ctx context.Context) error {
 		c.cfg.OnDictionaries(startup)
 	}
 	for more := true; more; {
-		var batch []model.Trade
-		if batch, more, err = c.Poll(ctx); err != nil {
+		events, m, err := c.Poll(ctx)
+		if err != nil {
 			return err
 		}
-		if len(batch) != 0 {
-			return errors.New("trades before subscription")
+		more = m
+		for _, ev := range events {
+			if _, ok := ev.(*model.Trade); ok {
+				return errors.New("trades before subscription")
+			}
 		}
 		if c.cfg.OnSecurities != nil {
 			if secs := c.catalog.DrainPending(); len(secs) > 0 {
@@ -195,11 +202,14 @@ func (c *Client) update(ctx context.Context, symbols []model.Symbol, bit byte, o
 	return nil
 }
 
-// Poll sends one RQ_MAIN and returns the new trades it carried; more reports
-// that the reply filled the buffer and the server has queued data. Records
-// with an unimplemented layout end decoding of that payload; they are
-// counted in Stats.
-func (c *Client) Poll(ctx context.Context) (trades []model.Trade, more bool, err error) {
+// Poll sends one RQ_MAIN and returns the events of that reply in wire order;
+// more reports that the reply filled the buffer and the server has queued data.
+// Records with an unimplemented layout end decoding of that payload: they are
+// counted in Stats and reported as one model.UnknownRecord whose Payload is
+// the remaining tail (the rest of the payload cannot be split without the
+// layout). Poll keeps the client lock only while decoding, so Run can hand the
+// events to a callback without the lock held.
+func (c *Client) Poll(ctx context.Context) (events []model.Event, more bool, err error) {
 	reply, err := c.conn.Main(ctx)
 	if err != nil {
 		return nil, false, err
@@ -208,35 +218,90 @@ func (c *Client) Poll(ctx context.Context) (trades []model.Trade, more bool, err
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stats.Polls++
+	var unknown *records.UnknownRecordError
 	if splitErr != nil {
 		if !errors.Is(splitErr, records.ErrUnknownRecord) {
 			return nil, reply.More, splitErr
 		}
+		errors.As(splitErr, &unknown)
 		c.stats.UnknownRecords++
-		var unknown *records.UnknownRecordError
-		if errors.As(splitErr, &unknown) {
+		if unknown != nil {
 			c.stats.LastUnknownTag = unknown.Tag
 		}
 	}
 	for _, r := range recs {
 		if _, err := c.catalog.ApplyMutations(r); err != nil {
-			return trades, reply.More, err
+			return events, reply.More, err
 		}
-		if r.Tag != records.TagAllTrade {
+		decode := decoders[r.Tag]
+		if decode == nil {
 			continue
 		}
-		raw, err := records.ParseAllTrade(r.Body)
+		evs, err := decode(c, r.Body)
 		if err != nil {
-			return trades, reply.More, err
+			return events, reply.More, err
 		}
-		if !c.dedup.Fresh(raw) {
-			c.stats.Duplicates++
-			continue
-		}
-		trades = append(trades, c.catalog.Trade(raw, c.bias))
+		events = append(events, evs...)
 	}
-	c.stats.Trades += int64(len(trades))
-	return trades, reply.More, nil
+	if unknown != nil {
+		events = append(events, model.UnknownRecord{
+			Tag:     unknown.Tag,
+			Offset:  unknown.Offset,
+			Payload: reply.Payload[unknown.Offset:],
+		})
+	}
+	return events, reply.More, nil
+}
+
+const (
+	defaultRunRqDelay = 100 * time.Millisecond
+	minRunRqDelay     = 10 * time.Millisecond
+)
+
+// RunOptions configures Run.
+type RunOptions struct {
+	// RqDelay is the pause between RQ_MAIN poll rounds. Zero means 100ms;
+	// values below 10ms are raised to 10ms, as the DLL does.
+	RqDelay time.Duration
+}
+
+// Run polls RQ_MAIN and hands every reply's events to h in wire order until the
+// context is cancelled, an exchange fails or h returns an error (the error is
+// returned to the caller). h runs on the Run goroutine with the client lock
+// released, so it may use Client methods. An unknown record ends a batch: its
+// model.UnknownRecord is the last event of that batch and polling continues
+// with the next RQ_MAIN.
+func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) error) error {
+	delay := opt.RqDelay
+	if delay == 0 {
+		delay = defaultRunRqDelay
+	}
+	if delay < minRunRqDelay {
+		delay = minRqDelay
+	}
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		for {
+			events, more, err := c.Poll(ctx)
+			if err != nil {
+				return err
+			}
+			if len(events) > 0 {
+				if err := h(events); err != nil {
+					return err
+				}
+			}
+			if !more {
+				break
+			}
+		}
+	}
 }
 
 // WallTime renders the trade time as the server (and the DLL) shows it.

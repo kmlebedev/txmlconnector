@@ -2,173 +2,28 @@ package native
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native/cryptoprofile"
-	"github.com/kmlebedev/txmlconnector/native/session"
-	"github.com/kmlebedev/txmlconnector/native/wire"
+	"github.com/kmlebedev/txmlconnector/native/testserver"
 )
 
 const (
-	testLogin    = "TESTLOGIN"
-	testPassword = "TESTPASS"
+	testLogin    = testserver.Login
+	testPassword = testserver.Password
 )
 
-// fakeServer speaks the server side of the protocol: it accepts any RQ_PWD
-// for testPassword's key, issues a session key and answers RQ_TIME,
-// RQ_STARTUP (demo-server fixture) and RQ_MAIN: first the snapshot (if set),
-// then empty, and once after RQ_SUBSCRIBE the queued trades.
-type fakeServer struct {
-	t       *testing.T
-	startup []byte
-
-	mu         sync.Mutex
-	logouts    int
-	conns      []net.Conn
-	mainDelay  time.Duration
-	snapshot   []byte   // first RQ_MAIN reply
-	trades     []byte   // RQ_MAIN reply after the next RQ_SUBSCRIBE
-	subscribes [][]byte // RQ_SUBSCRIBE payloads received
-	pending    []byte
-}
-
-func newFakeServer(t *testing.T) *fakeServer {
-	raw, err := os.ReadFile("records/testdata/startup-demo.hex")
-	if err != nil {
-		t.Fatal(err)
-	}
-	startup, err := hex.DecodeString(strings.TrimSpace(string(raw)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &fakeServer{t: t, startup: startup}
-}
-
-// dial connects over loopback TCP: socket buffers matter when a disconnect
-// abandons a reply in flight, which an unbuffered net.Pipe cannot model.
-func (s *fakeServer) dial(ctx context.Context, address string) (net.Conn, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return nil, err
-	}
-	go func() {
-		defer ln.Close()
-		server, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		s.mu.Lock()
-		s.conns = append(s.conns, server)
-		s.mu.Unlock()
-		s.serve(server)
-	}()
-	var d net.Dialer
-	return d.DialContext(ctx, "tcp", ln.Addr().String())
-}
-
-// drop closes every server connection, simulating a lost link.
-func (s *fakeServer) drop() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, c := range s.conns {
-		c.Close()
-	}
-}
-
-func (s *fakeServer) serve(nc net.Conn) {
-	defer nc.Close()
-	keys := wire.DefaultKeys()
-	pwKey, _ := cryptoprofile.NewCipher(cryptoprofile.PasswordKey(testPassword))
-	sessionKey := make([]byte, cryptoprofile.KeySize)
-	for i := range sessionKey {
-		sessionKey[i] = byte(0x40 + i)
-	}
-	sessionSync := [8]byte{0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77}
-
-	reply := func(typ byte, payload []byte) error {
-		out, err := keys.Encode(wire.ServerToClient, wire.Frame{Flags: wire.KindReply, Type: typ, Payload: payload})
-		if err != nil {
-			return err
-		}
-		_, err = nc.Write(out)
-		return err
-	}
-	for {
-		f, err := keys.Decode(wire.ClientToServer, nc)
-		if err != nil {
-			return
-		}
-		switch f.Type {
-		case session.RqLogin:
-			err = reply(f.Type, []byte{0, 8, 1, 2, 3, 4, 5, 6, 7, 8})
-		case session.RqPwd:
-			var w wire.Writer
-			w.Byte(0)
-			encKey := make([]byte, len(sessionKey))
-			pwKey.CFBEncrypt(cryptoprofile.DefaultSync, encKey, sessionKey)
-			encSync := make([]byte, 8)
-			pwKey.CFBEncrypt(cryptoprofile.DefaultSync, encSync, sessionSync[:])
-			w.Raw(encKey)
-			w.Raw(encSync)
-			// Byte1..3, SessionTimeout, Byte4..7, Int1
-			w.Raw([]byte{0, 0, 0})
-			w.Int32(120)
-			w.Raw([]byte{0, 0, 0, 0})
-			w.Int32(0)
-			// Flags, Byte8, SubBroker, Text1, Byte9, Text2, Text3, Byte10
-			w.Raw([]byte{0, 0, 0, 0, 0, 0, 0, 0})
-			w.Int32(4242) // UID
-			w.Byte(0)     // Byte11
-			w.Byte(7)     // SID
-			w.Raw([]byte{0, 0})
-			w.Int32(626) // SYS#
-			w.Int32(4)   // BLD#
-			if err = reply(f.Type, w.Bytes()); err == nil {
-				keys, err = wire.NewKeys(sessionKey, sessionSync)
-			}
-		case session.RqTime:
-			// Demo-server RQ_TIME reply: 2026-11-03 21:03:03, Russian Standard Time.
-			p, _ := hex.DecodeString("74c0a4ae064cff0000c4ff00000000000000000000")
-			err = reply(f.Type, p)
-		case session.RqStartup:
-			err = reply(f.Type, s.startup)
-		case session.RqMain:
-			s.mu.Lock()
-			delay := s.mainDelay
-			payload := s.snapshot
-			s.snapshot = nil
-			if payload == nil {
-				payload, s.pending = s.pending, nil
-			}
-			s.mu.Unlock()
-			time.Sleep(delay)
-			err = reply(f.Type, payload)
-		case session.RqSubscribe:
-			s.mu.Lock()
-			s.subscribes = append(s.subscribes, f.Payload)
-			s.pending, s.trades = s.trades, nil
-			s.mu.Unlock()
-			err = reply(f.Type, nil)
-		case session.RqLogout:
-			s.mu.Lock()
-			s.logouts++
-			s.mu.Unlock()
-			return
-		default:
-			s.t.Errorf("unexpected request type %d", f.Type)
-			return
-		}
-		if err != nil {
-			return
-		}
-	}
+// newTestServer returns the shared test double with the demo-server
+// dictionaries loaded: the native client needs a valid RQ_STARTUP reply.
+func newTestServer(t *testing.T) *testserver.Server {
+	t.Helper()
+	srv := testserver.New(t)
+	srv.Startup = readFixture(t, "startup-demo.hex")
+	return srv
 }
 
 type recorder struct {
@@ -218,8 +73,8 @@ func connectCommand() string {
 
 // Expected results are the DLL's answers recorded on the Finam demo server.
 func TestServerStatusLifecycleMatchesDLL(t *testing.T) {
-	srv := newFakeServer(t)
-	c := New(Config{Dial: srv.dial})
+	srv := newTestServer(t)
+	c := New(Config{Dial: srv.Dial})
 	rec := newRecorder()
 	if err := c.Start(rec.handle); err != nil {
 		t.Fatal(err)
@@ -266,13 +121,13 @@ func TestServerStatusLifecycleMatchesDLL(t *testing.T) {
 	if got := send(t, c, `<command id="server_status"/>`); !strings.Contains(got, "without connection") {
 		t.Fatalf("server_status after disconnect = %s", got)
 	}
-	waitFor(t, func() bool { srv.mu.Lock(); defer srv.mu.Unlock(); return srv.logouts == 1 })
+	waitFor(t, func() bool { return srv.Logouts() == 1 })
 }
 
 // disconnect while an RQ_MAIN poll is in flight must still log out.
 func TestDisconnectDuringPollLogsOut(t *testing.T) {
-	srv := newFakeServer(t)
-	c := New(Config{Dial: srv.dial})
+	srv := newTestServer(t)
+	c := New(Config{Dial: srv.Dial})
 	rec := newRecorder()
 	if err := c.Start(rec.handle); err != nil {
 		t.Fatal(err)
@@ -280,19 +135,17 @@ func TestDisconnectDuringPollLogsOut(t *testing.T) {
 	defer c.Close()
 	send(t, c, connectCommand())
 	rec.next(t, `<server_status`)
-	srv.mu.Lock()
-	srv.mainDelay = 300 * time.Millisecond
-	srv.mu.Unlock()
+	srv.SetMainDelay(300 * time.Millisecond)
 	time.Sleep(100 * time.Millisecond) // the next poll is now waiting for its reply
 	if got := send(t, c, `<command id="disconnect"/>`); got != `<result success="true"/>` {
 		t.Fatalf("disconnect = %s", got)
 	}
-	waitFor(t, func() bool { srv.mu.Lock(); defer srv.mu.Unlock(); return srv.logouts == 1 })
+	waitFor(t, func() bool { return srv.Logouts() == 1 })
 }
 
 func TestLostConnectionReportsDisconnected(t *testing.T) {
-	srv := newFakeServer(t)
-	c := New(Config{Dial: srv.dial})
+	srv := newTestServer(t)
+	c := New(Config{Dial: srv.Dial})
 	rec := newRecorder()
 	if err := c.Start(rec.handle); err != nil {
 		t.Fatal(err)
@@ -300,7 +153,7 @@ func TestLostConnectionReportsDisconnected(t *testing.T) {
 	defer c.Close()
 	send(t, c, connectCommand())
 	rec.next(t, `<server_status`)
-	srv.drop()
+	srv.Drop()
 	if m := rec.next(t, "<server_status"); !strings.HasSuffix(m, `connected="false"/>`) {
 		t.Fatalf("status = %s", m)
 	}

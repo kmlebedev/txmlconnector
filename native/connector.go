@@ -282,30 +282,30 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 		c.finish(ctx, nil, func() string { return connectErrorXML(err) })
 		return
 	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(delay):
-		}
-		// Poll again at once while replies fill the buffer, as the DLL does.
-		for more := true; more; {
-			trades, m, err := client.Poll(ctx)
-			if err != nil {
-				c.finish(ctx, client, func() string { return c.statusLocked(false) })
-				return
-			}
-			more = m
-			if len(trades) > 0 {
-				c.emit(xmlcompat.AllTradesXML(trades, c.withMillis))
-			}
-			if secs := client.Catalog().DrainPending(); len(secs) > 0 {
-				st := client.Catalog().Startup()
-				c.emit(xmlcompat.SecuritiesXML(st, secs))
-				c.emit(xmlcompat.PitsXML(st, secs))
+	// Run polls RQ_MAIN and returns its events in wire order; the connector
+	// renders them as the DLL callbacks and keeps the securities chunks, which
+	// the catalog queues while polling.
+	err = client.Run(ctx, RunOptions{RqDelay: delay}, func(events []model.Event) error {
+		var trades []model.Trade
+		for _, ev := range events {
+			if t, ok := ev.(*model.Trade); ok {
+				trades = append(trades, *t)
 			}
 		}
+		if len(trades) > 0 {
+			c.emit(xmlcompat.AllTradesXML(trades, c.withMillis))
+		}
+		if secs := client.Catalog().DrainPending(); len(secs) > 0 {
+			st := client.Catalog().Startup()
+			c.emit(xmlcompat.SecuritiesXML(st, secs))
+			c.emit(xmlcompat.PitsXML(st, secs))
+		}
+		return nil
+	})
+	if ctx.Err() != nil {
+		return // disconnect cancelled the run; it owns the RQ_LOGOUT
 	}
+	c.finish(ctx, client, func() string { return c.statusLocked(false) })
 }
 
 // open logs in, loads dictionaries and the snapshot, then reports
