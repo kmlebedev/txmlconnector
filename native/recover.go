@@ -83,17 +83,29 @@ func isFatalRecoverError(err error) bool {
 // (docs/protocol/connect.md) confirms: 0 or below 0x14 — 20 s, below 300 —
 // seconds, otherwise milliseconds.
 func (c *Client) sessionTimeout() time.Duration {
-	if override := c.cfg.SessionTimeout; override > 0 {
-		// The DLL normalizes the <connect> value like the server one: below
-		// 20 s it becomes 20 s.
-		if override < 20*time.Second {
-			return 20 * time.Second
-		}
-		return override
-	}
 	c.mu.Lock()
 	info := c.info
 	c.mu.Unlock()
+	return effectiveSessionTTL(c.cfg.SessionTimeout, info)
+}
+
+// effectiveSessionTTL is the session lifetime (the recovery window): the
+// <connect> override first, otherwise the RQ_PWD value with the DLL
+// normalization (below 0x14 -> 20 s, below 300 -> seconds, otherwise
+// milliseconds).
+func effectiveSessionTTL(override time.Duration, info *session.Info) time.Duration {
+	if override != 0 {
+		switch {
+		case override < 0 || override < 20*time.Second:
+			// The DLL statcard: negative and below 20 s become 20 s.
+			return 20 * time.Second
+		case override < 300*time.Second:
+			return override
+		default:
+			// From 300 on the value is treated as milliseconds.
+			return override / time.Second * time.Millisecond
+		}
+	}
 	if info == nil {
 		return defaultSessionTTL
 	}
@@ -105,6 +117,18 @@ func (c *Client) sessionTimeout() time.Duration {
 	default:
 		return time.Duration(v) * time.Millisecond
 	}
+}
+
+// normalizeRequestTimeout applies the DLL request_timeout rules: 20 s by default,
+// and a value not below the session window becomes half of it.
+func normalizeRequestTimeout(request, sessionTTL time.Duration) time.Duration {
+	if request <= 0 {
+		request = session.DefaultRequestTimeout
+	}
+	if sessionTTL > 0 && request >= sessionTTL {
+		request = sessionTTL / 2
+	}
+	return request
 }
 
 // recover restores the session after a transport failure the way the DLL does:
@@ -193,6 +217,7 @@ func (c *Client) relogin(ctx context.Context) error {
 		nc.Close()
 		return fmt.Errorf("login: %w", err)
 	}
+	conn.SetRequestTimeout(normalizeRequestTimeout(c.cfg.RequestTimeout, effectiveSessionTTL(c.cfg.SessionTimeout, info)))
 	// Publish the new connection before load() so its RQ_MAIN polls use it;
 	// concurrent requests fail fast while recovering instead of interleaving
 	// with the login sequence.
