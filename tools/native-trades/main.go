@@ -25,6 +25,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/kmlebedev/txmlconnector/native"
+	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/natsout"
 )
 
@@ -52,8 +53,8 @@ func main() {
 	}
 }
 
-func parseSymbols(list string) ([]native.Symbol, error) {
-	var out []native.Symbol
+func parseSymbols(list string) ([]model.Symbol, error) {
+	var out []model.Symbol
 	for _, item := range strings.Split(list, ",") {
 		item = strings.TrimSpace(item)
 		if item == "" {
@@ -63,12 +64,12 @@ func parseSymbols(list string) ([]native.Symbol, error) {
 		if !ok || board == "" || code == "" {
 			return nil, fmt.Errorf("bad security %q, want BOARD:SECCODE", item)
 		}
-		out = append(out, native.Symbol{Board: board, SecCode: code})
+		out = append(out, model.Symbol{Board: board, SecCode: code})
 	}
 	return out, nil
 }
 
-func run(ctx context.Context, addr, login, password, natsURL, prefix string, symbols []native.Symbol, delay, statsEvery time.Duration) error {
+func run(ctx context.Context, addr, login, password, natsURL, prefix string, symbols []model.Symbol, delay, statsEvery time.Duration) error {
 	nc, err := nats.Connect(natsURL, nats.Name("txmlconnector native-trades"))
 	if err != nil {
 		return fmt.Errorf("nats: %w", err)
@@ -93,30 +94,43 @@ func run(ctx context.Context, addr, login, password, natsURL, prefix string, sym
 	}
 	log.Printf("subscribed to alltrades: %v; publishing to %s.<board>.<seccode>", symbols, prefix)
 
-	var lastStats time.Time
-	for {
-		select {
-		case <-ctx.Done():
-			log.Printf("stopping: %+v", client.Stats())
-			return nil
-		case <-time.After(delay):
-		}
-		for more := true; more; {
-			trades, m, err := client.Poll(ctx)
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					return nil
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+	if statsEvery > 0 {
+		go func() {
+			ticker := time.NewTicker(statsEvery)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-ticker.C:
+					log.Printf("stats: %+v", client.Stats())
 				}
-				return fmt.Errorf("transaq: %w", err)
 			}
-			more = m
-			if err := sink.Publish(trades); err != nil {
-				return fmt.Errorf("nats: %w", err)
-			}
-		}
-		if statsEvery > 0 && time.Since(lastStats) >= statsEvery {
-			lastStats = time.Now()
-			log.Printf("stats: %+v", client.Stats())
-		}
+		}()
 	}
+	err = client.Run(runCtx, native.RunOptions{RqDelay: delay}, func(events []model.Event) error {
+		var trades []model.Trade
+		for _, ev := range events {
+			if t, ok := ev.(*model.Trade); ok {
+				trades = append(trades, *t)
+			}
+		}
+		if len(trades) == 0 {
+			return nil
+		}
+		if err := sink.Publish(trades); err != nil {
+			return fmt.Errorf("nats: %w", err)
+		}
+		return nil
+	})
+	if errors.Is(err, context.Canceled) {
+		log.Printf("stopping: %+v", client.Stats())
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("transaq: %w", err)
+	}
+	return nil
 }

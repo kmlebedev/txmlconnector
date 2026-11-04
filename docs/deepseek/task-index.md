@@ -501,3 +501,53 @@ env-переменными и `t.Skip` без них; тесты не ходят
 | Отсутствие фикстур `secparam-*`, `snapshot-tail-*`, `service-dll.xml` и каталогов `native/records/testdata`, `native/session/testdata`, `native/testdata` | `ls`/`test -e`; сверено с `docs/protocol/dictionaries.md` |
 | Ссылки плана, которые **существуют** (проверены): `native/xmlcompat/testdata/alltrades-inject{1,2,3}.hex` и `alltrades-dll{1,2,3}.xml`, `native/session/login_test.go` (`stubPwdReply`, `SessionKeys`), `native/wire` (`DefaultKeys`), `native.Dial`, `tools/{native-trades,reference-harness,wire-decode}`, `docs/protocol/{connect,dictionaries,commands,alltrades}.md`, `client/commands.Connect` | `git ls-files`, `ls`, `grep` по символам |
 | Доступность RE | по AGENTS.md §4 и ограничениям текущей среды (Wine/демо-доступ отсутствуют) |
+
+---
+
+## 11. Фаза 0: итог и решения Lead (2026-11-04)
+
+Ветка `plan/native-client` (от `main` = `488e7b7`); карточки `task-1`…`task-4` закрыты. Коммиты:
+`e7ebc10` (T1), `2c22bf5` (T2), `acd84e2` (T3), `a2a4c85` (T4); фиксы по ревью второй моделью —
+`79adb3f` (T1 P2), `3a46898` (T2 P2), `7e3f378` (T3 P1), плюс `153033a` (docs-хвост T2).
+
+Что появилось: `tools/tcproxy`, `native/replay`, `tools/replay-server` (Go-порты py-инструментов
+RE-2/RE-3 на `native/wire`), `native/model` + `native/records` (SPLIT: бинарный разбор и типы —
+без XML; `xmlcompat` — только XML), `native/events.go` + `events_alltrade.go` (реестр декодеров,
+`Client.Run`/`Poll` событий), `native/testserver` (публичный тестовый сервер),
+`native/internal/oracle` (`LoadFixture`/`CheckDLL`), `native/xmlcompat/render.go` (`Render`),
+фикстуры — `native/records/testdata`.
+
+Решения по §8 (не переписывая план):
+
+- §8.2 — `native/testserver` (публичный, не `internal`): его должны импортировать тесты `server/`
+  в задаче 29; `internal`-путь невозможен.
+- §8.3 — общий помощник oracle-тестов — `native/internal/oracle` (non-test: `_test.go` не
+  импортируется); плановый `records.LoadFixture` реализован как `oracle.LoadFixture`; `records`
+  не зависит от XML. `checkDLL` = `oracle.CheckDLL(t, catalogFixture, injectFixture, dllXML,
+  extra ...records.SecNew)`.
+- §8.4 — фикстуры перенесены в `native/records/testdata`; путь в `native/replay/replay_test.go`
+  обновлён; сверка `TXML_DEMO_*` теперь `go test -run SecuritiesFull ./native/records`.
+- §8.5/§8.6 — «Move» выполнено как SPLIT: `model` — чистые типы (Board/Market/CandleKind/Security/
+  Decimal/Trade/AllTrade) без XML-тегов; XML-структуры/эмиттеры остались в `client/commands` и
+  `xmlcompat`; `records` не импортирует `client/commands`/`xmlcompat` (проверено `go list -deps`).
+- §8.9 — конвенция: каждая семья записей задач 6–28 регистрирует декодер из `init()` в своём
+  `native/events_<family>.go`; `events.go` больше не правится. Декодер исполняется под `c.mu`.
+- §8.15 — `testserver` — новый API (не перенос `fakeServer`): `New`, `Dial`, `Handle`,
+  `Requests`, `Drop`, `Logouts`, `SetMainDelay`; `fakeServer` удалён.
+- §8.16 — новые `RQ_*` константы — в файле своей семьи (`native/session/<family>.go`), общий файл
+  констант не заводился.
+- Дополнительно по ревью: в `native/wire.Keys.Encode` исправлен plain-флаг (0x82 у сервера: payload
+  без шифрования; клиент маскирует 0x7f) — иначе replay-сервер не мог отдать 0x82; `replay.Load/Serve`
+  режут записанный RQ_MAIN по времени trigger-запроса, как `replay_server.py`; `model.AllTrade`
+  перенесён в `model`, чтобы вернуть `model.Trade.Raw`, обещанный планом и `docs/protocol/alltrades.md`.
+
+Проверки Фазы 0 на `a2a4c85`: `make verify` — exit 0; `go test -race ./...` — ok;
+`make server_build`, `make queues_build` — exit 0; кросс-сборки linux/amd64, darwin/arm64,
+linux/arm64 — ok; `tools/re/check_env.sh --full` — PASS=19 WARN=3 FAIL=0; полная сверка
+`SecuritiesFull` на `native/records` — «compared 499 securities». Ревью второй моделью: 4
+независимых ревью (`deepseek-flash`-субагенты; Qwen в этой сессии недоступен — маршрут не разрешён,
+GLM-адаптер после первого probe перестал регистрироваться), P1/P2 исправлены в тех же задачах.
+
+Не проверено в Фазе 0: живые RE-2/RE-3 (нет загруженного `TC_PASSWORD` и записанной сессии; в Фазе 0
+они и не требовались), Windows-прогон тестов (только кросс-сборка). Следующая фаза — Фаза 1 (задачи
+5–7); блокеры — отсутствие фикстур `recover-*-live`/`service-dll.xml` (нужны RE-2/RE-3).
