@@ -352,6 +352,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.PositionsXML([]model.MoneyPosition{*e}, c.micexRegisters))
 			case *model.Union:
 				c.emit(xmlcompat.UnionXML(*e))
+			case *model.SecInfoUpdate:
+				c.emit(xmlcompat.SecInfoUpdateXML(*e))
 			case model.ServerStatus:
 				switch {
 				case e.Recover:
