@@ -1117,6 +1117,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.MarketOrdXML(*e))
 			case *model.NewsHeader:
 				c.emit(xmlcompat.NewsHeaderXML(*e))
+			case *model.Messages:
+				c.emit(xmlcompat.MessagesXML(e.Items))
 			case model.ServerStatus:
 				switch {
 				case e.Recover:
@@ -1214,6 +1216,9 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 				}
 				if header, ok := ev.(*model.NewsHeader); ok {
 					c.emit(xmlcompat.NewsHeaderXML(*header))
+				}
+				if messages, ok := ev.(*model.Messages); ok {
+					c.emit(xmlcompat.MessagesXML(messages.Items))
 				}
 			}
 		},

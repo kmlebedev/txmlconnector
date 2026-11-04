@@ -316,6 +316,23 @@ func (c *Client) Poll(ctx context.Context) (events []model.Event, more bool, err
 		}
 		events = append(events, evs...)
 	}
+	// The DLL batches all R_MSG records of one RQ_MAIN reply into one
+	// <messages> callback (messages.md, O).
+	var messages []model.Message
+	if len(events) > 0 {
+		kept := events[:0]
+		for _, ev := range events {
+			if message, ok := ev.(*model.Message); ok {
+				messages = append(messages, *message)
+				continue
+			}
+			kept = append(kept, ev)
+		}
+		events = kept
+	}
+	if len(messages) > 0 {
+		events = append(events, &model.Messages{Items: messages})
+	}
 	if unknown != nil {
 		events = append(events, model.UnknownRecord{
 			Tag:     unknown.Tag,

@@ -109,6 +109,13 @@ func Records(p []byte) ([]Record, error) {
 				return out, fmt.Errorf("R_DATE: %w", err)
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagMessage:
+			// 0x01 R_MSG is unsized with variable C-strings (messages.md).
+			start := len(p) - r.Len()
+			if err := SkipMessage(r); err != nil {
+				return out, err
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagNews || tag == TagNewsUpload:
 			// 0x35/0x36 are unsized with variable C-strings: walk the fields to
 			// find the record end (news.md, D/O).
