@@ -100,6 +100,12 @@ type Client struct {
 	// marginRates is the R_SEC_RATE (0x0a) price P per secid (lot cost in
 	// kopecks) used by the local max-buy/sell formula (task 23/52).
 	marginRates map[uint16]int64
+	// news is the header store of get_old_news/get_news_body; newsLastOld is the
+	// last 0x35 id (the RQ_GETNEWS from/to rule is I, see docs/protocol/news.md).
+	news        map[int64]model.NewsHeader
+	newsOrder   []int64
+	newsLastOld int64
+	newsBodies  map[int64]string
 }
 
 // Dial logs in, loads the dictionaries and the initial snapshot (RQ_TIME,
