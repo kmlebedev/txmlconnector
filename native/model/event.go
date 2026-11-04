@@ -18,4 +18,17 @@ type UnknownRecord struct {
 
 func (UnknownRecord) isEvent() {}
 
+// ServerStatus reports a session state change, in the order the DLL emits the
+// server_status callbacks: recover=true right on the link loss (the reconnect
+// attempts start), then a plain Connected=true after a successful recovery, or
+// Connected=false with Err when the session_timeout window expired and the
+// client gave up (the XML client then issues connect again).
+type ServerStatus struct {
+	Connected bool
+	Recover   bool
+	Err       string
+}
+
+func (ServerStatus) isEvent() {}
+
 func (*Trade) isEvent() {}

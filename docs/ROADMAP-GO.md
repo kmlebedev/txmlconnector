@@ -143,7 +143,8 @@ tools/reference-harness/       # создать на M1
 - [ ] M5: эмиттер `<sec_info_upd>` из очереди событий R_SEC_PARAM, R_DOUBLELEG, тег 0x62, `subscribe` для `<quotations>`/`<quotes>`, `gethistorydata` (RQ_HISTORY), переподключение.
 - [ ] RQ_RELOGIN/RQ_RECOVER и обрывы связи; сравнить с поведением DLL (эксперимент E05).
 - [x] **Фаза 0** плана [native client](superpowers/plans/2026-11-04-native-transaq-client.md) (2026-11-04, ветка `plan/native-client`): RE-инструменты на Go (`tools/tcproxy`, `tools/replay-server`, `native/replay`), пакеты `native/model`/`native/records` (SPLIT XML и бинарных записей), событийный API `Client.Run` с реестром декодеров, единая точка `xmlcompat.Render` и oracle-помощник; `make verify`/`-race`/`server_build`/`queues_build` зелёные, фикстуры — `native/records/testdata`. Итог и решения — [docs/deepseek/task-index.md](deepseek/task-index.md) §11.
-- [ ] **Фаза 1** плана: задачи 5–7 (переподключение/восстановление, служебные команды и параметры `connect`, сообщения конца загрузки). Нужны RE-2/RE-3: `TC_PASSWORD` в `~/re/demo.env` и записанные сессии.
+- [x] **Фаза 1** плана (2026-11-04, `plan/native-client`): задачи 5–7 — DLL-faithful восстановление (RQ_RELOGIN/RQ_RECOVER, `Recover`/`Reconnect`), служебные команды и параметры `connect`, конец загрузки (`<client>`/`<positions>`/`<overnight>`/`<union>`); живые RE-4 PASS, фикстуры E05/R6/E07 в `native/*/testdata`. Итог и отклонения — [docs/deepseek/task-index.md](deepseek/task-index.md) §12.
+- [ ] **Фаза 2** плана: задачи 8–12 (`<sec_info_upd>`, `<quotations>`, `<quotes>`, `<sec_info>`, остальные записи снапшота).
 
 ## Результат проверки: macOS arm64 + Rosetta + Wine (3 ноября 2026)
 
@@ -165,7 +166,7 @@ tools/reference-harness/       # создать на M1
 
 | Прогон | Login | RQ_STARTUP | RQ_MAIN до выборки снапшота | Logout |
 |---|---|---|---|---|
-| DLL (эталон) | `UID# 8202`, `SYS# 626`, `PRO# 68` | 4355 Б | 35 опросов, 2 260 846 Б | RQ_LOGOUT |
+| DLL (эталон) | `UID#` (маскирован), `SYS# 626`, `PRO# 68` | 4355 Б | 35 опросов, 2 260 846 Б | RQ_LOGOUT |
 | Go #1 | 255 мс, те же поля | 4355 Б | 35 опросов, 2 258 525 Б, 1.55 с | RQ_LOGOUT |
 | Go #2 | 88 мс | 4355 Б | 35 опросов, 2 259 862 Б, 1.36 с | RQ_LOGOUT |
 | Go #3 | 93 мс | 4355 Б | 35 опросов, 2 259 069 Б, 1.40 с | RQ_LOGOUT |

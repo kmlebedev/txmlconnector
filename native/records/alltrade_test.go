@@ -95,3 +95,33 @@ func TestCatalogTrade(t *testing.T) {
 		t.Fatalf("GAZP = %+v", gazp)
 	}
 }
+
+// TestTradeDedupSymbolSurvivesSecidChange covers the reconnect replay: the new
+// session assigns a different session-local secid to the same security, so the
+// stable model.Symbol key must still drop the trade delivered before the
+// reconnect (Review Focus 3).
+func TestTradeDedupSymbolSurvivesSecidChange(t *testing.T) {
+	var d TradeDedup
+	sym := model.Symbol{Board: "TQBR", SecCode: "SBER"}
+	if !d.FreshSymbol(model.AllTrade{SecID: 26, Board: 37, TradeNo: 9000000001}, sym) {
+		t.Fatal("the first trade must be fresh")
+	}
+	if d.FreshSymbol(model.AllTrade{SecID: 27, Board: 37, TradeNo: 9000000001}, sym) {
+		t.Fatal("a replay with the same trade number and a new secid must be dropped")
+	}
+	if !d.FreshSymbol(model.AllTrade{SecID: 27, Board: 37, TradeNo: 9000000002}, sym) {
+		t.Fatal("the next trade must be fresh")
+	}
+}
+
+// TestTradeDedupRawFallback covers securities the catalog does not know: the
+// fallback keeps the session-local (secid, board) dedup of the DLL.
+func TestTradeDedupRawFallback(t *testing.T) {
+	var d TradeDedup
+	if !d.Fresh(model.AllTrade{SecID: 889, Board: 37, TradeNo: 1}) {
+		t.Fatal("the first trade must be fresh")
+	}
+	if d.Fresh(model.AllTrade{SecID: 889, Board: 37, TradeNo: 1}) {
+		t.Fatal("the same raw trade must be dropped")
+	}
+}

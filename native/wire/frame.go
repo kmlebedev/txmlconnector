@@ -44,6 +44,17 @@ var (
 	ErrTooLarge   = errors.New("wire: payload too large")
 )
 
+// PayloadCRCError reports a damaged payload together with the decoded header, so
+// the caller can tell which reply was affected: the DLL treats a CRC failure of
+// the RQ_RECOVER reply (type 0x40) as fatal and retries every other case.
+type PayloadCRCError struct {
+	Frame Frame
+}
+
+func (e *PayloadCRCError) Error() string { return ErrPayloadCRC.Error() }
+
+func (e *PayloadCRCError) Unwrap() error { return ErrPayloadCRC }
+
 // Frame is one decrypted packet.
 //
 // Plain header layout (FUN_1801bfb20): flags, type, payload length (BE16),
@@ -146,7 +157,10 @@ func (k *Keys) Decode(dir Direction, r io.Reader) (Frame, error) {
 		k.decrypt(dir, f.Payload)
 	}
 	if binary.BigEndian.Uint16(hdr[4:]) != CRC16(f.Payload) {
-		return Frame{}, ErrPayloadCRC
+		// Keep the decoded header: the recovery loop distinguishes the damaged
+		// RQ_RECOVER reply (fatal) from other frames (retried).
+		damaged := Frame{Flags: f.Flags, Type: f.Type}
+		return damaged, &PayloadCRCError{Frame: damaged}
 	}
 	return f, nil
 }

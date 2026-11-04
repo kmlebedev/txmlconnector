@@ -1,8 +1,9 @@
 # Окружение: фактическое состояние
 
 **Дата проверки:** 2026-11-04 · **Хост:** macOS (darwin 25.6.0, Apple Silicon arm64) ·
-**Репозиторий:** `/Users/whitefox/GolandProjects/txmlconnector`, ветка `plan/native-client`, HEAD `a2a4c85`
-(Фаза 0 плана выполнена, см. [task-index.md](task-index.md) §11).
+**Репозиторий:** `/Users/whitefox/GolandProjects/txmlconnector`, ветка `plan/native-client`, HEAD `6d4a689`
+(Фаза 0 влита в `main` через PR #47; Фаза 1 закрыта — см. [task-index.md](task-index.md) §12; текущая
+работа — Фаза 2).
 **Кто проверял:** env-scout (task-1). Все факты ниже — результат реальных команд; там, где прогона не
 было, так и написано («не проверено»).
 
@@ -44,9 +45,9 @@ tools/re/check_env.sh --full   # + go build, go test, go test -race, кросс-
   захват DLL) и RE-3 (оракул) доступны**; им нужны `TC_PASSWORD` и/или записанная сессия. Секреты —
   `~/re/demo.env` (шаблон `tools/re/demo.env.example`), не в репозитории.
 - **Python 3.15.0, `txproto selftest: OK`** — Python-инструменты RE рабочие.
-- **`TC_LOGIN` — set; `TC_PASSWORD` в среде агента не экспортирован** (значения не печатаются и не
-  должны попадать в файлы). Файл `~/re/demo.env` найден; перед живыми шагами (RE-2/RE-3/RE-4,
-  `wire-decode` с расшифровкой) загружать: `set -a; . ~/re/demo.env; set +a`.
+- **`TC_LOGIN` и `TC_PASSWORD` доступны** (2026-11-04 пользователь заполнил `~/re/demo.env` и дал
+  явное согласие на живые операции Wine+DLL и демо-сервер; значения не печатаются и не попадают в
+  файлы). Перед живыми шагами (RE-2/RE-3/RE-4, `wire-decode` с расшифровкой): `set -a; . ~/re/demo.env; set +a`.
 - **Демо-сервер:** `tr1-demo5.finam.ru:3939`, 09:50–23:50 МСК, будни (кроме праздников). Любые живые
   операции — только с явного согласия пользователя в чате.
 - **Эталонная DLL** в корне репозитория, sha256 совпадает с эталоном.
@@ -80,9 +81,9 @@ tools/re/check_env.sh --full   # + go build, go test, go test -race, кросс-
 | Python | `python3 --version` | `Python 3.15.0` (`/opt/homebrew/bin/python3`) | **PASS** | Python-инструменты RE |
 | Python selftest | `python3 tools/re/py/selftest.py` | `txproto selftest: OK`, exit 0 | **PASS** | `txproto`/`dll_maps`/прокси/реплей-сервер |
 | `TC_LOGIN` | `[ -n "${TC_LOGIN:-}" ]` | **set** (значение не выводится) | **PASS** | логин на демо-сервере возможен |
-| `TC_PASSWORD` | `[ -n "${TC_PASSWORD:-}" ]` | **unset** (значение не выводится) | **WARN** | живой логин и `tools/wire-decode` с расшифровкой недоступны |
+| `TC_PASSWORD` | `set -a; . ~/re/demo.env; set +a; [ -n "${TC_PASSWORD:-}" ]` | **set** после загрузки `~/re/demo.env` (2026-11-04, значение не выводится) | **PASS** | живой логин, RE-2/RE-3/RE-4 и `wire-decode` с расшифровкой доступны (с согласия пользователя) |
 | `TC_DLL_PATH` / `TXC_DLL` | `[ -n ... ]` | оба **unset**, но эталонная DLL лежит в корне репо | **INFO** | `run_dll.sh` подставит `$REPO/txmlconnector64-6.47.2.26.4.dll`, если `TXC_DLL` не задан |
-| `~/re/demo.env` (секреты) | `test -f ~/re/demo.env` | файла нет; шаблон — `tools/re/demo.env.example` | **WARN** | положить `TC_LOGIN`/`TC_PASSWORD` + Wine-экспорты в `~/re/demo.env` (chmod 600); значения не печатать и не коммитить |
+| `~/re/demo.env` (секреты) | `test -f ~/re/demo.env` | файл есть и заполнен (2026-11-04); шаблон — `tools/re/demo.env.example` | **PASS** | живые операции; значения не печатать и не коммитить |
 | `TC_HOST` / `TC_TARGET` | имена переменных | set (адрес/цель демо-сервера; значения в отчёты не выводятся) | **INFO** | живой режим по расписанию, только с согласия пользователя |
 | Эталонная DLL | `shasum -a 256 txmlconnector64-6.47.2.26.4.dll` | `a197e2625e53c0df453687ae1b20ef2ae1a05e034cd20c424a7014b0c9726342` — совпадает с эталоном, 10 МБ | **PASS** | RE-1/RE-2/RE-3 против правильного бинаря; DLL не модифицируется |
 | Стартовые инструменты | `test -e tools/tcproxy` и др. | присутствуют: `tools/tcproxy`, `tools/replay-server`, `native/replay`, `native/model`, `native/records` (Фаза 0, 2026-11-04) | **PASS** | задачи 1–2 Фазы 0 закрыты |
@@ -148,11 +149,13 @@ tools/re/check_env.sh --full   # + go build, go test, go test -race, кросс-
   ориентируйтесь (это не ошибка обхода).
 
   Дополнительно нужны `JAVA_HOME` (JDK 25 / openjdk@25) и `PATH` — полный рецепт в разделе
-  [«Готовые команды»](#готовые-команды-копировать). Ghidra-проект держите **внутри workspace**:
-  `.re-run/ghproj` (каталог `.re-run/` в `.gitignore`) — `~/re/ghproj` из README под sandbox создать
-  нельзя.
-- **Не проверено:** полный импорт DLL (`-import …`) не запускался — это минуты; проверены наличие
-  Ghidra, JVM и старт `analyzeHeadless`. Импорт выполняет RE-инженер и фиксирует результат отдельно.
+  [«Готовые команды»](#готовые-команды-копировать). **Ghidra 12.2 не принимает проект с элементом
+  пути, начинающимся с точки** (`.re-run/ghproj` → `Path element starting with '.' is not permitted`),
+  поэтому проект держите в `${TMPDIR:-/tmp}/txc-ghproj` (без `.re-run`); для удобства в workspace
+  можно сделать симлинк `.re-run/ghproj` на него (`.re-run/` в `.gitignore`).
+- **Проверено 2026-11-04 (RE-инженер):** полный импорт DLL (`-import … -analysisTimeoutPerFile 1800`)
+  завершился `REPORT: Import succeeded`, exit 0, ~3 м 50 с; лог `.re-run/logs/import.log`. Повторные
+  проходы `-process -readOnly` быстрые. После перезагрузки машины проект в `$TMPDIR` нужно импортировать заново.
 
 ### 3. `~/re` и прочие пути вне дерева
 
@@ -205,8 +208,9 @@ mkdir -p "${TMPDIR:-/tmp}/dsh-ghidra-home"     # каталог должен с�
 export JAVA_TOOL_OPTIONS="-Duser.home=${TMPDIR:-/tmp}/dsh-ghidra-home"   # только под sandbox
 
 "$GHIDRA_HEADLESS" -help                     # проверка старта (usage; exit code 1 — нормально)
-mkdir -p .re-run/ghproj                      # проект внутри workspace, а не ~/re/ghproj
-"$GHIDRA_HEADLESS" .re-run/ghproj txc -import "$PWD/txmlconnector64-6.47.2.26.4.dll" \
+mkdir -p "${TMPDIR:-/tmp}/txc-ghproj"        # проект ВНЕ workspace: Ghidra 12.2 запрещает '.re-run'
+mkdir -p .re-run && ln -sfn "${TMPDIR:-/tmp}/txc-ghproj" .re-run/ghproj   # удобный симлинк (gitignored)
+"$GHIDRA_HEADLESS" "${TMPDIR:-/tmp}/txc-ghproj" txc -import "$PWD/txmlconnector64-6.47.2.26.4.dll" \
   -analysisTimeoutPerFile 3000 -max-cpu 8 -scriptPath tools/re/ghidra
 ```
 
@@ -314,13 +318,15 @@ shasum -a 256 txmlconnector64-6.47.2.26.4.dll
 
 Ghidra 12.2 и JDK 25 есть, скрипты `tools/re/ghidra` на месте, `analyzeHeadless` стартует при
 `JAVA_HOME` + обходе `user.home` (см. [Песочница DSH](#песочница-dsh-gocache-и-запись-вне-workspace)).
-Ограничения: полный импорт DLL в этой проверке **не запускался**; проект Ghidra — внутри workspace
-(`.re-run/ghproj`), не `~/re/ghproj`.
+Проверено 2026-11-04: полный импорт DLL выполнен (`Import succeeded`, exit 0, ~3 м 50 с). Проект
+Ghidra — в `${TMPDIR:-/tmp}/txc-ghproj` (Ghidra 12.2 запрещает '.'-пути вида `.re-run/ghproj`);
+симлинк `.re-run/ghproj` — только для удобства.
 
-### RE-4 (живая проверка Go на демо-сервере) — заблокирован
+### RE-4 (живая проверка Go на демо-сервере) — доступен
 
-Нужны `TC_LOGIN` + `TC_PASSWORD` и окно демо-сервера; сейчас `TC_PASSWORD` нет. До появления пароля
-RE-4 не выполняется, сверка идёт по фикстурам.
+2026-11-04: пользователь заполнил `~/re/demo.env` (`TC_LOGIN`/`TC_PASSWORD`) и дал явное согласие на
+живые операции (Wine+DLL, демо-сервер; торговые команды — только по отдельному согласию в чате).
+RE-4 выполняется через `tools/tcproxy` в окне демо-сервера (09:50–23:50 МСК, будни).
 
 ### Состояние после Фазы 0
 
@@ -374,5 +380,9 @@ RE-4 не выполняется, сверка идёт по фикстурам.
 | GoLand MCP | `GoLand MCP Server 2026.2.3` на `127.0.0.1:64422/stream`; 1 tool `execute_tool`; привязан к `clickhouse-import-rosstat` (не к `txmlconnector`) |
 
 **История:** 2026-11-04 — первичная проверка окружения (env-scout, task-1); 2026-11-04 — Фаза 0
-плана закрыта (`plan/native-client` @ `a2a4c85`), статусы путей/фикстур обновлены. При изменении
-окружения обновляйте эту страницу и сверяйтесь с `tools/re/check_env.sh`.
+плана закрыта (`plan/native-client` @ `a2a4c85`), статусы путей/фикстур обновлены; 2026-11-04 — Фаза 0
+влита в `main` (PR #47), Ghidra-импорт проверен, секреты загружены (`~/re/demo.env`), RE-2/RE-3/RE-4
+доступны с согласия пользователя; 2026-11-04 — Фаза 1 закрыта (HEAD `6d4a689`), живые RE-2/RE-4
+использованы (E05/R6/E07), `make verify`/`check_env.sh` проверяют gofmt по `git ls-files '*.go'`
+(gitignored scratch в `.re-run/` не ломает DoD). При изменении окружения обновляйте эту страницу и
+сверяйтесь с `tools/re/check_env.sh`.

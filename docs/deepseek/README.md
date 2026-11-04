@@ -193,14 +193,14 @@ set -a; . ~/re/demo.env; set +a       # перед живыми командам
 
 | Блокер | Признак | Решение |
 |---|---|---|
-| Нет `TC_PASSWORD` | `tools/re/check_env.sh` → WARN `TC_PASSWORD: unset` | RE-2/RE-3/RE-4 и `wire-decode` недоступны; положить `TC_LOGIN`/`TC_PASSWORD` в `~/re/demo.env` (шаблон `tools/re/demo.env.example`, chmod 600), загрузить `set -a; . ~/re/demo.env; set +a`; до этого работаем на фикстурах/testserver |
+| Нет `TC_PASSWORD` | `tools/re/check_env.sh` → WARN `TC_PASSWORD: unset` | **Снято 2026-11-04:** `~/re/demo.env` заполнен, секреты доступны, согласие пользователя на живые операции получено; загружать `set -a; . ~/re/demo.env; set +a` |
 | Wine | `tools/re/check_env.sh` → `PASS Wine: wine-11.21` | установлен (`~/re/wine`, `~/re/wine-prefix`), `run_dll.sh` подставляет пути и DLL; проверено `get_connector_version` |
 | Демо-сервер закрыт | 23:50–09:50 МСК, выходные | живые шаги отложить; в отчёте — «окно демо-сервера» |
 | Qwen 404 | ревью-субагент вернул `null` | fallback GLM-5.3-Flash / deepseek-flash; Lead сообщает пользователю про `/v1` |
 | Worktree не в `.worktrees` | `create_worktree` вернул `.agents/worktrees/...` | патч `worktree.directory: .worktrees` **уже добавлен** 2026-11-04; действует после перезапуска DSH. До перезапуска — `.agents/worktrees` |
 | GoLand MCP не в сессии | нет инструментов `mcp__jetbrains__*` | патч `mcp-jetbrains` **уже добавлен** 2026-11-04; действует после перезапуска DSH |
 | MCP: `outside of the project directory` | project-scoped инструмент на `native/client.go` | MCP привязан к другому проекту GoLand; открыть `txmlconnector`/worktree в этом инстансе или использовать его MCP-порт |
-| Ghidra под sandbox | `analyzeHeadless` → `Unable to prompt user for JDK path` | `mkdir -p "${TMPDIR:-/tmp}/dsh-ghidra-home"`, `JAVA_HOME=openjdk@25`, `JAVA_TOOL_OPTIONS=-Duser.home=…`; проект — `.re-run/ghproj` (environment.md §Песочница DSH) |
+| Ghidra под sandbox | `analyzeHeadless` → `Unable to prompt user for JDK path` / `Path element starting with '.' is not permitted` | `mkdir -p "${TMPDIR:-/tmp}/dsh-ghidra-home"`, `JAVA_HOME=openjdk@25`, `JAVA_TOOL_OPTIONS=-Duser.home=…`; проект — `${TMPDIR:-/tmp}/txc-ghproj` (Ghidra 12.2 отвергает '.'-пути), симлинк `.re-run/ghproj`; проверено 2026-11-04 (import succeeded ~3 м 50 с) |
 | Конфликт write-scope | две карточки на один файл | сериализовать: `blocked_by` или передать владение; не мержить параллельные правки одного файла |
 | План противоречит коду/DLL | невозможно выполнить шаг | зафиксировать в `docs/protocol/` со статусом, сообщить Lead; задачу не «додумывать» |
 

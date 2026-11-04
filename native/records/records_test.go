@@ -9,13 +9,13 @@ import (
 )
 
 func TestRecordsStopsAtUnknownLayout(t *testing.T) {
-	_, err := Records([]byte{0x62, 0, 0})
-	if err == nil || !strings.Contains(err.Error(), "0x62") {
+	_, err := Records([]byte{0x21, 0, 0})
+	if err == nil || !strings.Contains(err.Error(), "0x21") {
 		t.Fatalf("err = %v", err)
 	}
 	var unknown *UnknownRecordError
-	if !errors.As(err, &unknown) || unknown.Tag != 0x62 {
-		t.Fatalf("err = %v, want UnknownRecordError for 0x62", err)
+	if !errors.As(err, &unknown) || unknown.Tag != 0x21 {
+		t.Fatalf("err = %v, want UnknownRecordError for 0x21", err)
 	}
 }
 

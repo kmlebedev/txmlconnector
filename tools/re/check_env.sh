@@ -103,11 +103,13 @@ else
 fi
 
 if command -v gofmt >/dev/null 2>&1; then
-	UNFORMATTED="$(gofmt -l . 2>/dev/null | head -5)"
+	# Only tracked Go files: .re-run/ holds gitignored RE scratch programs whose
+	# formatting is not the repository's concern (same scope as make verify).
+	UNFORMATTED="$(git ls-files '*.go' 2>/dev/null | xargs gofmt -l 2>/dev/null | head -5)"
 	if [ -z "$UNFORMATTED" ]; then
-		pass "gofmt -l .: пусто"
+		pass "gofmt tracked Go files: пусто"
 	else
-		fail "gofmt -l .: требуется форматирование: $(echo "$UNFORMATTED" | tr '\n' ' ')"
+		fail "gofmt tracked Go files: требуется форматирование: $(echo "$UNFORMATTED" | tr '\n' ' ')"
 	fi
 else
 	fail "gofmt: не найден в PATH"
