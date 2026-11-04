@@ -3,18 +3,24 @@
 Пара `margin-inject.hex` + `margin-dll.xml` снята оракулом (replay-server + DLL 6.47.2.26.4 под
 Wine 11.21, только loopback, без живых торговых команд) 2026-11-05.
 
-## Вход (`margin-inject.hex`, 80 байт)
+## Вход (`margin-inject.hex`, 86 байт)
 
-Три записи RQ_MAIN, подмешанные в поток ответа RQ_MAIN после запроса RQ_HISTORY_EXT (148):
+Четыре записи RQ_MAIN, подмешанные в поток ответа RQ_MAIN после запроса RQ_HISTORY_EXT (148):
 
 | Запись | Байты | Что задаёт |
 |---|---|---|
 | `0x02*` R_CLN_NEW | `020021…` (36 Б) | клиент id=4096, код `TESTCLIEN`, логин `TESTLOGIN`, тип 2 (leverage), market 1, currency 1 (RUB) |
 | `0x3b*` R_CLIENT_ASSET | `3b0015…` (24 Б) | денежная позиция клиента 4096: `sym=0xffff`, reg=1, mask=0x03, open_balance=balance=30 000 000 (300 000.00 RUB), mask2=0x04, currency RUR |
 | `0x3b*` R_CLIENT_ASSET | `3b0011…` (20 Б) | бумажная позиция SBER (`sym=26`): reg=1, mask=0x03, open_balance=balance=1000, mask2=0x04, currency RUR |
+| `0x0a` R_SEC_RATE | `0a 001a a21d07` (5 Б) | цена SBER для маржинального расчёта: `W secid=26`, packed L = 29146 (291.46 ₽ в копейках) |
 
 Формат записей — `docs/protocol/connect.md` (R_CLN_NEW), `docs/protocol/positions.md`
-(R_CLIENT_ASSET); упакованные целые — `tools/re/README.md` (RE-1).
+(R_CLIENT_ASSET), `docs/protocol/margin.md` (R_SEC_RATE → `symbol+0xb8`); упакованные целые —
+`tools/re/README.md` (RE-1). Запись `0x0a` задаёт цену явно, поэтому ожидаемые значения
+`margin-dll.xml` (13210/15210) не зависят от цены, загруженной из записанной сессии, и
+воспроизводятся формулой из `margin.md`:
+`maxbuy = trunc(300000·100/(0.1428·29146) + 1000·(1−0.1428)/0.1428) = 13210`,
+`maxsell = … + 1000·(1+0.1428)/0.1428 = 15210`.
 
 ## Выход (`margin-dll.xml`, 3 колбэка)
 
