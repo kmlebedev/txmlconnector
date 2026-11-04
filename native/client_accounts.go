@@ -126,16 +126,21 @@ func decodeClientAsset(c *Client, body []byte) ([]model.Event, error) {
 }
 
 // moneyDecimal converts a wire money value to the DLL money scale (2): the
-// Decimal printer then keeps at least one decimal digit (300000.0).
+// Decimal printer then keeps at least one decimal digit (300000.0). This is the
+// demo-limit: the money scale for other assets is not recovered (I).
 func moneyDecimal(units int64) model.Decimal {
 	return model.Decimal{Units: units, Scale: 2}
 }
 
 // moneyAssetInfo is the <asset>/<shortname> pair of a money position. Only the
-// demo case is confirmed (RUR on the MICEX market); the other DLL asset enum
-// values are not recovered, so they render empty and are documented as open.
-func moneyAssetInfo(clientMarket int, currency string) (asset, shortName string) {
-	if currency == "RUR" {
+// demo case is confirmed (RUR -> FOND_MICEX); the DLL asset enum and the
+// clientMarket role are not recovered, so the parameter is intentionally unused
+// and other currencies render empty (I).
+//
+// The multi-register aggregation below (sums, first reg, last currency) is inferred
+// from the demo one-register record and is not confirmed for several registers (I).
+func moneyAssetInfo(_ int, currency string) (asset, shortName string) {
+	if currency == "RUR" { // demo value only
 		return "FOND_MICEX", "Деньги КЦБ ММВБ (RUR)"
 	}
 	return "", ""

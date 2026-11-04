@@ -82,6 +82,12 @@ func TestRenderClientAndPositions(t *testing.T) {
 	if got := xmlcompat.PositionsXML([]model.MoneyPosition{position}, true); !strings.Contains(got, "<register>T0</register>") {
 		t.Fatalf("micex_registers PositionsXML = %s", got)
 	}
+	// The single Render entry point passes Options.MicexRegisters through for a
+	// money position event (Connector uses the same option for load-end batches).
+	catalog := records.NewCatalog(&model.Startup{})
+	if got, ok := xmlcompat.Render(catalog, &position, xmlcompat.Options{MicexRegisters: true}); !ok || !strings.Contains(got, "<register>T0</register>") {
+		t.Fatalf("Render(MicexRegisters) = %q, %v", got, ok)
+	}
 	if got, want := xmlcompat.OvernightXML(false), `<overnight status="false"/>`; got != want {
 		t.Fatalf("OvernightXML = %s, want %s", got, want)
 	}

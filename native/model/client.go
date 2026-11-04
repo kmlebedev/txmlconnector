@@ -7,9 +7,9 @@ type ClientAccount struct {
 	Type     string // spot, risk, leverage, margin_level or mct
 	Currency string // RUB for the demo (currency id 1)
 	Union    string // Z7 union of the record; empty on the demo
-	FortsAcc string // FORTS account, not recovered yet (task 20)
+	FortsAcc string // FORTS account: not recovered yet (R_CLN_NEW fields 4/8, task 20)
 	Market   int    // the client market from the record
-	Removed  bool   // the record updates an existing client: remove="true"
+	Removed  bool   // remove="true": update form is not recovered yet (R_CLN_NEW fields 4/8)
 }
 
 func (*ClientAccount) isEvent() {}
