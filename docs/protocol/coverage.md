@@ -43,7 +43,7 @@
 | 23 | max buy/sell, cln_sec_permissions, leverage | 5 | **stub** | каркас 6a57f75: `model/margin.go`, `client_margin.go`, I-ошибки; ждёт RE-2 |
 | 24 | news/get_old_news/get_news_body | 6 | **partial** | 0x35/0x36 парсеры+splitter, `<news_header>` O-побайтно, RQ_GETNEWS payloads (7484ffc); `<news_body>` — I (reply-механика, task-56) |
 | 25 | messages (R_MSG 0x01) | 6 | **done** | unsized 0x01, batch одного RQ_MAIN, `<messages>` O-побайтно (73a4acc/6cb9697) |
-| 26 | change_pass | 6 | **none** | только RE-3 без живой смены пароля |
+| 26 | change_pass | 6 | **done** | RQ_CHANGE_PWD 3, payload/SHA-1, replies, fatal empty reply, local texts (7427b10); живьём не выполнялось (S-негатив) |
 | 27 | options | 7 | **none** | — |
 | 28 | RPS/REPO/отчёты | 8 | **none** | — |
 | 29 | XML-коннектор целиком, native backend | 9 | **partial** | `native/connector.go`: 26/43 команд; `server/` native backend нет; матрица 45 имён — в этом документе `2 |
@@ -94,12 +94,13 @@
 | get_cln_sec_permissions | done (local) | локальный рендер | O/D | `TestClnSecPermissionsMatchDLL` | marketable из 0x0e; права/ставки I (FUN_18001a700) |
 | get_old_news | done | RQ_GETNEWS 73 (mode 1) | O/D | `TestOldNewsPayloadMatchesDLL`, `news-inject.hex` | заголовки — события 0x35/0x36; O-пейлоады 713e913e0201 / 017d217d0201 |
 | get_news_body | done (команда) | RQ_GETNEWS 73 (mode 2) | O/D | `TestGetNewsBodyRequest`, `TestNewsErrors` | payload 217d217d0102; `<news_body>` — I (task-56) |
+| change_pass | done | RQ_CHANGE_PWD 3 | O/D | `TestChangePasswordPayloadMatchesDLL/Command/ReplyErrors/LocalErrors/EmptyReplyFatal` | 56-Б SHA-1 payload; пустой reply фатален/закрывает сессию; S-негатив (живьём не выполнялось) |
 
 ### 2.3 Не реализовано в Connector (default → message not implemented)
 
-authenticate, set_csp (внешние криптопровайдеры; T29), cancelnegdeal, change_pass,
+authenticate, set_csp (внешние криптопровайдеры; T29), cancelnegdeal,
 get_family_strikes, get_option_families, get_options,
-makeordown, moveorder, newmrepoorder, newrepoorder, newrpsorder (14 имён). Соответствие задачам: T19 (moveorder/
+makeordown, moveorder, newmrepoorder, newrepoorder, newrpsorder (13 имён). Соответствие задачам: T19 (moveorder/
 makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Плюс отсутствуют `newreport4`/`cancelreport4` (T28/T29).
 
 ## 3. Записи RQ_MAIN (splitter `records.Records` + декодеры `native/events*`)
@@ -224,8 +225,10 @@ makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Пл�
    permissions=false/regrate=0 (mask/rates FUN_18001a700 не в RQ_MAIN), источник R и начальный V — I.
    **T24**: заголовки/команды сделаны (7484ffc), `<news_body>` reply-механика — I (task-56).
    **T25**: сделано (73a4acc/6cb9697), O-побайтно.
+   **T26**: change_pass сделан (7427b10): payload SHA-1, replies, fatal empty reply; живой смены
+   пароля не было (S-негатив), политика безопасности сервера — I.
 6. **T26–T28**: не начаты (change_pass, options, RPS/REPO).
-7. **T29**: 31/43 XML-команд в Connector; native backend `server/`, матрица 45 имён и тексты
+7. **T29**: 32/43 XML-команд в Connector; native backend `server/`, матрица 45 имён и тексты
    ошибок (Task 29 Step 1/1b) — не сделаны; нет `newreport4`/`cancelreport4` (task-index `8.1).
 8. **Windows/Wine**: нативный клиент сборками `make server_build/queues_build` и `make verify`
    проверяется; отдельного прогона native на Windows не было (не проверено).
