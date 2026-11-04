@@ -45,7 +45,7 @@
 | 25 | messages (R_MSG 0x01) | 6 | **done** | unsized 0x01, batch одного RQ_MAIN, `<messages>` O-побайтно (73a4acc/6cb9697) |
 | 26 | change_pass | 6 | **done** | RQ_CHANGE_PWD 3, payload/SHA-1, replies, fatal empty reply, local texts (7427b10); живьём не выполнялось (S-негатив) |
 | 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply, 149 O e2e (9b7204f); гейт версии 0x45 — I (поле не восстановлено), 153/150/151 mapping/XML — D/I |
-| 28 | RPS/REPO/отчёты | 8 | **none** | — |
+| 28 | RPS/REPO/отчёты | 8 | **partial** | payloads newrpsorder/newrepoorder/cancel O-побайтно, 6 команд, ошибки, D-literal XML (b9f305a); newmrepoorder/newreport4 и records/XML — I |
 | 29 | XML-коннектор целиком, native backend | 9 | **partial** | `native/connector.go`: 26/43 команд; `server/` native backend нет; матрица 45 имён — в этом документе `2 |
 | 30 | Матрица покрытия, soak, выпуск | 9 | **in progress** | этот документ; soak/выпуск — после 29 |
 
@@ -98,12 +98,16 @@
 | get_option_families | done | RQ_OPTION_FAMILIES 149 | O/D | `TestConnectorOptionFamilies`, `option-families-request/reply-*.hex` | payload 001a; пустой/непустой C-string reply (O); XML — D/I |
 | get_family_strikes | partial (I) | RQ_FAMILY_STRIKES 153 | D/I | `TestConnectorFamilyStrikesErrors` | mat_date ошибки D+O; family mapping и гейт 0x45 — I, запрос не отправляется |
 | get_options | partial (I) | RQ_CERTAIN_OPTIONS 151 | D/I | `TestConnectorGetOptions` | Z25 payload и local «No seccodes found»; XML/данные I |
+| newrpsorder | done | RQ_TRANSACT 14 (TRN 0x04) | O/D | `TestRPSPayloads`, `rps-transact-newrpsorder.hex` | 30-Б payload побайтно; repoterm/reporate offsets I |
+| newrepoorder | done | RQ_TRANSACT 14 (TRN 0x0e) | O/D | `TestRPSPayloads`, `rps-transact-newrepoorder.hex` | 39-Б payload побайтно; repo-поля I |
+| newmrepoorder | partial (I) | RQ_TRANSACT 14 | D/I | `TestRPSErrors` | payload не восстановлен -> explicit I |
+| cancelnegdeal | done | RQ_TRANSACT 14 (0x08+L) | O/D | `TestRPSPayloads`, `rps-transact-cancel.hex` | 2-Б payload 0810 |
+| newreport4 | partial (I) | RQ_TRANSACT 14 | D/I | `TestRPSErrors` | ustrade_leg layout не восстановлен -> explicit I |
+| cancelreport4 | done | RQ_TRANSACT 14 (0x08+L) | O/D | `TestRPSPayloads`, `rps-transact-cancel.hex` | payload как cancelnegdeal; различие TRN-кода I |
 
 ### 2.3 Не реализовано в Connector (default → message not implemented)
 
-authenticate, set_csp (внешние криптопровайдеры; T29), cancelnegdeal,
-makeordown, moveorder, newmrepoorder, newrepoorder, newrpsorder (10 имён). Соответствие задачам: T19 (moveorder/
-makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Плюс отсутствуют `newreport4`/`cancelreport4` (T28/T29).
+authenticate, set_csp (внешние криптопровайдеры; T29), makeordown, moveorder (4 имени).\nСоответствие задачам: T19 (moveorder/makeordown). Расхождение 45 vs 43 имён закрыто: T28 добавил `newreport4`/`cancelreport4`.
 
 ## 3. Записи RQ_MAIN (splitter `records.Records` + декодеры `native/events*`)
 
@@ -205,6 +209,8 @@ makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Пл�
 | `<news_body>` | NewsBody | `NewsBodyXML` (D-форма) | нет O | I (task-56) |
 | `<messages>` | Messages batch | `MessagesXML` | `message-dll.xml` | O |
 | `<option_families>`/`<family_strikes>`/`<options_failed>` | OptionFamily/OptionStrikes/EndOfFamily | `OptionFamiliesXML`/`FamilyStrikesXML`/`OptionsFailedXML` | нет O | I (D-литералы) |
+| `<negdeal>` | RPSTradeForExecution | `NegDealXML` | нет O | I (D-литералы) |
+| `<report>` | ExecutionReport | `ReportXML` | нет O | I (D-литералы) |
 
 ## 6. Тесты и фикстуры по подсистемам
 
