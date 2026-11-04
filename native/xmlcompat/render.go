@@ -58,6 +58,12 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return NewsHeaderXML(*e), true
 	case *model.Messages:
 		return MessagesXML(e.Items), true
+	case *model.OptionFamily:
+		return OptionFamiliesXML([]model.OptionFamily{*e}), true
+	case *model.OptionStrikes:
+		return FamilyStrikesXML(*e), true
+	case *model.EndOfFamily:
+		return OptionsFailedXML(*e), true
 	}
 	return "", false
 }
@@ -1001,4 +1007,42 @@ func MessagesXML(messages []model.Message) string {
 	}
 	b.WriteString("</messages>")
 	return b.String()
+}
+
+// The option XML forms are D literals only (options.md): no O fixture exists,
+// so the element meaning/order is I. MatDate is the R_FAMILY first L (semantics
+// I; rendered empty when 0), LotSize is the second L (I).
+func OptionFamiliesXML(families []model.OptionFamily) string {
+	var b strings.Builder
+	b.WriteString("<option_families>")
+	for _, family := range families {
+		b.WriteString("<family>")
+		if family.MatDate > 0 {
+			b.WriteString("<mat_date>" + time.Unix(family.MatDate, 0).UTC().Format("02.01.2006") + "</mat_date>")
+		} else {
+			b.WriteString("<mat_date></mat_date>")
+		}
+		b.WriteString("<lot_size>" + strconv.FormatInt(family.LotSize, 10) + "</lot_size>")
+		b.WriteString("</family>")
+	}
+	b.WriteString("</option_families>")
+	return b.String()
+}
+
+// FamilyStrikesXML renders the D literal <family_strikes> (order/attrs are I).
+func FamilyStrikesXML(strikes model.OptionStrikes) string {
+	var b strings.Builder
+	b.WriteString("<family_strikes>")
+	for _, strike := range strikes.Items {
+		b.WriteString("<strike><opt_code>" + escape(strike.OptCode) + "</opt_code>")
+		b.WriteString("<price>" + strconv.FormatInt(strike.Price, 10) + "</price>")
+		b.WriteString("<cp>" + escape(string([]byte{strike.CP})) + "</cp></strike>")
+	}
+	b.WriteString("</family_strikes>")
+	return b.String()
+}
+
+// OptionsFailedXML renders the D literal <options_failed> (trigger semantics I).
+func OptionsFailedXML(end model.EndOfFamily) string {
+	return "<options_failed><option opt_code=" + quoteAttr(end.OptCode) + " error=" + quoteAttr(end.Text) + "/></options_failed>"
 }
