@@ -146,7 +146,20 @@ func TestDisconnectDuringPollLogsOut(t *testing.T) {
 
 func TestLostConnectionReportsDisconnected(t *testing.T) {
 	srv := newTestServer(t)
-	c := New(Config{Dial: srv.Dial})
+	srv.SessionTimeout = 2 // keep the recovery limit short for the test
+	var mu sync.Mutex
+	connects := 0
+	dial := func(ctx context.Context, address string) (net.Conn, error) {
+		mu.Lock()
+		connects++
+		n := connects
+		mu.Unlock()
+		if n > 1 {
+			return nil, errors.New("connection refused")
+		}
+		return srv.Dial(ctx, address)
+	}
+	c := New(Config{Dial: dial})
 	rec := newRecorder()
 	if err := c.Start(rec.handle); err != nil {
 		t.Fatal(err)
@@ -155,11 +168,44 @@ func TestLostConnectionReportsDisconnected(t *testing.T) {
 	send(t, c, connectCommand())
 	rec.next(t, `<server_status`)
 	srv.Drop()
+	// The client retries the login, fails and reports the lost connection.
 	if m := rec.next(t, "<server_status"); !strings.HasSuffix(m, `connected="false"/>`) {
 		t.Fatalf("status = %s", m)
 	}
 	if got := send(t, c, `<command id="disconnect"/>`); !strings.Contains(got, "Соединение не установлено") {
 		t.Fatalf("disconnect = %s", got)
+	}
+}
+
+// TestConnectorReportsRecoveryStatus checks the callback the DLL emits after a
+// lost link is restored: <server_status> with connected="true" recover="true".
+func TestConnectorReportsRecoveryStatus(t *testing.T) {
+	first := newTestServer(t)
+	second := newTestServer(t)
+	var mu sync.Mutex
+	connects := 0
+	dial := func(ctx context.Context, address string) (net.Conn, error) {
+		mu.Lock()
+		connects++
+		n := connects
+		mu.Unlock()
+		if n == 1 {
+			return first.Dial(ctx, address)
+		}
+		return second.Dial(ctx, address)
+	}
+	c := New(Config{Dial: dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	first.Drop()
+	want := `<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="7" connected="true" recover="true"/>`
+	if m := rec.next(t, "<server_status"); m != want {
+		t.Fatalf("recovery status = %s, want %s", m, want)
 	}
 }
 
