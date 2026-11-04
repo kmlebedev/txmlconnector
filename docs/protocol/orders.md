@@ -285,3 +285,24 @@ virt/9993 → TESTCLIEN, длины сохранены).
 для newstoporder/newcondorder; cancelstoporder — success без id). Точная семантика каждого байта
 в stop-полях — I, нужна одна итерация с записью R_STOP-обновления (следующий шаг).EOF
 echo ok
+
+## moveorder / makeordown (Task 19) — D + O-валидация, payloads не сняты (блокер)
+
+**D:** `moveorder` — обработчик `FUN_180198420`; `makeordown` — `FUN_1801983a0`;
+`RQ_MAKE_COND_OWN` (112) — обменник `FUN_1803861e0` (строки `RQ_MAKE_COND_OWN …`).
+
+**O (реплейный DLL, fake reply type=14):**
+- `moveorder`: требует `transactionid` **и** элемент `moveflag` (без него — «Cannot find moveflag.»);
+  с несуществующим/не-активным id — «{32} Недопустимое значение параметра 'TransactionID' для
+  данной транзакции». Даже после fake-success `neworder` (transactionid=1) moveorder с id=1 даёт
+  ошибку {32}: по-видимому, DLL проверяет наличие **активной заявки в своём сторе**, а наш fake
+  reply не создаёт полноценную заявку — для снятия payload нужен ответ, порождающий активный ордер
+  (или живая S-сессия). Payload `transact-moveorder-payload.hex` пока НЕ снят.
+- `makeordown`: команда в этой конфигурации не доходит до RQ_MAKE_COND_OWN (нет ни результата,
+  ни C>S type=112 в захвате; harness завершает серию после предыдущих транзакций) — вероятно,
+  требует иного набора полей/не поддержана DLL. Формат/наличие — **I/не подтверждено**;
+  `RQ_MAKE_COND_OWN` (112): запрос/ответ — D-обменник известен, layout не восстановлен.
+
+**Итог:** task-44 требует либо S-сессии (утром), либо более полного fake-ответа neworder;
+фикстур moveorder/makeordown пока нет. Зафиксировано честно; после утренней S-съёмки — добрать.EOF
+echo ok
