@@ -23,4 +23,7 @@ type Trade struct {
 	Period          byte // 'O', 'N', 'C' or 0
 	OpenInterest    int64
 	HasOpenInterest bool
+	// Raw is the R_ALLTRADE record the trade was decoded from; it keeps the
+	// fields <alltrades> does not emit (Field2, Text, ...).
+	Raw AllTrade
 }

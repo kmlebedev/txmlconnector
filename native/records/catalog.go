@@ -161,7 +161,7 @@ func (c *Catalog) List() []SecNew {
 // catalog and the trade instant from the RQ_TIME bias: bias is the server
 // time-zone shift, UTC = wall clock + bias. The wall clock itself is kept in
 // WallTime for the DLL-compatible <time> rendering.
-func (c *Catalog) Trade(a AllTrade, bias time.Duration) model.Trade {
+func (c *Catalog) Trade(a model.AllTrade, bias time.Duration) model.Trade {
 	wall := a.Time
 	if wall == 0 {
 		wall = c.tradeDate
@@ -180,6 +180,7 @@ func (c *Catalog) Trade(a AllTrade, bias time.Duration) model.Trade {
 		Quantity: a.Quantity,
 		BuySell:  a.BuySell,
 		Period:   a.Period,
+		Raw:      a,
 	}
 	if s, ok := c.secs[a.SecID]; ok {
 		t.SecCode = s.SecCode
@@ -188,7 +189,7 @@ func (c *Catalog) Trade(a AllTrade, bias time.Duration) model.Trade {
 		t.Board = b.Code
 	}
 	t.Price.Scale, _ = c.Decimals(a.SecID, a.Board)
-	if a.Flags&AllTradeOpenInterest != 0 {
+	if a.Flags&model.AllTradeOpenInterest != 0 {
 		t.OpenInterest, t.HasOpenInterest = a.OpenInt, true
 	}
 	return t
