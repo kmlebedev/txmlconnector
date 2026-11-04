@@ -1,6 +1,7 @@
 package xmlcompat
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return PositionsXML([]model.MoneyPosition{*e}, opt.MicexRegisters), true
 	case *model.Union:
 		return UnionXML(*e), true
+	case *model.SecInfoUpdate:
+		return SecInfoUpdateXML(*e), true
 	}
 	return "", false
 }
@@ -122,4 +125,73 @@ func UnionXML(u model.Union) string {
 // quoteAttr renders an XML attribute value with the surrounding quotes.
 func quoteAttr(s string) string {
 	return "\"" + escape(s) + "\""
+}
+
+// SecInfoUpdateXML renders one <sec_info_upd> callback (FUN_180107800): the
+// security identity and the changed fields in the DLL order. The FUT form is
+// selected for futures, the OPT form for options (the DLL's type switch).
+func SecInfoUpdateXML(u model.SecInfoUpdate) string {
+	var b strings.Builder
+	b.WriteString("<sec_info_upd><secid>" + strconv.Itoa(int(u.SecID)) + "</secid>")
+	b.WriteString("<seccode>" + escape(u.Symbol.SecCode) + "</seccode>")
+	b.WriteString("<market>" + strconv.Itoa(u.Market) + "</market>")
+	fut := u.Kind == 4 || u.BuyDeposit != nil || u.SellDeposit != nil || u.MinPrice != nil || u.MaxPrice != nil
+	if fut {
+		if u.BuyDeposit != nil {
+			b.WriteString("<buy_deposit>" + moneyHundredths(*u.BuyDeposit) + "</buy_deposit>")
+		}
+		if u.SellDeposit != nil {
+			b.WriteString("<sell_deposit>" + moneyHundredths(*u.SellDeposit) + "</sell_deposit>")
+		}
+		if u.PointCost != nil {
+			b.WriteString("<point_cost>" + u.PointCost.String() + "</point_cost>")
+		}
+		if u.MinPrice != nil {
+			b.WriteString("<minprice>" + u.MinPrice.String() + "</minprice>")
+		}
+		if u.MaxPrice != nil {
+			b.WriteString("<maxprice>" + u.MaxPrice.String() + "</maxprice>")
+		}
+	} else {
+		if u.BgoC != nil {
+			b.WriteString("<bgo_c>" + moneyHundredths(*u.BgoC) + "</bgo_c>")
+		}
+		if u.BgoNC != nil {
+			b.WriteString("<bgo_nc>" + moneyHundredths(*u.BgoNC) + "</bgo_nc>")
+		}
+		if u.BgoBuy != nil {
+			b.WriteString("<bgo_buy>" + moneyHundredths(*u.BgoBuy) + "</bgo_buy>")
+		}
+		if u.PointCost != nil {
+			b.WriteString("<point_cost>" + u.PointCost.String() + "</point_cost>")
+		}
+	}
+	b.WriteString("</sec_info_upd>")
+	return b.String()
+}
+
+// moneyHundredths renders a Scale-2 money value with exactly two decimals, as
+// the DLL prints the sec_info_upd money fields (e.g. bgo_buy 17425.00): unlike
+// model.Decimal.String it keeps the trailing zero that the callback carries.
+func moneyHundredths(d model.Decimal) string {
+	units := d.Units
+	if d.Scale > 2 {
+		units /= int64(math.Pow10(int(d.Scale - 2)))
+	} else if d.Scale < 2 {
+		units *= int64(math.Pow10(int(2 - d.Scale)))
+	}
+	neg := units < 0
+	if neg {
+		units = -units
+	}
+	whole, frac := units/100, units%100
+	text := strconv.FormatInt(whole, 10) + "."
+	if frac < 10 {
+		text += "0"
+	}
+	text += strconv.FormatInt(frac, 10)
+	if neg {
+		return "-" + text
+	}
+	return text
 }
