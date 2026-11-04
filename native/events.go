@@ -19,6 +19,11 @@ type decoder func(c *Client, body []byte) ([]model.Event, error)
 var decoders = map[byte]decoder{}
 
 // registerDecoder adds the decoder of a RQ_MAIN record tag.
+//
+// Contract: the decoder runs inside Client.Poll with the client mutex held, so
+// it must not call Client methods that take that mutex (Subscribe/Run/...),
+// must not block and must return its events quickly. Stats updates (trades,
+// duplicates) happen inside the decoder and are protected by the same mutex.
 func registerDecoder(tag byte, d decoder) {
 	if decoders[tag] != nil {
 		panic(fmt.Sprintf("native: duplicate decoder for record tag %#02x", tag))

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/testserver"
 )
 
@@ -217,5 +218,52 @@ func waitFor(t *testing.T, cond func() bool) {
 			t.Fatal("condition not met")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestEventlessMainStillDeliversSecurities checks that an RQ_MAIN reply whose
+// only content is a catalog mutation still flushes the <securities>/<pits>
+// chunks: the DLL emits them for every poll, even when no market event came.
+func TestEventlessMainStillDeliversSecurities(t *testing.T) {
+	main := readFixture(t, "main1-demo.hex.gz")
+	recs, err := records.Records(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var secBody []byte
+	for _, r := range recs {
+		if r.Tag == records.TagSecNew {
+			secBody = append([]byte(nil), r.Body...)
+			break
+		}
+	}
+	if secBody == nil {
+		t.Fatal("snapshot fixture has no R_SEC_NEW record")
+	}
+	const newID = 65000
+	secBody[0], secBody[1] = byte(newID>>8), byte(newID&0xff)
+	payload := append([]byte{records.TagSecNew, byte(len(secBody) >> 8), byte(len(secBody))}, secBody...)
+
+	srv := newTestServer(t)
+	srv.Snapshot = main
+	srv.AfterSubscribe = payload
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	sub := `<command id="subscribe"><alltrades><security><board>TQBR</board><seccode>SBER</seccode></security></alltrades></command>`
+	if got := send(t, c, sub); got != `<result success="true"/>` {
+		t.Fatalf("subscribe = %s", got)
+	}
+	msg := rec.next(t, "<securities>")
+	if !strings.Contains(msg, `secid="65000"`) {
+		t.Fatalf("securities chunk without the new instrument: %s", msg)
+	}
+	if strings.Contains(msg, "<trade") {
+		t.Fatalf("unexpected trades in the securities chunk: %s", msg)
 	}
 }

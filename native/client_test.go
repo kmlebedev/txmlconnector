@@ -276,7 +276,10 @@ func TestConcurrentRequestsDuringRun(t *testing.T) {
 	runCtx, runCancel := context.WithCancel(ctx)
 	errc := make(chan error, 1)
 	go func() {
-		errc <- c.Run(runCtx, RunOptions{RqDelay: 10 * time.Millisecond}, func([]model.Event) error { return nil })
+		errc <- c.Run(runCtx, RunOptions{RqDelay: 10 * time.Millisecond}, func([]model.Event) error {
+			_ = c.Stats() // the handler runs without Client.mu held; else this deadlocks
+			return nil
+		})
 	}()
 
 	var wg sync.WaitGroup

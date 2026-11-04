@@ -82,20 +82,32 @@ func (s *Server) Dial(ctx context.Context, address string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	accepted := make(chan struct{})
 	go func() {
 		defer ln.Close()
 		server, err := ln.Accept()
 		if err != nil {
+			close(accepted)
 			return
 		}
+		// Register under the mutex before Dial returns: a Drop called right
+		// after Dial then closes this connection too.
 		s.mu.Lock()
 		s.conns = append(s.conns, server)
 		s.delay = s.MainDelay
 		s.mu.Unlock()
+		close(accepted)
 		s.serve(server)
 	}()
 	var d net.Dialer
-	return d.DialContext(ctx, "tcp", ln.Addr().String())
+	client, err := d.DialContext(ctx, "tcp", ln.Addr().String())
+	if err != nil {
+		ln.Close() // unblock Accept and let the goroutine finish
+		<-accepted
+		return nil, err
+	}
+	<-accepted
+	return client, nil
 }
 
 // Drop closes every live server connection, simulating a lost link.
