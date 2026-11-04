@@ -1,6 +1,7 @@
 package xmlcompat
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -47,6 +48,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return SecInfoXML(*e), true
 	case *model.Candles:
 		return CandlesXML(*e), true
+	case *model.Order:
+		return OrdersXML([]model.Order{*e}), true
 	}
 	return "", false
 }
@@ -450,4 +453,89 @@ func CandlesXML(candles model.Candles) string {
 	}
 	b.WriteString("</candles>")
 	return b.String()
+}
+
+// OrdersXML renders one <orders> callback of the order feed (D+O form of
+// docs/protocol/orders.md; the element order is the oracle-confirmed one).
+func OrdersXML(orders []model.Order) string {
+	var b strings.Builder
+	b.WriteString("<orders>")
+	for _, order := range orders {
+		b.WriteString(OrderXML(order))
+	}
+	b.WriteString("</orders>")
+	return b.String()
+}
+
+// OrderXML renders one <order transactionid> element.
+func OrderXML(order model.Order) string {
+	timeOfDay := func(sec int32) string {
+		return fmt.Sprintf("%02d:%02d:%02d", sec/3600, (sec%3600)/60, sec%60)
+	}
+	var b strings.Builder
+	b.WriteString("<order transactionid=" + quoteAttr(strconv.FormatUint(order.TransactionID, 10)) + ">")
+	b.WriteString("<orderno>" + strconv.FormatUint(order.OrderNo, 10) + "</orderno>")
+	b.WriteString("<secid>" + strconv.Itoa(int(order.SecID)) + "</secid>")
+	b.WriteString("<union>" + escape(order.Union) + "</union>")
+	b.WriteString("<board>" + escape(order.Board) + "</board>")
+	b.WriteString("<seccode>" + escape(order.SecCode) + "</seccode>")
+	b.WriteString("<client>" + escape(order.Client) + "</client>")
+	b.WriteString("<status>" + orderStatusName(order.Status) + "</status>")
+	b.WriteString("<buysell>" + escape(string(order.BuySell)) + "</buysell>")
+	b.WriteString("<time>" + timeOfDay(order.Time) + "</time>")
+	b.WriteString("<accepttime>" + timeOfDay(order.AcceptTime) + "</accepttime>")
+	b.WriteString("<brokerref>" + escape(order.BrokerRef) + "</brokerref>")
+	b.WriteString("<value>0.0</value><accruedint>0.0</accruedint><settlecode></settlecode>")
+	b.WriteString("<balance>" + strconv.FormatInt(order.Balance, 10) + "</balance>")
+	b.WriteString("<price>" + orderAmount(order.Price) + "</price>")
+	b.WriteString("<quantity>" + strconv.FormatInt(order.Quantity, 10) + "</quantity>")
+	b.WriteString("<hidden>0</hidden>")
+	b.WriteString("<yield>" + orderAmount(order.Yield) + "</yield>")
+	b.WriteString("<withdrawtime>0</withdrawtime>")
+	b.WriteString("<condition>" + orderConditionName(order.Condition) + "</condition>")
+	b.WriteString("<conditionvalue>" + orderAmount(order.ConditionValue) + "</conditionvalue>")
+	b.WriteString("<validafter>" + timeOfDay(order.ValidAfter) + "</validafter>")
+	b.WriteString("<validbefore>" + timeOfDay(order.ValidBefore) + "</validbefore>")
+	b.WriteString("<maxcomission>0.0</maxcomission><within_pos>true</within_pos>")
+	b.WriteString("<result>" + escape(order.Result) + "</result>")
+	b.WriteString("</order>")
+	return b.String()
+}
+
+// orderAmount prints the DLL order amount style: the Decimal trimmed, but with
+// at least one fractional digit (100.00 -> 100.0, 5.55 -> 5.55, 0 -> 0.0).
+func orderAmount(d model.Decimal) string {
+	text := d.String()
+	if !strings.Contains(text, ".") {
+		text += ".0"
+	}
+	return text
+}
+
+// orderStatusName maps the DLL order status enum (only 1/2 are oracle-proven).
+func orderStatusName(status int) string {
+	switch status {
+	case 0:
+		return "none"
+	case 1:
+		return "watching"
+	case 2:
+		return "disabled"
+	default:
+		return strconv.Itoa(status)
+	}
+}
+
+// orderConditionName maps the condition enum (Bid is oracle-confirmed).
+func orderConditionName(condition int) string {
+	switch condition {
+	case 1:
+		return "Bid"
+	case 3:
+		return "Ask"
+	case 0:
+		return ""
+	default:
+		return strconv.Itoa(condition)
+	}
 }
