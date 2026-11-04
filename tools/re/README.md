@@ -67,10 +67,18 @@ go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
 Проверка DLL под Wine:
 
 ```bash
+export WINE="$HOME/re/wine/Wine Devel.app/Contents/Resources/wine/bin/wine"
+export WINEPREFIX="$HOME/re/wine-prefix"
 export TXC_DLL=$PWD/txmlconnector64-6.47.2.26.4.dll
 tools/re/run_dll.sh 1s '<command id="get_connector_version"/>'
 # CALLBACK: <connector_version>6.47.2.26.4</connector_version>
 ```
+
+На текущей машине Wine 11.21 и prefix уже установлены по этим путям; `run_dll.sh` подставляет
+`WINE`/`WINEPREFIX`/`TXC_DLL` по умолчанию, если переменные не заданы (проверено 2026-11-04).
+Секреты и Wine-экспорты удобно держать в `~/re/demo.env` (chmod 600, шаблон —
+`tools/re/demo.env.example`): `set -a; . ~/re/demo.env; set +a` перед живыми командами.
+Заполненный `*.env` в git не попадает.
 
 Проект Ghidra создаётся один раз, анализ занимает несколько минут. Каталог проекта держите вне репозитория:
 
