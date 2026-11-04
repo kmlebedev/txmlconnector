@@ -25,6 +25,8 @@ import (
 
 	"github.com/kmlebedev/txmlconnector/client/commands"
 	"github.com/kmlebedev/txmlconnector/connector"
+	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/session"
 	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
 )
@@ -220,7 +222,7 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		if client == nil {
 			return failure(msgNeedsConnection), nil
 		}
-		c.emit(client.Catalog().SecuritiesDumpXML())
+		c.emit(xmlcompat.SecuritiesDumpXML(client.Catalog().Startup(), client.Catalog().List()))
 		return success(), nil
 	case "subscribe", "unsubscribe":
 		return c.subscribe(ctx, command, id == "subscribe")
@@ -295,15 +297,12 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 			}
 			more = m
 			if len(trades) > 0 {
-				raw := make([]xmlcompat.AllTrade, len(trades))
-				for i, t := range trades {
-					raw[i] = t.Raw
-				}
-				c.emit(client.Catalog().AllTradesXML(raw, c.withMillis))
+				c.emit(xmlcompat.AllTradesXML(trades, c.withMillis))
 			}
 			if secs := client.Catalog().DrainPending(); len(secs) > 0 {
-				c.emit(client.Catalog().Startup().SecuritiesXML(secs))
-				c.emit(client.Catalog().Startup().PitsXML(secs))
+				st := client.Catalog().Startup()
+				c.emit(xmlcompat.SecuritiesXML(st, secs))
+				c.emit(xmlcompat.PitsXML(st, secs))
 			}
 		}
 	}
@@ -315,15 +314,15 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 // chunk per RQ_MAIN poll that carried new instruments, then <pits>.
 func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time.Duration) (*Client, error) {
 	var (
-		st   *xmlcompat.Startup
+		st   *model.Startup
 		mErr error
 	)
 	client, err := Dial(ctx, ClientConfig{
 		Address: net.JoinHostPort(req.Host, req.Port), Login: req.Login, Password: req.Password,
 		Client: c.cfg.Client, RequestTimeout: timeout, Dial: c.cfg.Dial,
-		OnDictionaries: func(s *xmlcompat.Startup) {
+		OnDictionaries: func(s *model.Startup) {
 			st = s
-			for _, v := range []any{s.MarketsXML(), s.BoardsXML(), s.CandleKindsXML()} {
+			for _, v := range []any{xmlcompat.MarketsXML(s), xmlcompat.BoardsXML(s), xmlcompat.CandleKindsXML(s)} {
 				if mErr != nil {
 					return
 				}
@@ -335,10 +334,10 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 				c.emit(m)
 			}
 		},
-		OnSecurities: func(secs []xmlcompat.SecNew) {
+		OnSecurities: func(secs []records.SecNew) {
 			if mErr == nil && st != nil {
-				c.emit(st.SecuritiesXML(secs))
-				c.emit(st.PitsXML(secs))
+				c.emit(xmlcompat.SecuritiesXML(st, secs))
+				c.emit(xmlcompat.PitsXML(st, secs))
 			}
 		},
 	})
@@ -386,9 +385,9 @@ func (c *Connector) subscribe(ctx context.Context, command string, on bool) (str
 	c.mu.Lock()
 	client := c.client
 	c.mu.Unlock()
-	var symbols []Symbol
+	var symbols []model.Symbol
 	for _, s := range req.AllTrades.Securities {
-		symbols = append(symbols, Symbol{Board: s.Board, SecCode: s.SecCode})
+		symbols = append(symbols, model.Symbol{Board: s.Board, SecCode: s.SecCode})
 	}
 	for _, id := range req.AllTrades.SecIDs {
 		sec, ok := client.Catalog().Security(uint16(id))
@@ -397,7 +396,7 @@ func (c *Connector) subscribe(ctx context.Context, command string, on bool) (str
 		if !ok || !hasPit || !hasBoard {
 			return failure(fmt.Sprintf("unknown secid %d", id)), nil
 		}
-		symbols = append(symbols, Symbol{Board: board.Code, SecCode: sec.SecCode})
+		symbols = append(symbols, model.Symbol{Board: board.Code, SecCode: sec.SecCode})
 	}
 	update := client.SubscribeAllTrades
 	if !on {
@@ -507,7 +506,7 @@ func connectErrorXML(err error) string {
 	message := msgConnectFailed
 	var le *session.LoginError
 	if errors.As(err, &le) && le.Message != "" {
-		message = xmlcompat.DecodeCP1251(le.Message)
+		message = records.DecodeCP1251(le.Message)
 	}
 	return `<server_status connected="error">` + escapeText(message) + `</server_status>`
 }

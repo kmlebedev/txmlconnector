@@ -123,4 +123,4 @@ go test ./native/xmlcompat        # включает TestSecurityXMLBytes — п
 TXML_DEMO_MAIN=main.hex TXML_DEMO_XML=dll.xml go test -run SecuritiesFull -v ./native/xmlcompat
 ```
 
-Фикстуры в `native/xmlcompat/testdata` — справочные данные демо-сервера без полей счёта: ответ RQ_STARTUP, первый ответ RQ_MAIN (499 инструментов) и соответствующие колбэки DLL.
+Фикстуры в `native/records/testdata` — справочные данные демо-сервера без полей счёта: ответ RQ_STARTUP, первый ответ RQ_MAIN (499 инструментов) и соответствующие колбэки DLL.

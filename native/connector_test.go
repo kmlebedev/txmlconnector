@@ -40,7 +40,7 @@ type fakeServer struct {
 }
 
 func newFakeServer(t *testing.T) *fakeServer {
-	raw, err := os.ReadFile("xmlcompat/testdata/startup-demo.hex")
+	raw, err := os.ReadFile("records/testdata/startup-demo.hex")
 	if err != nil {
 		t.Fatal(err)
 	}

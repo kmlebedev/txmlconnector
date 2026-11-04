@@ -25,6 +25,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/kmlebedev/txmlconnector/native"
+	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/natsout"
 )
 
@@ -52,8 +53,8 @@ func main() {
 	}
 }
 
-func parseSymbols(list string) ([]native.Symbol, error) {
-	var out []native.Symbol
+func parseSymbols(list string) ([]model.Symbol, error) {
+	var out []model.Symbol
 	for _, item := range strings.Split(list, ",") {
 		item = strings.TrimSpace(item)
 		if item == "" {
@@ -63,12 +64,12 @@ func parseSymbols(list string) ([]native.Symbol, error) {
 		if !ok || board == "" || code == "" {
 			return nil, fmt.Errorf("bad security %q, want BOARD:SECCODE", item)
 		}
-		out = append(out, native.Symbol{Board: board, SecCode: code})
+		out = append(out, model.Symbol{Board: board, SecCode: code})
 	}
 	return out, nil
 }
 
-func run(ctx context.Context, addr, login, password, natsURL, prefix string, symbols []native.Symbol, delay, statsEvery time.Duration) error {
+func run(ctx context.Context, addr, login, password, natsURL, prefix string, symbols []model.Symbol, delay, statsEvery time.Duration) error {
 	nc, err := nats.Connect(natsURL, nats.Name("txmlconnector native-trades"))
 	if err != nil {
 		return fmt.Errorf("nats: %w", err)
