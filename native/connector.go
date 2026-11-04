@@ -434,6 +434,19 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 				c.emit(xmlcompat.PitsXML(st, secs))
 			}
 		},
+		OnLoadEvent: func(events []model.Event) {
+			if mErr != nil {
+				return
+			}
+			for _, ev := range events {
+				// Accounts, positions and unions are emitted from the state
+				// after the load (catalog/client store below), so only the
+				// updates the DLL reports per RQ_MAIN reply go from here.
+				if update, ok := ev.(*model.SecInfoUpdate); ok {
+					c.emit(xmlcompat.SecInfoUpdateXML(*update))
+				}
+			}
+		},
 	})
 	if err != nil {
 		return nil, err

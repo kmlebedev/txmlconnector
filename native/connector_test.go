@@ -656,3 +656,100 @@ func TestConnectorSecInfoUpd(t *testing.T) {
 		t.Fatalf("sec_info_upd = %s, want %s", got, want)
 	}
 }
+
+// TestConnectorSecInfoUpdFromLoad checks the load path: R_SEC_PARAM in the
+// snapshot (not after the subscription) reaches the XML stream before the
+// end-of-load <client>/<positions>/<overnight>/<server_status> callbacks, as in
+// the E07 capture (all 684 sec_info_upd callbacks come before <client>).
+func TestConnectorSecInfoUpdFromLoad(t *testing.T) {
+	srv := newTestServer(t)
+	srv.Snapshot = append(secNewRecord(t, "SBER", 26), secParamRecord(t, 26, 3272739, 100)...)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	rec.mu.Lock()
+	messages := append([]string(nil), rec.msgs...)
+	rec.mu.Unlock()
+	index := func(prefix string) int {
+		for i, m := range messages {
+			if strings.HasPrefix(m, prefix) {
+				return i
+			}
+		}
+		return -1
+	}
+	securities := index("<securities")
+	update := index("<sec_info_upd")
+	status := index("<server_status")
+	if securities < 0 || update < 0 || status < 0 {
+		t.Fatalf("missing callbacks in %q", messages)
+	}
+	if !(securities < update && update < status) {
+		t.Fatalf("load order: securities %d sec_info_upd %d status %d", securities, update, status)
+	}
+	want := "<sec_info_upd><secid>26</secid><seccode>SBER</seccode><market>1</market>"
+	want += "<buy_deposit>32727.39</buy_deposit><point_cost>100</point_cost></sec_info_upd>"
+	if got := messages[update]; got != want {
+		t.Fatalf("load sec_info_upd = %s, want %s", got, want)
+	}
+}
+
+// TestConnectorSecInfoMutedSilent checks that a R_SEC_PARAM without mask 0x8 in
+// the snapshot produces no callback and does not break the load.
+func TestConnectorSecInfoMutedSilent(t *testing.T) {
+	var w wire.Writer
+	w.Uint16(26)
+	w.Int64(0x3cc0) // no bit 0x8: muted, no values follow
+	body := w.Bytes()
+	muted := make([]byte, 3+len(body))
+	muted[0] = records.TagSecParam
+	muted[1] = byte(len(body) >> 8)
+	muted[2] = byte(len(body))
+	copy(muted[3:], body)
+	srv := newTestServer(t)
+	srv.Snapshot = append(secNewRecord(t, "SBER", 26), muted...)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	rec.mu.Lock()
+	messages := append([]string(nil), rec.msgs...)
+	rec.mu.Unlock()
+	for _, m := range messages {
+		if strings.HasPrefix(m, "<sec_info_upd") {
+			t.Fatalf("muted record produced a callback: %q", messages)
+		}
+	}
+}
+
+// TestConnectorSecInfoUnknownSecID checks that a R_SEC_PARAM for a secid missing
+// from the catalog is skipped without aborting the poll.
+func TestConnectorSecInfoUnknownSecID(t *testing.T) {
+	srv := newTestServer(t)
+	srv.Snapshot = append(secNewRecord(t, "SBER", 26), secParamRecord(t, 9999, 3272739, 100)...)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	rec.mu.Lock()
+	messages := append([]string(nil), rec.msgs...)
+	rec.mu.Unlock()
+	for _, m := range messages {
+		if strings.HasPrefix(m, "<sec_info_upd") {
+			t.Fatalf("unknown secid produced a callback: %q", messages)
+		}
+	}
+}

@@ -51,6 +51,12 @@ type ClientConfig struct {
 	// R_SEC_NEW records, with exactly those records, as the DLL emits
 	// <securities> chunks while the snapshot arrives.
 	OnSecurities func([]records.SecNew)
+	// OnLoadEvent is called while the snapshot is loading with the events of
+	// one RQ_MAIN reply in wire order, after OnSecurities of that reply. The
+	// DLL emits some callbacks (for example <sec_info_upd>) already during the
+	// load (E07: all 684 sec_info_upd callbacks before <client>/<server_status>),
+	// so the Connector forwards them from here instead of dropping them.
+	OnLoadEvent func([]model.Event)
 }
 
 // Stats counts what decoding has seen.
@@ -131,9 +137,11 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 }
 
 // load consumes the RQ_STARTUP dictionaries and the initial RQ_MAIN snapshot.
-// Events seen while loading are dropped: trades are not expected before the
-// subscription (the DLL delivers none either), and other event families only
-// start flowing after it; unknown layouts are counted in Stats, not reported.
+// Trades are not expected before the subscription (the DLL delivers none
+// either). The events of each poll are handed to ClientConfig.OnLoadEvent in
+// wire order (the DLL emits e.g. <sec_info_upd> during the load); other event
+// families keep their state and are rendered by the Connector after the load.
+// Unknown layouts are counted in Stats, not reported.
 func (c *Client) load(ctx context.Context, conn *session.Conn) error {
 	st, err := conn.Time(ctx)
 	if err != nil {
@@ -176,6 +184,9 @@ func (c *Client) load(ctx context.Context, conn *session.Conn) error {
 			if secs := c.catalog.DrainPending(); len(secs) > 0 {
 				c.cfg.OnSecurities(secs)
 			}
+		}
+		if c.cfg.OnLoadEvent != nil && len(events) > 0 {
+			c.cfg.OnLoadEvent(events)
 		}
 	}
 	return nil
