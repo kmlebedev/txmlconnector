@@ -133,6 +133,7 @@ func compareSecurities(t *testing.T, payloads, docs [][]byte) int {
 			}
 		}
 		check("secid", g.SecId, w.SecId)
+		check("active", g.Active, w.Active)
 		check("seccode", g.SecCode, w.SecCode)
 		check("shortname", g.ShortName, w.ShortName)
 		check("instrclass", g.InstrClass, w.InstrClass)
@@ -144,6 +145,12 @@ func compareSecurities(t *testing.T, payloads, docs [][]byte) int {
 		check("currencyid", g.CurrencyID, w.CurrencyID)
 		check("lotdivider", g.LotDivider, w.LotDivider)
 		check("sec_tz", g.SecTZ.Name, w.SecTZ.Name)
+		check("quotestype", g.QuotesType, w.QuotesType)
+		check("MIC", g.MIC, w.MIC)
+		check("ticker", g.Ticker, w.Ticker)
+		if w.Active == "true" {
+			check("opmask", g.OpMask, w.OpMask)
+		}
 		if w.LotSizeText != "" {
 			check("lotsize", strconv.Itoa(g.LotSize), w.LotSizeText)
 		}
