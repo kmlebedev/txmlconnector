@@ -31,6 +31,12 @@ type Quotes struct {
 }
 
 // ParseQuotes decodes the body of an R_QUOTES record.
+//
+// Not recovered (I): the optional L between the price delta and the quantity
+// (read by the DLL when FUN_18024f280(ctx, secid) != 0, rendered as <yield>) and
+// the <source> variant of <quote>; the demo TQBR records carry neither. This is
+// a blocker for yield-bearing modes only (separate RE card if needed).
+
 func ParseQuotes(body []byte) (Quotes, error) {
 	var q Quotes
 	r := wire.NewReader(body)
@@ -89,8 +95,11 @@ func (q Quotes) Event(cat *Catalog) model.Quotes {
 	}
 	for _, level := range q.Levels {
 		quote := model.Quote{SecID: q.SecID, Symbol: ev.Symbol}
+		// The DLL builds <price> before branching on buy/sell == -1 (asm
+		// 0x1800faa27/0x1800faad6), so a deletion still carries the accumulated
+		// price; the quantity becomes -1.
+		quote.Price = model.Decimal{Units: level.Price, Scale: decimals}
 		if level.Deleted {
-			// Deletion marker (PDF 4.9): the side quantity is -1, no price.
 			if level.Side == 'B' {
 				quote.Buy = -1
 			} else {
@@ -99,7 +108,6 @@ func (q Quotes) Event(cat *Catalog) model.Quotes {
 			ev.Levels = append(ev.Levels, quote)
 			continue
 		}
-		quote.Price = model.Decimal{Units: level.Price, Scale: decimals}
 		if level.Side == 'B' {
 			quote.Buy = level.Qty
 		} else {

@@ -585,7 +585,7 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 }
 
 // subscribe handles <alltrades> of subscribe/unsubscribe, in either the
-// secid or the board+seccode form. Quotations and quotes are not implemented.
+// secid or the board+seccode form.
 func (c *Connector) subscribe(ctx context.Context, command string, on bool) (string, error) {
 	type feed struct {
 		SecIDs     []int `xml:"secid"`
@@ -627,25 +627,21 @@ func (c *Connector) subscribe(ctx context.Context, command string, on bool) (str
 		return failure(err.Error()), nil
 	}
 	sub.AllTrades = symbols
-	if req.Quotes != nil {
-		// The DLL accepts only the first element of one feed block (S for
-		// <quotations>; the same shape is used for <quotes>).
-		quotes, err := resolve(*req.Quotes)
-		if err != nil {
-			return failure(err.Error()), nil
-		}
-		if len(quotes) > 1 {
-			quotes = quotes[:1]
-		}
-		sub.Quotes = quotes
-	}
 	// <quotations> needs document order: encoding/xml merges repeated elements,
 	// so the first block/child is picked by a streaming scan (S r8: a command
 	// with four <quotations> blocks subscribed only the first security).
-	if quotations, err := c.firstQuotation(ctx, command); err != nil {
+	if quotations, err := c.firstFeed(client, command, "quotations"); err != nil {
 		return failure(err.Error()), nil
 	} else if len(quotations) > 0 {
 		sub.Quotations = quotations
+	}
+	// <quotes>: the first-block rule is used by analogy with <quotations>; the
+	// live r10 capture subscribed one security per command, so the "only first
+	// element" behaviour for several <quotes> blocks is I, not S.
+	if quotes, err := c.firstFeed(client, command, "quotes"); err != nil {
+		return failure(err.Error()), nil
+	} else if len(quotes) > 0 {
+		sub.Quotes = quotes
 	}
 	var runErr error
 	if on {
@@ -800,11 +796,11 @@ func escapeText(s string) string {
 	return b.String()
 }
 
-// firstQuotation returns the first <quotations> child of the command, in XML
-// document order (encoding/xml would merge repeated blocks and mix <secid> with
-// <security> children).
-func (c *Connector) firstQuotation(ctx context.Context, command string) ([]model.Symbol, error) {
-	_ = ctx
+// firstFeed returns the first <feedName> child of the command in XML document
+// order (encoding/xml would merge repeated blocks and mix <secid> with
+// <security> children). The S rule "only the first element" is proven for
+// <quotations> (r8); <quotes> uses it by analogy (I).
+func (c *Connector) firstFeed(client *Client, command, feedName string) ([]model.Symbol, error) {
 	dec := xml.NewDecoder(strings.NewReader(command))
 	depth := 0
 	feedDepth := -1
@@ -827,7 +823,7 @@ func (c *Connector) firstQuotation(ctx context.Context, command string) ([]model
 		case xml.StartElement:
 			depth++
 			if feedDepth < 0 {
-				if t.Name.Local == "quotations" {
+				if t.Name.Local == feedName {
 					feedDepth = depth
 				}
 				continue
@@ -864,9 +860,6 @@ func (c *Connector) firstQuotation(ctx context.Context, command string) ([]model
 				if first == nil {
 					return nil, nil
 				}
-				c.mu.Lock()
-				client := c.client
-				c.mu.Unlock()
 				if client == nil {
 					return nil, fmt.Errorf(msgNeedsConnection)
 				}
