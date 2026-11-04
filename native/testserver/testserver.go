@@ -63,6 +63,9 @@ type Server struct {
 	// SessionTimeout is the RQ_PWD session timeout in seconds; 0 means the
 	// demo-server value of 120. The client uses it as the recovery limit.
 	SessionTimeout int32
+	// SID is the server id reported in RQ_PWD (and used by RQ_RELOGIN when
+	// ReloginSID is 0); New sets it to defaultSID.
+	SID int
 	// ReloginToken is the token returned in the RQ_RELOGIN reply; New sets it
 	// to DefaultReloginToken.
 	ReloginToken []byte
@@ -86,7 +89,7 @@ type Server struct {
 
 // New returns a server that reports protocol errors through t.
 func New(t testing.TB) *Server {
-	return &Server{t: t, Password: Password, ReloginToken: []byte(DefaultReloginToken), handlers: map[byte]replyHandler{}}
+	return &Server{t: t, Password: Password, SID: int(defaultSID), ReloginToken: []byte(DefaultReloginToken), handlers: map[byte]replyHandler{}}
 }
 
 // Dial opens a loopback TCP connection to a fresh server-side session and
@@ -173,6 +176,7 @@ func (s *Server) serve(nc net.Conn) {
 	sessionTimeout := s.SessionTimeout
 	reloginToken := append([]byte(nil), s.ReloginToken...)
 	reloginSID := s.ReloginSID
+	serverSID := byte(s.SID)
 	s.mu.Unlock()
 	if sessionTimeout <= 0 {
 		sessionTimeout = 120
@@ -240,9 +244,9 @@ func (s *Server) serve(nc net.Conn) {
 			w.Int32(0)
 			// Flags, Byte8, SubBroker, Text1, Byte9, Text2, Text3, Byte10
 			w.Raw([]byte{0, 0, 0, 0, 0, 0, 0, 0})
-			w.Int32(4242)      // UID
-			w.Byte(0)          // Byte11
-			w.Byte(defaultSID) // SID
+			w.Int32(4242)     // UID
+			w.Byte(0)         // Byte11
+			w.Byte(serverSID) // SID
 			w.Raw([]byte{0, 0})
 			w.Int32(626) // SYS#
 			w.Int32(4)   // BLD#
@@ -273,7 +277,7 @@ func (s *Server) serve(nc net.Conn) {
 			s.mu.Unlock()
 			err = reply(wire.KindReply, f.Type, nil)
 		case session.RqRelogin:
-			sid := defaultSID
+			sid := serverSID
 			if reloginSID != 0 {
 				sid = byte(reloginSID)
 			}

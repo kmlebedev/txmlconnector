@@ -316,14 +316,26 @@ RQ_RECOVER (64):  Bn:  token                 // ровно len байт токе
   `reqSeq int32` — счётчик запросов, +1 на каждый запрос кроме 63/64 (в текущем `native/` его нет);
   сессионные ключи (они нужны на новом сокете).
 - Алгоритм восстановления, как у DLL: новый TCP → `RQ_RELOGIN` ключом по умолчанию (таймаут
-  `min(остаток окна, 10 с)`) → прочитать `token`/`sid`, сравнить SID → `RQ_RECOVER` сессионным
-  ключом с `lastSeq` → повторить оборванный запрос. Попытки каждые 1 с, окно — `session_timeout`
-  (текущий `native/recover.go` использует backoff 1→30 с и полный логин — это расходится с DLL;
-  полный логин остаётся поведением на случай `"Request timeout."`).
+  `min(остаток окна, 10 с)`) → прочитать `token`/`sid`, строго сравнить SID (расхождение, в том
+  числе при сохранённом SID=0, — `ErrNotSameServer`/DLL -0xe) → `RQ_RECOVER` сессионным ключом с
+  `lastSeq` → повторить оборванный запрос. Первая попытка сразу, далее ровно раз в 1 с, окно —
+  `session_timeout`; после окна DLL бросает `"Request timeout."` и сама новый логин не делает.
 - Живым захватом (RE-2, E05) **подтверждены** байты обоих запросов и ответа RQ_RELOGIN
   (см. «Подтверждение живым захватом» ниже). Осталось не проверенным: ветка «сервер забыл
   сессию» (BYE/-0xd или «Recover unavailable.»), счётчик в «`Not same server`» (-0xe) на живом
   обмене, начальное значение/сброс lastSeq и входной атрибут `recover` у `<connect>`.
+
+**Состояние Go-реализации (2026-11-04).** `native/session` содержит `ReloginPayload`,
+`RecoverPayload`, `ParseReloginReply` и `Conn.Restore` (строгий SID, сохранённые ключи, счётчик
+`lastSeq`); `native/recover.go` повторяет DLL: первая попытка сразу, далее раз в 1 с, окно
+`session_timeout`, фатальные ошибки (BYE/CRC/чужой SID) прекращают short path. Как и DLL, клиент
+**не** делает автоматический новый логин после окна: `Client.Run` возвращает `*recoveryError`, а
+явный `Client.Reconnect(ctx)` выполняет полный connect (новый TCP, логин, `load`, пересборка
+каталога и переподписка по `model.Symbol`) — это Go-обёртка над XML-командой `connect`.
+Порядок статусов в потоке `Run` повторяет E05: `ServerStatus{Recover:true}` сразу на обрыве,
+затем plain `ServerStatus{Connected:true}` после успеха либо `ServerStatus{Connected:false, Err}`
+при сдаче; `Connector` рендерит их как `<server_status ... connected="true" recover="true"/>`,
+`<server_status ... connected="true"/>` и `<server_status ... connected="false"/>`.
 
 ## После логина
 

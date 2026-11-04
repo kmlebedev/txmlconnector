@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -123,5 +124,68 @@ func TestRecoverPayloadMatchesDLL(t *testing.T) {
 	}
 	if !bytes.Contains(callbacks, []byte(`connected="true" recover="true"`)) {
 		t.Fatal("the captured DLL callbacks do not carry connected=\"true\" recover=\"true\"")
+	}
+}
+
+// callbackStatus is one <server_status> callback of the E05 DLL captures.
+type callbackStatus struct {
+	Connected bool
+	Recover   bool
+}
+
+var statusAttr = regexp.MustCompile(`(connected|recover)="([^"]*)"`)
+
+// readStatusCallbacks parses the <server_status .../> lines of a fixture.
+func readStatusCallbacks(t *testing.T, file string) []callbackStatus {
+	t.Helper()
+	data, err := os.ReadFile(file)
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skipf("RE-2 E05 capture %s is not available", file)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []callbackStatus
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "<server_status") {
+			continue
+		}
+		var st callbackStatus
+		for _, m := range statusAttr.FindAllStringSubmatch(line, -1) {
+			switch m[1] {
+			case "connected":
+				st.Connected = m[2] == "true"
+			case "recover":
+				st.Recover = m[2] == "true"
+			}
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
+// TestRecoveryCallbacksMatchDLL checks the server_status sequence the DLL emits
+// around a recovery (E05 captures): recover="true" right on the loss, then a
+// plain connected="true" after a successful recovery, or connected="false" when
+// session_timeout expired and the DLL gave up. The first status in each capture
+// is the load-end callback.
+func TestRecoveryCallbacksMatchDLL(t *testing.T) {
+	cases := []struct {
+		file string
+		want []callbackStatus
+	}{
+		{"testdata/recover-short-live.xml", []callbackStatus{{Connected: true, Recover: true}, {Connected: true}}},
+		{"testdata/recover-long-live.xml", []callbackStatus{{Connected: true, Recover: true}, {Connected: false}}},
+	}
+	for _, c := range cases {
+		statuses := readStatusCallbacks(t, c.file)
+		if len(statuses) < 3 {
+			t.Fatalf("%s: %d server_status callbacks, want the load end and two recovery ones", c.file, len(statuses))
+		}
+		got := statuses[1:3] // [0] is the load-end status
+		if got[0] != c.want[0] || got[1] != c.want[1] {
+			t.Fatalf("%s: recovery statuses = %+v, want %+v", c.file, got, c.want)
+		}
 	}
 }

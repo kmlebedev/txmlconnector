@@ -170,9 +170,14 @@ func TestLostConnectionReportsDisconnected(t *testing.T) {
 	send(t, c, connectCommand())
 	rec.next(t, `<server_status`)
 	srv.Drop()
-	// The client retries the login, fails and reports the lost connection.
+	// The DLL reports recover="true" on the loss, then connected="false" when
+	// the session cannot be restored.
+	wantRecord := `<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="7" connected="true" recover="true"/>`
+	if m := rec.next(t, "<server_status"); m != wantRecord {
+		t.Fatalf("loss status = %s, want %s", m, wantRecord)
+	}
 	if m := rec.next(t, "<server_status"); !strings.HasSuffix(m, `connected="false"/>`) {
-		t.Fatalf("status = %s", m)
+		t.Fatalf("give-up status = %s, want connected=\"false\"", m)
 	}
 	if got := send(t, c, `<command id="disconnect"/>`); !strings.Contains(got, "Соединение не установлено") {
 		t.Fatalf("disconnect = %s", got)
@@ -205,9 +210,15 @@ func TestConnectorReportsRecoveryStatus(t *testing.T) {
 	send(t, c, connectCommand())
 	rec.next(t, "<server_status")
 	first.Drop()
-	want := `<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="7" connected="true" recover="true"/>`
-	if m := rec.next(t, "<server_status"); m != want {
-		t.Fatalf("recovery status = %s, want %s", m, want)
+	// The DLL reports recover="true" right on the loss and a plain connected
+	// status after "Recover succeeded.".
+	wantRecover := `<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="7" connected="true" recover="true"/>`
+	if m := rec.next(t, "<server_status"); m != wantRecover {
+		t.Fatalf("loss status = %s, want %s", m, wantRecover)
+	}
+	wantConnected := `<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="7" connected="true"/>`
+	if m := rec.next(t, "<server_status"); m != wantConnected {
+		t.Fatalf("recovered status = %s, want %s", m, wantConnected)
 	}
 }
 

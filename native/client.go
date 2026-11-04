@@ -355,12 +355,20 @@ func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) 
 				if !isTransportError(err) {
 					return err
 				}
+				// The DLL reports recover="true" right on the loss, before the
+				// reconnect attempts.
+				if herr := h([]model.Event{model.ServerStatus{Connected: true, Recover: true}}); herr != nil {
+					return herr
+				}
 				if rerr := c.recover(ctx); rerr != nil {
+					// DLL: "Request timeout." -> connected="false".
+					if herr := h([]model.Event{model.ServerStatus{Err: rerr.Error()}}); herr != nil {
+						return herr
+					}
 					return rerr
 				}
-				// The link is restored: hand the recovery status to the caller
-				// like any other batch and continue polling after the delay.
-				if herr := h([]model.Event{model.ServerStatus{Connected: true, Recover: true}}); herr != nil {
+				// DLL: a plain connected="true" after "Recover succeeded.".
+				if herr := h([]model.Event{model.ServerStatus{Connected: true}}); herr != nil {
 					return herr
 				}
 				break

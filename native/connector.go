@@ -285,6 +285,7 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 	// Run polls RQ_MAIN and returns its events in wire order; the connector
 	// renders them as the DLL callbacks and keeps the securities chunks, which
 	// the catalog queues while polling.
+	reportedDown := false
 	err = client.Run(ctx, RunOptions{RqDelay: delay}, func(events []model.Event) error {
 		var trades []model.Trade
 		for _, ev := range events {
@@ -292,8 +293,14 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 			case *model.Trade:
 				trades = append(trades, *e)
 			case model.ServerStatus:
-				if e.Recover {
+				switch {
+				case e.Recover:
 					c.emit(c.recoveryStatusXML())
+				case e.Connected:
+					c.emit(c.statusXML(true))
+				default:
+					c.emit(c.statusXML(false))
+					reportedDown = true
 				}
 			}
 		}
@@ -309,6 +316,12 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 	})
 	if ctx.Err() != nil {
 		return // disconnect cancelled the run; it owns the RQ_LOGOUT
+	}
+	if reportedDown {
+		// The client already reported the give-up (DLL order: recover status on
+		// the loss, connected="false" when the recovery window expires).
+		c.finish(ctx, client, nil)
+		return
 	}
 	c.finish(ctx, client, func() string { return c.statusLocked(false) })
 }
@@ -423,13 +436,18 @@ func (c *Connector) finish(ctx context.Context, client *Client, report func() st
 		c.mu.Unlock()
 		return
 	}
-	message := report() // called with c.mu held
+	var message string
+	if report != nil {
+		message = report() // called with c.mu held
+	}
 	c.state, c.client = stateDisconnected, nil
 	c.mu.Unlock()
 	if client != nil {
 		client.Close()
 	}
-	c.emit(message)
+	if message != "" {
+		c.emit(message)
+	}
 }
 
 func (c *Connector) disconnect(ctx context.Context) (string, error) {
@@ -483,10 +501,10 @@ func (c *Connector) Close() error {
 	return nil
 }
 
-// recoveryStatusXML renders the <server_status> the DLL reports after it has
-// restored a lost connection: connected="true" with recover="true" right after
-// it. The E05 DLL capture of the recovery confirms this shape
-// (native/session/testdata/recover-short-live.xml, docs/protocol/connect.md).
+// recoveryStatusXML renders the <server_status> the DLL reports when the link
+// is lost and the reconnect starts: connected="true" with recover="true" right
+// after it (E05 capture: native/session/testdata/recover-short-live.xml,
+// docs/protocol/connect.md).
 func (c *Connector) recoveryStatusXML() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
