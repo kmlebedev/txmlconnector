@@ -81,3 +81,9 @@ T20 — см. `positions.md` (client/union/markets/market=4/blocked/varmargin/cu
 - Фикстуры `limits-*` будут сняты после подтверждения; сейчас в `native/records/testdata` их нет.
 - I: точные условия вывода каждого элемента (ненулевое поле), опечатка `</cpblused>`,
   `fob_varmargin` смещение, формат RQ_FORTS_FIRM_MONEY.
+## Payload запроса RQ_CLIENT_LIMITS (43) — D + O
+
+Обработчик `FUN_1803b4d50`: `FUN_1801c2030(stream,1)`, затем `FUN_1801bebb0(stream, client_id)`
+и `FUN_180355d50(...,0x2b,"RQ_CLIENT_LIMITS")`. Фактический payload (живой/реплейный захват):
+`22 69 1a` = **`L client_id`** (packed 32-bit, 108178 → 3 байта). Т.е. запрос = один packed-L
+с числовым id клиента (код клиента резолвится DLL из стора до отправки). Ответ — см. раздел выше.
