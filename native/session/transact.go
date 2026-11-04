@@ -29,6 +29,10 @@ const (
 	TxNewOrder TxKind = 1
 	// TxCancelOrder is TRN_CANCELORDER.
 	TxCancelOrder TxKind = 2
+	// TxNewStopOrder is TRN_NEWSTOPORDER (O payload prefix 0x14).
+	TxNewStopOrder TxKind = 0x14
+	// TxNewCondOrder is TRN_NEWORDER (0x01) with the cond fields appended (O).
+	TxNewCondOrder TxKind = 0x01
 	// TxCancelStopOrder is TRN_CANCELSTOPORDER (O payload 17 <packed L id>).
 	TxCancelStopOrder TxKind = 0x17
 )
