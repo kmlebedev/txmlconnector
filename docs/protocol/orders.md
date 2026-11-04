@@ -119,18 +119,34 @@ Z512,L,B,B,B,B,B,L,L,L,G,G,G,B,B,W,W`. Часть чтений условная 
 **Фикстуры:** `order-new-inject.hex` (124 Б, обезличено: client-строки → `TESTCLIEN`, числовой
 client id/orderno → синтетические) + `order-new-dll.xml` (ожидаемый XML; снят с DLL до маскирования).
 
-## R_TRD (0x04\*) — D, не добито (I)
+## R_TRD (0x04\*) — D + O
 
 Размерная запись; обработчик `FUN_1803c5970` (`NEW_TRADE: …`), тело — `FUN_1803c6990`
-(`ReadOneTrade`), 47 чтений: `W,W,G,B,G,G,L,B,Z20,L,W,L,G,G,G,G,Z12,L,L,L,Z12,L,L,L,G,G,G,L,L,L,
-L,B,L,L,G,W,G,L`, затем условный блок от байта `+0x7a` (`B`, при ненулевом — доп. поля
-`B,G,G,B,G,W,Z12`). Попытка инъекции тела из 39 полей: `NEW_TRADE: incorrect buffer` —
-часть полей обязательна сверх этого набора; layout не добит (I), фикстуры `trade-*` пока нет.
+(`ReadOneTrade`). Формат (D): `W secid, W board, G client_id, B tradetype, G tradeno, G orderno,
+L time, B ? , Z20 seccode, L price, W mask`, далее поля по маске (`mask & 1`: L/G/G;
+`mask & 2`: L,L,L; `mask & 4`: L,L,L,G,G,G,L,L,L,L,B; `mask & 8`: L,L,G; `mask & 0x10`: W,G;
+`mask & 0x20`: L; `mask & 0x40`: B), затем безусловные `G quantity, G value, G comission,
+Z12 client, Z12 settlecode, B, B, B, D, B, G`, и опционально `W`/`Z12` при `mask & 0x80`/`0x100`.
+`G client_id` — фильтр: сделка чужого клиента в `<trades>` не отдаётся (O).
+
+**Oracle (O, mask=0):** `<trades><trade><secid>…</secid><tradeno>2222</tradeno><orderno>3333</orderno>
+<board>TQBR</board><seccode>SBER</seccode><client>…</client><buysell></buysell><union></union>
+<time>02:46:40</time><brokerref>…</brokerref><value>55.55</value><comission>66.66</comission>
+<price>0.01</price><quantity>4444</quantity><items>4444</items><yield>0.0</yield>
+<currentpos>-4444</currentpos><accruedint>0.0</accruedint><tradetype>B</tradetype><settlecode>…</settlecode>
+<bypass>1</bypass></trade></trades>`. Подтверждено: `<tradeno>`=G(5-е поле), `<orderno>`=G(6-е),
+`<value>`=G/100 (5555→55.55), `<comission>`=G/100 (6666→66.66), `<quantity>/<items>/<currentpos>`
+=G (4444, currentpos=-4444), `<time>`=L (10000→02:46:40), `<price>`=L (1→0.01), `<tradetype>`=B.
+
+**Фикстуры:** `trade-inject.hex` (71 Б; client-строки → `TESTCLIEN`, числовой client id → 4096,
+остальные значения синтетические) + `trade-dll.xml` (снят с DLL до маскирования).
 
 ## R_ORD_MODIFY (0x10\*) — D, предварительно (I)
 
-`FUN_1803c3590` (`UpdateOrder: …`), размерная; чтения идут напрямую в этой функции (список в
-`.re-run/re/decomp-orders.c`), ищет заявку по ID и применяет изменения; полный layout и oracle — I.
+`FUN_1803c3590` (`UpdateOrder: …`), размерная; чтения идут напрямую: `L, L?(FUN_1801bdc50), B, G,
+L, L, L(bd760), Z12, L(bd760), L, L, B, Z512, B`, затем условный блок (G/L/G/L/B/…); ищет заявку
+по ID и применяет изменения, вставляя обновлённую в `<orders>` (по аналогии с 0x03). Полный layout
+и oracle-фикстуры — следующий шаг (I).
 
 ## XML-формы <orders>/<trades> — D (обнаружено)
 
