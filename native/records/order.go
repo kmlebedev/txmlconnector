@@ -125,6 +125,16 @@ func ParseOrderNew(body []byte) (OrderNew, error) {
 		return out, fmt.Errorf("R_ORD_NEW balance: %w", err)
 	}
 	o.Balance = int64(balance)
+	// The oracle shows that a disabled order renders <time> from the value at
+	// this body position (11 in the fixture) and <balance> from the next one
+	// (1); they are kept for the status-dependent render (I, RE is confirming
+	// the D offsets).
+	o.UpdateTime = int32(balance)
+	updateBalance, err := r.Int32()
+	if err != nil {
+		return out, fmt.Errorf("R_ORD_NEW update balance: %w", err)
+	}
+	o.UpdateBalance = int64(updateBalance)
 	// The remaining reads of the D body are not mapped (I); the record is
 	// sized, so skip the rest.
 	if r.Len() > 0 {

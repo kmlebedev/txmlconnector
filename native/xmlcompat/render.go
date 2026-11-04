@@ -482,11 +482,17 @@ func OrderXML(order model.Order) string {
 	b.WriteString("<client>" + escape(order.Client) + "</client>")
 	b.WriteString("<status>" + orderStatusName(order.Status) + "</status>")
 	b.WriteString("<buysell>" + escape(string(order.BuySell)) + "</buysell>")
-	b.WriteString("<time>" + timeOfDay(order.Time) + "</time>")
+	// The DLL renders a disabled (cancelled) order with the update time/balance
+	// fields (oracle: 11/1 vs the watching 1/11); the D offsets are I.
+	orderTime, orderBalance := order.Time, order.Balance
+	if order.Status == 2 {
+		orderTime, orderBalance = order.UpdateTime, order.UpdateBalance
+	}
+	b.WriteString("<time>" + timeOfDay(orderTime) + "</time>")
 	b.WriteString("<accepttime>" + timeOfDay(order.AcceptTime) + "</accepttime>")
 	b.WriteString("<brokerref>" + escape(order.BrokerRef) + "</brokerref>")
 	b.WriteString("<value>0.0</value><accruedint>0.0</accruedint><settlecode></settlecode>")
-	b.WriteString("<balance>" + strconv.FormatInt(order.Balance, 10) + "</balance>")
+	b.WriteString("<balance>" + strconv.FormatInt(orderBalance, 10) + "</balance>")
 	b.WriteString("<price>" + orderAmount(order.Price) + "</price>")
 	b.WriteString("<quantity>" + strconv.FormatInt(order.Quantity, 10) + "</quantity>")
 	b.WriteString("<hidden>0</hidden>")
