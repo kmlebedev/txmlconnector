@@ -90,7 +90,7 @@ func (c *Conn) Logout(ctx context.Context) error {
 // subscription state of one security on one board; 0 unsubscribes.
 const (
 	SubQuotations byte = 0x01 // <quotations>, seen on the demo server
-	SubQuotes     byte = 0x02 // <quotes>, inferred from the bit layout, not observed
+	SubQuotes     byte = 0x02 // <quotes> (S r10: payloads 0x02 and 0x06 alltrades+quotes)
 	SubAllTrades  byte = 0x04 // <alltrades>, seen on the demo server
 )
 

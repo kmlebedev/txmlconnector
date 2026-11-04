@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/session"
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
@@ -242,9 +242,12 @@ func (c *Client) relogin(ctx context.Context) error {
 		conn.Close()
 		return err
 	}
-	// The new session brings a new client store, positions and overnight flag.
+	// The new session brings a new client store, positions, overnight flag and
+	// sec spec cache.
 	c.mu.Lock()
 	c.resetAccountsLocked()
+	c.secSpecs = map[uint16]records.SecSpec{}
+	c.history = map[historyKey]*historyCollector{}
 	c.mu.Unlock()
 	// load re-runs the ClientConfig.OnDictionaries/OnSecurities callbacks, so
 	// the Connector emits the dictionary and securities callbacks again after a
@@ -270,23 +273,22 @@ func (c *Client) relogin(ctx context.Context) error {
 // the session-local secids of the previous connection are not valid any more.
 func (c *Client) resubscribe(ctx context.Context, conn *session.Conn) error {
 	c.mu.Lock()
-	subs := make(map[model.Symbol]byte, len(c.subs))
-	for s, mask := range c.subs {
-		subs[s] = mask
-	}
-	catalog := c.catalog
-	c.mu.Unlock()
-	if len(subs) == 0 || catalog == nil {
+	if c.catalog == nil {
+		c.mu.Unlock()
 		return nil
 	}
-	items := make([]session.SubscribeItem, 0, len(subs))
-	for s, mask := range subs {
-		sec, board, ok := catalog.Lookup(s.Board, s.SecCode)
+	items := make([]session.SubscribeItem, 0, len(c.subs))
+	var specIDs []uint16
+	for s, mask := range c.subs {
+		// Poll mutates the catalog under c.mu, so resolve under the same lock.
+		sec, board, ok := c.catalog.Lookup(s.Board, s.SecCode)
 		if !ok {
 			continue // the new session does not trade this symbol any more
 		}
 		items = append(items, session.SubscribeItem{SecID: sec.SecID, Board: board.Num, Mask: mask})
+		specIDs = append(specIDs, sec.SecID)
 	}
+	c.mu.Unlock()
 	if len(items) == 0 {
 		return nil
 	}
@@ -296,7 +298,17 @@ func (c *Client) resubscribe(ctx context.Context, conn *session.Conn) error {
 		}
 		return items[i].Board < items[j].Board
 	})
-	return conn.Subscribe(ctx, items)
+	if err := conn.Subscribe(ctx, items); err != nil {
+		return err
+	}
+	// The session-local secids changed, so the RQ_SEC_SPEC cache of the old
+	// connection is stale: refetch it best-effort (the DLL does the same after
+	// the resubscribe; a failure must not break the recovery).
+	reverseIDs(specIDs)
+	if err := c.loadSecSpecs(ctx, specIDs); err != nil {
+		return nil
+	}
+	return nil
 }
 
 // sleepCtx waits for d or until ctx is done.

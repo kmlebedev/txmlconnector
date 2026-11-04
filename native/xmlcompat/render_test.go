@@ -96,3 +96,68 @@ func TestRenderClientAndPositions(t *testing.T) {
 		t.Fatalf("UnionXML = %s, want %s", got, want)
 	}
 }
+
+// TestQuotationFixedMoney checks the fixed formats of the <quotation> money
+// fields: valtoday keeps three decimals, the deposits two (the DLL emits
+// 1.000/7601.40/7516.00, while plain Decimal.String trims the zeros).
+func TestQuotationFixedMoney(t *testing.T) {
+	q := model.Quotation{
+		SecID: 26, Board: "TQBR",
+		Symbol: model.Symbol{Board: "TQBR", SecCode: "SBER"},
+		Fields: model.QuotationFields{
+			Status:      ptrString("A"),
+			ValToday:    &model.Decimal{Units: 1000, Scale: 3},
+			BuyDeposit:  &model.Decimal{Units: 760140, Scale: 2},
+			SellDeposit: &model.Decimal{Units: 751600, Scale: 2},
+			Last:        &model.Decimal{Units: 4968, Scale: 4},
+		},
+	}
+	got := xmlcompat.QuotationXML(q)
+	for _, want := range []string{
+		"<valtoday>1.000</valtoday>",
+		"<buydeposit>7601.40</buydeposit>",
+		"<selldeposit>7516.00</selldeposit>",
+		"<last>0.4968</last>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("QuotationXML = %s, want substring %s", got, want)
+		}
+	}
+}
+
+func ptrString(s string) *string { return &s }
+
+// TestQuotesDeletionRendersPrice pins the DLL order: <price> is built before the
+// deletion branch, so a deleted level still has its price (asm 0x1800faa27).
+func TestQuotesDeletionRendersPrice(t *testing.T) {
+	q := model.Quotes{SecID: 26, Symbol: model.Symbol{Board: "TQBR", SecCode: "SBER"}, Levels: []model.Quote{
+		{SecID: 26, Price: model.Decimal{Units: 0}, Buy: -1},
+		{SecID: 26, Price: model.Decimal{Units: 50, Scale: 2}, Sell: -1},
+	}}
+	got := xmlcompat.QuotesXML(q)
+	for _, want := range []string{
+		"<price>0</price><yield>0</yield><buy>-1</buy>",
+		"<price>0.5</price><yield>0</yield><sell>-1</sell>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("QuotesXML = %s, want substring %s", got, want)
+		}
+	}
+}
+
+// TestSecInfoXMLSkipsEmptyFields: the DLL drops empty/zero fields (market 0,
+// zero decimals), so a SecInfo with only identity must render those fields as
+// absent instead of zero values.
+func TestSecInfoXMLSkipsEmptyFields(t *testing.T) {
+	zero := model.Decimal{Units: 0, Scale: 2}
+	info := model.SecInfo{SecID: 26, SecCode: "SBER", Market: 0, PointCost: &zero, BuyDeposit: &zero, ISIN: "RU0009029540"}
+	got := xmlcompat.SecInfoXML(info)
+	for _, absent := range []string{"<market>", "<point_cost>", "<buy_deposit>"} {
+		if strings.Contains(got, absent) {
+			t.Fatalf("SecInfoXML = %s, must not contain %s", got, absent)
+		}
+	}
+	if !strings.Contains(got, "<seccode>SBER</seccode>") || !strings.Contains(got, "<isin>RU0009029540</isin>") {
+		t.Fatalf("SecInfoXML = %s", got)
+	}
+}

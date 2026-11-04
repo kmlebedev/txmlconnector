@@ -1,9 +1,14 @@
 package native
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"io"
+	"math"
 	"net"
 	"os"
 	"strings"
@@ -11,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/testserver"
 	"github.com/kmlebedev/txmlconnector/native/wire"
@@ -394,25 +400,22 @@ func snapshotTailXML(t *testing.T) []string {
 func TestSnapshotTailMatchesDLL(t *testing.T) {
 	payload := snapshotTail(t)
 	recs, err := records.Records(payload)
-	var unknown *records.UnknownRecordError
-	if !errors.As(err, &unknown) {
-		t.Fatalf("Records: %v, want the documented 0x5b boundary", err)
+	if err != nil {
+		t.Fatalf("Records: %v, want the whole E07 tail (task 12 parses 0x5b/0x05)", err)
 	}
-	// The mapped part of the E07 tail ends at the 0x5b limits/parameters block
-	// (its layout is task 12): pin the boundary so a silent shift is noticed.
-	if unknown.Tag != 0x5b || unknown.Offset != 249 {
-		t.Fatalf("unmapped tail starts at tag %#02x offset %d, want 0x5b at 249", unknown.Tag, unknown.Offset)
-	}
-	if len(recs) != 7 {
-		t.Fatalf("decoded %d records before the boundary, want 7: %v", len(recs), recs)
+	if len(recs) != 662 {
+		t.Fatalf("decoded %d records, want the full 662-record E07 tail", len(recs))
 	}
 	c := &Client{}
 	c.cfg.OnDictionaries = nil
 	c.resetAccountsLocked()
 	for _, rec := range recs {
-		if decode := decoders[rec.Tag]; decode != nil {
-			if _, err := decode(c, rec.Body); err != nil {
-				t.Fatalf("decode %#02x: %v", rec.Tag, err)
+		switch rec.Tag {
+		case records.TagClientNew, records.TagClientAsset, records.TagOvernight, records.TagUnion:
+			if decode := decoders[rec.Tag]; decode != nil {
+				if _, err := decode(c, rec.Body); err != nil {
+					t.Fatalf("decode %#02x: %v", rec.Tag, err)
+				}
 			}
 		}
 	}
@@ -603,4 +606,203 @@ func TestUnionRecordReachesLoadEnd(t *testing.T) {
 	}
 	rec.next(t, "<overnight")
 	rec.next(t, "<server_status")
+}
+
+// secParamRecord builds one sized R_SEC_PARAM record for the testserver: mask
+// 0x9 (bit0 money value + bit3 point_cost), as validated against the DLL.
+func secParamRecord(t *testing.T, secid uint16, money int64, pointCost float64) []byte {
+	t.Helper()
+	var w wire.Writer
+	w.Uint16(secid)
+	w.Int64(0x9) // bits 0x1 (money) and 0x8 (point_cost)
+	w.Int64(money)
+	w.Raw([]byte{0, 0}) // the two header bytes of the point_cost block
+	var raw [8]byte
+	binary.LittleEndian.PutUint64(raw[:], math.Float64bits(pointCost))
+	w.Raw(raw[:])
+	body := w.Bytes()
+	rec := make([]byte, 3+len(body))
+	rec[0] = records.TagSecParam
+	rec[1] = byte(len(body) >> 8)
+	rec[2] = byte(len(body))
+	copy(rec[3:], body)
+	return rec
+}
+
+// TestConnectorSecInfoUpd checks the XML path end to end: a R_SEC_PARAM fetched
+// after the subscription reaches the Connector handler as <sec_info_upd>.
+func TestConnectorSecInfoUpd(t *testing.T) {
+	// The catalog comes from the recorded demo snapshot, which knows SBER 26.
+	srv := newRunServer(t)
+	srv.AfterSubscribe = secParamRecord(t, 26, 3272739, 100)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	sub := "<command id=" + quote + "subscribe" + quote + "><alltrades>"
+	sub += "<security><board>TQBR</board><seccode>SBER</seccode></security></alltrades></command>"
+	if got := send(t, c, sub); got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("subscribe = %s", got)
+	}
+	// The values are hardcoded (the DLL money format: hundredths with exactly
+	// two decimals; point_cost %g) and only the catalog identity comes from the
+	// demo snapshot.
+	want := "<sec_info_upd><secid>26</secid><seccode>SBER</seccode><market>1</market>"
+	want += "<buy_deposit>32727.39</buy_deposit><point_cost>100</point_cost></sec_info_upd>"
+	if got := rec.next(t, "<sec_info_upd"); got != want {
+		t.Fatalf("sec_info_upd = %s, want %s", got, want)
+	}
+}
+
+// TestConnectorSecInfoUpdFromLoad checks the load path: R_SEC_PARAM in the
+// snapshot (not after the subscription) reaches the XML stream before the
+// end-of-load <client>/<positions>/<overnight>/<server_status> callbacks, as in
+// the E07 capture (all 684 sec_info_upd callbacks come before <client>).
+func TestConnectorSecInfoUpdFromLoad(t *testing.T) {
+	srv := newTestServer(t)
+	srv.Snapshot = append(secNewRecord(t, "SBER", 26), secParamRecord(t, 26, 3272739, 100)...)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	rec.mu.Lock()
+	messages := append([]string(nil), rec.msgs...)
+	rec.mu.Unlock()
+	index := func(prefix string) int {
+		for i, m := range messages {
+			if strings.HasPrefix(m, prefix) {
+				return i
+			}
+		}
+		return -1
+	}
+	securities := index("<securities")
+	update := index("<sec_info_upd")
+	status := index("<server_status")
+	if securities < 0 || update < 0 || status < 0 {
+		t.Fatalf("missing callbacks in %q", messages)
+	}
+	if !(securities < update && update < status) {
+		t.Fatalf("load order: securities %d sec_info_upd %d status %d", securities, update, status)
+	}
+	want := "<sec_info_upd><secid>26</secid><seccode>SBER</seccode><market>1</market>"
+	want += "<buy_deposit>32727.39</buy_deposit><point_cost>100</point_cost></sec_info_upd>"
+	if got := messages[update]; got != want {
+		t.Fatalf("load sec_info_upd = %s, want %s", got, want)
+	}
+}
+
+// TestConnectorSecInfoMutedSilent checks that a R_SEC_PARAM without mask 0x8 in
+// the snapshot produces no callback and does not break the load.
+func TestConnectorSecInfoMutedSilent(t *testing.T) {
+	var w wire.Writer
+	w.Uint16(26)
+	w.Int64(0x3cc0) // no bit 0x8: muted, no values follow
+	body := w.Bytes()
+	muted := make([]byte, 3+len(body))
+	muted[0] = records.TagSecParam
+	muted[1] = byte(len(body) >> 8)
+	muted[2] = byte(len(body))
+	copy(muted[3:], body)
+	srv := newTestServer(t)
+	srv.Snapshot = append(secNewRecord(t, "SBER", 26), muted...)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	rec.mu.Lock()
+	messages := append([]string(nil), rec.msgs...)
+	rec.mu.Unlock()
+	for _, m := range messages {
+		if strings.HasPrefix(m, "<sec_info_upd") {
+			t.Fatalf("muted record produced a callback: %q", messages)
+		}
+	}
+}
+
+// TestConnectorSecInfoUnknownSecID checks that a R_SEC_PARAM for a secid missing
+// from the catalog is skipped without aborting the poll.
+func TestConnectorSecInfoUnknownSecID(t *testing.T) {
+	srv := newTestServer(t)
+	srv.Snapshot = append(secNewRecord(t, "SBER", 26), secParamRecord(t, 9999, 3272739, 100)...)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	rec.mu.Lock()
+	messages := append([]string(nil), rec.msgs...)
+	rec.mu.Unlock()
+	for _, m := range messages {
+		if strings.HasPrefix(m, "<sec_info_upd") {
+			t.Fatalf("unknown secid produced a callback: %q", messages)
+		}
+	}
+}
+
+// TestE07TailHasNoUnknownRecordsAfterLoad is the Client/Stats version of the
+// task 12 goal: the full E07 RQ_MAIN tail (0x5b R_SYSPARAMS, 0x05 state,
+// R_WRAPPER, AmBOOK, ...) reaches Poll and Stats().UnknownRecords stays zero.
+func TestE07TailHasNoUnknownRecordsAfterLoad(t *testing.T) {
+	srv := newRunServer(t)
+	raw, err := os.ReadFile("records/testdata/e07-tail-live.hex.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := hex.DecodeString(strings.TrimSpace(string(decoded)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.AfterSubscribe = payload
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, ClientConfig{Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: srv.Dial})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	baseline := c.Stats().Polls
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = c.Run(ctx, RunOptions{}, func([]model.Event) error { return nil })
+	}()
+	if err := c.SubscribeAllTrades(ctx, model.Symbol{Board: "TQBR", SecCode: "SBER"}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.Stats().Polls >= baseline+2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := c.Stats().UnknownRecords; got != 0 {
+		t.Fatalf("UnknownRecords = %d, want 0", got)
+	}
+	cancel()
+	<-runDone
 }

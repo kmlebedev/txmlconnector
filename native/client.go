@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"sort"
 	"sync"
 	"time"
 
@@ -52,6 +51,12 @@ type ClientConfig struct {
 	// R_SEC_NEW records, with exactly those records, as the DLL emits
 	// <securities> chunks while the snapshot arrives.
 	OnSecurities func([]records.SecNew)
+	// OnLoadEvent is called while the snapshot is loading with the events of
+	// one RQ_MAIN reply in wire order, after OnSecurities of that reply. The
+	// DLL emits some callbacks (for example <sec_info_upd>) already during the
+	// load (E07: all 684 sec_info_upd callbacks before <client>/<server_status>),
+	// so the Connector forwards them from here instead of dropping them.
+	OnLoadEvent func([]model.Event)
 }
 
 // Stats counts what decoding has seen.
@@ -85,6 +90,8 @@ type Client struct {
 	positionOrder []positionKey
 	unions        []model.Union
 	overnight     model.Overnight
+	secSpecs      map[uint16]records.SecSpec
+	history       map[historyKey]*historyCollector
 }
 
 // Dial logs in, loads the dictionaries and the initial snapshot (RQ_TIME,
@@ -122,7 +129,7 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	// becomes half the window (docs/protocol/connect.md).
 	cfg.RequestTimeout = normalizeRequestTimeout(cfg.RequestTimeout, effectiveSessionTTL(cfg.SessionTimeout, info))
 	conn.SetRequestTimeout(cfg.RequestTimeout)
-	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}}
+	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}, secSpecs: map[uint16]records.SecSpec{}, history: map[historyKey]*historyCollector{}}
 	c.resetAccountsLocked()
 	if err := c.load(ctx, conn); err != nil {
 		conn.Close()
@@ -132,9 +139,11 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 }
 
 // load consumes the RQ_STARTUP dictionaries and the initial RQ_MAIN snapshot.
-// Events seen while loading are dropped: trades are not expected before the
-// subscription (the DLL delivers none either), and other event families only
-// start flowing after it; unknown layouts are counted in Stats, not reported.
+// Trades are not expected before the subscription (the DLL delivers none
+// either). The events of each poll are handed to ClientConfig.OnLoadEvent in
+// wire order (the DLL emits e.g. <sec_info_upd> during the load); other event
+// families keep their state and are rendered by the Connector after the load.
+// Unknown layouts are counted in Stats, not reported.
 func (c *Client) load(ctx context.Context, conn *session.Conn) error {
 	st, err := conn.Time(ctx)
 	if err != nil {
@@ -177,6 +186,9 @@ func (c *Client) load(ctx context.Context, conn *session.Conn) error {
 			if secs := c.catalog.DrainPending(); len(secs) > 0 {
 				c.cfg.OnSecurities(secs)
 			}
+		}
+		if c.cfg.OnLoadEvent != nil && len(events) > 0 {
+			c.cfg.OnLoadEvent(events)
 		}
 	}
 	return nil
@@ -232,71 +244,15 @@ func (c *Client) Stats() Stats {
 	return c.stats
 }
 
-// SubscribeAllTrades adds symbols to the <alltrades> feed.
+// SubscribeAllTrades adds symbols to the <alltrades> feed (a wrapper over
+// Subscribe with only the AllTrades part set).
 func (c *Client) SubscribeAllTrades(ctx context.Context, symbols ...model.Symbol) error {
-	return c.update(ctx, symbols, session.SubAllTrades, true)
+	return c.Subscribe(ctx, Subscription{AllTrades: symbols})
 }
 
 // UnsubscribeAllTrades removes symbols from the <alltrades> feed.
 func (c *Client) UnsubscribeAllTrades(ctx context.Context, symbols ...model.Symbol) error {
-	return c.update(ctx, symbols, session.SubAllTrades, false)
-}
-
-// update sends the full new mask of every touched security, as the DLL does.
-// Subscriptions are kept per stable model.Symbol, so they survive a reconnect
-// that changes the session-local secids; the ids are resolved on every send.
-func (c *Client) update(ctx context.Context, symbols []model.Symbol, bit byte, on bool) error {
-	c.mu.Lock()
-	next := make(map[model.Symbol]byte, len(symbols))
-	for _, s := range symbols {
-		mask := c.subs[s]
-		if m, ok := next[s]; ok {
-			mask = m
-		}
-		if on {
-			mask |= bit
-		} else {
-			mask &^= bit
-		}
-		next[s] = mask
-	}
-	if c.recovering {
-		c.mu.Unlock()
-		return errors.New("transaq: connection is being recovered")
-	}
-	conn := c.conn
-	catalog := c.catalog
-	c.mu.Unlock()
-	if conn == nil || catalog == nil {
-		return errors.New("transaq: client is not connected")
-	}
-	items := make([]session.SubscribeItem, 0, len(next))
-	for s, mask := range next {
-		sec, board, ok := catalog.Lookup(s.Board, s.SecCode)
-		if !ok {
-			return fmt.Errorf("unknown security %s", s)
-		}
-		items = append(items, session.SubscribeItem{SecID: sec.SecID, Board: board.Num, Mask: mask})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].SecID != items[j].SecID {
-			return items[i].SecID < items[j].SecID
-		}
-		return items[i].Board < items[j].Board
-	})
-	if err := conn.Subscribe(ctx, items); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	for s, mask := range next {
-		if mask == 0 {
-			delete(c.subs, s)
-		} else {
-			c.subs[s] = mask
-		}
-	}
-	c.mu.Unlock()
-	return nil
+	return c.Unsubscribe(ctx, Subscription{AllTrades: symbols})
 }
 
 // Poll sends one RQ_MAIN and returns the events of that reply in wire order;

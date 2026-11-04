@@ -22,6 +22,7 @@ const (
 	RqMain           byte = 5   // RQ_MAIN, polls queued server events
 	RqStartup        byte = 9   // RQ_STARTUP
 	RqSubscribe      byte = 10  // RQ_SUBSCRIBE
+	RqSecSpec        byte = 15  // RQ_SEC_SPEC
 	RqClientHoldings byte = 42  // RQ_CLIENT_HOLDINGS
 	RqPwd            byte = 46  // RQ_PWD
 	RqTime           byte = 50  // RQ_TIME
