@@ -40,11 +40,8 @@ type Order struct {
 	AcceptTime    int32 // seconds of day
 	BrokerRef     string
 	Balance       int64
-	// UpdateTime/UpdateBalance are the raw fields the DLL renders as <time> /
 	// <balance> for a cancelled (disabled) order; the oracle shows time=11 and
 	// balance=1 for the disabled fixture (I until the D offsets are confirmed).
-	UpdateTime     int32
-	UpdateBalance  int64
 	Price          Decimal
 	Quantity       int64
 	Yield          Decimal
