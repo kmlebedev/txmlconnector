@@ -62,14 +62,8 @@ type SpotLimit struct {
 	Market int
 }
 
-type UnitedLimits struct {
-	Client string
-	Union  string
-}
-
 func (*SecPosition) isEvent()      {}
 func (*FortsPosition) isEvent()    {}
 func (*FortsMoney) isEvent()       {}
 func (*FortsCollaterals) isEvent() {}
 func (*SpotLimit) isEvent()        {}
-func (*UnitedLimits) isEvent()     {}

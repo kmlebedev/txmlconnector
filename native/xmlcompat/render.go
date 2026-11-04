@@ -645,3 +645,66 @@ func FortsPositionsXML(positions []model.FortsPosition, money *model.FortsMoney)
 	b.WriteString("</positions>")
 	return b.String()
 }
+
+// ClientLimitsXML renders <clientlimits client="…"> (limits.md, D): the DLL
+// emits only non-zero fields in this fixed order, keeps the </cpblused> typo of
+// the cbplused element and prints the money fields with two decimals, coverage
+// raw and liquidity_c with five decimals.
+func ClientLimitsXML(l model.ClientLimits) string {
+	var b strings.Builder
+	b.WriteString("<clientlimits client=" + quoteAttr(l.Client) + ">")
+	money := func(name string, d model.Decimal, typo bool) {
+		if d.Units == 0 {
+			return
+		}
+		closeTag := name
+		if typo {
+			closeTag = "cpblused"
+		}
+		b.WriteString("<" + name + ">" + fixedDecimal(d) + "</" + closeTag + ">")
+	}
+	money("cbplimit", l.CBPLimit, false)
+	money("cbplused", l.CBPLUsed, true)
+	money("cbplplanned", l.CBPLPlanned, false)
+	money("fob_varmargin", l.FobVarMargin, false)
+	if l.Coverage != 0 {
+		b.WriteString("<coverage>" + strconv.Itoa(int(l.Coverage)) + "</coverage>")
+	}
+	if l.LiquidityC.Units != 0 {
+		b.WriteString("<liquidity_c>" + fixedDecimal(l.LiquidityC) + "</liquidity_c>")
+	}
+	for _, field := range []struct {
+		name string
+		d    model.Decimal
+	}{
+		{"profit", l.Profit}, {"money_current", l.MoneyCurrent}, {"money_reserve", l.MoneyReserve},
+		{"money_free", l.MoneyFree}, {"options_premium", l.OptionsPremium}, {"exchange_fee", l.ExchangeFee},
+		{"forts_varmargin", l.FortsVarMargin}, {"varmargin", l.VarMargin}, {"pclmargin", l.PCLMargin},
+		{"options_vm", l.OptionsVM}, {"spot_buy_limit", l.SpotBuyLimit}, {"used_spot_buy_limit", l.UsedSpotBuyLimit},
+		{"collat_current", l.CollatCurrent}, {"collat_blocked", l.CollatBlocked}, {"collat_free", l.CollatFree},
+	} {
+		money(field.name, field.d, false)
+	}
+	b.WriteString("</clientlimits>")
+	return b.String()
+}
+
+// UnitedLimitsXML renders the D-only <united_limits union="…"> callback.
+func UnitedLimitsXML(l model.UnitedLimits) string {
+	var b strings.Builder
+	b.WriteString("<united_limits union=" + quoteAttr(l.Union) + ">")
+	for _, field := range []struct {
+		name string
+		d    model.Decimal
+	}{
+		{"open_equity", l.OpenEquity}, {"equity", l.Equity}, {"requirements", l.Requirements},
+		{"free", l.Free}, {"vm", l.VM}, {"finres", l.FinRes}, {"go", l.GO},
+	} {
+		if field.d.Units == 0 {
+			continue
+		}
+		b.WriteString("<" + field.name + ">" + fixedDecimal(field.d) + "</" + field.name + ">")
+	}
+	b.WriteString("</united_limits>")
+	return b.String()
+}
