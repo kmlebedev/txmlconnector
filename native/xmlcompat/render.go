@@ -50,6 +50,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return CandlesXML(*e), true
 	case *model.Order:
 		return OrdersXML([]model.Order{*e}), true
+	case *model.ClientTrade:
+		return TradesXML([]model.ClientTrade{*e}), true
 	}
 	return "", false
 }
@@ -538,4 +540,48 @@ func orderConditionName(condition int) string {
 	default:
 		return strconv.Itoa(condition)
 	}
+}
+
+// TradesXML renders one client <trades> callback (PDF 4.11, oracle-confirmed
+// order of elements in docs/protocol/orders.md).
+func TradesXML(trades []model.ClientTrade) string {
+	var b strings.Builder
+	b.WriteString("<trades>")
+	for _, trade := range trades {
+		b.WriteString(TradeXML(trade))
+	}
+	b.WriteString("</trades>")
+	return b.String()
+}
+
+// TradeXML renders one <trade> element.
+func TradeXML(trade model.ClientTrade) string {
+	timeOfDay := func(sec int64) string {
+		return fmt.Sprintf("%02d:%02d:%02d", sec/3600, (sec%3600)/60, sec%60)
+	}
+	var b strings.Builder
+	b.WriteString("<trade>")
+	b.WriteString("<secid>" + strconv.Itoa(int(trade.SecID)) + "</secid>")
+	b.WriteString("<tradeno>" + strconv.FormatUint(trade.TradeNo, 10) + "</tradeno>")
+	b.WriteString("<orderno>" + strconv.FormatUint(trade.OrderNo, 10) + "</orderno>")
+	b.WriteString("<board>" + escape(trade.Board) + "</board>")
+	b.WriteString("<seccode>" + escape(trade.SecCode) + "</seccode>")
+	b.WriteString("<client>" + escape(trade.Client) + "</client>")
+	// The DLL prints the buysell byte as-is (the O fixture shows \x01).
+	b.WriteString("<buysell>" + string([]byte{trade.BuySell}) + "</buysell><union></union>")
+	b.WriteString("<time>" + timeOfDay(trade.Time) + "</time>")
+	b.WriteString("<brokerref>" + escape(trade.BrokerRef) + "</brokerref>")
+	b.WriteString("<value>" + orderAmount(trade.Value) + "</value>")
+	b.WriteString("<comission>" + orderAmount(trade.Comission) + "</comission>")
+	b.WriteString("<price>" + orderAmount(trade.Price) + "</price>")
+	b.WriteString("<quantity>" + strconv.FormatInt(trade.Quantity, 10) + "</quantity>")
+	b.WriteString("<items>" + strconv.FormatInt(trade.Items, 10) + "</items>")
+	b.WriteString("<yield>0.0</yield>")
+	b.WriteString("<currentpos>" + strconv.FormatInt(trade.CurrentPos, 10) + "</currentpos>")
+	b.WriteString("<accruedint>0.0</accruedint>")
+	b.WriteString("<tradetype>" + escape(string(trade.TradeType)) + "</tradetype>")
+	b.WriteString("<settlecode>" + escape(trade.SettleCode) + "</settlecode>")
+	b.WriteString("<bypass>" + strconv.Itoa(int(trade.Bypass)) + "</bypass>")
+	b.WriteString("</trade>")
+	return b.String()
 }
