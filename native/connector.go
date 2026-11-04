@@ -465,17 +465,50 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(req.TransactionID, 10) + "\"/>", nil
 	case "get_portfolio":
-		return failure("get_portfolio: layout not recovered (I)"), nil
-	case "get_portfolio_mct":
-		return failure("get_portfolio_mct: layout not recovered (I)"), nil
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		// Local render from the loaded stores: the DLL sends no request (O).
+		for _, pos := range client.MoneyPositions() {
+			c.emit(xmlcompat.PortfolioCurrencyXML(pos))
+		}
+		return success(), nil
 	case "get_mc_portfolio":
-		return failure("get_mc_portfolio: layout not recovered (I)"), nil
-	case "get_united_portfolio":
-		return failure("get_united_portfolio: layout not recovered (I)"), nil
-	case "get_united_equity":
-		return failure("get_united_equity: layout not recovered (I)"), nil
-	case "get_united_go":
-		return failure("get_united_go: layout not recovered (I)"), nil
+		var req struct {
+			Client string `xml:"client,attr"`
+			Union  string `xml:"union,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Attributes union and client are empty"), nil
+		}
+		for _, pos := range client.MoneyPositions() {
+			if req.Client != "" && pos.Client != req.Client {
+				continue
+			}
+			if req.Client == "" && req.Union != "" && pos.Union != req.Union {
+				continue
+			}
+			c.emit(xmlcompat.MCPortfolioXML(pos.Client, pos))
+		}
+		return success(), nil
+	case "get_portfolio_mct":
+		// O: the DLL expects another szClient format and rejects the client code
+		// (the exact input format is I).
+		return failure("{8} Неверное значение параметра szClient"), nil
+	case "get_united_portfolio", "get_united_equity", "get_united_go":
+		return failure("layout not recovered (I)"), nil
 	case "newstoporder":
 		var req struct {
 			SecID    int    `xml:"secid"`
