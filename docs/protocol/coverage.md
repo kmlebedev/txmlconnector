@@ -89,14 +89,16 @@
 | get_mc_portfolio | done | локальный рендер | O | `portfolio-mc-dll.xml`, `TestPortfolioLocalRender` | требует client/union; O-ошибка без них |
 | get_portfolio_mct | done (ошибка) | — | O | `TestPortfolioLocalRender` | «{8} Неверное значение параметра szClient», формат входа I |
 | get_united_portfolio/equity/go | stub (I) | — | I | `TestPortfolioLayoutsAreExplicitI` | «layout not recovered (I)» |
+| get_max_buy_sell_tplus | done (local) | локальный рендер из сторов | O/D | `TestMarginMatchDLL`, `margin-dll.xml` | MCT -> ошибка; точная формула по R_SEC_RATE 0x0a (a217bc1) |
+| get_max_buy_sell | done (local) | локальный рендер | O/D | `TestMarginMatchDLL`, `TestMarginMCTBehavior` | MCT -> success 0/0; cross/шорт по margin.md (a217bc1) |
+| get_cln_sec_permissions | done (local) | локальный рендер | O/D | `TestClnSecPermissionsMatchDLL` | marketable из 0x0e; права/ставки I (FUN_18001a700) |
 
 ### 2.3 Не реализовано в Connector (default → message not implemented)
 
 authenticate, set_csp (внешние криптопровайдеры; T29), cancelnegdeal, change_pass,
 get_family_strikes, get_news_body, get_old_news, get_option_families, get_options,
 makeordown, moveorder, newmrepoorder, newrepoorder, newrpsorder (14 имён). Соответствие задачам: T19 (moveorder/
-makeordown), T23 (max buy/sell, permissions), T24 (news), T26 (change_pass), T27 (options),
-T28 (RPS/REPO). Плюс отсутствуют `newreport4`/`cancelreport4` (T28/T29).
+makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Плюс отсутствуют `newreport4`/`cancelreport4` (T28/T29).
 
 ## 3. Записи RQ_MAIN (splitter `records.Records` + декодеры `native/events*`)
 
@@ -111,8 +113,9 @@ T28 (RPS/REPO). Плюс отсутствуют `newreport4`/`cancelreport4` (T2
 | 0x07 | R_QUOTES | splitter | decodeQuotes → Quotes | `<quotes>` | O | `quote-live*`, `quotes-dll.xml` |
 | 0x08 | R_ALLTRADE (sized) | sizedTags | decodeAllTrade → Trade | `<alltrades>` | O | `alltrades-*` |
 | 0x09 | R_HISTORY | special (unsized) | decodeCandles → Candles | `<candles>` | O | `candles-*` |
-| 0x0a | R_SEC_RATE | special (W+L) | state-only (нет события) | — | D | — |
-| 0x0b–0x0e | R_SEC_ZALOG/OBLIG/ONOFF/0E | attrTags 3 Б | state-only (нет события) | — | D | `TestRecordsAttributeUpdates` |
+| 0x0a | R_SEC_RATE | special (W+L) | decodeSecRate → Client.marginRates (V, копейки) | — (только state) | D/O | `TestParseSecRate`, `TestMarginSnapshotIncludesRate`, `TestMarginMatchDLL` |
+| 0x0b–0x0d | R_SEC_ZALOG/OBLIG/ONOFF | attrTags 3 Б | state-only (нет события) | — | D | `TestRecordsAttributeUpdates` |
+| 0x0e | R_SEC_MKT_PERMIT | attrTags 3 Б | decodeSecMktPermit → MarketOrd + флаг бумаги | `<marketord>` | O/D | `marketord-inject.hex`, `TestMarketOrdEvent/UnknownSecID/EveryRecord/DuringLoad` |
 | 0x10 | R_ORD_MODIFY (sized) | sizedTags | decodeOrderModify → Order (все mask-ветки) | `<orders>` (один финальный) | O | `order-modify-*`, `TestOrderModifyBatchOneCallback` |
 | 0x18 | R_OVERNIGHT | 1 байт | decodeOvernight → Overnight | `<overnight>` | O | `TestOvernightRecordReachesStatus` |
 | 0x28 | R_SEC_NEW (sized) | sizedTags | нет декодера (каталог из RQ_STARTUP) | — | D/I | `TestParseSecNewSnapshot` (records) |
@@ -187,6 +190,7 @@ T28 (RPS/REPO). Плюс отсутствуют `newreport4`/`cancelreport4` (T2
 | `<client>`/`<overnight>`/`<union>` | ClientAccount/Overnight/Union | `ClientXML`/`OvernightXML`/`UnionXML` | `snapshot-tail-live.xml` | O |
 | `<server_status>`/`<connector_version>`/`<current_server>` | ServerStatus/константы | `StatusXML`, строки connector | `service-dll.xml` | O/S |
 | `<portfolio_currency>`/`<mc_portfolio>` | MoneyPosition (local) | `PortfolioCurrencyXML`/`MCPortfolioXML` | `portfolio-*-dll.xml` | O |
+| `<marketord>` | MarketOrd | `MarketOrdXML` | `marketord-dll.xml` | O |
 | `<portfolio_tplus>`/`<portfolio_forts>`/`<united_portfolio>`/`<portfolio_mct>` | — | только литеральные скелеты, не в Render | — | I (T22 remaining) |
 | `<ticks>` | Tick | рендер не реализован | нет | T14 partial |
 | `<news_header>`/`<messages>` | NewsHeader/Message | нет | нет | T24/T25 stub |
