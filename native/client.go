@@ -267,10 +267,12 @@ type RunOptions struct {
 
 // Run polls RQ_MAIN and hands every reply's events to h in wire order until the
 // context is cancelled, an exchange fails or h returns an error (the error is
-// returned to the caller). h runs on the Run goroutine with the client lock
-// released, so it may use Client methods. An unknown record ends a batch: its
-// model.UnknownRecord is the last event of that batch and polling continues
-// with the next RQ_MAIN.
+// returned to the caller). h is called exactly once per RQ_MAIN reply,
+// including replies without events (e.g. one that carried only catalog
+// mutations); a nil/empty slice means there were no events. h runs on the Run
+// goroutine with the client lock released, so it may use Client methods. An
+// unknown record ends a batch: its model.UnknownRecord is the last event of
+// that batch and polling continues with the next RQ_MAIN.
 func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) error) error {
 	delay := opt.RqDelay
 	if delay == 0 {
@@ -292,10 +294,8 @@ func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) 
 			if err != nil {
 				return err
 			}
-			if len(events) > 0 {
-				if err := h(events); err != nil {
-					return err
-				}
+			if err := h(events); err != nil {
+				return err
 			}
 			if !more {
 				break
