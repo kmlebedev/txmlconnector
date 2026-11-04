@@ -568,7 +568,8 @@ func TradeXML(trade model.ClientTrade) string {
 	b.WriteString("<seccode>" + escape(trade.SecCode) + "</seccode>")
 	b.WriteString("<client>" + escape(trade.Client) + "</client>")
 	// The DLL prints the buysell byte as-is (the O fixture shows \x01).
-	b.WriteString("<buysell>" + string([]byte{trade.BuySell}) + "</buysell><union></union>")
+	b.WriteString("<buysell>" + string([]byte{trade.BuySell}) + "</buysell>")
+	b.WriteString("<union>" + escape(trade.Union) + "</union>")
 	b.WriteString("<time>" + timeOfDay(trade.Time) + "</time>")
 	b.WriteString("<brokerref>" + escape(trade.BrokerRef) + "</brokerref>")
 	b.WriteString("<value>" + orderAmount(trade.Value) + "</value>")
@@ -578,7 +579,7 @@ func TradeXML(trade model.ClientTrade) string {
 	b.WriteString("<items>" + strconv.FormatInt(trade.Items, 10) + "</items>")
 	b.WriteString("<yield>0.0</yield>")
 	b.WriteString("<currentpos>" + strconv.FormatInt(trade.CurrentPos, 10) + "</currentpos>")
-	b.WriteString("<accruedint>0.0</accruedint>")
+	b.WriteString("<accruedint>" + orderAmount(trade.AccruedInt) + "</accruedint>")
 	b.WriteString("<tradetype>" + escape(string(trade.TradeType)) + "</tradetype>")
 	b.WriteString("<settlecode>" + escape(trade.SettleCode) + "</settlecode>")
 	b.WriteString("<bypass>" + strconv.Itoa(int(trade.Bypass)) + "</bypass>")

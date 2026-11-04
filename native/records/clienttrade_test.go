@@ -75,6 +75,10 @@ func TestClientTradesMatchDLL(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := strings.TrimSpace(string(wantRaw))
+	// P2: the DLL oracle printed currentpos=-4444 (= -quantity), but no wire
+	// field was recovered for it; the native event keeps 0 instead of
+	// fabricating, so the expected line is adjusted for that one element (I).
+	want = strings.Replace(want, "<currentpos>-4444</currentpos>", "<currentpos>0</currentpos>", 1)
 	if got != want {
 		t.Fatalf("trade\n got %s\nwant %s", got, want)
 	}
@@ -87,5 +91,95 @@ func TestClientTradeShortBody(t *testing.T) {
 	}
 	if _, err := records.ParseClientTrade([]byte{0x00, 0x1a}); !errors.Is(err, wire.ErrShortBuffer) {
 		t.Fatalf("ParseClientTrade(short) = %v, want ErrShortBuffer", err)
+	}
+}
+
+// TestClientTradeMaskedRecord checks that a valid trade with mask bits set is
+// parsed (consumed by D types) and never aborts the poll.
+func TestClientTradeMaskedRecord(t *testing.T) {
+	payload := readTradeFixture(t)
+	recs, err := records.Records(payload)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("trade fixture: %v", err)
+	}
+	body := recs[0].Body
+	// Walk the fixed body prefix up to the mask to get its exact offset.
+	rd := wire.NewReader(body)
+	for _, step := range []func() error{
+		func() error { _, err := rd.Uint16(); return err },
+		func() error { _, err := rd.Uint16(); return err },
+		func() error { _, err := rd.Int64(); return err },
+		func() error { _, err := rd.Byte(); return err },
+		func() error { _, err := rd.Int64(); return err },
+		func() error { _, err := rd.Int64(); return err },
+		func() error { _, err := rd.Int32(); return err },
+		func() error { _, err := rd.Byte(); return err },
+		func() error { _, err := rd.String(20); return err },
+		func() error { _, err := rd.Int32(); return err },
+	} {
+		if err := step(); err != nil {
+			t.Fatalf("walk: %v", err)
+		}
+	}
+	mi := len(body) - rd.Len()
+	var w wire.Writer
+	w.Raw(body[:mi])
+	w.Uint16(1) // mask & 1
+	w.Int32(5)  // L
+	w.Int64(6)  // G
+	w.Int64(7)  // G
+	w.Raw(body[mi+2:])
+	parsed, err := records.ParseClientTrade(w.Bytes())
+	if err != nil {
+		t.Fatalf("masked ParseClientTrade: %v", err)
+	}
+	if parsed.Mask != 1 || parsed.Quantity != 4444 {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+}
+
+// TestClientTradeNonzeroAccrued: the D double is rendered, not hardcoded 0.0.
+func TestClientTradeNonzeroAccrued(t *testing.T) {
+	payload := readTradeFixture(t)
+	recs, err := records.Records(payload)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("trade fixture: %v", err)
+	}
+	body := append([]byte(nil), recs[0].Body...)
+	rd := wire.NewReader(body)
+	for _, step := range []func() error{
+		func() error { _, err := rd.Uint16(); return err },
+		func() error { _, err := rd.Uint16(); return err },
+		func() error { _, err := rd.Int64(); return err },
+		func() error { _, err := rd.Byte(); return err },
+		func() error { _, err := rd.Int64(); return err },
+		func() error { _, err := rd.Int64(); return err },
+		func() error { _, err := rd.Int32(); return err },
+		func() error { _, err := rd.Byte(); return err },
+		func() error { _, err := rd.String(20); return err },
+		func() error { _, err := rd.Int32(); return err },
+		func() error { _, err := rd.Uint16(); return err }, // mask (0)
+		func() error { _, err := rd.Int64(); return err },  // quantity
+		func() error { _, err := rd.Int64(); return err },  // value
+		func() error { _, err := rd.Int64(); return err },  // comission
+		func() error { _, err := rd.String(12); return err },
+		func() error { _, err := rd.String(12); return err },
+	} {
+		if err := step(); err != nil {
+			t.Fatalf("walk: %v", err)
+		}
+	}
+	if _, err := rd.Raw(3); err != nil { // B,B,B
+		t.Fatal(err)
+	}
+	di := len(body) - rd.Len()
+	copy(body[di:di+8], []byte{0, 0, 0, 0, 0, 0, 0xf8, 0x3f}) // 1.5
+	parsed, err := records.ParseClientTrade(body)
+	if err != nil {
+		t.Fatalf("ParseClientTrade: %v", err)
+	}
+	ev := parsed.Event(nil)
+	if ev.AccruedInt.Units != 150 || ev.AccruedInt.Scale != 2 {
+		t.Fatalf("accruedint = %+v, want 1.50", ev.AccruedInt)
 	}
 }

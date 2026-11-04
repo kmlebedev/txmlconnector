@@ -14,11 +14,12 @@ func decodeClientTrade(c *Client, body []byte) ([]model.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	clientCode := ""
+	clientCode, union := "", ""
 	for _, id := range c.accountOrder {
 		state := c.accounts[id]
 		if state != nil && state.raw.ID == raw.ClientID {
 			clientCode = state.account.ID
+			union = state.account.Union
 			break
 		}
 	}
@@ -27,5 +28,6 @@ func decodeClientTrade(c *Client, body []byte) ([]model.Event, error) {
 	}
 	ev := raw.Event(c.catalog)
 	ev.Client = clientCode
+	ev.Union = union
 	return []model.Event{&ev}, nil
 }
