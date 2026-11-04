@@ -881,6 +881,66 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		c.emit(xmlcompat.ClnSecPermissionsXML(perm))
 		return success(), nil
+	case "get_old_news":
+		var req struct {
+			Count *string `xml:"count,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Count == nil {
+			return failure("\"count\" attribute not found"), nil
+		}
+		count, err := strconv.Atoi(*req.Count)
+		if err != nil {
+			return failure("\"count\" attribute must be an integer"), nil
+		}
+		if count < 1 || count > 100 {
+			return failure(fmt.Sprintf("News count must be in interval from 1 to 100. Received value is %d", count)), nil
+		}
+		// Local request: RQ_GETNEWS 73; the headers arrive as 0x35/0x36 events.
+		if err := client.OldNews(ctx, count); err != nil {
+			return failure(err.Error()), nil
+		}
+		return success(), nil
+	case "get_news_body":
+		var req struct {
+			NewsID *string `xml:"news_id,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.NewsID == nil {
+			return failure("\"news_id\" attribute not found"), nil
+		}
+		newsID, err := strconv.ParseInt(*req.NewsID, 10, 64)
+		if err != nil || newsID < 0 || newsID > 2147483647 {
+			return failure("Attribute \"news_id\" must be in interval from 0 to 2147483647"), nil
+		}
+		if _, ok := client.newsHeader(newsID); !ok {
+			return failure(fmt.Sprintf("Header with id = %d not found", newsID)), nil
+		}
+		if _, err := client.NewsBody(ctx, newsID); err != nil {
+			if errors.Is(err, errNewsBodyI) {
+				// The DLL request is sent and the command succeeds; the body
+				// callback path is I until task-56 (news.md).
+				return success(), nil
+			}
+			return failure(err.Error()), nil
+		}
+		return success(), nil
 	case "get_forts_positions":
 		var req struct {
 			Client string `xml:"client"`
@@ -1055,6 +1115,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.TradesXML([]model.ClientTrade{*e}))
 			case *model.MarketOrd:
 				c.emit(xmlcompat.MarketOrdXML(*e))
+			case *model.NewsHeader:
+				c.emit(xmlcompat.NewsHeaderXML(*e))
 			case model.ServerStatus:
 				switch {
 				case e.Recover:
@@ -1149,6 +1211,9 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 				}
 				if marketOrd, ok := ev.(*model.MarketOrd); ok {
 					c.emit(xmlcompat.MarketOrdXML(*marketOrd))
+				}
+				if header, ok := ev.(*model.NewsHeader); ok {
+					c.emit(xmlcompat.NewsHeaderXML(*header))
 				}
 			}
 		},

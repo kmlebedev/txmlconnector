@@ -54,6 +54,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return TradesXML([]model.ClientTrade{*e}), true
 	case *model.MarketOrd:
 		return MarketOrdXML(*e), true
+	case *model.NewsHeader:
+		return NewsHeaderXML(*e), true
 	}
 	return "", false
 }
@@ -955,4 +957,24 @@ func MarketOrdXML(m model.MarketOrd) string {
 		permit = "yes"
 	}
 	return "<marketord secid=" + quoteAttr(strconv.Itoa(int(m.SecID))) + " permit=" + quoteAttr(permit) + " seccode=" + quoteAttr(m.SecCode) + "/>"
+}
+
+// cdata escapes the text of an XML CDATA section (the DLL wraps the news
+// source/title/text in CDATA, news.md D/O).
+func cdata(s string) string {
+	return strings.ReplaceAll(s, "]]>", "]]]]><![CDATA[>")
+}
+
+// NewsHeaderXML renders <news_header> (news.md, D + O fixture). The O fixture
+// prints the timestamp as UTC (the capture machine printed UTC); the exact
+// time source of the DLL is I, so UTC keeps the fixture byte-exact.
+func NewsHeaderXML(h model.NewsHeader) string {
+	return "<news_header><id>" + strconv.FormatInt(h.ID, 10) + "</id><timestamp>" +
+		h.Time.UTC().Format("02.01.2006 15:04:05") + "</timestamp><source><![CDATA[" + cdata(h.Source) +
+		"]]></source><title><![CDATA[" + cdata(h.Title) + "]]></title></news_header>"
+}
+
+// NewsBodyXML renders <news_body> (D form; the emit mechanics are I).
+func NewsBodyXML(b model.NewsBody) string {
+	return "<news_body><id>" + strconv.FormatInt(b.ID, 10) + "</id><text><![CDATA[" + cdata(b.Text) + "]]></text></news_body>"
 }
