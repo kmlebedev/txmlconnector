@@ -18,3 +18,7 @@
 
 # secrets: never commit environment files (use tools/re/demo.env.example)
 *.env
+
+# Python caches of the RE tools (generated)
+__pycache__/
+*.pyc
