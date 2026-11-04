@@ -1,0 +1,1 @@
+<orders><stoporder transactionid="1"><secid>26</secid><union></union><board>TQBR</board><seccode>SBER</seccode><client>TESTCLIEN</client><buysell>B</buysell><author>TESTLOGIN</author><status>none</status><withdrawtime>0</withdrawtime><result>{50} Статус заявки не определен.</result></stoporder></orders>
