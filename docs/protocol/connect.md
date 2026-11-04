@@ -337,6 +337,76 @@ RQ_RECOVER (64):  Bn:  token                 // ровно len байт токе
 при сдаче; `Connector` рендерит их как `<server_status ... connected="true" recover="true"/>`,
 `<server_status ... connected="true"/>` и `<server_status ... connected="false"/>`.
 
+## Параметры `<connect>` (PDF 3.1): куда уходит каждый
+
+Разбор обработчика команды `connect`: `FUN_1801196a0` (XML-элемент `<command id="connect">`,
+параметры — дочерние элементы; `FUN_18040c140(el, "имя")` возвращает элемент, `FUN_18040d930` —
+его текст, `FUN_18012f330` проверяет число, `FUN_180781710` переводит в int). Статусы: **D** —
+декомпилятор, **S** — подтверждено живым захватом (RE-2, два логина DLL через прокси, 2026-11-04,
+фикстуры и сырьё — `.re-run/r6/`).
+
+### Параметр → хранилище → действие
+
+| Параметр | Где хранится (D) | Куда действует | Статус |
+|---|---|---|---|
+| `login` (обязателен) | `connector+0x110` (`FUN_1801196a0`, строка копируется в процедуру логина) | RQ_LOGIN: `Z12: login`; в других запросах логина нет | **D**, **S** |
+| `password` (обязателен, если нет сохранённого) | локальный буфер процедуры логина (проверка `"You have to specify password."`) | ключ пароля для RQ_PWD (в открытом виде на провод не уходит) | **D** |
+| `host`, `port` (обязательны) | список адресов (`FUN_180109170`); TCP-connect и переподключение берут его из `conn+0x810`/`conn+0x850` (см. раздел про RQ_RELOGIN) | TCP-соединение и восстановление | **D**, **S** |
+| `session_timeout` | секунды → `connector+0x208` = значение×1000 мс | клиентский таймаут сессии; `0`/отсутствие — берётся серверный из RQ_PWD; нормировка в `FUN_1803895c0`: `<0x14` → 20000 мс, `<300` → ×1000; задаёт окно восстановления (RE-1). На провод не уходит | **D**; **S**: payload RQ_LOGIN/RQ_STARTUP и хвост RQ_PWD не меняются |
+| `request_timeout` | секунды → `connector+0x2b8` = значение×1000 мс | таймаут каждого запроса и connect при реконнекте; default 20000 мс; если ≥ `session_timeout`, становится `session_timeout/2` (`FUN_1803895c0`) | **D** |
+| `rqdelay` | мс; default 100; минимум 10 (`"RQDelay cannot be less than %dms"`); setter `FUN_1800db3f0` → `connector+0x5ec` | период главного цикла: `FUN_1800f41d0` создаёт waitable timer с периодом `+0x5ec`, логирует `"Main thread OK. Data refresh period: N"`, по таймеру идёт опрос RQ_MAIN | **D**, **S** |
+| `push_u_limits` | секунды, ≥1 (`"Incorrect ulimits update period value. Min value is 1 second"`), longlong `connector+0x4a8`; 0/нет = выключено | периодические клиентские запросы лимитов/позиций: читается в `FUN_180172870`/`FUN_180173830`, которые взводят таймер task_runner `conn+0x4b8` (`FUN_180419660`, `FUN_1804197c0`; снятие — `FUN_180175340`); исполнители — `FUN_180384b60` (RQ_CLIENT_LIMITS 43), `FUN_180384a80` (RQ_DEPO_POS 16), `FUN_1803849a0` (RQ_MONEY_POS 17), `FUN_180384a10` (RQ_POSITIONS 81) | **D**; живой эффект не наблюдался (**S**-негатив, см. ниже) |
+| `push_pos_equity` | то же, longlong `connector+0x4b0` | то же | **D**; **S**-негатив |
+| `language` | `"ru"` → 0, `"en"` → 1 (статкарта в `FUN_1801196a0`: VA `0x18082e1a4` = `"ru"`, `0x18082e1a8` = `"en"`); неизвестный → `"Unknown language."`; значение — глобал `DAT_1809d4064`, default 0 | последний байт RQ_PWD (RE-1: builder `FUN_1803895c0` пишет `DAT_1809d4064` через `FUN_1801be4f0`) → сервер отдаёт локализованные справочники; на прочие запросы не влияет | **D**, **S** |
+| `milliseconds` | `"true"` → 1, глобал `DAT_1809d3e88` (default 0) | только XML: `FUN_180116c20` приписывает к времени `.mmm` (при значении >999 мс — `"Milliseconds overflow"`) | **D**; живой XML-эффект не проверен |
+| `utc_time` | `"true"` → 1, `connector+0x680` (default 0) | только XML: `FUN_1801003d0`/`FUN_180100450` переводят время через `FUN_18027a9a0`/`FUN_18027a9e0` (UTC vs серверное локальное) | **D**; не проверено живьём (нужны колбэки со временем) |
+| `autopos` | `connector+9`; ctor `FUN_1800d7d50` ставит default 1, `"false"` → 0 | только XML: читается генераторами `<alltrades>` (`FUN_1800f7b40`) и `FUN_180140600`; в сетевые запросы не входит | **D**; **S**: `autopos=true` ничего не изменил (default уже 1) |
+| `micex_registers` | `connector+8`; `"false"` → 0, иначе 1 (default 0) | только XML-слой: влияет на `<positions>`; в сеть не входит | **D**, **S** |
+| `packet_size` (в PDF 3.1 не значится) | необязательный; `connector+0x20c` = `(v+8)`, округлённое вниз до кратного 8; default 0xfff0; читатель `FUN_1801027a0` | размер буфера/потока; связь с `W:65512` в RQ_LOGIN — **I** (не прослежена) | **D** |
+| `proxy` (необязательный) | тип SOCKS4/SOCKS5/HTTP-CONNECT и addr/port/login/password → `connector+0x5f0`…`+0x640` | TCP через прокси | **D** |
+| `pos_at_startup`, `sms_auth` | `connector+0x11848` (default 1), `connector+0x681` (default 0) | XML-слой, не в сетевых запросах | **D** |
+
+### Живая сверка (S): два логина DLL через прокси
+
+Прогон A — `<connect>` только с логином/паролем/host/port/rqdelay=100 (все параметры по умолчанию);
+прогон B — те же плюс `<autopos>true</autopos><micex_registers>true</micex_registers>
+<utc_time>true</utc_time><push_u_limits>10</push_u_limits><push_pos_equity>10</push_pos_equity>`.
+Демо-сервер, одна машина, ~42 с после загрузки. Результаты:
+
+- **Не изменилось ничего в протоколе** от `autopos/utc_time/milliseconds/push_*`: RQ_LOGIN payload
+  (18 байт) побайтно равен, RQ_STARTUP reply (4355 байт) побайтно равен, хвост RQ_PWD после proof
+  (строки host/user/OS, HWID, адреса, trailer) побайтно равен; набор кадров одинаков:
+  1×RQ_LOGIN, 1×RQ_PWD, 3×RQ_TIME, 1×RQ_STARTUP, 1×RQ_CLIENT_HOLDINGS, поток RQ_MAIN, 1×RQ_LOGOUT — **S**.
+  Отличалась только длина RQ_PWD (196 vs 204) из-за длины challenge от сервера (ответ RQ_LOGIN
+  130 vs 138 байт, challenge 128 vs 136) — серверный параметр, не клиентский.
+- `micex_registers=true` → в `<positions>` появляется `<register>T0</register>` внутри
+  `<money_position>` (в default тега нет); остальные колбэки идентичны (766/766) — **S**.
+- `push_u_limits=10`/`push_pos_equity=10` за ~42 с **не дали** ни одного нового кадра
+  (типы 43/16/17/81 не появились) — **S**-негатив; почему в этом прогоне таймеры не сработали, не
+  установлено (D: регистрация таймера есть, см. таблицу). Нужен отдельный прогон/RE-3.
+- `utc_time`/`milliseconds` в этом сценарии ненаблюдаемы: колбэков со временем нет (нет подписок);
+  по **D** они влияют только на форматирование XML — оставлено «не проверено».
+- `language=en` отдельным прогоном: последний байт RQ_PWD = **1** (у default 0), а словари в
+  колбэках приходят на английском (`MICEX`, `Auction`, `1 minute` вместо `ММВБ`, `Аукцион`,
+  `1 минута`) — **S**: `language` действительно уходит в RQ_PWD и влияет на серверные справочники.
+- `rqdelay` подтверждён логом `"Main thread OK. Data refresh period: 100"` и шагом RQ_MAIN ~100 мс — **S**.
+
+### Для Go-реализации
+
+- На провод из параметров `<connect>` уходят: `login` (RQ_LOGIN), `language` (последний байт
+  RQ_PWD), `host`/`port` (TCP), `rqdelay` — только клиентская частота RQ_MAIN; `session_timeout`,
+  `request_timeout`, `push_u_limits`, `push_pos_equity` — клиентские таймеры, на провод не уходят;
+  `milliseconds`, `utc_time`, `autopos`, `micex_registers` — только XML-слой (в `ClientConfig` их
+  можно принимать и применять при рендере XML, но в запросы они не входят).
+- `ClientConfig` (план задачи 6) должен хранить: `Language` (ru/en → 0/1 в хвосте RQ_PWD),
+  `SessionTimeout`/`RequestTimeout`/`RqDelay`/`PushULimits`/`PushPosEquity` (все — клиентские
+  таймеры; `rqdelay` по умолчанию 100 мс, минимум 10, таймауты — секунды в XML и мс внутри),
+  `Milliseconds`/`UTCTime` (формат времени в XML), `AutoPos`/`MicexRegisters` (XML-слой).
+- `session_timeout`/`request_timeout` в XML — секунды, DLL хранит мс; `rqdelay` — уже мс;
+  `push_*` — секунды, минимум 1.
+- Фикстура ожидаемого вывода трёх служебных команд — `native/testdata/service-dll.xml`
+  (см. [commands.md](commands.md)).
+
 ## После логина
 
 - **RQ_TIME** (`FUN_1803b7ca0`): пустой запрос; ответ `L:время` + 16 байт часового пояса. Время — секунды «настенного» времени сервера (МСК на демо), DLL печатает его как `Server time`. Первые 2 байта пояса на демо: `-180` (int16 LE, минуты) — **I**. Демо-сервер присылает этот ответ с флагом `0x82` (без шифрования) — **S**.
@@ -351,6 +421,7 @@ RQ_RECOVER (64):  Bn:  token                 // ровно len байт токе
 - Смысл большинства полей ответа RQ_PWD, флагов 4/8 RQ_LOGIN и слов `W:1`, `W:540`.
 - Форматы RQ_STARTUP и записей RQ_MAIN; признак «Snapshot done»; RQ_CLIENT_HOLDINGS; сжатие (`inflate 1.2.5`, на демо не встречалось) — этап M5.
 - RQ_RELOGIN/RQ_RECOVER: байты payload, формат ответа RQ_RELOGIN (включая SID=0), lastSeq и «логин в Z12» подтверждены живым захватом (RE-2, E05, раздел «Переподключение и восстановление» выше); не подтверждена только ветка «сервер забыл сессию» (BYE/-0xd, «Recover unavailable.»).
+- Параметры `<connect>`: живой эффект `push_u_limits`/`push_pos_equity` (в прогоне 10 с новых запросов не дали — S-негатив) и форматирование XML от `utc_time`/`milliseconds` (нужны колбэки со временем) не проверены; связь `packet_size` с `W:65512` в RQ_LOGIN — **I**.
 - Поведение на боевом сервере и на HFT-адресах; демо-сервер может отличаться.
 - Режимы с внешней криптографией (MS CryptoAPI, MESPRO, SSL; `cfg+8 != 0`) не реализованы.
 
