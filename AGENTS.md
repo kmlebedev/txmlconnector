@@ -44,7 +44,14 @@ XML), `native/cryptoprofile`, `native/natsout`, `native.Client` (логин, к�
 (RQ_RELOGIN/RQ_RECOVER, `Client.Reconnect`), служебные команды и параметры `connect`, конец загрузки
 (`<client>`/`<positions>`/`<overnight>`/`<union>`); RE-2/RE-3/RE-4 использовались живьём с согласия
 пользователя (E05/R6/E07). Итог и отклонения — `docs/deepseek/task-index.md` §12; новые RE-документы —
-`docs/protocol/records.md`, `docs/protocol/history.md`. Следующий шаг — **Фаза 2, задачи 8–12**.
+`docs/protocol/records.md`, `docs/protocol/history.md`.
+
+**Обновление 2026-11-04 (3):** **Фаза 2 плана закрыта** (задачи 8–12): `<sec_info_upd>` (в т.ч. из
+загрузки), `<quotations>`, стакан `<quotes>`, `get_securities_info`/`<sec_info>` (локальная команда,
+RQ_SEC_SPEC после подписки), остальные живые записи снапшота (AmBOOK 0x5c, R_SYSPARAMS 0x5b, 0x05,
+strict R_WRAPPER; `UnknownRecords==0` на E07-хвосте). Новые RE-доки — `docs/protocol/records.md`,
+`positions.md`, `orders.md`; oracle-фикстуры в `native/{records,}/testdata`. Итог —
+`docs/deepseek/task-index.md` §13. Следующий шаг — **Фаза 3, задачи 13–14**.
 
 ## 2. Обязательные скиллы
 
@@ -362,12 +369,12 @@ RE-процедуры доступны или фикстуры уже сняты
 
 ## 10. Что делать прямо сейчас (стартовый порядок)
 
-1. **Фазы 0–1 закрыты** (задачи 1–7; ветка `plan/native-client`; Фаза 0 влита в `main`, PR #47).
-   Текущая — **Фаза 2 (задачи 8–12)**: `<sec_info_upd>`, `<quotations>`, `<quotes>`, `<sec_info>`,
-   остальные записи снапшота. Порядок — полоса `native/xmlcompat/render.go`/`native/connector.go`
-   (по одной карточке). RE-1…RE-4 доступны: Ghidra-проект — `${TMPDIR:-/tmp}/txc-ghproj`, секреты —
-   `~/re/demo.env`, согласие пользователя на Wine+демо-сервер получено (торговые команды — только по
-   отдельному согласию; в фазах 2–3 не требуются).
+1. **Фазы 0–2 закрыты** (задачи 1–12; ветка `plan/native-client`; Фазы 0–1 влиты в `main`, PR #47/#48).
+   Текущая — **Фаза 3 (задачи 13–14)**: история `<candles>` (RQ_HISTORY_EXT) и тики `<ticks>`
+   (RQ_SUBSCRIBE_TICKS; живые S-фикстуры — основная сессия 5 ноября после 10:00 МСК). Порядок —
+   полоса `native/xmlcompat/render.go`/`native/connector.go` (по одной карточке). RE-1…RE-4 доступны:
+   Ghidra-проект — `${TMPDIR:-/tmp}/txc-ghproj`, секреты — `~/re/demo.env`, согласие пользователя на
+   Wine+демо-сервер получено (торговые команды — только по отдельному согласию).
 2. Дальше — группы из [docs/deepseek/task-index.md](docs/deepseek/task-index.md) §6. Реальный
    параллелизм ограничен общими файлами: **полоса `native/xmlcompat/render.go` и `native/connector.go`
    (13 задач фаз 1–8) идёт строго по одной карточке**. Параллельно с ней можно вести только задачи,
