@@ -384,19 +384,19 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		return success(), nil
 	case "neworder":
 		var req struct {
-			SecID     int    `xml:"secid"`
-			Client    string `xml:"client"`
-			Union     string `xml:"union"`
-			Price     string `xml:"price"`
-			Quantity  int64  `xml:"quantity"`
-			BuySell   string `xml:"buysell"`
-			Unfilled  string `xml:"unfilled"`
-			Hidden    int64  `xml:"hidden"`
-			BrokerRef string `xml:"brokerref"`
-			ByMarket  string `xml:"bymarket"`
-			UseCredit string `xml:"usecredit"`
-			NoSplit   string `xml:"nosplit"`
-			ExpDate   string `xml:"expdate"`
+			SecID     int     `xml:"secid"`
+			Client    string  `xml:"client"`
+			Union     string  `xml:"union"`
+			Price     string  `xml:"price"`
+			Quantity  int64   `xml:"quantity"`
+			BuySell   string  `xml:"buysell"`
+			Unfilled  string  `xml:"unfilled"`
+			Hidden    int64   `xml:"hidden"`
+			BrokerRef string  `xml:"brokerref"`
+			ByMarket  string  `xml:"bymarket"`
+			UseCredit string  `xml:"usecredit"`
+			NoSplit   string  `xml:"nosplit"`
+			ExpDate   *string `xml:"expdate"`
 		}
 		if err := xml.Unmarshal([]byte(command), &req); err != nil {
 			return failure(err.Error()), nil
@@ -430,6 +430,11 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		if buySell != 'B' && buySell != 'S' {
 			return failure("Wrong buysell."), nil
+		}
+		if req.ExpDate != nil && *req.ExpDate != "" {
+			// The DLL payload field for expdate is not recovered (I): reject it explicitly
+			// instead of silently dropping a requested condition.
+			return failure("transaq: neworder expdate is not encoded yet (I)"), nil
 		}
 		order := model.NewOrder{
 			Client: req.Client, Union: req.Union, Symbol: symbol, Price: price,
