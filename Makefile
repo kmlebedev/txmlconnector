@@ -16,7 +16,7 @@ STAGING_BIN         ?= bin/server.exe
 STAGING_REMOTE_BIN  ?= $(STAGING_BIN_DIR)/txmlconnector-server.exe
 STAGING_UNIT_TMPL   ?= deploy/txmlconnector-server.service
 
-.PHONY: compile test vet server_build server queues_build queues client tgbot \
+.PHONY: compile test vet verify server_build server queues_build queues client tgbot \
 	staging-precheck staging-prepare deploy-staging deploy-staging-binary \
 	deploy-staging-dll deploy-staging-unit deploy-staging-smoke \
 	deploy-staging-status deploy-staging-logs deploy-staging-restart rollback-staging
@@ -29,6 +29,18 @@ test:
 
 vet:
 	go vet ./...
+
+## verify runs the checks required by AGENTS.md before every commit.
+## In a restricted sandbox (DSH workspace-write) the global Go cache is not writable,
+## so the target falls back to a repository-local cache; override GOCACHE to change it.
+VERIFY_GOCACHE = GOCACHE="$${GOCACHE:-$(CURDIR)/.cache/go-build}"
+verify:
+	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+	$(VERIFY_GOCACHE) go vet ./...
+	$(VERIFY_GOCACHE) go build ./...
+	$(VERIFY_GOCACHE) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./native/...
+	$(VERIFY_GOCACHE) CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ./native/...
+	$(VERIFY_GOCACHE) go test -race ./...
 
 server_build:
 	mkdir -p bin
