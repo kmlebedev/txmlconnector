@@ -748,6 +748,134 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		c.emit(xmlcompat.ClientLimitsXML(*limits))
 		return success(), nil
+	case "get_max_buy_sell_tplus":
+		var req struct {
+			Client   string `xml:"client,attr"`
+			Union    string `xml:"union,attr"`
+			Security []struct {
+				SecCode string `xml:"seccode"`
+				Market  int    `xml:"market"`
+			} `xml:"security"`
+			SecIDs []int `xml:"secid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Client == "" {
+			return failure("Client not specified."), nil
+		}
+		var symbols []model.Symbol
+		for _, item := range req.Security {
+			symbol, ok := client.SymbolByMarket(item.Market, item.SecCode)
+			if !ok {
+				return failure(fmt.Sprintf("Failed to get symbol. seecode(%s), market(%d)", item.SecCode, item.Market)), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		for _, id := range req.SecIDs {
+			symbol, ok := client.SymbolBySecID(uint16(id))
+			if !ok {
+				return failure("Wrong secid precified."), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		// Local render from the stores: the DLL sends no request (O).
+		rows, err := client.MaxBuySellTPlus(ctx, req.Client, symbols...)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.MaxBuySellTPlusXML(req.Client, rows))
+		return success(), nil
+	case "get_max_buy_sell":
+		var req struct {
+			Client   string `xml:"client,attr"`
+			Union    string `xml:"union,attr"`
+			Security []struct {
+				SecCode string `xml:"seccode"`
+				Market  int    `xml:"market"`
+			} `xml:"security"`
+			SecIDs []int `xml:"secid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Parameters \"union\" and \"client\" should not be empty"), nil
+		}
+		var symbols []model.Symbol
+		for _, item := range req.Security {
+			symbol, ok := client.SymbolByMarket(item.Market, item.SecCode)
+			if !ok {
+				return failure(fmt.Sprintf("Failed to get symbol. seecode(%s), market(%d)", item.SecCode, item.Market)), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		for _, id := range req.SecIDs {
+			symbol, ok := client.SymbolBySecID(uint16(id))
+			if !ok {
+				return failure("Wrong secid precified."), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		rows, err := client.MaxBuySell(ctx, req.Client, req.Union, symbols...)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.MaxBuySellXML(req.Client, req.Union, rows))
+		return success(), nil
+	case "get_cln_sec_permissions":
+		var req struct {
+			Security *struct {
+				SecCode string `xml:"seccode"`
+				Market  int    `xml:"market"`
+				Board   string `xml:"board"`
+			} `xml:"security"`
+			Client string `xml:"client"`
+			Union  string `xml:"union"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Security == nil || req.Security.Board == "" {
+			return failure("Не указан элемент \"board\""), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Должен быть указан клиент и/или юнион"), nil
+		}
+		symbol, ok := client.SymbolByBoard(req.Security.Board, req.Security.SecCode)
+		if !ok {
+			return failure(fmt.Sprintf("Инструмент не найден ('seccode'=%s, 'board='%s)", req.Security.SecCode, req.Security.Board)), nil
+		}
+		var perm model.SecPermissions
+		var err error
+		if req.Client != "" {
+			perm, err = client.ClientSecPermissions(ctx, req.Client, symbol)
+		} else {
+			perm, err = client.ClientSecPermissionsUnion(ctx, req.Union, symbol)
+		}
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.ClnSecPermissionsXML(perm))
+		return success(), nil
 	case "get_forts_positions":
 		var req struct {
 			Client string `xml:"client"`
@@ -920,6 +1048,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.StopOrdersXML([]model.StopOrder{*e}))
 			case *model.ClientTrade:
 				c.emit(xmlcompat.TradesXML([]model.ClientTrade{*e}))
+			case *model.MarketOrd:
+				c.emit(xmlcompat.MarketOrdXML(*e))
 			case model.ServerStatus:
 				switch {
 				case e.Recover:
@@ -1011,6 +1141,9 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 				// updates the DLL reports per RQ_MAIN reply go from here.
 				if update, ok := ev.(*model.SecInfoUpdate); ok {
 					c.emit(xmlcompat.SecInfoUpdateXML(*update))
+				}
+				if marketOrd, ok := ev.(*model.MarketOrd); ok {
+					c.emit(xmlcompat.MarketOrdXML(*marketOrd))
 				}
 			}
 		},
