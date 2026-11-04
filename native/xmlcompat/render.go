@@ -43,6 +43,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return QuotationXML(*e), true
 	case *model.Quotes:
 		return QuotesXML(*e), true
+	case *model.SecInfo:
+		return SecInfoXML(*e), true
 	}
 	return "", false
 }
@@ -296,4 +298,101 @@ func QuotesXML(book model.Quotes) string {
 	}
 	b.WriteString("</quotes>")
 	return b.String()
+}
+
+// SecInfoXML renders one <sec_info> callback (FUN_180105990): the catalog and
+// RQ_SEC_SPEC data in the DLL order, empty and zero fields skipped.
+func SecInfoXML(info model.SecInfo) string {
+	var b strings.Builder
+	b.WriteString("<sec_info secid=" + quoteAttr(strconv.Itoa(int(info.SecID))) + ">")
+	if info.SecName != "" {
+		b.WriteString("<secname>" + escape(info.SecName) + "</secname>")
+	}
+	if info.SecCode != "" {
+		b.WriteString("<seccode>" + escape(info.SecCode) + "</seccode>")
+	}
+	b.WriteString("<market>" + strconv.Itoa(info.Market) + "</market>")
+	if info.PName != "" {
+		b.WriteString("<pname>" + escape(info.PName) + "</pname>")
+	}
+	dateField := func(name string, v *time.Time) {
+		if v != nil {
+			b.WriteString("<" + name + ">" + v.Format("02.01.2006") + "</" + name + ">")
+		}
+	}
+	decField := func(name string, v *model.Decimal) {
+		if v != nil {
+			b.WriteString("<" + name + ">" + v.String() + "</" + name + ">")
+		}
+	}
+	fixedField := func(name string, v *model.Decimal) {
+		if v != nil {
+			b.WriteString("<" + name + ">" + fixedDecimal(*v) + "</" + name + ">")
+		}
+	}
+	intField := func(name string, v *int64) {
+		if v != nil {
+			b.WriteString("<" + name + ">" + strconv.FormatInt(*v, 10) + "</" + name + ">")
+		}
+	}
+	dateField("mat_date", info.MatDate)
+	decField("clearing_price", info.ClearingPrice)
+	decField("minprice", info.MinPrice)
+	decField("maxprice", info.MaxPrice)
+	if info.BgoC != nil || info.BgoNC != nil || info.BgoBuy != nil {
+		decField("bgo_c", info.BgoC)
+		decField("bgo_nc", info.BgoNC)
+		decField("bgo_buy", info.BgoBuy)
+	} else {
+		fixedField("buy_deposit", info.BuyDeposit)
+		fixedField("sell_deposit", info.SellDeposit)
+	}
+	fixedField("coupon_value", info.CouponValue)
+	dateField("coupon_date", info.CouponDate)
+	intField("coupon_period", info.CouponPeriod)
+	fixedField("facevalue", info.FaceValue)
+	if info.PutCall != nil {
+		b.WriteString("<put_call>" + escape(*info.PutCall) + "</put_call>")
+	}
+	if info.OptType != nil {
+		b.WriteString("<opt_type>" + escape(*info.OptType) + "</opt_type>")
+	}
+	fixedField("accruedint", info.AccruedInt)
+	decField("point_cost", info.PointCost)
+	intField("lot_volume", info.LotVolume)
+	if info.ISIN != "" {
+		b.WriteString("<isin>" + escape(info.ISIN) + "</isin>")
+	}
+	if info.RegNumber != "" {
+		b.WriteString("<regnumber>" + escape(info.RegNumber) + "</regnumber>")
+	}
+	decField("buybackprice", info.BuybackPrice)
+	dateField("buybackdate", info.BuybackDate)
+	if info.CurrencyID != "" {
+		b.WriteString("<currencyid>" + escape(info.CurrencyID) + "</currencyid>")
+	}
+	b.WriteString("</sec_info>")
+	return b.String()
+}
+
+// fixedDecimal prints exactly Scale digits after the point (the DLL keeps the
+// trailing zeros of facevalue and the money fields, e.g. 1000.0000).
+func fixedDecimal(d model.Decimal) string {
+	neg := d.Units < 0
+	units := d.Units
+	if neg {
+		units = -units
+	}
+	text := strconv.FormatInt(units, 10)
+	if d.Scale > 0 {
+		scale := int(d.Scale)
+		for len(text) <= scale {
+			text = "0" + text
+		}
+		text = text[:len(text)-scale] + "." + text[len(text)-scale:]
+	}
+	if neg {
+		return "-" + text
+	}
+	return text
 }

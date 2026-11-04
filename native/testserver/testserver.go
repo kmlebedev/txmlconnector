@@ -66,6 +66,9 @@ type Server struct {
 	// SID is the server id reported in RQ_PWD (and used by RQ_RELOGIN when
 	// ReloginSID is 0); New sets it to defaultSID.
 	SID int
+	// SecSpec is the reply payload of RQ_SEC_SPEC (the RQ_SEC_SPEC records of
+	// native/testdata/secinfo-live.hex.gz in tests); nil replies empty.
+	SecSpec []byte
 	// ReloginToken is the token returned in the RQ_RELOGIN reply; New sets it
 	// to DefaultReloginToken.
 	ReloginToken []byte
@@ -253,6 +256,11 @@ func (s *Server) serve(nc net.Conn) {
 			if err = reply(wire.KindReply, f.Type, w.Bytes()); err == nil {
 				keys, err = wire.NewKeys(sessionKey, sessionSync)
 			}
+		case session.RqSecSpec:
+			s.mu.Lock()
+			payload := s.SecSpec
+			s.mu.Unlock()
+			err = reply(wire.KindReply, f.Type, payload)
 		case session.RqTime:
 			err = reply(wire.KindReply, f.Type, rqTimeReply)
 		case session.RqStartup:

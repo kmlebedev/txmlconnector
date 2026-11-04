@@ -79,6 +79,28 @@ func (c *Client) changeSubscription(ctx context.Context, sub Subscription, on bo
 	if err := conn.Subscribe(ctx, items); err != nil {
 		return err
 	}
+	// Like the DLL, request the security specs of the subscribed securities
+	// right after the subscribe (the payload order is the reverse of the XML
+	// elements, RQ_SEC_SPEC needs no counter).
+	var ids []uint16
+	for _, s := range []struct {
+		symbols []model.Symbol
+	}{
+		{sub.AllTrades}, {sub.Quotations}, {sub.Quotes},
+	} {
+		for _, symbol := range s.symbols {
+			if _, ok := next[symbol]; !ok {
+				continue
+			}
+			if sec, _, ok := catalog.Lookup(symbol.Board, symbol.SecCode); ok {
+				ids = append(ids, sec.SecID)
+			}
+		}
+	}
+	reverseIDs(ids)
+	if err := c.loadSecSpecs(ctx, ids); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	for s, mask := range next {
 		if mask == 0 {
@@ -89,4 +111,11 @@ func (c *Client) changeSubscription(ctx context.Context, sub Subscription, on bo
 	}
 	c.mu.Unlock()
 	return nil
+}
+
+// reverseIDs reverses the secid list in place (RQ_SEC_SPEC payload order).
+func reverseIDs(ids []uint16) {
+	for i, j := 0, len(ids)-1; i < j; i, j = i+1, j-1 {
+		ids[i], ids[j] = ids[j], ids[i]
+	}
 }

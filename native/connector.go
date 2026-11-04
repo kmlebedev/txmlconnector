@@ -271,6 +271,48 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		c.emit(msg)
 		return success(), nil
+	case "get_securities_info":
+		var req struct {
+			Security []struct {
+				Market  int    `xml:"market"`
+				SecCode string `xml:"seccode"`
+			} `xml:"security"`
+			SecIDs []int `xml:"secid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		var symbols []model.Symbol
+		for _, s := range req.Security {
+			symbol, ok := client.SymbolByMarket(s.Market, s.SecCode)
+			if !ok {
+				return failure("unknown security " + s.SecCode), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		for _, id := range req.SecIDs {
+			symbol, ok := client.SymbolBySecID(uint16(id))
+			if !ok {
+				return failure(fmt.Sprintf("unknown secid %d", id)), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		// The DLL renders the callbacks from the local catalog/spec cache and
+		// sends no request to the server (S, r11 capture).
+		infos, err := client.SecuritiesInfo(ctx, symbols...)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		for _, info := range infos {
+			c.emit(xmlcompat.SecInfoXML(info))
+		}
+		return success(), nil
 	case "subscribe", "unsubscribe":
 		return c.subscribe(ctx, command, id == "subscribe")
 	default:
