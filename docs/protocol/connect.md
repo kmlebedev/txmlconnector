@@ -471,6 +471,108 @@ XML-строители: `<positions>` — `FUN_1800f5460`/`FUN_1800f4f20` (сп�
 большой генератор `FUN_1800f7b40` (декомпилятор упирается в размер ответа — нужен отдельный
 проход, задача 7).
 
+### Форматы записей конца загрузки — D/S
+
+Все числа на проводе — big-endian; примитивы — из таблицы «Типы полей» (`Z` — строка до n байт +
+NUL, `L`/`G` — упакованное целое, `B` — байт, `W` — u16). Байты сверены с `snapshot-tail-live.hex`.
+
+#### `0x02*` R_CLN_NEW (`FUN_1803cbc40`, demo size 35) — D, значения S
+
+| # | Тип | Поле (смещение в структуре клиента) | Демо |
+|---|---|---|---|
+| 1 | G/L | числовой id клиента (`+0`), ключ стора клиентов `FUN_180258760` | 108178 |
+| 2 | Z12 | код клиента (`+4`), выводится как `<client id=…>` | TESTCLIEN (9 б) |
+| 3 | Z32 | login (`+0x11`), в XML не выводится | TESTLOGI (8 б) |
+| 4 | B | флаг (`+0x32`), смысл неизвестен | 1 |
+| 5 | B | тип клиента (`+0x33`): 0 spot, 1 risk, 2 leverage, 3 margin_level, 4 mct | 2 → `<type>leverage</type>` |
+| 6 | B | рынок (`+0x3b`), XML `<market>` через `FUN_1801ec180` | 1 |
+| 7 | Z7 | юнион (`+0x3c`), используется в `<positions>`/`<client>` | пусто |
+| 8 | B | поле `+0x35`, смысл неизвестен | 0 |
+| 9 | B | валюта (`+0x36`): id; имя для XML через `FUN_180217700`→`FUN_1802177c0`; id ≥ 9 → исключение `Wrong currency in client callback` | 1 → `RUB` |
+| 10 | W | поле `+0x38`, смысл неизвестен | 100 |
+| 11 | B | `ClPortSub` (`+0x3a`) — так подписывает лог `ReadClientAsset` | 0 |
+| 12 | L | поле `+0x44`, смысл неизвестен | 0 |
+| 13 | opt | `Z15`, `B`, `L` — читаются только если остались байты (`FUN_1801be120`) | пусто/0 |
+
+Тип-переключатель для `<type>` — `0x1800fbbe0`, литералы `0x180836b08/b20/b38/b50/b70`
+(`<type>spot|risk|leverage|margin_level|mct</type>`). Валюта — `0x1800fbb60`, рынок — `0x1800fbb0a`.
+Стор клиентов: `FUN_1802663c0` (записи по 0x54 байта, `connector+0x4b8`, индекс в `+0x20`).
+Рендер `<client … remove="false">` — большой генератор `FUN_1800f7b40` (`0x1800fba21`,
+литерал `0x180836a88`); удаление — `<client id="…" remove="true"/>` (`FUN_180120ad0`).
+
+#### `0x3b*` R_CLIENT_ASSET (`FUN_1803cde40`, demo size 21) — D, значения S
+
+```
+G/L client_id;  W sym_id          ; 0xffff = денежный актив (демо); иначе id бумаги
+loop: B reg_code; if reg_code == 0xff break    ; сервер >= 0x269; старее — 0x0b
+      B mask
+        0x01 -> G open_balance   (REG_POS_OPENBAL; идёт в <saldoin>)
+        0x02 -> G balance        (REG_POS_BALANCE; современный сервер игнорирует)
+        0x04 -> L bought         (REG_POS_BOUGHT; игнорируется)
+        0x08 -> L sold           (REG_POS_SOLD; игнорируется)
+        0x10 -> L blocked        (игнорируется)
+        0x20 -> L estimated      (игнорируется)
+B mask2:
+  0x01 -> G commission          (POS_COMMISSION)
+  0x02 -> Z15 waposprice        (POS_WAPOSPRICE, double строкой; FORTS)
+  0x04 -> Z4 currency           (POS_CURRENCY, имя -> id через FUN_18000fc20)
+```
+
+Демо-запись: id=108178, sym=0xffff, reg=0x01, mask=0x03 → open_balance=30 000 000,
+balance=30 000 000 (игнорируется), mask2=0x04 → currency="RUR". Сохраняется через
+`FUN_18024d4e0` (магазин позиций `connector+0x120`) и рендерится как `<money_position>`:
+`<saldoin>` = open_balance, `<saldo>` = open_balance + bought − sold (`FUN_1801f3c50`,
+`FUN_1801f2d40`); bought/sold/ordbuy/ordbuycond/comission — поля магазина
+(`FUN_1801f3b70`, `FUN_1801f3be0`, `FUN_1801f38d0`, `FUN_1801f3a50`). Бумажные позиции — та же
+запись с sym_id бумаги и маской `FUN_18012e480`; на демо не приходили (S-негатив).
+
+#### `<positions>` / `<money_position>` — D, S (демо)
+
+- `<money_position>` строит `FUN_18012a000`: `<client>` — код клиента из стора,
+  `<union>` — `FUN_180256280`, `<currency>` — `FUN_18000f9b0(&DAT_1809dd380, cur_id)`,
+  `<market>` — `FUN_1801ec180(client,1)` (поле `+0x3b` клиента), `<asset>` — тот же геттер,
+  enum: FOND_MICEX / MoneyFOND_SPBEX / MoneyFrankfurt / MoneyUSD / MoneyMCT / MoneyETS
+  (switch 0,6,8,9,0xb,0xd,0xe), `<shortname>` — имя актива из справочника.
+- `<register>` выводится **только если `connector+8` (`micex_registers`) != 0**, имя регистра
+  из таблицы по `reg_code` (S: default — нет тега, options — `<register>T0</register>`).
+- Позиции клиента итерирует `FUN_18024de80`; обёртку `<positions>` даёт `FUN_180118d60`
+  (и `FUN_180130a30` для пустой/групповой формы), отправка — `FUN_1800dba40`; списки
+  `connector+0x3e0`/`+0x3f0` эмитят `FUN_1800f5460`/`FUN_1800f4f20` из worker `FUN_1800f49d0`.
+
+#### `<overnight>` — D, S
+
+Запись `0x18` = `B status` (`FUN_180263f50`) пишет байт в объект сессии `+0x688`.
+`<overnight status="true|false"/>` строит `FUN_1800db330` (читает `+0x688`), и её **всегда**
+вызывает `FUN_1800f5370` перед `<server_status>` (`0x1800f53a4`) — поэтому `<overnight>` есть
+перед каждым `<server_status>` (S). На демо запись 0x18 в хвосте E07 не встречена, значение
+по умолчанию false (S).
+
+#### `<union>` — D, I (живой случай не пойман)
+
+Запись `0x68` (`FUN_1803dae90`, `ReadUnion`): `L union_id`, `Z20 name`, `Z32 category_name`,
+`B unicat_id`; сохраняется `FUN_180275b80(store+0x60, id, name)` и ставит dirty-флаг `+0x34`.
+Колбэк строится в `FUN_1800f7b40` по литералу `<union id="` (`0x180836c00`; три площадки
+`0x1800fc204`, `0x1800fcbc7`, `0x1800fcd81` — добавление/обновление/удаление, `remove="true|false"`).
+На демо union пуст → записи 0x68 нет и колбэка `<union>` нет (S); формат для непустого юниона — I.
+
+### Для Go-реализации (записи конца загрузки)
+
+- `model.ClientAccount`: ID ← поле 2 (Z12), Type ← поле 5 (enum → строка), Currency ← поле 9
+  (id → имя через таблицу валют), Union ← поле 7 (Z7), Market ← поле 6, Removed ← флаг update
+  (`remove="true"` при повторной записи 0x02; на демо false).
+- `model.MoneyPosition`: SaldoIn ← open_balance (G, масштаб брать из данных: демо 2, 30 000 000 →
+  300000.00), Saldo = open_balance + bought − sold, Bought/Sold/OrdBuy/OrdBuyCond/Comission —
+  соответствующие поля магазина; Currency — из mask2 Z4 (имя → id); Client/Union — из стора;
+  Asset — enum; Register — reg_code (имя регистра из таблицы, выводится только при
+  `micex_registers`). Деньги — `model.Decimal`, не `float64`.
+- `model.Overnight{Status}` ← байт 0x18; `model.Union{ID, Removed}` ← запись 0x68 (ID = имя из Z20).
+- Порядок колбэков Connector перед `<server_status>`: `<client>`, `<positions>`, `<overnight>`;
+  перед **каждым** `<server_status>` — `<overnight status=…>` (S).
+- Тест `TestSnapshotTailMatchesDLL`: прогнать `snapshot-tail-live.hex` через декодер + `Render`,
+  сравнить с `snapshot-tail-live.xml`; `Stats().UnknownRecords == 0` на полном снапшоте демо.
+- Недоказанные места: смысл полей 4, 8, 10, 12 R_CLN_NEW; бумажные `sec_position` (нет на демо);
+  поля FORTS (`forts_position`, `forts_money`); колбэк `<union>` для непустого юниона.
+
 ### Обезличивание — правило
 
 Фикстуры не содержат логина/пароля/UID/счетов/юниона: client code → `TESTCLIEN` (9 байт) и login →
@@ -480,9 +582,11 @@ XML-строители: `<positions>` — `FUN_1800f5460`/`FUN_1800f4f20` (сп�
 
 ### Не проверено
 
-- Полные форматы R_CLN_NEW (0x02), позиционных записей, 0x6b, размеченного хвоста — RE-1 задачи 7.
-- `<union>` для непустого юниона; наличие/позиция записи `0x18` в хвосте (наблюдаемый
-  `<overnight status="false"/>` может быть значением по умолчанию).
+- Форматы R_CLN_NEW (0x02) и R_CLIENT_ASSET (0x3b) восстановлены (см. выше); остаются:
+  смысл полей 4/8/10/12 R_CLN_NEW, полные форматы бумажных (`sec_position`), FORTS-позиций и
+  тега `0x6b` R_FORTS_SESSION; разметка остального «хвоста» снапшота.
+- `<union>` для непустого юниона (на демо нет): колбэк-формат выведен из литерала
+  `<union id="` и обработчика 0x68, но живым обменом не подтверждён — **I**.
 
 ## Что не доказано
 
