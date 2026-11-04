@@ -31,7 +31,8 @@ DLL под Wine подключалась к демо-серверу через �
 
 Ответ RQ_MAIN — поток записей `B:тег …`. Диспетчер — `FUN_18038d7d0`, в `switch` значение равно `тег−1`.
 
-- У 12 тегов после тега идёт размер `W` (BE): 0x02 R_CLN_NEW, 0x03 R_ORD_NEW, 0x04 R_TRD, 0x08 R_ALLTRADE, 0x10 R_ORD_MODIFY, 0x28 R_SEC_NEW, 0x3a R_ORD_RENEW, 0x3b R_CLIENT_ASSET, 0x54 R_STOP, 0x5e R_SEC_PARAM, 0x5f R_WRAPPER, 0x66 R_DOUBLELEG. Перед каждым следующим тегом DLL переходит на конец записи, поэтому такие записи можно пропускать — **D**.
+- У 12 тегов после тега идёт размер `W` (BE): 0x02 R_CLN_NEW, 0x03 R_ORD_NEW, 0x04 R_TRD, 0x08 R_ALLTRADE, 0x10 R_ORD_MODIFY, 0x28 R_SEC_NEW, 0x3a R_ORD_RENEW, 0x3b R_CLIENT_ASSET, 0x34 R_BOARD, 0x54 R_STOP, 0x5e R_SEC_PARAM, 0x5f R_WRAPPER,
+  0x66 R_DOUBLELEG, 0x7c ReadICA. Перед каждым следующим тегом DLL переходит на конец записи, поэтому такие записи можно пропускать — **D**.
 - Обёртка R_WRAPPER (0x5f) задаёт границу, а внутри идут обычные записи.
 - Остальные ~70 тегов размера не имеют, и для разбора потока нужен формат каждого. Реализован R_DATE (0x3d, `L` — секунды на 00:00 дня торгов) — **S**.
 - Снапшот демо-сервера: R_DATE, 17 176 × R_SEC_NEW, 17 176 × R_SEC_PARAM, 5 × R_DOUBLELEG. Затем идёт 0x62 с данными счёта (формат не разобран).
