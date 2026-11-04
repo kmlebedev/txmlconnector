@@ -33,6 +33,17 @@ set +a`; DLL под Wine через `tools/re/run_dll.sh` + `tcproxy`-захва
 - `cancelorder`: transactionid из moveorder/новой заявки, сразу после; проверить снятие в `<orders>`.
 - Фикстуры: `transact-moveorder-payload.hex` (+ makeordown при наличии), client/orderno обезличить; обновить `orders.md`.
 
+## 3a. Опционы (неторговая; проверить версию сервера)
+
+- `get_option_families` (149; гейта версии нет) — снять C>S payload (W secid) и, если придут
+  RQ_MAIN 0x6f/0x71, колбэки `<option_families>/<family>`.
+- `get_family_strikes` (153, нужен `<mat_date>`) и `get_options` (151/150) — работают только при
+  версии сервера ≥0x45 (в записанной сессии 68 → DLL отвечает `Unsupported request.`, см.
+  `docs/protocol/options.md`). Снять: версию сервера в S-сессии, reply-кадры 149/153/150/151,
+  XML `<family_strikes>/<strike>`, `<options_failed>`; S-негатив — если демо опционы не отдаёт.
+- Фикстуры `option-*-inject.hex`/`option-*-dll.xml`; зафиксировать, где хранится поле версии
+  `symbolStore+0x694` (I в options.md).
+
 ## 4a. Новости: <news_body> (неторговая)
 
 - Сначала `get_old_news count="5"` (если на демо есть новости): снять C>S type=73 и колбэки
