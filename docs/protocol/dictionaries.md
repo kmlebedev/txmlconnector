@@ -120,7 +120,7 @@ XML-событие `FUN_180107800` (`<sec_info_upd>`): `secid, seccode, market`,
 ```sh
 go test ./native/xmlcompat        # включает TestSecurityXMLBytes — побайтовая сверка <security> с фикстурой DLL
 # полная сверка на локальном захвате (вне репозитория):
-TXML_DEMO_MAIN=main.hex TXML_DEMO_XML=dll.xml go test -run SecuritiesFull -v ./native/xmlcompat
+TXML_DEMO_MAIN=main.hex TXML_DEMO_XML=dll.xml go test -run SecuritiesFull -v ./native/records
 ```
 
 Фикстуры в `native/records/testdata` — справочные данные демо-сервера без полей счёта: ответ RQ_STARTUP, первый ответ RQ_MAIN (499 инструментов) и соответствующие колбэки DLL.
