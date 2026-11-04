@@ -717,12 +717,24 @@ func StopOrdersXML(orders []model.StopOrder) string {
 	b.WriteString("<orders>")
 	for _, order := range orders {
 		b.WriteString("<stoporder transactionid=" + quoteAttr(strconv.FormatUint(order.TransactionID, 10)) + ">")
-		b.WriteString("<secid>" + strconv.Itoa(int(order.SecID)) + "</secid>")
+		// Only the fields the record actually carries (mask-aware): a status-only
+		// update must not print a NUL buysell or a zero secid (D).
+		if order.HasSec {
+			b.WriteString("<secid>" + strconv.Itoa(int(order.SecID)) + "</secid>")
+		}
 		b.WriteString("<union>" + escape(order.Union) + "</union>")
-		b.WriteString("<board>" + escape(order.Board) + "</board>")
-		b.WriteString("<seccode>" + escape(order.SecCode) + "</seccode>")
-		b.WriteString("<client>" + escape(order.Client) + "</client>")
-		b.WriteString("<buysell>" + escape(string(order.BuySell)) + "</buysell>")
+		if order.HasBoard {
+			b.WriteString("<board>" + escape(order.Board) + "</board>")
+		}
+		if order.HasSec {
+			b.WriteString("<seccode>" + escape(order.SecCode) + "</seccode>")
+		}
+		if order.HasClient {
+			b.WriteString("<client>" + escape(order.Client) + "</client>")
+		}
+		if order.HasBuySell {
+			b.WriteString("<buysell>" + escape(string(order.BuySell)) + "</buysell>")
+		}
 		b.WriteString("<author>" + escape(order.Author) + "</author>")
 		b.WriteString("<status>" + stopOrderStatusName(order.Status) + "</status>")
 		b.WriteString("<withdrawtime>" + strconv.FormatInt(order.WithdrawTime, 10) + "</withdrawtime>")

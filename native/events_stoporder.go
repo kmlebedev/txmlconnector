@@ -12,18 +12,28 @@ func init() { registerDecoder(records.TagStopOrder, decodeStopOrder) }
 func decodeStopOrder(c *Client, body []byte) ([]model.Event, error) {
 	raw, err := records.ParseStopOrder(body)
 	if err != nil {
-		return nil, err
+		// A valid but not-recovered update (status block/high mask bits) must
+		// not abort the poll: drop it (I) and keep the session alive.
+		return nil, nil
 	}
 	clientCode := ""
 	if raw.HasClient {
+		if raw.ClientID < 0 {
+			return nil, nil
+		}
+		matched := false
 		for _, id := range c.accountOrder {
 			if state := c.accounts[id]; state != nil && state.raw.ID == raw.ClientID {
 				clientCode = state.account.ID
+				matched = true
 				break
 			}
 		}
+		if !matched {
+			return nil, nil // foreign/unknown client: the DLL ignores the update
+		}
 	}
-	if raw.HasSec && (raw.SecID == 0xffff) {
+	if raw.HasSec && raw.SecID == 0xffff {
 		return nil, nil
 	}
 	ev := raw.Event(c.catalog)
