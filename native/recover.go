@@ -48,8 +48,12 @@ func isTransportError(err error) bool {
 }
 
 // sessionTimeout is the server session lifetime from the RQ_PWD reply, the
-// limit the DLL allows for recovering a lost connection. Values below 300 are
-// seconds, bigger ones milliseconds (parsePwdReply).
+// limit the DLL allows for recovering a lost connection.
+//
+// TODO(re): the "<300 means seconds, otherwise milliseconds" heuristic comes
+// from parsePwdReply and is not verified against the DLL; R5/RE-1
+// (docs/protocol/connect.md) must confirm the RQ_PWD session_timeout unit.
+
 func (c *Client) sessionTimeout() time.Duration {
 	c.mu.Lock()
 	info := c.info
@@ -118,12 +122,22 @@ func (c *Client) relogin(ctx context.Context) error {
 	c.conn, c.info, c.recovering = conn, info, true
 	c.mu.Unlock()
 	fail := func(err error) error {
+		// Detach the failed connection so concurrent callers see "not
+		// connected" instead of using a dead socket; the next attempt installs
+		// the fresh one. The old connection is left for the success path.
 		c.mu.Lock()
+		if c.conn == conn {
+			c.conn = nil
+		}
 		c.recovering = false
 		c.mu.Unlock()
 		conn.Close()
 		return err
 	}
+	// load re-runs the ClientConfig.OnDictionaries/OnSecurities callbacks, so
+	// the Connector emits the dictionary and securities callbacks again after a
+	// recovery. The DLL behaviour here is not recovered yet (needs the RE-2
+	// capture of the recovery scenario); keep it until then.
 	if err := c.load(ctx, conn); err != nil {
 		return fail(fmt.Errorf("load: %w", err))
 	}

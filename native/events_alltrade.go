@@ -15,7 +15,13 @@ func decodeAllTrade(c *Client, body []byte) ([]model.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !c.dedup.Fresh(raw) {
+	fresh := false
+	if sym, ok := c.symbolOf(raw); ok {
+		fresh = c.dedup.FreshSymbol(raw, sym)
+	} else {
+		fresh = c.dedup.Fresh(raw)
+	}
+	if !fresh {
 		c.stats.Duplicates++
 		return nil, nil
 	}
