@@ -10,6 +10,22 @@ import (
 // catalog flags; the event is rendered as <marketord .../> (margin.md, O).
 func init() {
 	registerDecoder(records.TagSecMktPermit, decodeSecMktPermit)
+	registerDecoder(records.TagSecRate, decodeSecRate)
+}
+
+// decodeSecRate stores the R_SEC_RATE price P per secid for the max-buy/sell
+// formula (task-52). The record has no XML callback: it only updates the state.
+func decodeSecRate(c *Client, body []byte) ([]model.Event, error) {
+	parsed, err := records.ParseSecRate(body)
+	if err != nil {
+		return nil, err
+	}
+	// Decoders run under Client.mu (see Client.poll): no extra locking here.
+	if c.marginRates == nil {
+		c.marginRates = map[uint16]int64{}
+	}
+	c.marginRates[parsed.SecID] = parsed.Value
+	return nil, nil
 }
 
 // unknownMarketOrdSecCode is the 12-question-mark placeholder the DLL uses when

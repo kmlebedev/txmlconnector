@@ -1,6 +1,7 @@
 package native
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -13,18 +14,26 @@ import (
 // money 300 000 RUB, SBER 1000) plus the catalog security of clientSnapshot.
 func marginSnapshot(t *testing.T) []byte {
 	t.Helper()
-	return append(clientSnapshot(t), readOrderFixture(t, "margin-inject.hex")...)
+	// margin-inject.hex is self-contained (task-52): client + money 300 000 RUB +
+	// SBER position 1000 + R_SEC_RATE 0x0a SBER=29146 kopecks. Only the
+	// SBER catalog identity is added from the synthetic R_SEC_NEW (no second
+	// client record: one R_CLN_NEW per client is the real load invariant).
+	return append(secNewRecord(t, "SBER", 26), readOrderFixture(t, "margin-inject.hex")...)
 }
 
 // TestMarginMatchDLL renders the two max-buy/sell forms from the synthetic
-// store. The empirical maxbuy/maxsell formula needs the price/rate stores that
-// the DLL keeps internally (margin.md: I), so the values are 0 with an explicit
-// I note; the identity fields are byte-exact against margin-dll.xml.
-//
-// I-EXPECTATION: the expected XML below is our store-derived form with
-// maxbuy/maxsell=0, NOT the DLL fixture values 13210/15210. After task-52 (P/R
-// source) switch this test to margin-dll.xml; never edit margin-dll.xml.
+// store (margin-inject.hex + R_SEC_RATE P=29146) and compares the callbacks
+// byte-for-byte with the O fixture margin-dll.xml (13210/15210, task-52).
 func TestMarginMatchDLL(t *testing.T) {
+	rawFixture, err := os.ReadFile("records/testdata/margin-dll.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(rawFixture)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("margin-dll.xml lines = %d, want 3", len(lines))
+	}
+	wantMax, wantTPlus := strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1])
 	srv := newRunServer(t)
 	srv.Snapshot = marginSnapshot(t)
 	c := New(Config{Dial: srv.Dial})
@@ -33,7 +42,9 @@ func TestMarginMatchDLL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	send(t, c, connectCommand())
+	if got := send(t, c, connectCommand()); !strings.Contains(got, quote+"true"+quote) {
+		t.Fatalf("connect = %s", got)
+	}
 	rec.next(t, "<server_status")
 	// O: all three commands are a local render; the capture has no 84/85/86/82
 	// frames. Track every non-MAIN request and require zero new ones.
@@ -52,7 +63,6 @@ func TestMarginMatchDLL(t *testing.T) {
 	if got := send(t, c, base); got != "<result success="+quote+"true"+quote+"/>" {
 		t.Fatalf("get_max_buy_sell_tplus = %s", got)
 	}
-	wantTPlus := "<max_buy_sell_tplus client=" + quote + "TESTCLIEN" + quote + "><security secid=" + quote + "26" + quote + "><market>1</market><seccode>SBER</seccode><maxbuy>0</maxbuy><maxsell>0</maxsell></security></max_buy_sell_tplus>"
 	if got := rec.next(t, "<max_buy_sell_tplus"); got != wantTPlus {
 		t.Fatalf("tplus XML\n got %s\nwant %s", got, wantTPlus)
 	}
@@ -61,7 +71,6 @@ func TestMarginMatchDLL(t *testing.T) {
 	if got := send(t, c, maxCmd); got != "<result success="+quote+"true"+quote+"/>" {
 		t.Fatalf("get_max_buy_sell = %s", got)
 	}
-	wantMax := "<max_buy_sell client=" + quote + "TESTCLIEN" + quote + "><security secid=" + quote + "26" + quote + "><market>1</market><seccode>SBER</seccode><maxbuy>0</maxbuy><maxsell>0</maxsell></security></max_buy_sell>"
 	if got := rec.next(t, "<max_buy_sell"); got != wantMax {
 		t.Fatalf("max_buy_sell XML\n got %s\nwant %s", got, wantMax)
 	}
@@ -163,7 +172,7 @@ func TestMarginErrors(t *testing.T) {
 // MCT behavior of the three commands can be tested (margin.md, O).
 func mctSnapshot(t *testing.T) []byte {
 	t.Helper()
-	raw := append(clientSnapshot(t), readOrderFixture(t, "margin-inject.hex")...)
+	raw := append(secNewRecord(t, "SBER", 26), readOrderFixture(t, "margin-inject.hex")...)
 	recs, err := records.Records(raw)
 	if err != nil {
 		t.Fatalf("margin store: %v", err)
@@ -292,4 +301,84 @@ func TestMarketOrdDuringLoad(t *testing.T) {
 		t.Fatalf("load marketord 2 = %s", got)
 	}
 	rec.next(t, "<server_status")
+}
+
+// TestMaxBuySellFormulaPoints pins the exact task-52 formula against the O
+// tables of margin.md (money sweep, position sweep incl. the short branch, V
+// injection and the GAZP cross position; V(SBER)=29146, R=0.1428).
+func TestMaxBuySellFormulaPoints(t *testing.T) {
+	type point struct {
+		name                       string
+		money, pos, value, lotSize float64
+		buy, sell                  int64
+	}
+	moneySweep := []point{
+		{"money0", 0, 0, 29146, 1, 0, 0},
+		{"money100k", 10_000_000, 0, 29146, 1, 2402, 2402},
+		{"money200k", 20_000_000, 0, 29146, 1, 4805, 4805},
+		{"money300k", 30_000_000, 0, 29146, 1, 7207, 7207},
+		{"money400k", 40_000_000, 0, 29146, 1, 9610, 9610},
+		{"money450k", 45_000_000, 0, 29146, 1, 10811, 10811},
+		{"money600k", 60_000_000, 0, 29146, 1, 14415, 14415},
+		{"money900k", 90_000_000, 0, 29146, 1, 21623, 21623},
+		{"money1200k", 120_000_000, 0, 29146, 1, 28831, 28831},
+	}
+	posSweep := []point{
+		{"pos1000", 30_000_000, 1000, 29146, 1, 13210, 15210},
+		{"pos2000", 30_000_000, 2000, 29146, 1, 19213, 23213},
+		{"pos3000", 30_000_000, 3000, 29146, 1, 25216, 31216},
+		{"pos0", 30_000_000, 0, 29146, 1, 7207, 7207},
+		{"pos-100", 30_000_000, -100, 29146, 1, 6607, 6407},
+		{"pos-500", 30_000_000, -500, 29146, 1, 4206, 3206},
+		{"pos-900", 30_000_000, -900, 29146, 1, 1805, 5},
+		{"pos-950_short", 30_000_000, -950, 29146, 1, 950, 0},
+		{"pos-1000_short", 30_000_000, -1000, 29146, 1, 1000, 0},
+		{"pos-2000_short", 30_000_000, -2000, 29146, 1, 2000, 0},
+		{"pos-5000_short", 30_000_000, -5000, 29146, 1, 5000, 0},
+	}
+	vSweep := []point{
+		{"v2500", 30_000_000, 0, 2500, 1, 84033, 84033},
+		{"v5000", 30_000_000, 0, 5000, 1, 42016, 42016},
+		{"v10000_pos1000", 30_000_000, 1000, 10000, 1, 27011, 29011},
+		// GAZP query: lot size 10, V=14041 -> q0=1496.4, own 600.3/800.3.
+		{"gazp_lot10", 30_000_000, 1000, 14041, 10, 2096, 2296},
+	}
+	for _, tc := range append(append(moneySweep, posSweep...), vSweep...) {
+		buy, sell := marginMaxBuySell(tc.money, tc.pos, tc.value, tc.lotSize, nil)
+		if buy != tc.buy || sell != tc.sell {
+			t.Fatalf("%s: got %d/%d, want %d/%d", tc.name, buy, sell, tc.buy, tc.sell)
+		}
+	}
+	// Cross position: GAZP pos 1000 (lot size 10) contributes to BOTH T terms
+	// (formula T=q0+cross) -> SBER 9518/9518 with V=11216.6; margin.md's DLL
+	// cross column shows +2309 (9516), the exact V of that replay point is not
+	// stored (I) - the formula point here is the model value.
+	buy, sell := marginMaxBuySell(30_000_000, 0, 29146, 1, []marginOther{
+		{position: 1000, value: 11216.6, lotSize: 10},
+	})
+	if buy != 9518 || sell != 9518 {
+		t.Fatalf("cross position: got %d/%d, want 9518/9518", buy, sell)
+	}
+}
+
+// TestMarginSnapshotIncludesRate makes the self-contained O fixture explicit:
+// margin-inject.hex carries the 0x0a R_SEC_RATE record (P=29146).
+func TestMarginSnapshotIncludesRate(t *testing.T) {
+	recs, err := records.Records(marginSnapshot(t))
+	if err != nil {
+		t.Fatalf("margin snapshot: %v", err)
+	}
+	found := false
+	for _, rec := range recs {
+		if rec.Tag == records.TagSecRate {
+			rate, err := records.ParseSecRate(rec.Body)
+			if err != nil || rate.SecID != 26 || rate.Value != 29146 {
+				t.Fatalf("rate = %+v, %v", rate, err)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("margin-inject.hex has no R_SEC_RATE 0x0a record")
+	}
 }
