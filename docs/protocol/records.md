@@ -8,7 +8,7 @@
 
 Записи, не входившие в задачи 7/9/10 (клиент/позиции/котировки/стакан):
 `0x34*` R_BOARD, `0x38` R_SEC_RESIDENT, `0x39` R_OPT_EXPIRATION, `0x42` R_CURRENCY_RATE,
-`0x43` R_SEC_DEFSETTLECODE, `0x4f` R_DELAY, `0x5c` AmBOOK, `0x5d` R_VENUE, `0x66*` R_DOUBLELEG,
+`0x43` R_SEC_DEFSETTLECODE, `0x4f` R_DELAY, `0x5b` R_SYSPARAMS, `0x5c` AmBOOK, `0x5d` R_VENUE, `0x66*` R_DOUBLELEG,
 `0x6b` R_FORTS_SESSION, `0x6e` R_EDP_RATE, `0x6f`–`0x79`, `0x7c*` ReadICA.
 Диспетчер тегов — `FUN_18038d7d0` (карта тег→обработчик снята `tools/re/py/dll_maps.py tags`).
 
@@ -29,6 +29,7 @@
 | `0x4f` | R_DELAY | нет | `L` (задержка, мс; пишется в +0x29c) | D |
 | `0x5c` | AmBOOK `FUN_1803bea70` | нет | `W secid`, `B`, `B`, `L`, `L`, `Z4`, `L` (книга маркет-мейкера/анонимный стакан; лог `AmBOOK: incorrect buffer N`) | D/I |
 | `0x5d` | R_VENUE `FUN_1803962b0` | нет | `B`, `Z12`, `Z30` (лог `Got VENUE`) | D |
+| `0x5b` | R_SYSPARAMS `FUN_18035bbb0` | нет | `L size`; далее `size` байт сериализованного словаря параметров (в blob — `SP_PRICE_DEVIATION_MAX/HARD`, `SP_PERCENT_MARKET_MAX/HARD`; точный формат blob — I). Достаточный пропуск: `L size` + пропуск `size` байт | D/S/O |
 | `0x66` | R_DOUBLELEG `FUN_1803dab80` | `*` BE16 | `B,W,W,W` (двойной листинг: тип/два secid/режим) — семантика I | D/I |
 | `0x6b` | R_FORTS_SESSION `FUN_18027a600` | нет | `L session`, далее необязательный `B` (0xff — нет; читается при остатке байт) | D/S |
 | `0x6e` | R_EDP_RATE | нет | `Z4`, `Z25`, `B`, `L` (пара валют/ставка; ранее считался неразобранным) | D |
@@ -67,6 +68,14 @@
 | 0x6b | R_FORTS_SESSION | 7 | 12 |
 | 0x6e | R_EDP_RATE | 7 | 12 |
 | 0x5c | AmBOOK | 1 | 12 |
+| 0x5b | R_SYSPARAMS | 8 | 12 |
+
+**Про `0x5b`:** запись идёт в хвосте E07 (после `R_CLIENT_ASSET`/`0xff`) и раньше не попадала в
+статистику: top-level walker останавливался на неизвестном теге (I, поэтому в таблице её не было).
+Прицельный поиск по blob-строке `SP_PERCENT_MARKET_HARD` нашёл её во всех 8 живых дампах
+(по 1 записи на сессию). Oracle (O): инъекция реальной записи через `replay-server` в DLL проходит
+без ошибок и исключений (в логе нет `R_SYSPARAMS unpack failed`). Фикстура:
+`native/records/testdata/sysparams-inject.hex` (136 Б).
 
 **Вывод для go-engineer (задача 12):** после реализации задач 7, 9, 10 и 12 неразобранных тегов
 в живых дампах не остаётся — `UnknownRecords == 0` достижим. Раньше единственным «сиротой» был
@@ -79,5 +88,6 @@
 - Семантика полей записей, помеченных I (0x34, 0x38, 0x39, 0x43, 0x66, 0x6f, 0x71, 0x74–0x78) —
   для `UnknownRecords==0` достаточно длины/типов; полное назначение потребует отдельного RE.
 - Порядок записей 0x6f–0x79 в реальном потоке (на демо не встречались) — D.
+- Внутренний формат blob-а `0x5b` (сериализатор R_SYSPARAMS) — I; для пропуска достаточно `L size`.
 - Oracle-проверка не требуется: XML-колбэков эти записи не дают (D; подтверждено отсутствием
   вызовов XML-эмиттеров в обработчиках).
