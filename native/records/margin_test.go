@@ -51,3 +51,16 @@ func TestParseMarginPosReply(t *testing.T) {
 		t.Fatalf("pos = %+v", pos)
 	}
 }
+
+// TestSecMktPermitNegatives: short body and trailing data are explicit errors.
+func TestSecMktPermitNegatives(t *testing.T) {
+	if _, err := records.ParseSecMktPermit(nil); err == nil {
+		t.Fatal("nil body accepted")
+	}
+	if _, err := records.ParseSecMktPermit([]byte{0x00, 0x1a}); err == nil {
+		t.Fatal("body without the permit byte accepted")
+	}
+	if _, err := records.ParseSecMktPermit([]byte{0x00, 0x1a, 0x01, 0xff}); err == nil {
+		t.Fatal("trailing byte accepted")
+	}
+}

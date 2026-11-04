@@ -20,6 +20,10 @@ func marginSnapshot(t *testing.T) []byte {
 // store. The empirical maxbuy/maxsell formula needs the price/rate stores that
 // the DLL keeps internally (margin.md: I), so the values are 0 with an explicit
 // I note; the identity fields are byte-exact against margin-dll.xml.
+//
+// I-EXPECTATION: the expected XML below is our store-derived form with
+// maxbuy/maxsell=0, NOT the DLL fixture values 13210/15210. After task-52 (P/R
+// source) switch this test to margin-dll.xml; never edit margin-dll.xml.
 func TestMarginMatchDLL(t *testing.T) {
 	srv := newRunServer(t)
 	srv.Snapshot = marginSnapshot(t)
@@ -70,6 +74,10 @@ func TestMarginMatchDLL(t *testing.T) {
 // mask and rate store of FUN_18001a700 are not present in RQ_MAIN (margin.md:
 // mask formula D, source I), so the four rights fall back to false and the
 // rates to 0.00; marketable is taken from the R_SEC_MKT_PERMIT bit (O).
+//
+// I-EXPECTATION: tradeable/longable/shortable=false and regrate*=0.00 are our
+// store-derived values, NOT the DLL fixture (true/14.28). After task-52 switch
+// to margin-dll.xml; never edit margin-dll.xml.
 func TestClnSecPermissionsMatchDLL(t *testing.T) {
 	srv := newRunServer(t)
 	srv.Snapshot = marginSnapshot(t)
@@ -216,4 +224,72 @@ func TestMarginMCTBehavior(t *testing.T) {
 	if got := rec.next(t, "<cln_sec_permissions"); !strings.Contains(got, "secid="+quote+"26"+quote) {
 		t.Fatalf("MCT permissions XML = %s", got)
 	}
+}
+
+// TestMarketOrdUnknownSecID: the secid not in the catalog still yields a
+// callback with the DLL's 12-question-mark seccode placeholder (margin.md, D).
+func TestMarketOrdUnknownSecID(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = marginSnapshot(t)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	srv.QueueMain([]byte{0x0e, 0x27, 0x0f, 0x01}) // secid 9999, permit=yes
+	want := "<marketord secid=" + quote + "9999" + quote + " permit=" + quote + "yes" + quote + " seccode=" + quote + "????????????" + quote + "/>"
+	if got := rec.next(t, "<marketord"); got != want {
+		t.Fatalf("unknown-secid marketord = %s, want %s", got, want)
+	}
+}
+
+// TestMarketOrdEveryRecord: every 0x0e record is reported, without dedup (O).
+func TestMarketOrdEveryRecord(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = marginSnapshot(t)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	srv.QueueMain([]byte{
+		0x0e, 0x00, 0x1a, 0x01,
+		0x0e, 0x00, 0x1a, 0x00,
+		0x0e, 0x00, 0x1a, 0x01,
+	})
+	for i, permit := range []string{"yes", "no", "yes"} {
+		want := "<marketord secid=" + quote + "26" + quote + " permit=" + quote + permit + quote + " seccode=" + quote + "SBER" + quote + "/>"
+		if got := rec.next(t, "<marketord"); got != want {
+			t.Fatalf("marketord %d = %s, want %s", i+1, got, want)
+		}
+	}
+}
+
+// TestMarketOrdDuringLoad: a 0x0e record inside the load snapshot is reported
+// from the end-of-load stream too (O semantics: every record).
+func TestMarketOrdDuringLoad(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = append(marginSnapshot(t), readOrderFixture(t, "marketord-inject.hex")...)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	// Load callbacks come before the first <server_status>: read them first so
+	// the status search does not consume them.
+	if got := rec.next(t, "<marketord"); !strings.Contains(got, "permit="+quote+"yes"+quote) {
+		t.Fatalf("load marketord 1 = %s", got)
+	}
+	if got := rec.next(t, "<marketord"); !strings.Contains(got, "permit="+quote+"no"+quote) {
+		t.Fatalf("load marketord 2 = %s", got)
+	}
+	rec.next(t, "<server_status")
 }

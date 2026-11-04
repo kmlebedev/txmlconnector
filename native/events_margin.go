@@ -12,12 +12,17 @@ func init() {
 	registerDecoder(records.TagSecMktPermit, decodeSecMktPermit)
 }
 
+// unknownMarketOrdSecCode is the 12-question-mark placeholder the DLL uses when
+// the secid is not in the catalog (margin.md, D literal).
+const unknownMarketOrdSecCode = "????????????"
+
 func decodeSecMktPermit(c *Client, body []byte) ([]model.Event, error) {
 	parsed, err := records.ParseSecMktPermit(body)
 	if err != nil {
 		return nil, err
 	}
 	event := model.MarketOrd{SecID: parsed.SecID, Permit: parsed.Permit}
+	event.SecCode = unknownMarketOrdSecCode
 	if c.catalog != nil {
 		if sec, ok := c.catalog.Security(parsed.SecID); ok {
 			event.SecCode = sec.SecCode
