@@ -618,6 +618,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.QuotesXML(*e))
 			case *model.Order:
 				c.emit(xmlcompat.OrdersXML([]model.Order{*e}))
+			case *model.StopOrder:
+				c.emit(xmlcompat.StopOrdersXML([]model.StopOrder{*e}))
 			case *model.ClientTrade:
 				c.emit(xmlcompat.TradesXML([]model.ClientTrade{*e}))
 			case model.ServerStatus:
