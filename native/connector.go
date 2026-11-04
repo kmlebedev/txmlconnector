@@ -382,6 +382,81 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure(err.Error()), nil
 		}
 		return success(), nil
+	case "neworder":
+		var req struct {
+			SecID     int    `xml:"secid"`
+			Client    string `xml:"client"`
+			Union     string `xml:"union"`
+			Price     string `xml:"price"`
+			Quantity  int64  `xml:"quantity"`
+			BuySell   string `xml:"buysell"`
+			Unfilled  string `xml:"unfilled"`
+			Hidden    int64  `xml:"hidden"`
+			BrokerRef string `xml:"brokerref"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.SecID == 0 {
+			return failure("Не указан элемент secid"), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Должен быть указан клиент и/или юнион"), nil
+		}
+		if req.Price == "" {
+			return failure("Price not found."), nil
+		}
+		symbol, ok := client.SymbolBySecID(uint16(req.SecID))
+		if !ok {
+			return failure(fmt.Sprintf("unknown secid %d", req.SecID)), nil
+		}
+		price, err := model.ParseDecimal(req.Price)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		buySell := byte(0)
+		if len(req.BuySell) == 1 {
+			buySell = req.BuySell[0]
+		}
+		if buySell != 'B' && buySell != 'S' {
+			return failure("Wrong buysell."), nil
+		}
+		order := model.NewOrder{
+			Client: req.Client, Union: req.Union, Symbol: symbol, Price: price,
+			Hidden: req.Hidden, Quantity: req.Quantity, BuySell: buySell,
+			Unfilled: req.Unfilled, BrokerRef: req.BrokerRef,
+		}
+		id, err := client.NewOrder(ctx, order)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(id), 10) + "\"/>", nil
+	case "cancelorder":
+		var req struct {
+			TransactionID uint64 `xml:"transactionid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.TransactionID == 0 {
+			return failure("You have to specify transactionid."), nil
+		}
+		if err := client.CancelOrder(ctx, model.TransactionID(req.TransactionID)); err != nil {
+			return failure(err.Error()), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(req.TransactionID, 10) + "\"/>", nil
 	case "get_securities_info":
 		var req struct {
 			Security []struct {
@@ -514,6 +589,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.QuotationXML(*e))
 			case *model.Quotes:
 				c.emit(xmlcompat.QuotesXML(*e))
+			case *model.Order:
+				c.emit(xmlcompat.OrdersXML([]model.Order{*e}))
 			case model.ServerStatus:
 				switch {
 				case e.Recover:

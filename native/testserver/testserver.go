@@ -159,6 +159,14 @@ func (s *Server) SetMainDelay(d time.Duration) {
 	s.delay = d
 }
 
+// QueueMain appends payload to the next RQ_MAIN reply (the tests use it to
+// deliver order updates after a transaction reply).
+func (s *Server) QueueMain(payload []byte) {
+	s.mu.Lock()
+	s.pending = append(s.pending, payload...)
+	s.mu.Unlock()
+}
+
 // Handle sets a custom reply for a request type; fn gets the request payload
 // and returns the reply flags and payload.
 func (s *Server) Handle(reqType byte, fn func(payload []byte) (flags byte, reply []byte)) {
