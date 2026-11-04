@@ -37,11 +37,13 @@ func (c *Client) History(ctx context.Context, req HistoryRequest) (model.Candles
 	var empty model.Candles
 	c.mu.Lock()
 	catalog := c.catalog
-	c.mu.Unlock()
 	if catalog == nil {
+		c.mu.Unlock()
 		return empty, errors.New("transaq: client is not connected")
 	}
+	// The catalog is mutated by Poll under c.mu, so the lookup must be guarded.
 	sec, board, ok := catalog.Lookup(req.Symbol.Board, req.Symbol.SecCode)
+	c.mu.Unlock()
 	if !ok {
 		return empty, fmt.Errorf("transaq: unknown security %s", req.Symbol)
 	}
@@ -106,12 +108,11 @@ func (c *Client) addHistoryPart(part records.Candles) {
 // seccode) through the local catalog.
 func (c *Client) SymbolByBoard(board, secCode string) (model.Symbol, bool) {
 	c.mu.Lock()
-	catalog := c.catalog
-	c.mu.Unlock()
-	if catalog == nil {
+	defer c.mu.Unlock()
+	if c.catalog == nil {
 		return model.Symbol{}, false
 	}
-	if _, _, ok := catalog.Lookup(board, secCode); !ok {
+	if _, _, ok := c.catalog.Lookup(board, secCode); !ok {
 		return model.Symbol{}, false
 	}
 	return model.Symbol{Board: board, SecCode: secCode}, true

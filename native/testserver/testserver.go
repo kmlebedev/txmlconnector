@@ -72,6 +72,9 @@ type Server struct {
 	// SecSpec is the reply payload of RQ_SEC_SPEC (the RQ_SEC_SPEC records of
 	// native/testdata/secinfo-live.hex.gz in tests); nil replies empty.
 	SecSpec []byte
+	// SecSpecError makes the RQ_SEC_SPEC reply malformed (a mismatched reply
+	// type), so the client's best-effort spec refresh fails.
+	SecSpecError bool
 	// ReloginToken is the token returned in the RQ_RELOGIN reply; New sets it
 	// to DefaultReloginToken.
 	ReloginToken []byte
@@ -271,8 +274,13 @@ func (s *Server) serve(nc net.Conn) {
 		case session.RqSecSpec:
 			s.mu.Lock()
 			payload := s.SecSpec
+			bad := s.SecSpecError
 			s.mu.Unlock()
-			err = reply(wire.KindReply, f.Type, payload)
+			if bad {
+				err = reply(wire.KindReply, f.Type+1, payload)
+			} else {
+				err = reply(wire.KindReply, f.Type, payload)
+			}
 		case session.RqTime:
 			err = reply(wire.KindReply, f.Type, rqTimeReply)
 		case session.RqStartup:

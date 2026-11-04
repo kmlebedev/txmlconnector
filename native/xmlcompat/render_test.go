@@ -144,3 +144,20 @@ func TestQuotesDeletionRendersPrice(t *testing.T) {
 		}
 	}
 }
+
+// TestSecInfoXMLSkipsEmptyFields: the DLL drops empty/zero fields (market 0,
+// zero decimals), so a SecInfo with only identity must render those fields as
+// absent instead of zero values.
+func TestSecInfoXMLSkipsEmptyFields(t *testing.T) {
+	zero := model.Decimal{Units: 0, Scale: 2}
+	info := model.SecInfo{SecID: 26, SecCode: "SBER", Market: 0, PointCost: &zero, BuyDeposit: &zero, ISIN: "RU0009029540"}
+	got := xmlcompat.SecInfoXML(info)
+	for _, absent := range []string{"<market>", "<point_cost>", "<buy_deposit>"} {
+		if strings.Contains(got, absent) {
+			t.Fatalf("SecInfoXML = %s, must not contain %s", got, absent)
+		}
+	}
+	if !strings.Contains(got, "<seccode>SBER</seccode>") || !strings.Contains(got, "<isin>RU0009029540</isin>") {
+		t.Fatalf("SecInfoXML = %s", got)
+	}
+}

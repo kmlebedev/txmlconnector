@@ -106,7 +106,10 @@ func TestSecInfoMatchesDLL(t *testing.T) {
 		sec, _ := catalog.Security(id)
 		info := spec.Info(sec)
 		if id == 10043 {
-			// accruedint is not in RQ_SEC_SPEC (I): seed it from the DLL line.
+			// §8.12 oracle weakening, TEST-ONLY: accruedint is not present in
+			// RQ_SEC_SPEC (I), so this field is seeded from the expected DLL line
+			// instead of being parsed; production leaves it nil until its source
+			// is recovered.
 			v := model.Decimal{Units: 3082, Scale: 2}
 			info.AccruedInt = &v
 		}

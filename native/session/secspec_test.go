@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/hex"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -13,8 +14,7 @@ func TestSecSpecPayloadMatchesDLL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := string(fixture)
-	want = want[:len(want)-1]
+	want := strings.TrimSpace(string(fixture))
 	// The DLL sends the list in the reverse order of the XML elements.
 	if got := hex.EncodeToString(SecSpecRequest([]uint16{20583, 379, 26})); got != want {
 		t.Fatalf("SecSpecRequest = %s, want %s", got, want)
