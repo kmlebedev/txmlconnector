@@ -5,60 +5,26 @@
 package records_test
 
 import (
-	"compress/gzip"
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
-	"io"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/kmlebedev/txmlconnector/client/commands"
+	"github.com/kmlebedev/txmlconnector/native/internal/oracle"
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
 )
 
-func readGz(t *testing.T, name string) []byte {
-	t.Helper()
-	f, err := os.Open("testdata/" + name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	zr, err := gzip.NewReader(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := io.ReadAll(zr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
-func mustHexGz(t *testing.T, name string) []byte {
-	t.Helper()
-	p, err := hex.DecodeString(strings.TrimSpace(string(readGz(t, name))))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
+// loadStartup parses the shared RQ_STARTUP fixture; the binary fixture files
+// themselves are read through the oracle helper.
 func loadStartup(t *testing.T) *model.Startup {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/startup-demo.hex")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := hex.DecodeString(strings.TrimSpace(string(raw)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := records.ParseStartup(p)
+	s, err := records.ParseStartup(oracle.LoadFixture(t, "startup-demo.hex"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,11 +44,9 @@ type dllSecurity struct {
 // session; securities1-demo.xml.gz is the <securities> callback the DLL
 // produced from it (499 instruments).
 func TestSecuritiesMatchDLL(t *testing.T) {
-	payload, err := hex.DecodeString(string(readGz(t, "main1-demo.hex.gz")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := compareSecurities(t, [][]byte{payload}, [][]byte{readGz(t, "securities1-demo.xml.gz")}); n != 499 {
+	payload := oracle.LoadFixture(t, "main1-demo.hex.gz")
+	docs := []byte(oracle.LoadTextFixture(t, "securities1-demo.xml.gz"))
+	if n := compareSecurities(t, [][]byte{payload}, [][]byte{docs}); n != 499 {
 		t.Fatalf("compared %d securities", n)
 	}
 }
