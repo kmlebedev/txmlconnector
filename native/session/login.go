@@ -146,6 +146,15 @@ type Conn struct {
 
 	mu   sync.Mutex
 	keys *wire.Keys
+
+	// sid is the server id from the RQ_PWD reply, compared on RQ_RELOGIN.
+	sid byte
+	// seq counts the ordinary requests sent (63/64 excluded): RQ_RECOVER
+	// carries it as lastSeq.
+	seq int32
+	// lastType is the type of the last ordinary request; the RQ_RECOVER reply
+	// may carry it instead of type 64.
+	lastType byte
 }
 
 // Dial connects to addr and performs the login sequence.
@@ -204,6 +213,7 @@ func Login(ctx context.Context, nc net.Conn, cfg Config) (*Conn, *Info, error) {
 	}
 	c.mu.Lock()
 	c.keys = keys
+	c.sid = info.SID
 	c.mu.Unlock()
 	return c, info, nil
 }
@@ -402,6 +412,12 @@ func (c *Conn) exchange(ctx context.Context, typ byte, payload []byte, wait bool
 	stop := context.AfterFunc(ctx, func() { c.nc.SetDeadline(time.Unix(1, 0)) })
 	defer stop()
 
+	// The DLL increments its send counter before every ordinary request; the
+	// recovery requests 63/64 do not count (docs/protocol/connect.md).
+	if typ != RqRelogin && typ != RqRecover {
+		c.seq++
+		c.lastType = typ
+	}
 	out, err := c.keys.Encode(wire.ClientToServer, wire.Frame{Flags: wire.KindRequest, Type: typ, Payload: payload})
 	if err != nil {
 		return wire.Frame{}, err
@@ -433,3 +449,18 @@ func ctxErr(ctx context.Context, err error) error {
 }
 
 func (c *Conn) Close() error { return c.nc.Close() }
+
+// LastSeq returns the send counter value of the last ordinary request, the
+// lastSeq RQ_RECOVER carries.
+func (c *Conn) LastSeq() int32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.seq
+}
+
+// SID returns the server id from the RQ_PWD reply.
+func (c *Conn) SID() byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sid
+}

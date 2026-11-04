@@ -146,7 +146,9 @@ func TestDisconnectDuringPollLogsOut(t *testing.T) {
 
 func TestLostConnectionReportsDisconnected(t *testing.T) {
 	srv := newTestServer(t)
-	srv.SessionTimeout = 2 // keep the recovery limit short for the test
+	// 300 is milliseconds per the RQ_PWD normalization (values below 300 are
+	// seconds), so the recovery window stays short and the test does not wait.
+	srv.SessionTimeout = 300
 	var mu sync.Mutex
 	connects := 0
 	dial := func(ctx context.Context, address string) (net.Conn, error) {
