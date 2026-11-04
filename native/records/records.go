@@ -27,6 +27,7 @@ const (
 // (FUN_1801bdf00), so they can be skipped without decoding.
 var sizedTags = map[byte]string{
 	0x02: "R_CLN_NEW", 0x03: "R_ORD_NEW", 0x04: "R_TRD", 0x08: "R_ALLTRADE",
+	0x34: "R_BOARD", 0x7c: "ReadICA",
 	0x10: "R_ORD_MODIFY", 0x28: "R_SEC_NEW", 0x3a: "R_ORD_RENEW", 0x3b: "R_CLIENT_ASSET",
 	0x54: "R_STOP", 0x5e: "R_SEC_PARAM", 0x5f: "R_WRAPPER", 0x66: "R_DOUBLELEG",
 }
@@ -79,7 +80,16 @@ func Records(p []byte) ([]Record, error) {
 			}
 			if tag == TagWrapper {
 				// The wrapper body carries nested records the DLL reads in
-				// place; the tail fields are still followed by later records.
+				// place (for example R_EDP_RATE 0x6e): parse them so their
+				// lengths are verified and the splitter stays aligned.
+				if nested, err := Records(body); err == nil {
+					out = append(out, nested...)
+				}
+				// A wrapper body may carry records not mapped yet (the E07 tail
+				// wraps an 0x74 record, task 12 I): the outer stream stays
+				// aligned because the wrapper body length is known, so such a
+				// body is skipped rather than aborting the split.
+
 				continue
 			}
 			out = append(out, Record{Tag: tag, Body: body})
@@ -117,14 +127,12 @@ func Records(p []byte) ([]Record, error) {
 				return out, fmt.Errorf("record %#02x: %w", tag, err)
 			}
 			out = append(out, Record{Tag: tag, Body: body})
-		case tag == 0x6b:
-			// R_FORTS_SESSION: state only. The three-byte body is inferred from
-			// the fixture alignment, not from a decompiled layout (I).
-			body, err := r.Raw(3)
-			if err != nil {
+		case tag == TagFortsSession:
+			start := len(p) - r.Len()
+			if _, err := r.Int32(); err != nil {
 				return out, fmt.Errorf("R_FORTS_SESSION: %w", err)
 			}
-			out = append(out, Record{Tag: tag, Body: body})
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagUnion:
 			start := len(p) - r.Len()
 			if _, err := r.Int64(); err != nil {
@@ -162,6 +170,51 @@ func Records(p []byte) ([]Record, error) {
 				if _, err := r.Int32(); err != nil {
 					return out, fmt.Errorf("R_QUOTES quantity: %w", err)
 				}
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagFortsSession:
+			start := len(p) - r.Len()
+			if _, err := r.Int32(); err != nil {
+				return out, fmt.Errorf("R_FORTS_SESSION: %w", err)
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagEdpRate:
+			start := len(p) - r.Len()
+			if _, err := r.String(4); err != nil {
+				return out, fmt.Errorf("R_EDP_RATE: %w", err)
+			}
+			if _, err := r.String(25); err != nil {
+				return out, fmt.Errorf("R_EDP_RATE: %w", err)
+			}
+			if _, err := r.Byte(); err != nil {
+				return out, fmt.Errorf("R_EDP_RATE: %w", err)
+			}
+			if _, err := r.Int32(); err != nil {
+				return out, fmt.Errorf("R_EDP_RATE: %w", err)
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagAmBook:
+			start := len(p) - r.Len()
+			if _, err := r.Uint16(); err != nil {
+				return out, fmt.Errorf("AmBOOK: %w", err)
+			}
+			if _, err := r.Byte(); err != nil {
+				return out, fmt.Errorf("AmBOOK: %w", err)
+			}
+			if _, err := r.Byte(); err != nil {
+				return out, fmt.Errorf("AmBOOK: %w", err)
+			}
+			if _, err := r.Int32(); err != nil {
+				return out, fmt.Errorf("AmBOOK: %w", err)
+			}
+			if _, err := r.Int32(); err != nil {
+				return out, fmt.Errorf("AmBOOK: %w", err)
+			}
+			if _, err := r.String(4); err != nil {
+				return out, fmt.Errorf("AmBOOK: %w", err)
+			}
+			if _, err := r.Int32(); err != nil {
+				return out, fmt.Errorf("AmBOOK: %w", err)
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagQuotation:

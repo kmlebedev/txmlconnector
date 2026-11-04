@@ -405,8 +405,8 @@ func TestSnapshotTailMatchesDLL(t *testing.T) {
 	if unknown.Tag != 0x5b || unknown.Offset != 249 {
 		t.Fatalf("unmapped tail starts at tag %#02x offset %d, want 0x5b at 249", unknown.Tag, unknown.Offset)
 	}
-	if len(recs) != 7 {
-		t.Fatalf("decoded %d records before the boundary, want 7: %v", len(recs), recs)
+	if len(recs) != 14 {
+		t.Fatalf("decoded %d records before the boundary, want 14 (the R_WRAPPER nested R_EDP_RATE records are parsed now): %v", len(recs), recs)
 	}
 	c := &Client{}
 	c.cfg.OnDictionaries = nil
