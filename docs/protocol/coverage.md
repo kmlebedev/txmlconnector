@@ -211,8 +211,9 @@ T28 (RPS/REPO). Плюс отсутствуют `newreport4`/`cancelreport4` (T2
    не реализован (формат I, portfolios/limits.md).
 4. **T22 portfolios**: `portfolio_tplus/forts/united/mct`, typed client-API и формулы
    equity/cover/init_req/maint_req/unrealized_pnl — I (зафиксировано в коде и portfolios.md).
-5. **T23**: local render 3 команд и <marketord> сделаны (b29b757/6867d83); maxbuy/maxsell=0 и
-   permissions=false/regrate=0 — I (внутренние сторы P/R/FUN_18001a700 отсутствуют в RQ_MAIN), ждёт task-52.
+5. **T23**: local render 3 команд и <marketord> сделаны (b29b757/6867d83); maxbuy/maxsell — точная
+   формула из R_SEC_RATE 0x0a + позиций (a217bc1, побайтно по margin-dll.xml). Остаются I:
+   permissions=false/regrate=0 (mask/rates FUN_18001a700 не в RQ_MAIN), источник R и начальный V — I.
    **T24–T25**: только каркас (6a57f75), явные I-ошибки; ждут RE-2/RE-3 материалы.
 6. **T26–T28**: не начаты (change_pass, options, RPS/REPO).
 7. **T29**: 29/43 XML-команд в Connector; native backend `server/`, матрица 45 имён и тексты
