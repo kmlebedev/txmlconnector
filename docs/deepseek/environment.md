@@ -49,7 +49,7 @@ tools/re/check_env.sh --full   # + go build, go test, go test -race, кросс-
 - **Демо-сервер:** `tr1-demo5.finam.ru:3939`, 09:50–23:50 МСК, будни (кроме праздников). Любые живые
   операции — только с явного согласия пользователя в чате.
 - **Эталонная DLL** в корне репозитория, sha256 совпадает с эталоном.
-- **Стартовое состояние Фазы 0:** `tools/tcproxy`, `tools/replay-server`, `native/internal/replay`,
+- **Стартовое состояние Фазы 0:** `tools/tcproxy`, `tools/replay-server`, `native/replay`,
   `native/model`, `native/records` ещё отсутствуют — это ожидаемо, их создают задачи 1–2.
 
 ---
@@ -84,9 +84,9 @@ tools/re/check_env.sh --full   # + go build, go test, go test -race, кросс-
 | `~/re/demo.env` (секреты) | `test -f ~/re/demo.env` | файла нет; шаблон — `tools/re/demo.env.example` | **WARN** | положить `TC_LOGIN`/`TC_PASSWORD` + Wine-экспорты в `~/re/demo.env` (chmod 600); значения не печатать и не коммитить |
 | `TC_HOST` / `TC_TARGET` | имена переменных | set (адрес/цель демо-сервера; значения в отчёты не выводятся) | **INFO** | живой режим по расписанию, только с согласия пользователя |
 | Эталонная DLL | `shasum -a 256 txmlconnector64-6.47.2.26.4.dll` | `a197e2625e53c0df453687ae1b20ef2ae1a05e034cd20c424a7014b0c9726342` — совпадает с эталоном, 10 МБ | **PASS** | RE-1/RE-2/RE-3 против правильного бинаря; DLL не модифицируется |
-| Стартовые инструменты | `test -e tools/tcproxy` и др. | отсутствуют: `tools/tcproxy`, `tools/replay-server`, `native/internal/replay`, `native/model`, `native/records` | **INFO** | ожидаемо: их создают задачи 1–2 Фазы 0 |
+| Стартовые инструменты | `test -e tools/tcproxy` и др. | отсутствуют: `tools/tcproxy`, `tools/replay-server`, `native/replay`, `native/model`, `native/records` | **INFO** | ожидаемо: их создают задачи 1–2 Фазы 0 |
 | Существующие инструменты | `ls tools` | есть `tools/{wire-decode,reference-harness,native-login,native-trades}` и `tools/re/{py,ghidra}` | **PASS** | вход в задачу 1 |
-| Фикстуры | `find native/xmlcompat/testdata -type f` | 12 файлов: `*.hex[.gz]` + эталонный `*-dll*.xml`/`*-demo.xml` | **INFO** | работа без Wine: сверка разбора и XML-рендера. `native/records/testdata` появится в задаче 2 |
+| Фикстуры | `find native/records/testdata -type f` | 12 файлов: `*.hex[.gz]` + эталонный `*-dll*.xml`/`*-demo.xml` | **INFO** | работа без Wine: сверка разбора (`native/records`) и XML-рендера (`native/xmlcompat`) |
 | Git | `git branch --show-current`, `git status --short` | ветка `main`, HEAD `b940f9a`; незакоммичены только подготовительные правки Lead (`M .gitignore`, `M Makefile`) и новые файлы (`AGENTS.md`, `docs/deepseek/`, `tools/re/check_env.sh`) | **PASS** (см. WARN скрипта) | правок исходников нет; свои изменения агент делает в своей ветке/задаче |
 | GoLand MCP: сервер | `POST 127.0.0.1:64422/stream` MCP `initialize` | отвечает: `GoLand MCP Server 2026.2.3`, протокол 2024-11-05, `mcp-session-id` выдаётся | **PASS** | сервер жив, доступен по HTTP |
 | GoLand MCP: форма инструментов | `tools/list` | один tool `execute_tool` (`command` = `get_file_problems --filePath …`, `projectPath` = путь проекта); под-инструменты: `analyze_calls, get_file_problems, get_symbol_info, search_symbol, lint_files, read_file, git_status, list_directory_tree, search_file, search_text, …` | **INFO** | в сессии DSH это будет `mcp__jetbrains__execute_tool`, а не отдельные `get_file_problems` |
@@ -258,7 +258,7 @@ shasum -a 256 txmlconnector64-6.47.2.26.4.dll
 | `TC_PASSWORD`, `TC_LOGIN` | живой логин на демо-сервере, RE-4, расшифровка захватов `wire-decode` | положить в `~/re/demo.env` (chmod 600; шаблон `tools/re/demo.env.example`); значения в файлы/логи/коммиты не вносить |
 | `TXC_DLL` (или `TC_DLL_PATH`) | `tools/re/run_dll.sh` (RE-2) | не нужен: скрипт подставляет DLL из корня репозитория (переопределяется через env) |
 | protobuf, nats-server, `protoc-gen-go` | фаза с NATS/protobuf (позже) | [tools/re/README.md §Окружение](../../tools/re/README.md#окружение); сейчас не требуется |
-| `tools/tcproxy`, `tools/replay-server`, `native/internal/replay`, `native/model`, `native/records` | задачи 1–2 Фазы 0 | это **работа плана**, а не установка; создаются в своих задачах |
+| `tools/tcproxy`, `tools/replay-server`, `native/replay`, `native/model`, `native/records` | задачи 1–2 Фазы 0 | это **работа плана**, а не установка; создаются в своих задачах |
 
 Ничего из этого списка в task-1 не устанавливалось и не запрашивалось — фиксируется только состояние.
 
@@ -321,7 +321,7 @@ RE-4 не выполняется, сверка идёт по фикстурам.
 
 ### Стартовое состояние Фазы 0
 
-Отсутствуют `tools/tcproxy`, `tools/replay-server`, `native/internal/replay`, `native/model`,
+Отсутствуют `tools/tcproxy`, `tools/replay-server`, `native/replay`, `native/model`,
 `native/records` — это норма для старта: их создают задачи 1–2. До завершения Фазы 0 остальные фазы
 не начинаются (AGENTS.md §10).
 

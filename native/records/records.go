@@ -1,4 +1,8 @@
-package xmlcompat
+// Package records decodes the binary TRANSAQ records carried by RQ_MAIN and
+// the RQ_STARTUP reply into typed data. It is pure Go and does not depend on
+// the XML layer: the DLL-compatible XML is rendered by native/xmlcompat, and
+// the domain types live in native/model.
+package records
 
 import (
 	"errors"
@@ -39,7 +43,7 @@ type Record struct {
 
 // ErrUnknownRecord reports a record without a size prefix whose layout is not
 // implemented; the rest of the payload cannot be split without it.
-var ErrUnknownRecord = errors.New("xmlcompat: record layout not implemented")
+var ErrUnknownRecord = errors.New("records: record layout not implemented")
 
 // UnknownRecordError is the error Records returns at such a record.
 type UnknownRecordError struct {

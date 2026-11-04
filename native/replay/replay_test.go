@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/native"
+	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/session"
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
@@ -21,10 +22,9 @@ import (
 const (
 	testLogin    = "TESTLOGIN"
 	testPassword = "TESTPASS"
-	// fixturesDir is where the shared fixtures live until task 2 moves them out
-	// of native/xmlcompat/testdata. Keep the path in one place so the move is a
-	// one-line change.
-	fixturesDir = "../xmlcompat/testdata/"
+	// fixturesDir is where the binary fixtures and the DLL reference callbacks
+	// live, shared with the records and xmlcompat tests.
+	fixturesDir = "../records/testdata/"
 	// stubPwdReply is the recorded RQ_PWD reply frame from
 	// native/session/login_test.go: it issues session key 40..5f and sync
 	// 70..77, sealed with TESTPASS's password key.
@@ -125,7 +125,7 @@ func TestReplayServesRecordedSession(t *testing.T) {
 		c.Close()
 		t.Fatalf("catalog = %d securities, want 499", got)
 	}
-	if err := c.SubscribeAllTrades(ctx, native.Symbol{Board: "TQBR", SecCode: "SBER"}); err != nil {
+	if err := c.SubscribeAllTrades(ctx, model.Symbol{Board: "TQBR", SecCode: "SBER"}); err != nil {
 		c.Close()
 		t.Fatalf("subscribe: %v", err)
 	}

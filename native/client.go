@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/session"
-	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
 )
 
 // ClientConfig configures a typed session.
@@ -27,41 +28,11 @@ type ClientConfig struct {
 	// OnDictionaries is called once after RQ_STARTUP is parsed, before the
 	// first RQ_MAIN poll, so the session owner can emit <markets>/<boards>/
 	// <candlekinds> callbacks in the DLL's order.
-	OnDictionaries func(*xmlcompat.Startup)
+	OnDictionaries func(*model.Startup)
 	// OnSecurities is called after every RQ_MAIN poll that carried new
 	// R_SEC_NEW records, with exactly those records, as the DLL emits
 	// <securities> chunks while the snapshot arrives.
-	OnSecurities func([]xmlcompat.SecNew)
-}
-
-// Symbol identifies a security on a board, the stable key across sessions.
-type Symbol struct {
-	Board   string
-	SecCode string
-}
-
-func (s Symbol) String() string { return s.Board + ":" + s.SecCode }
-
-// Trade is one market trade from the <alltrades> feed, decoded without XML.
-type Trade struct {
-	SecID   uint16 // session-local id
-	Board   string
-	SecCode string
-	TradeNo int64
-	// Time is the trade instant in UTC: the server's wall-clock time shifted
-	// by the server time-zone bias from RQ_TIME.
-	Time time.Time
-	// Price is exact: Price × 10^-Decimals.
-	Price    int64
-	Decimals uint8
-	Quantity int64
-	BuySell  byte // 'B', 'S' or 0
-	Period   byte // 'O', 'N', 'C' or 0
-	// OpenInterest is set for futures and options (HasOpenInterest).
-	OpenInterest    int64
-	HasOpenInterest bool
-	// Raw is the decoded record, including fields not mapped above.
-	Raw xmlcompat.AllTrade
+	OnSecurities func([]records.SecNew)
 }
 
 // Stats counts what Poll has seen.
@@ -76,14 +47,14 @@ type Client struct {
 	cfg      ClientConfig
 	conn     *session.Conn
 	info     *session.Info
-	catalog  *xmlcompat.Catalog
+	catalog  *records.Catalog
 	zone     [16]byte
 	serverTZ string
 	bias     time.Duration // UTC = wall + bias
 
 	mu    sync.Mutex
 	subs  map[[2]uint16]byte // (secid, board) -> mask
-	dedup xmlcompat.TradeDedup
+	dedup records.TradeDedup
 	stats Stats
 }
 
@@ -124,7 +95,7 @@ func (c *Client) load(ctx context.Context) error {
 		return err
 	}
 	c.zone = st.Zone
-	c.serverTZ, _ = xmlcompat.TimeZoneName(st.Zone)
+	c.serverTZ, _ = records.TimeZoneName(st.Zone)
 	// Bytes 0..1 of the zone block hold the bias in minutes (-180 for MSK),
 	// with Windows sign: UTC = local + bias.
 	c.bias = time.Duration(int16(uint16(st.Zone[0])|uint16(st.Zone[1])<<8)) * time.Minute
@@ -132,16 +103,16 @@ func (c *Client) load(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	startup, err := xmlcompat.ParseStartup(payload)
+	startup, err := records.ParseStartup(payload)
 	if err != nil {
 		return err
 	}
-	c.catalog = xmlcompat.NewCatalog(startup)
+	c.catalog = records.NewCatalog(startup)
 	if c.cfg.OnDictionaries != nil {
 		c.cfg.OnDictionaries(startup)
 	}
 	for more := true; more; {
-		var batch []Trade
+		var batch []model.Trade
 		if batch, more, err = c.Poll(ctx); err != nil {
 			return err
 		}
@@ -158,7 +129,7 @@ func (c *Client) load(ctx context.Context) error {
 }
 
 func (c *Client) Info() *session.Info              { return c.info }
-func (c *Client) Catalog() *xmlcompat.Catalog      { return c.catalog }
+func (c *Client) Catalog() *records.Catalog        { return c.catalog }
 func (c *Client) ServerTZ() string                 { return c.serverTZ }
 func (c *Client) Conn() *session.Conn              { return c.conn }
 func (c *Client) Close() error                     { return c.conn.Close() }
@@ -172,17 +143,17 @@ func (c *Client) Stats() Stats {
 }
 
 // SubscribeAllTrades adds symbols to the <alltrades> feed.
-func (c *Client) SubscribeAllTrades(ctx context.Context, symbols ...Symbol) error {
+func (c *Client) SubscribeAllTrades(ctx context.Context, symbols ...model.Symbol) error {
 	return c.update(ctx, symbols, session.SubAllTrades, true)
 }
 
 // UnsubscribeAllTrades removes symbols from the <alltrades> feed.
-func (c *Client) UnsubscribeAllTrades(ctx context.Context, symbols ...Symbol) error {
+func (c *Client) UnsubscribeAllTrades(ctx context.Context, symbols ...model.Symbol) error {
 	return c.update(ctx, symbols, session.SubAllTrades, false)
 }
 
 // update sends the full new mask of every touched security, as the DLL does.
-func (c *Client) update(ctx context.Context, symbols []Symbol, bit byte, on bool) error {
+func (c *Client) update(ctx context.Context, symbols []model.Symbol, bit byte, on bool) error {
 	c.mu.Lock()
 	var items []session.SubscribeItem
 	next := map[[2]uint16]byte{}
@@ -228,21 +199,21 @@ func (c *Client) update(ctx context.Context, symbols []Symbol, bit byte, on bool
 // that the reply filled the buffer and the server has queued data. Records
 // with an unimplemented layout end decoding of that payload; they are
 // counted in Stats.
-func (c *Client) Poll(ctx context.Context) (trades []Trade, more bool, err error) {
+func (c *Client) Poll(ctx context.Context) (trades []model.Trade, more bool, err error) {
 	reply, err := c.conn.Main(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	recs, splitErr := xmlcompat.Records(reply.Payload)
+	recs, splitErr := records.Records(reply.Payload)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stats.Polls++
 	if splitErr != nil {
-		if !errors.Is(splitErr, xmlcompat.ErrUnknownRecord) {
+		if !errors.Is(splitErr, records.ErrUnknownRecord) {
 			return nil, reply.More, splitErr
 		}
 		c.stats.UnknownRecords++
-		var unknown *xmlcompat.UnknownRecordError
+		var unknown *records.UnknownRecordError
 		if errors.As(splitErr, &unknown) {
 			c.stats.LastUnknownTag = unknown.Tag
 		}
@@ -251,10 +222,10 @@ func (c *Client) Poll(ctx context.Context) (trades []Trade, more bool, err error
 		if _, err := c.catalog.ApplyMutations(r); err != nil {
 			return trades, reply.More, err
 		}
-		if r.Tag != xmlcompat.TagAllTrade {
+		if r.Tag != records.TagAllTrade {
 			continue
 		}
-		raw, err := xmlcompat.ParseAllTrade(r.Body)
+		raw, err := records.ParseAllTrade(r.Body)
 		if err != nil {
 			return trades, reply.More, err
 		}
@@ -262,39 +233,14 @@ func (c *Client) Poll(ctx context.Context) (trades []Trade, more bool, err error
 			c.stats.Duplicates++
 			continue
 		}
-		trades = append(trades, c.trade(raw))
+		trades = append(trades, c.catalog.Trade(raw, c.bias))
 	}
 	c.stats.Trades += int64(len(trades))
 	return trades, reply.More, nil
 }
 
-func (c *Client) trade(raw xmlcompat.AllTrade) Trade {
-	t := Trade{SecID: raw.SecID, TradeNo: raw.TradeNo, Price: raw.Price, Quantity: raw.Quantity,
-		BuySell: raw.BuySell, Period: raw.Period, Raw: raw}
-	if s, ok := c.catalog.Security(raw.SecID); ok {
-		t.SecCode = s.SecCode
-	}
-	if b, ok := c.catalog.Board(raw.Board); ok {
-		t.Board = b.Code
-	}
-	t.Decimals, _ = c.catalog.Decimals(raw.SecID, raw.Board)
-	if raw.Flags&xmlcompat.AllTradeOpenInterest != 0 {
-		t.OpenInterest, t.HasOpenInterest = raw.OpenInt, true
-	}
-	wall := raw.Time
-	if wall == 0 {
-		wall = c.catalog.TradeDate()
-	}
-	ts := time.Unix(wall, 0).Add(c.bias)
-	if raw.Millis < 1000 {
-		ts = ts.Add(time.Duration(raw.Millis) * time.Millisecond)
-	}
-	t.Time = ts.UTC()
-	return t
-}
-
 // WallTime renders the trade time as the server (and the DLL) shows it.
-func (c *Client) WallTime(t Trade) time.Time { return t.Time.Add(-c.bias) }
+func (c *Client) WallTime(t model.Trade) time.Time { return t.Time.Add(-c.bias) }
 
 func isZeroClient(ci session.ClientInfo) bool {
 	return ci.ComputerName == "" && ci.UserName == "" && ci.OS == "" && ci.HardwareID == 0 && len(ci.Addresses) == 0

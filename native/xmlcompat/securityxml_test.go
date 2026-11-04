@@ -1,13 +1,14 @@
 package xmlcompat
 
 import (
-	"encoding/hex"
 	"encoding/xml"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/kmlebedev/txmlconnector/client/commands"
+	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector/native/records"
 )
 
 // TestSecurityXMLBytes compares the hand-rolled <security> emitter with the
@@ -15,8 +16,7 @@ import (
 // fixture (499 demo-server instruments).
 func TestSecurityXMLBytes(t *testing.T) {
 	st := loadStartup(t)
-	payload := mustHexGz(t, "main1-demo.hex.gz")
-	recs, err := Records(payload)
+	recs, err := records.Records(mustHexGz(t, "main1-demo.hex.gz"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,10 +26,10 @@ func TestSecurityXMLBytes(t *testing.T) {
 	if len(want) != 499 {
 		t.Fatalf("fixture has %d <security> elements", len(want))
 	}
-	var got []SecNew
+	var got []records.SecNew
 	for _, r := range recs {
-		if r.Tag == TagSecNew {
-			s, err := ParseSecNew(r.Body)
+		if r.Tag == records.TagSecNew {
+			s, err := records.ParseSecNew(r.Body)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -40,18 +40,17 @@ func TestSecurityXMLBytes(t *testing.T) {
 		t.Fatalf("decoded %d, fixture %d", len(got), len(want))
 	}
 	for i, s := range got {
-		if w := st.SecurityXML(s); w != want[i] {
+		if w := SecurityXML(st, s); w != want[i] {
 			t.Fatalf("secid %d:\n got %s\nwant %s", s.SecID, w, want[i])
 		}
 	}
 }
 
-// TestSecurityDerivedFields checks the typed contract: commands.Security
-// carries the same active/opmask/quotestype/MIC/ticker the DLL emits.
+// TestSecurityDerivedFields checks the typed contract: model.Security carries
+// the same active/opmask/quotestype/MIC/ticker the DLL emits.
 func TestSecurityDerivedFields(t *testing.T) {
 	st := loadStartup(t)
-	payload := mustHexGz(t, "main1-demo.hex.gz")
-	recs, _ := Records(payload)
+	recs, _ := records.Records(mustHexGz(t, "main1-demo.hex.gz"))
 	var wrap struct {
 		Items []struct {
 			commands.Security
@@ -62,25 +61,25 @@ func TestSecurityDerivedFields(t *testing.T) {
 	}
 	n := 0
 	for _, r := range recs {
-		if r.Tag != TagSecNew {
+		if r.Tag != records.TagSecNew {
 			continue
 		}
-		s, err := ParseSecNew(r.Body)
+		s, err := records.ParseSecNew(r.Body)
 		if err != nil {
 			t.Fatal(err)
 		}
-		got := st.Security(s)
+		got := Security(st, s)
 		want := wrap.Items[n].Security
 		switch {
-		case got.Active != want.Active:
-			t.Fatalf("secid %d active: got %q want %q", s.SecID, got.Active, want.Active)
+		case got.Active != (want.Active == "true"):
+			t.Fatalf("secid %d active: got %v want %q", s.SecID, got.Active, want.Active)
 		case got.QuotesType != want.QuotesType:
 			t.Fatalf("secid %d quotestype: got %d want %d", s.SecID, got.QuotesType, want.QuotesType)
 		case got.MIC != want.MIC:
 			t.Fatalf("secid %d MIC: got %q want %q", s.SecID, got.MIC, want.MIC)
 		case got.Ticker != want.Ticker:
 			t.Fatalf("secid %d ticker: got %q want %q", s.SecID, got.Ticker, want.Ticker)
-		case got.Active == "true" && got.OpMask != want.OpMask:
+		case got.Active && got.OpMask != expectedOpMask(want.OpMask):
 			t.Fatalf("secid %d opmask: got %+v want %+v", s.SecID, got.OpMask, want.OpMask)
 		}
 		n++
@@ -95,42 +94,42 @@ func TestSecurityDerivedFields(t *testing.T) {
 // R_SEC_MKT_PERMIT (0x0e) toggles bymarket, R_SEC_ONOFF (0x0d) the tradability
 // bits of the flags byte.
 func TestCatalogApplyMutations(t *testing.T) {
-	c := NewCatalog(loadStartup(t))
+	c := records.NewCatalog(loadStartup(t))
 	// SHARE on TQBR with flags 0x0f: trading bits set and market permit set.
-	s := SecNew{SecID: 700, Kind: 0, Market: 1, SecCode: "TEST",
+	s := records.SecNew{SecID: 700, Kind: 0, Market: 1, SecCode: "TEST",
 		Class: 'E', Flags: 0x0f,
-		Pits: []Pit{{Board: 37, Decimals: 2, MinStep: 1, LotSize: 1, LotDivider: 1, PointCost: 1, Default: true}}}
+		Pits: []records.Pit{{Board: 37, Decimals: 2, MinStep: 1, LotSize: 1, LotDivider: 1, PointCost: 1, Default: true}}}
 	c.AddSecurity(s)
-	if xml1 := c.SecuritiesDumpXML(); !strings.Contains(xml1, `bymarket="yes"`) {
+	if xml1 := SecuritiesDumpXML(c.Startup(), c.List()); !strings.Contains(xml1, `bymarket="yes"`) {
 		t.Fatalf("flags 0x0f must report bymarket: %s", xml1)
 	}
 	// Market permit revoked by R_SEC_MKT_PERMIT (tag 0x0e) with value 0:
 	// body is W secid (big-endian) + B value.
 	body := []byte{byte(s.SecID >> 8), byte(s.SecID), 0x00}
-	if _, err := c.ApplyMutations(Record{Tag: 0x0e, Body: body}); err != nil {
+	if _, err := c.ApplyMutations(records.Record{Tag: 0x0e, Body: body}); err != nil {
 		t.Fatal(err)
 	}
-	if xml2 := c.SecuritiesDumpXML(); strings.Contains(xml2, `bymarket="yes"`) {
+	if xml2 := SecuritiesDumpXML(c.Startup(), c.List()); strings.Contains(xml2, `bymarket="yes"`) {
 		t.Fatalf("R_SEC_MKT_PERMIT=0 must clear bymarket: %s", xml2)
 	}
 	// Trading off via R_SEC_ONOFF value 0.
 	body[2] = 0x00
-	if _, err := c.ApplyMutations(Record{Tag: 0x0d, Body: body}); err != nil {
+	if _, err := c.ApplyMutations(records.Record{Tag: 0x0d, Body: body}); err != nil {
 		t.Fatal(err)
 	}
-	if xml3 := c.SecuritiesDumpXML(); !strings.Contains(xml3, `active="false"`) || strings.Contains(xml3, "<opmask") {
+	if xml3 := SecuritiesDumpXML(c.Startup(), c.List()); !strings.Contains(xml3, `active="false"`) || strings.Contains(xml3, "<opmask") {
 		t.Fatalf("R_SEC_ONOFF=0 must deactivate and drop opmask: %s", xml3)
 	}
 }
 
 func TestPitsXMLEmitsEveryBoard(t *testing.T) {
-	c := NewCatalog(loadStartup(t))
-	c.AddSecurity(SecNew{SecID: 5, Kind: 0, Market: 1, SecCode: "ABBA", Class: 'E',
-		Pits: []Pit{
+	c := records.NewCatalog(loadStartup(t))
+	c.AddSecurity(records.SecNew{SecID: 5, Kind: 0, Market: 1, SecCode: "ABBA", Class: 'E',
+		Pits: []records.Pit{
 			{Board: 37, Decimals: 2, MinStep: 1, LotSize: 10, LotDivider: 1, PointCost: 1},
 			{Board: 39, Decimals: 2, MinStep: 1, LotSize: 10, LotDivider: 1, PointCost: 1, Default: true},
 		}})
-	out := c.Startup().PitsXML(c.List())
+	out := PitsXML(c.Startup(), c.List())
 	for _, want := range []string{
 		`<pit seccode="ABBA" board ="TQBR">`,
 		`<pit seccode="ABBA" board ="TQIF">`,
@@ -147,11 +146,12 @@ func TestPitsXMLEmitsEveryBoard(t *testing.T) {
 	}
 }
 
-func mustHexGz(t *testing.T, name string) []byte {
-	t.Helper()
-	p, err := hex.DecodeString(strings.TrimSpace(string(readGz(t, name))))
-	if err != nil {
-		t.Fatal(err)
+// expectedOpMask converts the yes/no XML form to the typed model.
+func expectedOpMask(m commands.OpMask) model.SecurityOpMask {
+	yes := func(s string) bool { return s == "yes" }
+	return model.SecurityOpMask{
+		UseCredit: yes(m.UseCredit), ByMarket: yes(m.ByMarket), NoSplit: yes(m.NoSplit),
+		Fok: yes(m.Fok), Ioc: yes(m.Ioc), ImmOrCancel: yes(m.ImmOrCancel),
+		CancelBalance: yes(m.CancelBalance),
 	}
-	return p
 }

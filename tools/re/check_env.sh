@@ -303,7 +303,7 @@ fi
 
 # ---- Start state of the plan (informational) --------------------------------
 MISSING_TOOLS=""
-for path in tools/tcproxy tools/replay-server native/internal/replay native/model native/records; do
+for path in tools/tcproxy tools/replay-server native/replay native/model native/records; do
 	[ -e "$path" ] || MISSING_TOOLS="$MISSING_TOOLS $path"
 done
 if [ -n "$MISSING_TOOLS" ]; then
@@ -311,7 +311,7 @@ if [ -n "$MISSING_TOOLS" ]; then
 else
 	info "все ожидаемые инструменты плана уже присутствуют"
 fi
-info "фикстуры: native/xmlcompat/testdata ($(find native/xmlcompat/testdata -type f 2>/dev/null | wc -l | tr -d ' ') файлов); native/records/testdata появится в задаче 2"
+info "фикстуры: native/records/testdata ($(find native/records/testdata -type f 2>/dev/null | wc -l | tr -d ' ') файлов)"
 
 # ---- Git --------------------------------------------------------------------
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then

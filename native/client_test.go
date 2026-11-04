@@ -9,11 +9,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kmlebedev/txmlconnector/native/model"
 )
 
 func readFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	f, err := os.Open("xmlcompat/testdata/" + name)
+	f, err := os.Open("records/testdata/" + name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +61,7 @@ func TestClientAllTrades(t *testing.T) {
 	if c.Catalog().Len() != 499 || c.ServerTZ() != "Russian Standard Time" {
 		t.Fatalf("catalog %d, tz %q", c.Catalog().Len(), c.ServerTZ())
 	}
-	if err := c.SubscribeAllTrades(ctx, Symbol{"TQBR", "SBER"}, Symbol{"TQBR", "GAZP"}); err != nil {
+	if err := c.SubscribeAllTrades(ctx, model.Symbol{Board: "TQBR", SecCode: "SBER"}, model.Symbol{Board: "TQBR", SecCode: "GAZP"}); err != nil {
 		t.Fatal(err)
 	}
 	srv.mu.Lock()
@@ -77,8 +79,8 @@ func TestClientAllTrades(t *testing.T) {
 	}
 	sber, gazp, vtbr := trades[0], trades[2], trades[4]
 	// 03.11.2026 23:53:20 MSK in the DLL output is 20:53:20 UTC.
-	if sber.SecCode != "SBER" || sber.Board != "TQBR" || sber.TradeNo != 9000000001 || sber.Price != 30512 ||
-		sber.Decimals != 2 || sber.Quantity != 3 || sber.Period != 'B' || sber.BuySell != 0 ||
+	if sber.SecCode != "SBER" || sber.Board != "TQBR" || sber.TradeNo != 9000000001 ||
+		sber.Price != (model.Decimal{Units: 30512, Scale: 2}) || sber.Quantity != 3 || sber.Period != 'B' || sber.BuySell != 0 ||
 		!sber.Time.Equal(time.Date(2026, 11, 3, 20, 53, 20, 0, time.UTC)) {
 		t.Fatalf("SBER = %+v", sber)
 	}
@@ -93,7 +95,7 @@ func TestClientAllTrades(t *testing.T) {
 		t.Fatalf("wall time %s", got)
 	}
 
-	if err := c.UnsubscribeAllTrades(ctx, Symbol{"TQBR", "GAZP"}); err != nil {
+	if err := c.UnsubscribeAllTrades(ctx, model.Symbol{Board: "TQBR", SecCode: "GAZP"}); err != nil {
 		t.Fatal(err)
 	}
 	srv.mu.Lock()
@@ -102,7 +104,7 @@ func TestClientAllTrades(t *testing.T) {
 	if unsub != "017b002500" {
 		t.Fatalf("unsubscribe = %s", unsub)
 	}
-	if err := c.SubscribeAllTrades(ctx, Symbol{"TQBR", "NOPE"}); err == nil {
+	if err := c.SubscribeAllTrades(ctx, model.Symbol{Board: "TQBR", SecCode: "NOPE"}); err == nil {
 		t.Fatal("expected unknown security error")
 	}
 }
@@ -123,7 +125,7 @@ func TestConnectorAllTradesMatchDLL(t *testing.T) {
 	if got := send(t, c, sub); got != `<result success="true"/>` {
 		t.Fatalf("subscribe = %s", got)
 	}
-	want, err := os.ReadFile("xmlcompat/testdata/alltrades-dll2.xml")
+	want, err := os.ReadFile("records/testdata/alltrades-dll2.xml")
 	if err != nil {
 		t.Fatal(err)
 	}

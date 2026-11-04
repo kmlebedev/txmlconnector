@@ -28,7 +28,7 @@
 | `py/replay_server.py` | проигрывает записанную сессию и подмешивает записи в RQ_MAIN после заданного запроса (оракул) |
 | `../tcproxy` | Go-порт `py/proxy.py`: логирующий прокси с тем же форматом захвата (RE-2) |
 | `../replay-server` | Go-порт `py/replay_server.py`: проигрыватель захвата с инъекцией записей RQ_MAIN (RE-3) |
-| `py/make_alltrades.py` | генератор записей `R_ALLTRADE`; наборы 1–3 = фикстуры `native/xmlcompat/testdata/alltrades-inject*.hex`; образец для других записей |
+| `py/make_alltrades.py` | генератор записей `R_ALLTRADE`; наборы 1–3 = фикстуры `native/records/testdata/alltrades-inject*.hex`; образец для других записей |
 | `py/analyze_startup.py` | разбор ответа RQ_STARTUP и побайтная сверка `<markets>`/`<boards>`/`<candlekinds>` с DLL |
 | `py/analyze_main.py` | статистика тегов RQ_MAIN, разбор `R_SEC_NEW`, таблицы корреляции «поле записи ↔ элемент XML» |
 | `py/dll_maps.py` | карты «команда → обработчик» и «тег RQ_MAIN → обработчик» из декомпиляции |
