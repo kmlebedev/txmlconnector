@@ -248,6 +248,7 @@ func (c *Client) relogin(ctx context.Context) error {
 	c.mu.Lock()
 	c.resetAccountsLocked()
 	c.secSpecs = map[uint16]records.SecSpec{}
+	c.history = map[historyKey]*historyCollector{}
 	c.mu.Unlock()
 	// load re-runs the ClientConfig.OnDictionaries/OnSecurities callbacks, so
 	// the Connector emits the dictionary and securities callbacks again after a

@@ -45,6 +45,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return QuotesXML(*e), true
 	case *model.SecInfo:
 		return SecInfoXML(*e), true
+	case *model.Candles:
+		return CandlesXML(*e), true
 	}
 	return "", false
 }
@@ -423,4 +425,24 @@ func fixedDecimal(d model.Decimal) string {
 		return "-" + text
 	}
 	return text
+}
+
+// CandlesXML renders one <candles> callback of gethistorydata (PDF 4.1): the
+// DLL keeps a space after the opening tag and before the closing one, and the
+// candles are chronological (oldest first).
+func CandlesXML(candles model.Candles) string {
+	var b strings.Builder
+	b.WriteString("<candles secid=" + quoteAttr(strconv.Itoa(int(candles.SecID))) + " board=" + quoteAttr(candles.Symbol.Board))
+	b.WriteString(" seccode=" + quoteAttr(candles.Symbol.SecCode) + " period=" + quoteAttr(strconv.Itoa(candles.Period)))
+	b.WriteString(" status=" + quoteAttr(strconv.Itoa(candles.Status)) + "> ")
+	for _, candle := range candles.Items {
+		b.WriteString("<candle date=" + quoteAttr(candle.Time.Format("02.01.2006 15:04:05")))
+		b.WriteString(" open=" + quoteAttr(candle.Open.String()))
+		b.WriteString(" close=" + quoteAttr(candle.Close.String()))
+		b.WriteString(" high=" + quoteAttr(candle.High.String()))
+		b.WriteString(" low=" + quoteAttr(candle.Low.String()))
+		b.WriteString(" volume=" + quoteAttr(strconv.FormatInt(candle.Volume, 10)) + "/> ")
+	}
+	b.WriteString("</candles>")
+	return b.String()
 }
