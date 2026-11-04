@@ -223,10 +223,11 @@ func TestMiscParsersNegative(t *testing.T) {
 }
 
 // TestKnownUnseenTagReturnsUnknownRecord pins the task 12 boundary: tags whose
-// layouts are not recovered (0x38/0x39/0x42/0x43/0x4f/0x5d/0x6f-0x79) surface a
-// clear UnknownRecordError instead of being dropped or panicking.
+// layouts are not recovered (0x38/0x39/0x42/0x43/0x4f/0x5d/0x74/0x79) surface a
+// clear UnknownRecordError instead of being dropped or panicking. The option
+// tags 0x6f/0x71/0x78 are implemented by task 27.
 func TestKnownUnseenTagReturnsUnknownRecord(t *testing.T) {
-	for _, tag := range []byte{0x38, 0x39, 0x42, 0x43, 0x4f, 0x5d, 0x6f, 0x71, 0x74, 0x79} {
+	for _, tag := range []byte{0x38, 0x39, 0x42, 0x43, 0x4f, 0x5d, 0x74, 0x79} {
 		_, err := records.Records([]byte{tag, 0x00, 0x00})
 		var unknown *records.UnknownRecordError
 		if !errors.As(err, &unknown) || unknown.Tag != tag {
