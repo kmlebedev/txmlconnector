@@ -44,7 +44,7 @@
 | 24 | news/get_old_news/get_news_body | 6 | **partial** | 0x35/0x36 парсеры+splitter, `<news_header>` O-побайтно, RQ_GETNEWS payloads (7484ffc); `<news_body>` — I (reply-механика, task-56) |
 | 25 | messages (R_MSG 0x01) | 6 | **done** | unsized 0x01, batch одного RQ_MAIN, `<messages>` O-побайтно (73a4acc/6cb9697) |
 | 26 | change_pass | 6 | **done** | RQ_CHANGE_PWD 3, payload/SHA-1, replies, fatal empty reply, local texts (7427b10); живьём не выполнялось (S-негатив) |
-| 27 | options | 7 | **none** | — |
+| 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply, 149 O e2e (9b7204f); гейт версии 0x45 — I (поле не восстановлено), 153/150/151 mapping/XML — D/I |
 | 28 | RPS/REPO/отчёты | 8 | **none** | — |
 | 29 | XML-коннектор целиком, native backend | 9 | **partial** | `native/connector.go`: 26/43 команд; `server/` native backend нет; матрица 45 имён — в этом документе `2 |
 | 30 | Матрица покрытия, soak, выпуск | 9 | **in progress** | этот документ; soak/выпуск — после 29 |
@@ -95,12 +95,14 @@
 | get_old_news | done | RQ_GETNEWS 73 (mode 1) | O/D | `TestOldNewsPayloadMatchesDLL`, `news-inject.hex` | заголовки — события 0x35/0x36; O-пейлоады 713e913e0201 / 017d217d0201 |
 | get_news_body | done (команда) | RQ_GETNEWS 73 (mode 2) | O/D | `TestGetNewsBodyRequest`, `TestNewsErrors` | payload 217d217d0102; `<news_body>` — I (task-56) |
 | change_pass | done | RQ_CHANGE_PWD 3 | O/D | `TestChangePasswordPayloadMatchesDLL/Command/ReplyErrors/LocalErrors/EmptyReplyFatal` | 56-Б SHA-1 payload; пустой reply фатален/закрывает сессию; S-негатив (живьём не выполнялось) |
+| get_option_families | done | RQ_OPTION_FAMILIES 149 | O/D | `TestConnectorOptionFamilies`, `option-families-request/reply-*.hex` | payload 001a; пустой/непустой C-string reply (O); XML — D/I |
+| get_family_strikes | partial (I) | RQ_FAMILY_STRIKES 153 | D/I | `TestConnectorFamilyStrikesErrors` | mat_date ошибки D+O; family mapping и гейт 0x45 — I, запрос не отправляется |
+| get_options | partial (I) | RQ_CERTAIN_OPTIONS 151 | D/I | `TestConnectorGetOptions` | Z25 payload и local «No seccodes found»; XML/данные I |
 
 ### 2.3 Не реализовано в Connector (default → message not implemented)
 
 authenticate, set_csp (внешние криптопровайдеры; T29), cancelnegdeal,
-get_family_strikes, get_option_families, get_options,
-makeordown, moveorder, newmrepoorder, newrepoorder, newrpsorder (13 имён). Соответствие задачам: T19 (moveorder/
+makeordown, moveorder, newmrepoorder, newrepoorder, newrpsorder (10 имён). Соответствие задачам: T19 (moveorder/
 makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Плюс отсутствуют `newreport4`/`cancelreport4` (T28/T29).
 
 ## 3. Записи RQ_MAIN (splitter `records.Records` + декодеры `native/events*`)
@@ -134,6 +136,9 @@ makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Пл�
 | 0x5e | R_SEC_PARAM (sized) | sizedTags | decodeSecParam → SecInfoUpdate | `<sec_info_upd>` | O | `secparam-live*`, `TestSecInfoUpdMatchesDLL` |
 | 0x5f | R_WRAPPER (sized) | sizedTags → nested | вложенные записи (0x6e skip) | — | O/D | `TestE07TailHasNoUnknownRecords` |
 | 0x62,0x67 | MarCat/Unicat | 2 Б | state-only | — | D | `TestRecordsStopsAtUnknownLayout` (контекст) |
+| 0x6f | R_FAMILY | unsized walker | decodeOptionFamily → OptionFamily (state+event) | `<option_families>` (D/I) | D | `TestOptionsRecordsSplit`, `TestOptionFamilyEvent` |
+| 0x71 | R_END_OF_FAMILY | unsized walker | decodeEndOfFamily → EndOfFamily | `<options_failed>` (D/I) | D | `TestOptionsRecordsSplit` |
+| 0x78 | R_STRIKES | unsized walker | decodeOptionStrikes → OptionStrikes | `<family_strikes>` (D/I) | D | `TestOptionsRecordsSplit` |
 | 0x66 | R_DOUBLELEG (sized) | sizedTags | нет декодера | — | D/I | `TestSizedMiscRecords` |
 | 0x68 | R_UNION | splitter (G+Z20+Z32+B) | decodeUnion → Union | `<union>` | O | `TestUnionRecordReachesLoadEnd` |
 | 0x69 | ReadURTUpdate | splitter до 0xff | state-only | — | D | — |
@@ -199,6 +204,7 @@ makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Пл�
 | `<news_header>` | NewsHeader | `NewsHeaderXML` | `news-dll.xml` | O |
 | `<news_body>` | NewsBody | `NewsBodyXML` (D-форма) | нет O | I (task-56) |
 | `<messages>` | Messages batch | `MessagesXML` | `message-dll.xml` | O |
+| `<option_families>`/`<family_strikes>`/`<options_failed>` | OptionFamily/OptionStrikes/EndOfFamily | `OptionFamiliesXML`/`FamilyStrikesXML`/`OptionsFailedXML` | нет O | I (D-литералы) |
 
 ## 6. Тесты и фикстуры по подсистемам
 
@@ -227,8 +233,10 @@ makeordown), T24 (news), T26 (change_pass), T27 (options), T28 (RPS/REPO). Пл�
    **T25**: сделано (73a4acc/6cb9697), O-побайтно.
    **T26**: change_pass сделан (7427b10): payload SHA-1, replies, fatal empty reply; живой смены
    пароля не было (S-негатив), политика безопасности сервера — I.
+   **T27**: опционы частично (9b7204f): 149 payload/reply O, 151 payload D, 153/150 и XML — D/I;
+   гейт версии 0x45 и family mapping не восстановлены (I).
 6. **T26–T28**: не начаты (change_pass, options, RPS/REPO).
-7. **T29**: 32/43 XML-команд в Connector; native backend `server/`, матрица 45 имён и тексты
+7. **T29**: 35/43 XML-команд в Connector; native backend `server/`, матрица 45 имён и тексты
    ошибок (Task 29 Step 1/1b) — не сделаны; нет `newreport4`/`cancelreport4` (task-index `8.1).
 8. **Windows/Wine**: нативный клиент сборками `make server_build/queues_build` и `make verify`
    проверяется; отдельного прогона native на Windows не было (не проверено).
