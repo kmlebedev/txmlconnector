@@ -423,6 +423,67 @@ RQ_RECOVER (64):  Bn:  token                 // ровно len байт токе
 - Часть ответов RQ_MAIN приходит с флагом `0x82` (payload без шифрования); CRC проверяется всегда.
 - Сжатия на демо не наблюдалось: payload — открытые записи.
 
+## Конец загрузки: `<client>`, `<positions>`, `<overnight>`, `<union>` — S/D
+
+Живой прогон (RE-2, E07, 2026-11-04): DLL под Wine через логирующий прокси, демо-сервер,
+`<connect>` с параметрами по умолчанию, затем `<command id="server_status"/>` и `disconnect`.
+Сырьё — `.re-run/r7/` (не в git); обезличенные фикстуры —
+`native/testdata/snapshot-tail-live.{hex,xml,md}`.
+
+### Порядок колбэков в конце загрузки — S
+
+| t, с (harness) | Что пришло |
+|---|---|
+| 4.470–4.471 | последние `<securities>` (QQQ) и `<pits>` из того же RQ_MAIN-кадра |
+| 4.472 | `<client id="TESTCLIEN" remove="false"><market>1</market><currency>RUB</currency><type>leverage</type></client>` |
+| 4.472 | `<positions>` с одним `<money_position>` (`<client>TESTCLIEN</client>`, пустой `<union></union>`, saldo 300000.0) |
+| 4.472 | два `<sec_info_upd>` (BR32BK6/BR32BW6), в фикстуру не включены как несвязанные |
+| 4.517 | `<overnight status="false"/>` |
+| 4.517 | `<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="0" connected="true"/>` |
+
+- **`<union>` отдельным колбэком на демо НЕ приходит** (юнион пустой) — S; в `<positions>` есть
+  только пустой `<union></union>`. Для непустого юниона поведение не проверено (нужен другой счёт).
+- `<overnight status="false"/>` приходит перед **каждым** `<server_status>` (и по завершении
+  загрузки, и на команду `server_status`) — S.
+- `<positions>` на демо содержит только `<money_position>` (бумажных позиций нет) — S.
+- Порядок: `<client>` → `<positions>` → (события справочников) → `<overnight>` → `<server_status>` — **S**.
+
+### Записи конца снапшота — S/D
+
+Последний крупный кадр RQ_MAIN (41 583 байта) состоит из пар `R_SEC_NEW (0x28)`/`R_SEC_PARAM
+(0x5e)`, за которыми идёт «хвост» (5135 байт): `0x62×3` (MarCat), `0x67` (Unicat),
+`0x02 R_CLN_NEW` (size 35), `0x6b`, 7× R_WRAPPER (0x5f) с вложенными `0x6e R_EDP_RATE`,
+`0x3b R_CLIENT_ASSET`, затем лимиты/параметры и хвост из `0x0a R_SEC_RATE` — **S** (байты в
+`snapshot-tail-live.hex`), полная раскладка записей — RE-1 задачи 7.
+
+D-координаты обработчиков: `0x02*` `FUN_1803cbc40` (R_CLN_NEW; в хвосте два Z-поля — client code
+9 б и login 8 б); `0x18` `FUN_180263f50` (читает B и пишет в объект сессии `+0x688`);
+`0x62` `FUN_1803da850` ("ReadMarCat", `B,B` → `FUN_1801ecc10(conn+0x278,...)`); `0x67`
+`FUN_1803dad70` ("ReadUnicat", `B,B` → `conn+0x288` и `FUN_1802366c0(conn+0x60,...)`);
+`0x69` `FUN_1803db160` ("ReadURTUpdate", байты до `0xff` → `FUN_1802aabd0`, затем
+`FUN_180278bd0`/`FUN_180278b70`); R_WRAPPER `0x5f` — размерная запись с вложенными.
+
+XML-строители: `<positions>` — `FUN_1800f5460`/`FUN_1800f4f20` (списки позиций
+`connector+0x3e0`/`+0x3f0`, по одному элементу на колбэк, отправка `FUN_1800dba40`),
+`FUN_180118d60` (обёртка `<positions>` для одной позиции); `<overnight>` — `FUN_1800db330`
+(читает флаг `+0x688`, выбирает `status="true|false"`); `<client id="…" remove="true"/>` —
+`FUN_180120ad0`; `<client id="…" remove="false">…` и `<money_position>`/`<sec_position>` —
+большой генератор `FUN_1800f7b40` (декомпилятор упирается в размер ответа — нужен отдельный
+проход, задача 7).
+
+### Обезличивание — правило
+
+Фикстуры не содержат логина/пароля/UID/счетов/юниона: client code → `TESTCLIEN` (9 байт) и login →
+`TESTLOGI` (8 байт) — длины сохранены, потому что в бинарных записях строки переменной длины без
+явных префиксов и смена длины сломала бы разбор; «длины сохраняются» приоритетнее буквальных
+имён `TESTCLIENT`/`TESTLOGIN`. Сырые cap/логи DLL — только в `.re-run/`.
+
+### Не проверено
+
+- Полные форматы R_CLN_NEW (0x02), позиционных записей, 0x6b, размеченного хвоста — RE-1 задачи 7.
+- `<union>` для непустого юниона; наличие/позиция записи `0x18` в хвосте (наблюдаемый
+  `<overnight status="false"/>` может быть значением по умолчанию).
+
 ## Что не доказано
 
 - Смысл большинства полей ответа RQ_PWD, флагов 4/8 RQ_LOGIN и слов `W:1`, `W:540`.
