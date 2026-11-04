@@ -93,9 +93,8 @@
 ### 2.3 Не реализовано в Connector (default → message not implemented)
 
 authenticate, set_csp (внешние криптопровайдеры; T29), cancelnegdeal, change_pass,
-get_cln_sec_permissions, get_family_strikes, get_max_buy_sell, get_max_buy_sell_tplus,
-get_news_body, get_old_news, get_option_families, get_options, makeordown, moveorder,
-newmrepoorder, newrepoorder, newrpsorder (17 имён). Соответствие задачам: T19 (moveorder/
+get_family_strikes, get_news_body, get_old_news, get_option_families, get_options,
+makeordown, moveorder, newmrepoorder, newrepoorder, newrpsorder (14 имён). Соответствие задачам: T19 (moveorder/
 makeordown), T23 (max buy/sell, permissions), T24 (news), T26 (change_pass), T27 (options),
 T28 (RPS/REPO). Плюс отсутствуют `newreport4`/`cancelreport4` (T28/T29).
 
@@ -212,9 +211,11 @@ T28 (RPS/REPO). Плюс отсутствуют `newreport4`/`cancelreport4` (T2
    не реализован (формат I, portfolios/limits.md).
 4. **T22 portfolios**: `portfolio_tplus/forts/united/mct`, typed client-API и формулы
    equity/cover/init_req/maint_req/unrealized_pnl — I (зафиксировано в коде и portfolios.md).
-5. **T23–T25**: только каркас (6a57f75), явные I-ошибки; ждут RE-2/RE-3 материалы.
+5. **T23**: local render 3 команд и <marketord> сделаны (b29b757/6867d83); maxbuy/maxsell=0 и
+   permissions=false/regrate=0 — I (внутренние сторы P/R/FUN_18001a700 отсутствуют в RQ_MAIN), ждёт task-52.
+   **T24–T25**: только каркас (6a57f75), явные I-ошибки; ждут RE-2/RE-3 материалы.
 6. **T26–T28**: не начаты (change_pass, options, RPS/REPO).
-7. **T29**: 26/43 XML-команд в Connector; native backend `server/`, матрица 45 имён и тексты
+7. **T29**: 29/43 XML-команд в Connector; native backend `server/`, матрица 45 имён и тексты
    ошибок (Task 29 Step 1/1b) — не сделаны; нет `newreport4`/`cancelreport4` (task-index `8.1).
 8. **Windows/Wine**: нативный клиент сборками `make server_build/queues_build` и `make verify`
    проверяется; отдельного прогона native на Windows не было (не проверено).
