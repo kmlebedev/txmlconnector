@@ -61,3 +61,35 @@
   (схема RE-3 как task-24/35); фикстур `portfolio-*` пока нет.
 - Утренняя S-сессия: те же команды живьём; план — `docs/deepseek/re-session-checklist.md`.EOF
 echo ok
+
+## O-находка: portfolio-команды — ЛОКАЛЬНЫЙ рендер (без запросов к серверу)
+
+Прогон всех portfolio-команд под replay (DLL на loopback, tcproxy-захват): в C>S **нет** кадров
+86/84/85/82 — команды `get_portfolio`, `get_united_portfolio`, `get_mc_portfolio` отвечают
+`<result success="true"/>` и рендерят XML **из уже загруженных сторов** (money/positions из RQ_MAIN
+записей `0x3b` + клиентских данных). `get_portfolio_mct` с `client="код"` → «{8} Неверное значение
+параметра szClient» (ожидает иной формат/числовой id); `get_mc_portfolio` без client →
+«Attributes union and client are empty».
+
+Снятые формы (O, обезличено):
+
+```xml
+<portfolio_currency currency="RUB"><cross_rate>1</cross_rate><open_balance>300000.00</open_balance>
+<balance>300000.00</balance><equity>300000.00</equity><cover>300000.00</cover><init_req>0.00</init_req>
+<maint_req>0.00</maint_req><unrealized_pnl>0.00</unrealized_pnl></portfolio_currency>
+```
+
+`<mc_portfolio client="TESTCLIEN">` содержит `<open_equity><equity><pl><go><cover><init_req>
+<maint_req><unrealized_pnl>`, вложенные `<portfolio_currency …>` и `<money name="Фондовый рынок МБ"
+currency="RUB"><balance_prc><open_balance><bought><sold><balance><blocked><estimated><fee><vm><finres>
+<cover>`, а также `<value_part register="T0">…` (micex_registers-опция). Полный образец —
+фикстура `portfolio-mc-dll.xml`.
+
+**Фикстуры:** `portfolio-currency-dll.xml`, `portfolio-mc-dll.xml` (O-формы, обезличены);
+input-фикстуры (reply/hex) пока не применимы: commands local render — для unit-теста нужен вход из
+инъекции `0x3b`-записей money/секций + клиентских записей (`0x02`), что и станет парой
+`portfolio-*-inject.hex` + `*-dll.xml` (следующий шаг, вместе с построением стора).
+- I: как именно считаются equity/cover/init_req/maint_req/unrealized_pnl (формулы), поведение
+  `get_portfolio_mct` (формат client), `<portfolio_tplus>`/`<portfolio_forts>`/`<united_portfolio>`
+  (в этом прогоне не отдались; в первом probe были `<portfolio_tplus>`×2 и `<united_portfolio>`).EOF
+echo ok
