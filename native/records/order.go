@@ -61,11 +61,9 @@ func ParseOrderNew(body []byte) (OrderNew, error) {
 		return out, fmt.Errorf("R_ORD_NEW price: %w", err)
 	}
 	o.Price = model.Decimal{Units: int64(price), Scale: 2}
-	tm, err := r.Uint16()
-	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW time: %w", err)
+	if _, err := r.Uint16(); err != nil { // field 7 is not rendered (I)
+		return out, fmt.Errorf("R_ORD_NEW field7: %w", err)
 	}
-	o.Time = int32(tm)
 	yield, err := r.Int32()
 	if err != nil {
 		return out, fmt.Errorf("R_ORD_NEW yield: %w", err)
@@ -120,21 +118,18 @@ func ParseOrderNew(body []byte) (OrderNew, error) {
 		return out, fmt.Errorf("R_ORD_NEW condition: %w", err)
 	}
 	o.Condition = int(cond)
+	// Orders table (docs/protocol/orders.md, D+O): field 22 is <time> (seconds
+	// of day) and field 23 is <balance>.
+	timeRaw, err := r.Int32()
+	if err != nil {
+		return out, fmt.Errorf("R_ORD_NEW time: %w", err)
+	}
+	o.Time = timeRaw
 	balance, err := r.Int32()
 	if err != nil {
 		return out, fmt.Errorf("R_ORD_NEW balance: %w", err)
 	}
 	o.Balance = int64(balance)
-	// The oracle shows that a disabled order renders <time> from the value at
-	// this body position (11 in the fixture) and <balance> from the next one
-	// (1); they are kept for the status-dependent render (I, RE is confirming
-	// the D offsets).
-	o.UpdateTime = int32(balance)
-	updateBalance, err := r.Int32()
-	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW update balance: %w", err)
-	}
-	o.UpdateBalance = int64(updateBalance)
 	// The remaining reads of the D body are not mapped (I); the record is
 	// sized, so skip the rest.
 	if r.Len() > 0 {
