@@ -16,8 +16,9 @@ main» не учитывались.
 **Обозначения в таблицах:**
 - `RE-1` — Ghidra-декомпиляция — **доступна сейчас** (скрипты в `tools/re/ghidra`, DLL — в корне).
   В песочнице DSH нужны `JAVA_HOME=openjdk@25`, `mkdir -p "${TMPDIR:-/tmp}/dsh-ghidra-home"` и
-  `JAVA_TOOL_OPTIONS=-Duser.home=…`, а проект Ghidra — в `.re-run/ghproj` внутри workspace
-  (см. [environment.md](environment.md#песочница-dsh-gocache-и-запись-вне-workspace)).
+  `JAVA_TOOL_OPTIONS=-Duser.home=…`, а проект Ghidra — в `${TMPDIR:-/tmp}/txc-ghproj` ВНЕ workspace:
+  Ghidra 12.2 отвергает '.'-пути (`.re-run/ghproj`); симлинк `.re-run/ghproj` — для удобства.
+  Проверено 2026-11-04: импорт DLL succeeded, ~3 м 50 с (см. environment.md).
 - `RE-2` (живой захват DLL) и `RE-3` (оракул) — **доступны** (2026-11-04: Wine 11.21 установлен,
   `run_dll.sh` + `get_connector_version` проверены). RE-2 требует `TC_PASSWORD` и окно демо-сервера,
   RE-3 — записанную сессию + `TC_PASSWORD`. `RE-4` (живая проверка Go) — **пока нет**: нужен
@@ -68,13 +69,14 @@ main» не учитывались.
 
 | Процедура | Что даёт | Доступность сейчас | Чем |
 |---|---|---|---|
-| RE-1 Декомпиляция | Чтение полей записей и запросов, карты обработчиков | **Да**, с оговорками песочницы (см. §1 и environment.md) | Ghidra 12.2 headless, `tools/re/ghidra/*.java`, `tools/re/py/dll_maps.py`; проект Ghidra — `.re-run/ghproj` (gitignored), DLL в корне |
-| RE-2 Живой захват DLL | Байты запросов/ответов, XML-колбэки DLL | **Да**, с оговорками: нужен `TC_PASSWORD` и окно демо-сервера; захваты — в `.re-run/` (gitignored) | Wine 11.21 (`~/re/wine/.../wine`, `~/re/wine-prefix`, проверено `run_dll.sh`), `tools/re/py/proxy.py`, `tools/wire-decode` |
+| RE-1 Декомпиляция | Чтение полей записей и запросов, карты обработчиков | **Да** (2026-11-04 импорт DLL проверен: Import succeeded ~3 м 50 с) | Ghidra 12.2 headless, `tools/re/ghidra/*.java`, `tools/re/py/dll_maps.py`; проект — `${TMPDIR:-/tmp}/txc-ghproj` (Ghidra отвергает '.'-пути; симлинк `.re-run/ghproj`), DLL в корне |
+| RE-2 Живой захват DLL | Байты запросов/ответов, XML-колбэки DLL | **Да** (2026-11-04: `TC_PASSWORD` в `~/re/demo.env`, согласие пользователя получено; окно демо-сервера 09:50–23:50 МСК); захваты — в `.re-run/` (gitignored) | Wine 11.21 (`~/re/wine/.../wine`, `~/re/wine-prefix`, проверено `run_dll.sh`), `tools/tcproxy`, `tools/re/py/proxy.py`, `tools/wire-decode` |
 | RE-3 Оракул | XML DLL для записей, которых нет на демо (сделки, заявки, позиции, РПС) | **Да**, при наличии записанной сессии и `TC_PASSWORD` | Wine 11.21 + `replay_server.py` (или Go-версия из задачи 1), `TC_PASSWORD` из `~/re/demo.env` |
-| RE-4 Живая проверка Go | Сверка Go-клиента с сервером через прокси | **Нет** (в `~/re/demo.env` пока нет `TC_PASSWORD`) | `TC_LOGIN`/`TC_PASSWORD` + демо-сервер `tr1-demo5.finam.ru:3939` |
+| RE-4 Живая проверка Go | Сверка Go-клиента с сервером через прокси | **Да** с 2026-11-04 (`TC_PASSWORD` в `~/re/demo.env`, согласие пользователя; окно демо-сервера) | `TC_LOGIN`/`TC_PASSWORD` + демо-сервер `tr1-demo5.finam.ru:3939` + `tools/tcproxy` |
 
-Практическое следствие для планирования: RE-2/RE-3 теперь доступны (Wine есть), но их шагам нужны
-`TC_PASSWORD` (`~/re/demo.env`) и/или записанная сессия. Задачи, у которых в шагах есть RE-2/RE-3 **и
+Практическое следствие для планирования: RE-2/RE-3/RE-4 доступны (Wine есть, `TC_PASSWORD` в
+`~/re/demo.env`, согласие пользователя получено 2026-11-04); для RE-3 нужна записанная сессия (или
+захват пользователя вне git). Задачи, у которых в шагах есть RE-2/RE-3 **и
 нет фикстуры в репозитории**, закрываются по DoD только после снятия фикстур (живой захват или оракул)
 либо остаются `blocked` с явной причиной. Список таких задач — §8, пункты 11–13, 17.
 
