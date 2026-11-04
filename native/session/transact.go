@@ -29,6 +29,17 @@ const (
 	TxNewOrder TxKind = 1
 	// TxCancelOrder is TRN_CANCELORDER.
 	TxCancelOrder TxKind = 2
+	// TxNewRpsRepo is TRN_NEWRPSREPO (O payload prefix 0x04).
+	TxNewRpsRepo TxKind = 0x04
+	// TxNewRepoOrder is TRN_NEWREPOORDER (O payload prefix 0x0e).
+	TxNewRepoOrder TxKind = 0x0e
+	// TxCancelNegDeal is the cancel-negdeal TRN code (O payload prefix 0x08).
+	TxCancelNegDeal TxKind = 0x08
+	// TxCancelReport4 shares the O prefix 0x08 with cancelnegdeal; the exact TRN
+	// code difference is not recovered (I, rps.md).
+	TxCancelReport4 TxKind = 0x08
+	// TxNewMRepoOrder is TRN_NEWMREPOORDER: the payload layout is not recovered
+	// (I), so no constant is fabricated.
 	// TxNewStopOrder is TRN_NEWSTOPORDER (O payload prefix 0x14).
 	TxNewStopOrder TxKind = 0x14
 	// TxNewCondOrder is TRN_NEWORDER (0x01) with the cond fields appended (O).
