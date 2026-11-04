@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
@@ -207,5 +208,35 @@ func TestOldNewsHeadersAfterCommand(t *testing.T) {
 	}
 	if got := rec.next(t, "<news_header"); got != want[1] {
 		t.Fatalf("news_header 2 = %s", got)
+	}
+}
+
+// TestNewsHeaderCDATA: the DLL wraps source/title in CDATA and (per the code)
+// does not escape ]]>; we escape it to keep the XML valid (I) and check it.
+func TestNewsHeaderCDATA(t *testing.T) {
+	got := xmlcompat.NewsHeaderXML(model.NewsHeader{ID: 7, Time: time.Unix(1762300000, 0).UTC(), Source: "s]]>x", Title: "t]]>y"})
+	want := "<news_header><id>7</id><timestamp>04.11.2025 23:46:40</timestamp><source><![CDATA[s]]]]><![CDATA[>x]]></source><title><![CDATA[t]]]]><![CDATA[>y]]></title></news_header>"
+	if got != want {
+		t.Fatalf("NewsHeaderXML = %s, want %s", got, want)
+	}
+}
+
+// TestOldNewsEmptyStorePayload: an empty news store sends 0..0x7fffffff
+// (news.md D; the exact mixed-store rule is I).
+func TestOldNewsEmptyStorePayload(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = clientSnapshot(t)
+	get := captureNewsGet(t, srv)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	send(t, c, "<command id="+quote+"get_old_news"+quote+" count="+quote+"2"+quote+"/>")
+	if got := hex.EncodeToString(get()); got != "00f4ffffff070201" {
+		t.Fatalf("empty-store payload = %s, want 00f4ffffff070201", got)
 	}
 }
