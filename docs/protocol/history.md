@@ -152,3 +152,30 @@ XML `<ticks>`/`<tick>` имеют литералы `0x180836fb8`/`0x180832da8` (
   каждая часть начинается со своего абсолютного времени.
 - Многочастная выдача воспроизведена оракулом (O), но не на живом демо (S-негатив).
 - Тики: живых данных нет (S-негатив), формат записи тиков и RQ_TICKS не подтверждены.
+## RQ_TICKS: оракул в текущем окружении заблокирован (D/O, 2026-11-04)
+
+Попытки снять `<ticks>` оракулом (replay-server с `-reply-to 13 -reply-type 13`, dump-редакция с
+S>C кадром type=13; `ticks-reply.hex` = `W secid, W board, G tradeno, L time, L price, B, L volume,
+W 0xffff`) не дали ответа: **DLL отправляет RQ_SUBSCRIBE_TICKS (120), но не отправляет RQ_TICKS (13)**
+за 10–15 с (захват через `tcproxy`: C>S типы `1,46,42,120`). То же в вечерних live-прогонах r15/r16
+(25–45 с без 13).
+
+В декомпиляторе найден guard: отправка подписок/тиков (`FUN_1803ba530`, `FUN_180358d20`) разрешена
+только при `connector+0xaa4 != 0`; флаг ставит тег `0x05` (`FUN_180357f90`, лог «Snapshot accepted»).
+Инъекция 0x05 после загрузки флаг ставит, но DLL уходит в «Cannot process this command without
+connection» (повторный snapshot ломает состояние) — обход непригоден. **Гипотеза (I):** RQ_TICKS
+опрашивается только по серверному триггеру в основную торговую сессию; в вечерней/реплейной сессии
+триггера нет.
+
+### План утренней S-съёмки (5 ноября, 10:00+ МСК)
+
+1. `set -a; . ~/re/demo.env; set +a`; окно демо 09:50–23:50 МСК; живой DLL под Wine через `tcproxy`.
+2. Подписка: `<command id="subscribe_ticks"><filter>true</filter><security><board>TQBR</board>
+<seccode>SBER</seccode><tradeno>0</tradeno></security><security><board>TQBR</board>
+<seccode>GAZP</seccode><tradeno>0</tradeno></security></command>`; ждать 30–60 с.
+3. Проверить в захвате: C>S type=13 и/или S>C `<ticks>`; при отсутствии — ответить на type=13
+через `replay-server -reply-to 13 -reply-type 13 -inject ticks-reply.hex` (формат из D выше) и
+повторить подписку.
+4. Снять `native/records/testdata/ticks-live.hex.gz` (RQ_MAIN reply/куски) и `ticks-dll.xml.gz`
+(колбэки `<ticks>/<tick>`); обновить это приложение и docs/commands.md, статус S.
+5. Если пользователь не поднимет сессию — зафиксировать как внешний блокер, не выдумывать данные.
