@@ -972,6 +972,93 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure(err.Error()), nil
 		}
 		return success(), nil
+	case "get_option_families":
+		var req struct {
+			SecID    int    `xml:"secid,attr"`
+			Board    string `xml:"board,attr"`
+			SecCode  string `xml:"seccode,attr"`
+			Security *struct {
+				SecID   int    `xml:"secid"`
+				Board   string `xml:"board"`
+				SecCode string `xml:"seccode"`
+			} `xml:"security"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		secID, symbol, ok := 0, model.Symbol{}, false
+		if req.Security != nil {
+			switch {
+			case req.Security.SecID > 0:
+				symbol, ok = client.SymbolBySecID(uint16(req.Security.SecID))
+			case req.Security.Board != "":
+				symbol, ok = client.SymbolByBoard(req.Security.Board, req.Security.SecCode)
+			}
+		} else if req.SecID > 0 {
+			symbol, ok = client.SymbolBySecID(uint16(req.SecID))
+		} else if req.Board != "" {
+			symbol, ok = client.SymbolByBoard(req.Board, req.SecCode)
+		}
+		if !ok {
+			return failure("unknown security"), nil
+		}
+		_ = secID
+		families, err := client.OptionFamilies(ctx, symbol)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		for _, family := range families {
+			c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{family}))
+		}
+		return success(), nil
+	case "get_family_strikes":
+		var req struct {
+			MatDate *string `xml:"mat_date"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.MatDate == nil || *req.MatDate == "" {
+			return failure("No mat_date found"), nil
+		}
+		if _, err := time.Parse("02.01.2006", *req.MatDate); err != nil {
+			return failure(fmt.Sprintf("Failed to parse mat_date=%s", *req.MatDate)), nil
+		}
+		// The family-name -> (secid, family_id) mapping is not recovered (D:
+		// internal family store, options.md I), so no guessed request is sent.
+		return failure("family id mapping is not recovered (I)"), nil
+	case "get_options":
+		var req struct {
+			OptCodes []string `xml:"opt_code"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if len(req.OptCodes) == 0 {
+			return failure("No seccodes found"), nil
+		}
+		if _, err := client.Options(ctx, model.OptionsRequest{OptCodes: req.OptCodes}); err != nil {
+			return failure(err.Error()), nil
+		}
+		return success(), nil
 	case "get_forts_positions":
 		var req struct {
 			Client string `xml:"client"`
@@ -1150,6 +1237,12 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.NewsHeaderXML(*e))
 			case *model.Messages:
 				c.emit(xmlcompat.MessagesXML(e.Items))
+			case *model.OptionFamily:
+				c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{*e}))
+			case *model.OptionStrikes:
+				c.emit(xmlcompat.FamilyStrikesXML(*e))
+			case *model.EndOfFamily:
+				c.emit(xmlcompat.OptionsFailedXML(*e))
 			case model.ServerStatus:
 				switch {
 				case e.Recover:
@@ -1250,6 +1343,15 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 				}
 				if messages, ok := ev.(*model.Messages); ok {
 					c.emit(xmlcompat.MessagesXML(messages.Items))
+				}
+				if family, ok := ev.(*model.OptionFamily); ok {
+					c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{*family}))
+				}
+				if strikes, ok := ev.(*model.OptionStrikes); ok {
+					c.emit(xmlcompat.FamilyStrikesXML(*strikes))
+				}
+				if end, ok := ev.(*model.EndOfFamily); ok {
+					c.emit(xmlcompat.OptionsFailedXML(*end))
 				}
 			}
 		},
