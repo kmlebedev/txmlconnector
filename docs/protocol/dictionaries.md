@@ -119,6 +119,27 @@ XML-событие `FUN_180107800` (`<sec_info_upd>`): `secid, seccode, market`,
 без событий), описание — `native/records/testdata/secparam-live.md`.
 Смежные теги снапшота: R_SEC_RATE (0x0a) — `W:secid L:значение` в +0xb8 (974 записи в захвате 4.11, колбэков не генерирует); `R_SEC_ZALOG/OBLIG/ONOFF/MKT_PERMIT` (0x0b–0x0e) — `W secid B val` в `FUN_180264150` (0x0d→`б4&0xfc|val`, 0x0e→бит 0x04 +0xb4). В 81-секундной сессии 4.11 записей 0x0d/0x0e не было (сервер присылает их при изменении допуска), путь мутаций покрыт юнит-тестом `TestCatalogApplyMutations` — **D**.
 
+## RQ_SEC_SPEC (15): запрос, ответ и spec-поля — S/D
+
+DLL отправляет RQ_SEC_SPEC автоматически после подписки (`RQ_SUBSCRIBE`): запрос — простой список
+`W secid` **без счётчика и терминатора**; при подписке на несколько бумаг одной командой — один
+кадр со списком в обратном порядке XML-элементов (**S**, r12: подписка `<secid>26</secid>
+`<secid>379</secid><secid>20583</secid>` → `RQ_SUBSCRIBE` 3 элемента, `RQ_SEC_SPEC` payload
+`5067017b001a`). Ответ — кадр, состоящий из подряд идущих записей `W secid; G mask;` и значений по
+битам маски в порядке возрастания бита (парсер — `FUN_1803bac90`, конец — 0xffff или конец
+буфера; после разбора `symbol+0xec = 1`). Типы/поля маски (D, полная таблица и живые значения —
+`native/testdata/secinfo-live.md`): 0 Z75 secname, 1 Z9 pname, 2 Z4 валюта, 3 G facevalue,
+5 L clearing_price (FUT), 8 L mat_date (дни Unix), 9 L coupon_value (/100), 10 L coupon_period,
+11 L coupon_date (дни), 19 L minprice (FUT), 20 L maxprice (FUT), 24/25 G buy/sell_deposit (/100),
+32 Z3 currencyid, 36 Z12 isin, 40 Z160 url; прочие биты (4,6,7,12–17,21–23,26,27,30,31,33–35,
+37–39,41) — значения встречались, смысл не установлен (**I**).
+
+`get_securities_info` (`FUN_180197e60` → `FUN_1800f02f0` → рендер `FUN_180105990`) **не ходит в
+сервер**: отдаёт `<sec_info>` из каталога и этого spec-кэша (**S**); если кэша нет — исключение
+`GetSecSpec returned null` (I). Живые фикстуры: `native/testdata/secinfo-live.hex.gz` (281 байт —
+три ответа RQ_SEC_SPEC подряд), `secinfo-dll.xml.gz` (5 колбэков `<sec_info>`), `secspec-request.hex`
+(`5067017b001a`); разбор полей — `native/testdata/secinfo-live.md`.
+
 ## Что не разобрано
 
 - R_DOUBLELEG, тег 0x62 и другие теги без размера.

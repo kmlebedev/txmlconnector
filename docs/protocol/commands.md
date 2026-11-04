@@ -28,6 +28,7 @@
 | `get_markets` | `<result success="true"/>` | `<markets>…</markets>` из кэша RQ_STARTUP, асинхронно |
 | `subscribe`/`unsubscribe` с `<alltrades>` (`secid` или `security`) | `<result success="true"/>` | `<alltrades>` при поступлении сделок, см. [alltrades.md](alltrades.md) |
 | `get_securities` | `<result success="true"/>` | `<securities>` со всем каталогом, см. [dictionaries.md](dictionaries.md) |
+| `get_securities_info` | `<result success="true"/>` | по колбэку `<sec_info secid="…">` на каждую бумагу; **без запроса к серверу** — рендер из кэша каталога и RQ_SEC_SPEC, см. раздел ниже |
 
 Атрибуты `server_status` в порядке DLL: `sys_ver` (SYS# из ответа RQ_PWD), `build` (BLD#), `server_tz`, `id` (SID#), `connected`.
 
@@ -79,6 +80,36 @@
 
 Фикстура `native/testdata/service-dll.xml` содержит эталонный вывод трёх команд (account-independent
 строки; `diff` зависит от часового пояса машины — в фикстуре −7200 для local UTC+5 и МСК).
+
+## `get_securities_info` → `<sec_info>` (S/D)
+
+Запрос — одна из форм (обе проверены живьём, r11 2026-11-04):
+
+```xml
+<command id="get_securities_info">
+  <security><market>1</market><seccode>SBER</seccode></security>
+  <security><market>4</market><seccode>SiZ6</seccode></security>
+</command>
+<command id="get_securities_info"><secid>26</secid><secid>20583</secid></command>
+```
+
+Обработчик `FUN_180197e60` → `FUN_1800f02f0`: разбирает элементы `security` (`seccode`+`market`)
+или `secid`, ищет бумагу в **локальном каталоге** (`FUN_180252260`/`FUN_1802525b0`) и рендерит
+`<sec_info secid="…">` функцией `FUN_180105990`; колбэки отправляются через `FUN_1800dba90`.
+Никакого запроса к серверу команда не делает — **S**: в живом захвате между командой и колбэками нет
+ни одного C>S-кадра, данные берутся из кэша RQ_STARTUP/R_SEC_NEW и spec-кэша, который DLL получает
+ответом на RQ_SEC_SPEC (15) после подписки (`docs/protocol/dictionaries.md`, раздел RQ_SEC_SPEC).
+Если бумага не найдена — DLL отдаёт текстовое сообщение об ошибке (`Failed to get symbol
+seccode(…), market(…)` / `Cannot find security (secid=…)`); если нет spec-кэша — исключение
+`GetSecSpec returned null` (живьём не воспроизводили, **I**).
+
+Состав `<sec_info>` (порядок элементов, D): `secname, seccode, market, pname, mat_date,
+clearing_price, minprice, maxprice, (bgo_c, bgo_nc, bgo_buy | buy_deposit, sell_deposit),
+coupon_value, coupon_date, coupon_period, facevalue, put_call, opt_type, accruedint, point_cost,
+lot_volume, isin, regnumber, buybackprice, buybackdate, currencyid`; пустые/нулевые поля
+пропускаются. Живые примеры и байты spec-ответов — `native/testdata/secinfo-live.hex.gz`,
+`secinfo-dll.xml.gz`, описание — `native/testdata/secinfo-live.md` (**S** для значений, **D** для
+порядка).
 
 ## Нативная реализация
 
