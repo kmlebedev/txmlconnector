@@ -26,6 +26,8 @@
 | `py/sink.py` | TCP-приёмник без сервера: записывает, что шлёт клиент, может ответить сырыми байтами |
 | `py/stub_server.py` | сервер со сценарием: логин, выдача сессионного ключа, ответы по типам запросов, печать каждого кадра клиента |
 | `py/replay_server.py` | проигрывает записанную сессию и подмешивает записи в RQ_MAIN после заданного запроса (оракул) |
+| `../tcproxy` | Go-порт `py/proxy.py`: логирующий прокси с тем же форматом захвата (RE-2) |
+| `../replay-server` | Go-порт `py/replay_server.py`: проигрыватель захвата с инъекцией записей RQ_MAIN (RE-3) |
 | `py/make_alltrades.py` | генератор записей `R_ALLTRADE`; наборы 1–3 = фикстуры `native/xmlcompat/testdata/alltrades-inject*.hex`; образец для других записей |
 | `py/analyze_startup.py` | разбор ответа RQ_STARTUP и побайтная сверка `<markets>`/`<boards>`/`<candlekinds>` с DLL |
 | `py/analyze_main.py` | статистика тегов RQ_MAIN, разбор `R_SEC_NEW`, таблицы корреляции «поле записи ↔ элемент XML» |
@@ -175,6 +177,28 @@ go run ./tools/native-trades -addr … -sec TQBR:SBER -nats nats://127.0.0.1:422
 ```
 
 Критерии: сервер принимает запросы (ответ без ошибки), `Stats().UnknownRecords` не растёт после загрузки, последний кадр сессии — `RQ_LOGOUT` (тип 2).
+
+### Go-варианты прокси и проигрывателя
+
+Python-версии — эталон поведения; Go-версии (задача 1 плана) переносят оба инструмента на
+`native/wire` и принимают те же флаги. Демо-сервер и Wine для них не нужны, только loopback.
+
+```bash
+# RE-2: прокси вместо py/proxy.py; тот же формат захвата, что читает wire-decode
+go run ./tools/tcproxy -listen 127.0.0.1:39100 -upstream tr1-demo5.finam.ru:3939 -out ~/re/cap/session.cap &
+
+# RE-3: проигрыватель вместо py/replay_server.py
+TC_PASSWORD=... go run ./tools/replay-server -dump ~/re/cap/session.dump -listen 127.0.0.1:39170 \
+  -inject /tmp/inject.hex -after 10
+```
+
+- `tcproxy` принимает `-listen`, `-upstream` и `-out` (файл дописывается) и пишет строки
+  `"<conn> <секунды> C>S|S>C <len> <hex>"` — ровно то, что читают `../wire-decode` и
+  `../replay-server`.
+- `replay-server` принимает `-dump`, `-listen`, `-inject` и `-after` (по умолчанию 10 =
+  RQ_SUBSCRIBE), пароль — из `TC_PASSWORD`. `-after 0` отключает подмену и проигрывает все
+  записанные ответы RQ_MAIN.
+- Проверка Go-версий без сети: `go test ./tools/tcproxy ./native/replay`.
 
 ## Пример: как восстанавливалась лента сделок
 
