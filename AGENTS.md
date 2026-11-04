@@ -39,7 +39,12 @@ XML), `native/cryptoprofile`, `native/natsout`, `native.Client` (логин, к�
 `tools/tcproxy`, `tools/replay-server`, `native/replay`, `native/model`, `native/records`, событийный
 `Client.Run` с реестром декодеров, `xmlcompat.Render` и oracle-помощник `native/internal/oracle`;
 фикстуры — `native/records/testdata`. Решения по расхождениям — `docs/deepseek/task-index.md` §11.
-Следующий шаг — **Фаза 1, задачи 5–7**.
+
+**Обновление 2026-11-04 (2):** **Фаза 1 плана закрыта** (задачи 5–7): DLL-faithful восстановление
+(RQ_RELOGIN/RQ_RECOVER, `Client.Reconnect`), служебные команды и параметры `connect`, конец загрузки
+(`<client>`/`<positions>`/`<overnight>`/`<union>`); RE-2/RE-3/RE-4 использовались живьём с согласия
+пользователя (E05/R6/E07). Итог и отклонения — `docs/deepseek/task-index.md` §12; новые RE-документы —
+`docs/protocol/records.md`, `docs/protocol/history.md`. Следующий шаг — **Фаза 2, задачи 8–12**.
 
 ## 2. Обязательные скиллы
 
@@ -357,11 +362,12 @@ RE-процедуры доступны или фикстуры уже сняты
 
 ## 10. Что делать прямо сейчас (стартовый порядок)
 
-1. **Фаза 0 закрыта** (задачи 1–4; влита в `main` через PR #47, 2026-11-04). Текущая — **Фаза 1
-   (задачи 5–7)**: переподключение/восстановление (RQ_RELOGIN 63 / RQ_RECOVER 64), служебные команды
-   и параметры `connect`, сообщения конца загрузки. RE-1…RE-4 доступны: Ghidra-проект —
-   `${TMPDIR:-/tmp}/txc-ghproj`, секреты — `~/re/demo.env`, согласие пользователя на Wine+демо-сервер
-   получено (торговые команды — только по отдельному согласию).
+1. **Фазы 0–1 закрыты** (задачи 1–7; ветка `plan/native-client`; Фаза 0 влита в `main`, PR #47).
+   Текущая — **Фаза 2 (задачи 8–12)**: `<sec_info_upd>`, `<quotations>`, `<quotes>`, `<sec_info>`,
+   остальные записи снапшота. Порядок — полоса `native/xmlcompat/render.go`/`native/connector.go`
+   (по одной карточке). RE-1…RE-4 доступны: Ghidra-проект — `${TMPDIR:-/tmp}/txc-ghproj`, секреты —
+   `~/re/demo.env`, согласие пользователя на Wine+демо-сервер получено (торговые команды — только по
+   отдельному согласию; в фазах 2–3 не требуются).
 2. Дальше — группы из [docs/deepseek/task-index.md](docs/deepseek/task-index.md) §6. Реальный
    параллелизм ограничен общими файлами: **полоса `native/xmlcompat/render.go` и `native/connector.go`
    (13 задач фаз 1–8) идёт строго по одной карточке**. Параллельно с ней можно вести только задачи,

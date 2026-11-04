@@ -553,3 +553,71 @@ GLM-адаптер после первого probe перестал регист
 Не проверено в Фазе 0: живые RE-2/RE-3 (нет загруженного `TC_PASSWORD` и записанной сессии; в Фазе 0
 они и не требовались), Windows-прогон тестов (только кросс-сборка). Следующая фаза — Фаза 1 (задачи
 5–7); блокеры — отсутствие фикстур `recover-*-live`/`service-dll.xml` (нужны RE-2/RE-3).
+
+---
+
+## 12. Фаза 1: итог и решения Lead (2026-11-04)
+
+**Фаза 1 плана (задачи 5–7) закрыта** на ветке `plan/native-client`; карточки task-7/8/9 — completed.
+
+Коммиты (важнейшие):
+- T5: `e8e7868` (offline reconnect/recover), `9a2f2d8` (единый symbol-keyed dedup), `778c450`
+  (short path RQ_RELOGIN/RQ_RECOVER), `70b3430` (E05 fixtures), `479151f` (fixture comparison),
+  `fe1010d` (DLL-faithful статусы, Reconnect, strict SID), `a6212be` (правки ревью: race,
+  фатальные условия, дубли статусов).
+- T6: `736932f` (offline service), `c549a9e` (service commands + connect params), `e27dc45`
+  (connect options vs DLL), `710a379` (servtime: локальное стенное), `4fcffc6` (review fixes:
+  request timeout, e2e, docs), `a0dbb05`+`c97159a` (независимый connect-options эталон).
+- T7: `d5a7662` (E07 docs), `7f283d6` (snapshot tail fixtures), `833ba2e` (record formats),
+  `105bc6b` (accounts/positions/overnight/union), `6d4a689` (overnight matrix + robustness).
+- Инфра: `84b207f` (make verify: gofmt по tracked), `7942973` (маскирование UID), `check_env.sh`
+  (та же область gofmt) — в wrap-коммите.
+
+RE: новые документы `docs/protocol/records.md`, `docs/protocol/history.md`; разделы в
+`connect.md` (восстановление, параметры `connect`, конец загрузки), `commands.md` (служебные
+команды, `get_securities_info`), `dictionaries.md` (RQ_SEC_SPEC, R_SEC_PARAM), `alltrades.md`
+(маски, R_QUOTATION/R_QUOTES). Фикстуры: `recover-{short,long}-live`, `service-dll.xml`,
+`connect-options-live`, `snapshot-tail-live`, `secparam`/`sec_info_upd`, `secinfo`/`secspec`,
+`quotation`/`quotations`, `quote`/`quotes`, `candles-live`.
+
+Решения/отклонения от плана (DLL — эталон, AGENTS §6):
+1. **RQ_RELOGIN/RQ_RECOVER**: фактические форматы не совпадают с Interfaces плана —
+   `session.ReloginPayload(login)`, `session.RecoverPayload(token, lastSeq)`; sid/uid в payload не
+   входят; повторы фиксированные 1 с; `-0xe` повторяется до окна; CRC фатальна только для кадра
+   `0x40`; неверный RELOGIN/RECOVER-ответ — немедленно; BYE фатальна.
+2. **Автоматического нового логина после `session_timeout` нет** (E05 long: DLL отдаёт
+   `connected="false"` и ждёт новый `connect`). Go: `Run` возвращает `*native.RecoveryError`;
+   переподключение — явный `Client.Reconnect`. Пункт плана «иначе новый логин» автоматически не
+   выполняется — расхождение зафиксировано.
+3. **Статусы**: `recover="true"` — в момент обрыва; после успеха plain `connected="true"`; при
+   сдаче `connected="false"`. `<overnight status>` DLL отдаёт только перед server_status конца
+   загрузки и на команду server_status (E05/E07 S), а не перед recovery/disconnect — план-критерий
+   «перед каждым <server_status>» скорректирован по DLL.
+4. **§8.10**: в T7 реализованы только `money_position` (R_CLIENT_ASSET 0x3b); бумажные/FORTS-
+   позиции — задача 20.
+5. **UnknownRecords==0 на всём снапшоте демо** перенесён в задачу 12: в E07-хвосте после 0x3b идёт
+   неразобранный `0x5b` (offset 249), полного дампа в git нет; граница закреплена тестом.
+   RE-статистика (`records.md`, 7 сессий/3616 ответов) показывает: после задач 7/9/10/12
+   неразобранных тегов в живых дампах не остаётся.
+6. **`get_securities_info`** — локальная команда (каталог + spec-кэш), в сеть не ходит;
+   RQ_SEC_SPEC DLL шлёт после подписки (влияет на задачу 11; сигнатура `Client.SecuritiesInfo`
+   сохраняется, данные — из кэша).
+7. **`gethistorydata`**: DLL шлёт RQ_HISTORY_EXT (148), RQ_HISTORY (11) не наблюдался; свечи —
+   запись 0x09 через RQ_MAIN; точный layout дельта-полей — RE-3 (task-22). `subscribe_ticks`:
+   формат подтверждён, но вечером тиков нет — нужен основной сеанс/oracle (task-23).
+8. **Песочница/verify**: `make verify` и `tools/re/check_env.sh` проверяют gofmt по
+   `git ls-files '*.go'` (gitignored `.re-run/*.go` scratch не должны ломать DoD); AGENTS §7 обновлён.
+
+Проверки Фазы 1 на HEAD: `make verify` exit 0; `go test -race ./...` ok; `make server_build`/
+`queues_build` exit 0; `tools/re/check_env.sh --full` — PASS=18 WARN=4 FAIL=0 (WARN: sandbox-кэш,
+`~/Library/ghidra`, `TC_PASSWORD` не загружен в текущий шелл — грузится из `~/re/demo.env`).
+Живые RE-4: T5 recovery (`recover=true`→plain, без нового RQ_STARTUP, `UnknownRecords` не растёт);
+T7 native.Connector на демо — порядок `client`/`positions`/`overnight`/`server_status` как у DLL.
+
+Ревью: по каждой задаче — независимые deepseek-flash-ревьюеры (Qwen-маршрут в этой сессии не
+разрешён, в т.ч. после перезапуска DSH; baseURL провайдера пользователь поправил); все P1/P2
+исправлены в своих задачах. Не проверено: Windows-прогон, BYE-ветка восстановления живьём, непустой
+union, бумажные позиции, тики/свечи живьём (см. п. 4–7 и задачи 12–14).
+
+Следующее — **Фаза 2 (задачи 8–12)**; первая карточка Task 8 (`<sec_info_upd>`) уже в работе.
+
