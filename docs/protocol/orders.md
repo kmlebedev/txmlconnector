@@ -201,36 +201,64 @@ echo "9999.000 1 S>C #9001 flags=0x82 type=14 len=4 00100010" >> /tmp/dump14.txt
 RE_WORKDIR=$PWD/.re-run/t24-success tools/re/run_dll.sh 4s "$CONNECT" sleep:4s "$NEWORDER" sleep:3s "$DISCONNECT"
 ```
 
-## R_STOP (0x54*) и команды стоп-/условных заявок (Task 18) — D, oracle в работе
+## R_STOP (0x54*) — D + O (фикстура снята)
 
-**Запись 0x54*** (размерная, BE16) — обработчик `FUN_1803c2850` (лог `ReadOneStop: …`):
-тело = `L stop_order_id`, затем тело стоп-заявки `FUN_18039d3e0` (`ReadStopBody`), читает
-(D, порядок): `L; B +0xd0; L +0xdc; L +0xe0; L +0xe4; Z12 +0xfd; G +0xc0; G +0xc8; B +0x10a;
-Z512; W +6; W +8; L +0xc; B +0x11; W; L +0x78; Z12 +0xf0; L +0xd4; G +0x80; L +0x1c; L +0x18;
-L +0x24; L +0x20; Z20 +0x2b; L +0x48; L +0x70; L +0x44; L; L; Z20; L; L; B`; далее ветки по
-статусу (`OS_DENIED`/`OS_REJECTED` читают доп. поля). Валидность: если secid или client id не
-найдены (=-1) — запись игнорируется с логом `New/Update Stop … ignored`.
+Запись размерная (BE16). Обработчик `FUN_1803c2850` (лог `ReadOneStop: …`): тело =
+`L stop_order_id`, затем `FUN_18039d3e0` (`ReadStopBody`), начинающийся с **`L mask`**:
 
-**XML `<stoporder>`** (литеры в DLL, порядок элементов из таблицы строк):
-`<stoporder transactionid="…">` + `<client>`, `<union>`, `<secid>`, `<board>`, `<seccode>`,
-`<buysell>`, `<canceller>`, `<alltradeno>`, `<validafter>`?, `<validbefore>`, `<author>`,
-`<accepttime>`, `<linkedorderno>`, `<expdate>`, `<stoploss usecredit="…">`
-(`<activationprice>`, `<guardtime>`, `<brokerref>`, `<quantity>`, `<bymarket/>` или `<orderprice>`,
+```
+L stop_order_id
+L mask
+  mask & 1     -> B status (?), валидация кодов статуса (0/10..14/0x18)
+  mask & 2     -> L (+0xdc)
+  mask & 4     -> L (+0xe0)
+  mask & 8     -> L (+0xe4)
+  mask & 0x10  -> Z12 (+0xfd)
+  mask & 0x20  -> G (+0xc0)
+  mask & 0x40  -> G (+0xc8)
+  mask & 0x80  -> блок статуса: status==4 (OS_DENIED) B+0x10a + GetResume; status==6 (OS_REJECTED) Z512
+  mask & 0x100 -> W secid (+6)
+  mask & 0x200 -> W board (+8)
+  mask & 0x400 -> L client_id (+0xc)
+  mask & 0x800 -> B buysell (+0x11; валидируется как B/S)
+  mask & 0x1000 -> W (local_1a4)
+  mask & 0x2000 -> L (+0x78)
+  mask & 0x4000 -> Z12 (+0xf0)
+  mask & 0x8000 -> L (+0xd4)
+  mask & 0x10000 -> G (+0x80) … далее старшие биты для остальных полей (I)
+```
+
+Если после чтения secid == -1 или client < 0 — запись игнорируется с логом
+`New/Update Stop <id> ignored: Sec=…, Cl=…`. При успехе — вставка/обновление через
+`FUN_18024cf70` и колбэк.
+
+**XML (O): конверт — `<orders>`**, внутри — `<stoporder transactionid="…">`:
+
+```xml
+<orders><stoporder transactionid="1"><secid>26</secid><union></union><board>TQBR</board>
+<seccode>SBER</seccode><client>TESTCLIEN</client><buysell>B</buysell><author>TESTLOGIN</author>
+<status>none</status><withdrawtime>0</withdrawtime>
+<result>{50} Статус заявки не определен.</result></stoporder></orders>
+```
+
+Прочие элементы (литералы DLL, порядок): `<canceller>`, `<alltradeno>`, `<validafter>`?,
+`<validbefore>`, `<accepttime>`, `<linkedorderno>`, `<expdate>`, `<stoploss usecredit="…">`
+(`<activationprice>`, `<guardtime>`, `<brokerref>`, `<quantity>`, `<bymarket/>`/`<orderprice>`,
 `<correction>`), `<takeprofit usecredit="…">` (`<activationprice>`, `<guardtime>`, `<brokerref>`,
-`<quantity>`, `<extremum>`, `<level>`, `<correction>`, `<bymarket/>`, `<guardspread>`),
-`<withdrawtime>`, `<result>`, `</stoporder>`. Внешний конверт (`<stoporders>`/`<securities>`)
-уточняется оракулом (литерала `<stoporders>` в DLL нет; вероятно внутри `<orders>`/`<securities>`).
+`<quantity>`, `<extremum>`, `<level>`, `<correction>`, `<bymarket/>`, `<guardspread>`), `<result>`.
+Точные условия вывода элементов по маске — I.
 
-**Oracle-статус (не проверено, I):** инъекция минимальной 0x54-записи через replay-server пока
-не даёт ни колбэка, ни записи в логах (ни `ReadOneStop`, ни `ignored`) — вероятно, неверны
-смещения secid/client в теле (нужны поля из `ReadStopBody` в точном порядке) или требуется
-контекст обновления существующей стоп-заявки; нужен ещё 1–2 прохода. Фикстуры `stoporder-*`
-пока НЕ сняты.
+**Фикстура:** `native/records/testdata/stoporder-inject.hex` (14 Б: tag 0x54 sized, `L 1`,
+`L mask=0x0F00`, `W 26`, `W 37`, `L client=4096`, `B 'B'`) + `stoporder-dll.xml` (O;
+client→TESTCLIEN, author/login→TESTLOGIN).
 
-**Команды (O, валидация DLL на живом/реплейном XML):** `newstoporder`/`newcondorder` требуют
-`<secid>` (как `neworder`), затем `client`/`union`; `newstoporder` далее требует «activation
-price» стоп-лосса (элемент вида `<stoploss><activationprice>…</activationprice></stoploss>`;
-плоский `<stoploss>100</stoploss>` не принимается); `newcondorder` — `validafter` параметр и
-`cond_type`/`condition type`; `cancelstoporder`/`moveorder` требуют `transactionid` (проверяется
-по внутренней таблице транзакций); `makeordown` — аналогично. RQ_TRANSACT-payloads этих команд
-пока не сняты (нужен валидный XML + fake success reply type=14, схема как в task-24).
+## Команды стоп-/условных заявок (Task 18) — O-валидация, payloads в работе
+
+- `newstoporder`/`newcondorder`: требуют `<secid>` (как neworder), затем `client`/`union`;
+  `newstoporder` далее — «activation price» стоп-лосса вложенным элементом
+  (`<stoploss><activationprice>…</activationprice></stoploss>`; плоский `<stoploss>100</stoploss>`
+  не принимается); `newcondorder` — параметр `validafter` и `cond_type`/`condition type`.
+- `cancelstoporder`/`moveorder`/`makeordown`: требуют `transactionid`, проверяемый по внутренней
+  таблице транзакций DLL.
+- RQ_TRANSACT-payloads этих команд пока не сняты: нужен валидный XML + fake success reply type=14
+  (схема RE-3 как в task-24) — следующий шаг; в фикстурах будут обезличены client/union/orderno.
