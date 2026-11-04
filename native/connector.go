@@ -61,6 +61,7 @@ var dllCommands = map[string]bool{
 	"neworder": true, "moveorder": true, "change_pass": true, "newcondorder": true,
 	"newstoporder": true, "newrpsorder": true, "newrepoorder": true, "newmrepoorder": true,
 	"cancelorder": true, "cancelstoporder": true, "cancelnegdeal": true,
+	"newreport4": true, "cancelreport4": true,
 	"get_forts_positions": true, "get_client_limits": true, "get_markets": true,
 	"server_status": true, "get_securities": true, "get_servtime_difference": true,
 	"get_portfolio": true, "get_portfolio_mct": true, "get_united_portfolio": true,
@@ -1059,6 +1060,141 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure(err.Error()), nil
 		}
 		return success(), nil
+	case "newrpsorder", "newrepoorder", "newmrepoorder":
+		var req struct {
+			SecID    int     `xml:"secid"`
+			Client   string  `xml:"client"`
+			Union    string  `xml:"union"`
+			BuySell  *string `xml:"buysell"`
+			Quantity *int64  `xml:"quantity"`
+			Price    *string `xml:"price"`
+			RepoTerm *string `xml:"repoterm"`
+			RepoRate *string `xml:"reporate"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.SecID == 0 {
+			return failure("Не указан элемент \"secid\""), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Client not specified."), nil
+		}
+		symbol, ok := client.SymbolBySecID(uint16(req.SecID))
+		if !ok {
+			return failure(fmt.Sprintf("unknown secid %d", req.SecID)), nil
+		}
+		if req.BuySell == nil {
+			return failure("Cannot find buysell tag."), nil
+		}
+		buySell := (*req.BuySell)[0]
+		if len(*req.BuySell) != 1 || (buySell != 'B' && buySell != 'S') {
+			return failure("Buisell can be only 'B' or 'S'."), nil
+		}
+		if req.Quantity == nil {
+			return failure("Cannot find quantity."), nil
+		}
+		price := model.Decimal{}
+		if req.Price != nil {
+			parsed, err := model.ParseDecimal(*req.Price)
+			if err != nil {
+				return failure(err.Error()), nil
+			}
+			price = parsed
+		}
+		if id == "newmrepoorder" {
+			return failure("newmrepoorder payload layout is not recovered (I)"), nil
+		}
+		var txID model.TransactionID
+		var err error
+		if id == "newrpsorder" {
+			txID, err = client.NewRPSOrder(ctx, model.NewRPSOrder{
+				Symbol: symbol, Client: req.Client, Union: req.Union, BuySell: buySell,
+				Price: price, Quantity: *req.Quantity,
+			})
+		} else {
+			txID, err = client.NewRepoOrder(ctx, model.NewRepoOrder{
+				Symbol: symbol, Client: req.Client, Union: req.Union, BuySell: buySell,
+				Price: price, Quantity: *req.Quantity,
+			})
+		}
+		if err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(txID), 10) + "\"/>", nil
+	case "cancelnegdeal":
+		var req struct {
+			TransactionID *string `xml:"transactionid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.TransactionID == nil || *req.TransactionID == "" {
+			return failure("You have to specify transactionid."), nil
+		}
+		id, err := strconv.ParseInt(*req.TransactionID, 10, 64)
+		if err != nil {
+			return failure("Transaction identifier have to be a number."), nil
+		}
+		txid, err := client.CancelNegDeal(ctx, model.TransactionID(id))
+		if err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(txid), 10) + "\"/>", nil
+	case "newreport4":
+		var req struct {
+			UstradeLeg *struct{} `xml:"ustrade_leg"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.UstradeLeg == nil {
+			return failure("No \"ustrade_leg\" element found"), nil
+		}
+		return failure("newreport4 payload layout is not recovered (I)"), nil
+	case "cancelreport4":
+		var req struct {
+			ReportID *string `xml:"reportid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.ReportID == nil || *req.ReportID == "" {
+			return failure("You have to specify reportid."), nil
+		}
+		reportID, err := strconv.ParseInt(*req.ReportID, 10, 64)
+		if err != nil {
+			return failure("Reportid identifier have to be a number."), nil
+		}
+		txid, err := client.CancelReport4(ctx, reportID)
+		if err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(txid), 10) + "\"/>", nil
 	case "get_forts_positions":
 		var req struct {
 			Client string `xml:"client"`

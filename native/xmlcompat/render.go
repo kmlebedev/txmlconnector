@@ -1046,3 +1046,38 @@ func FamilyStrikesXML(strikes model.OptionStrikes) string {
 func OptionsFailedXML(end model.EndOfFamily) string {
 	return "<options_failed><option opt_code=" + quoteAttr(end.OptCode) + " error=" + quoteAttr(end.Text) + "/></options_failed>"
 }
+
+// NegDealXML renders the D-literal <negdeal> (rps.md): no O capture exists, so
+// the order/attribute details are I.
+func NegDealXML(deal model.RPSTradeForExecution) string {
+	var b strings.Builder
+	b.WriteString("<negdeal transactionid=" + quoteAttr(strconv.FormatUint(deal.TransactionID, 10)) + ">")
+	b.WriteString("<secid>" + strconv.Itoa(int(deal.SecID)) + "</secid>")
+	b.WriteString("<union>" + escape(deal.Union) + "</union>")
+	b.WriteString("<client>" + escape(deal.Client) + "</client>")
+	b.WriteString("<board>" + escape(deal.Board) + "</board>")
+	b.WriteString("<seccode>" + escape(deal.SecCode) + "</seccode>")
+	b.WriteString("<buysell>" + escape(string([]byte{deal.BuySell})) + "</buysell>")
+	b.WriteString("<price>" + deal.Price.String() + "</price>")
+	b.WriteString("<volume>" + strconv.FormatInt(deal.Volume, 10) + "</volume>")
+	b.WriteString("<repoterm>" + strconv.FormatInt(deal.RepoTerm, 10) + "</repoterm>")
+	b.WriteString("<reporate>" + deal.RepoRate.String() + "</reporate>")
+	b.WriteString("<repovalue>" + deal.RepoValue.String() + "</repovalue>")
+	b.WriteString("<repo2value>" + deal.Repo2Value.String() + "</repo2value>")
+	b.WriteString("</negdeal>")
+	return b.String()
+}
+
+// ReportXML renders the D-literal <report> (PDF 5.8); O form is I.
+func ReportXML(report model.ExecutionReport) string {
+	var b strings.Builder
+	b.WriteString("<report transactionid=" + quoteAttr(strconv.FormatUint(report.TransactionID, 10)) + ">")
+	b.WriteString("<reportno>" + strconv.FormatInt(report.ReportNo, 10) + "</reportno>")
+	b.WriteString("<reportkind>" + strconv.Itoa(report.ReportKind) + "</reportkind>")
+	b.WriteString("<reporttype>" + strconv.Itoa(report.ReportType) + "</reporttype>")
+	b.WriteString("<repotradeno>" + strconv.FormatInt(report.RepoTradeNo, 10) + "</repotradeno>")
+	b.WriteString("<repovalue>" + report.RepoValue.String() + "</repovalue>")
+	b.WriteString("<repo2value>" + report.Repo2Value.String() + "</repo2value>")
+	b.WriteString("</report>")
+	return b.String()
+}
