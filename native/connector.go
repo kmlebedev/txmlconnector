@@ -941,6 +941,37 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure(err.Error()), nil
 		}
 		return success(), nil
+	case "change_pass":
+		var req struct {
+			OldPass *string `xml:"oldpass,attr"`
+			NewPass *string `xml:"newpass,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		oldPassword, newPassword := "", ""
+		if req.OldPass != nil {
+			oldPassword = *req.OldPass
+		}
+		if req.NewPass != nil {
+			newPassword = *req.NewPass
+		}
+		if err := client.ChangePassword(ctx, oldPassword, newPassword); err != nil {
+			if errors.Is(err, session.ErrChangePasswordFatal) {
+				// DLL: the bad reply closes the connection and reports
+				// connected="false" (changepass.md O/D).
+				c.emit(c.statusXML(false))
+				return failure("RQ_CHANGE_PWD incorrect server buffer"), nil
+			}
+			return failure(err.Error()), nil
+		}
+		return success(), nil
 	case "get_forts_positions":
 		var req struct {
 			Client string `xml:"client"`
