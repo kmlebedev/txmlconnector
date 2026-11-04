@@ -474,3 +474,27 @@ func TestLoadOrdersEmitted(t *testing.T) {
 		t.Fatalf("load order callback = %s", msg)
 	}
 }
+
+// TestNewOrderExpDateRejected: the expdate payload field is not recovered (I);
+// the Connector must reject it explicitly instead of silently dropping it.
+func TestNewOrderExpDateRejected(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = clientSnapshot(t)
+	srv.Handle(session.RqTransact, func([]byte) (byte, []byte) {
+		return wire.KindReply | wire.FlagPlain, mustHex(t, "00100010")
+	})
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	cmd := "<command id=" + quote + "neworder" + quote + "><secid>26</secid><client>TESTCLIEN</client>"
+	cmd += "<price>100</price><quantity>1</quantity><buysell>B</buysell><unfilled>PutInQueue</unfilled>"
+	cmd += "<expdate>05.11.2026</expdate></command>"
+	if got := send(t, c, cmd); !strings.Contains(got, "expdate") || !strings.Contains(got, "not encoded") {
+		t.Fatalf("neworder expdate = %s, want the explicit I rejection", got)
+	}
+}
