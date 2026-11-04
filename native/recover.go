@@ -11,16 +11,19 @@ import (
 
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/session"
+	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
-// Recovery timing: the DLL retries a lost connection with a growing pause and
-// gives up after session_timeout. The RQ_RELOGIN/RQ_RECOVER short path needs
-// the payload format recovered from the DLL (docs/protocol/connect.md); until
-// then every recovery is a full login.
+// Recovery timing, recovered from FUN_180355d50 / FUN_1803d27b0: the first
+// attempt is immediate, the pause between attempts is a fixed 1 s (there is no
+// exponential growth in the DLL), the whole window is session_timeout and the
+// TCP connect timeout is min(remaining window, 10 s). When the window expires
+// the DLL raises "Request timeout."; the typed API then falls back to a full
+// login (the plan's long path).
 const (
-	recoveryFirstDelay = time.Second
-	recoveryMaxDelay   = 30 * time.Second
-	defaultSessionTTL  = 120 * time.Second
+	recoveryRetryPause     = time.Second
+	recoveryConnectTimeout = 10 * time.Second
+	defaultSessionTTL      = 120 * time.Second
 )
 
 // recoveryError is returned when the link could not be restored in time.
@@ -47,61 +50,106 @@ func isTransportError(err error) bool {
 	return errors.As(err, &netErr)
 }
 
-// sessionTimeout is the server session lifetime from the RQ_PWD reply, the
-// limit the DLL allows for recovering a lost connection.
-//
-// TODO(re): the "<300 means seconds, otherwise milliseconds" heuristic comes
-// from parsePwdReply and is not verified against the DLL; R5/RE-1
-// (docs/protocol/connect.md) must confirm the RQ_PWD session_timeout unit.
+// isFatalRecoverError reports the recovery errors the DLL treats as fatal
+// ("Recover unavailable."): BYE, a CRC failure while a recovery frame was
+// expected, and another server (SID mismatch). In those cases the short path is
+// abandoned at once instead of retrying until the window expires.
+func isFatalRecoverError(err error) bool {
+	return errors.Is(err, session.ErrBye) ||
+		errors.Is(err, session.ErrNotSameServer) ||
+		errors.Is(err, wire.ErrHeaderCRC) ||
+		errors.Is(err, wire.ErrPayloadCRC)
+}
 
+// sessionTimeout is the server session lifetime from the RQ_PWD reply, the
+// window the DLL allows for recovering a lost connection. RE-1
+// (docs/protocol/connect.md) confirms: 0 or below 0x14 — 20 s, below 300 —
+// seconds, otherwise milliseconds.
 func (c *Client) sessionTimeout() time.Duration {
 	c.mu.Lock()
 	info := c.info
 	c.mu.Unlock()
-	if info == nil || info.SessionTimeout <= 0 {
+	if info == nil {
 		return defaultSessionTTL
 	}
-	if v := info.SessionTimeout; v < 300 {
+	switch v := info.SessionTimeout; {
+	case v < 0x14:
+		return 20 * time.Second
+	case v < 300:
 		return time.Duration(v) * time.Second
-	} else {
+	default:
 		return time.Duration(v) * time.Millisecond
 	}
 }
 
-// recover restores the session after a transport failure: it retries with the
-// 1, 2, 4 ... 30 s pauses the DLL uses, up to session_timeout. Every attempt is
-// a fresh login: dial, RQ_LOGIN/RQ_PWD, reload the dictionaries and the
-// snapshot, rebuild the catalog and re-subscribe every model.Symbol that was
-// subscribed. The trade dedup state survives, so replayed trades are dropped.
+// recover restores the session after a transport failure the way the DLL does:
+// a fresh TCP connection, RQ_RELOGIN on the default keys, the SID check, then
+// RQ_RECOVER on the saved session keys. The catalog and the subscriptions are
+// not rebuilt (the server keeps the session, so the secids stay valid). Attempts
+// repeat every second until session_timeout; a fatal refusal or the expired
+// window falls back to a full login (rebuilt catalog and resubscribed symbols).
 func (c *Client) recover(ctx context.Context) error {
 	limit := c.sessionTimeout()
 	deadline := time.Now().Add(limit)
-	delay := recoveryFirstDelay
 	var lastErr error
-	for {
-		if err := sleepCtx(ctx, delay); err != nil {
+	for attempt := 1; ; attempt++ {
+		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if attempt > 1 {
+			if err := sleepCtx(ctx, recoveryRetryPause); err != nil {
+				return err
+			}
 		}
 		if time.Now().After(deadline) {
 			break
 		}
-		if err := c.relogin(ctx); err != nil {
-			lastErr = err
-			if delay *= 2; delay > recoveryMaxDelay {
-				delay = recoveryMaxDelay
-			}
-			continue
+		remaining := time.Until(deadline)
+		if remaining > recoveryConnectTimeout {
+			remaining = recoveryConnectTimeout
 		}
-		return nil
+		attemptCtx, cancel := context.WithTimeout(ctx, remaining)
+		err := c.shortRecover(attemptCtx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if isFatalRecoverError(err) {
+			break
+		}
 	}
-	if lastErr == nil {
-		lastErr = errors.New("no attempt within the session timeout")
+	// "Request timeout." in the DLL means the XML client must connect again;
+	// the typed API keeps working with a full login instead.
+	if err := c.relogin(ctx); err != nil {
+		if lastErr != nil {
+			return &recoveryError{SessionTimeout: limit, Err: fmt.Errorf("%v (short recovery: %w)", err, lastErr)}
+		}
+		return &recoveryError{SessionTimeout: limit, Err: err}
 	}
-	return &recoveryError{SessionTimeout: limit, Err: lastErr}
+	return nil
+}
+
+// shortRecover makes one DLL short-recovery attempt on a fresh TCP connection.
+func (c *Client) shortRecover(ctx context.Context) error {
+	conn := c.connection()
+	if conn == nil {
+		return errors.New("transaq: session connection is gone")
+	}
+	nc, err := c.cfg.Dial(ctx, c.cfg.Address)
+	if err != nil {
+		return fmt.Errorf("dial: %w", err)
+	}
+	if err := conn.Restore(ctx, nc, c.cfg.Login); err != nil {
+		nc.Close()
+		return err
+	}
+	return nil
 }
 
 // relogin opens a new session with the configured credentials and restores the
-// client state on it: catalog, securities callbacks and subscriptions.
+// client state on it: catalog, securities callbacks and subscriptions. It is the
+// fallback used when the short recovery is rejected or its window expired.
 func (c *Client) relogin(ctx context.Context) error {
 	nc, err := c.cfg.Dial(ctx, c.cfg.Address)
 	if err != nil {
@@ -124,7 +172,7 @@ func (c *Client) relogin(ctx context.Context) error {
 	fail := func(err error) error {
 		// Detach the failed connection so concurrent callers see "not
 		// connected" instead of using a dead socket; the next attempt installs
-		// the fresh one. The old connection is left for the success path.
+		// the fresh one.
 		c.mu.Lock()
 		if c.conn == conn {
 			c.conn = nil
