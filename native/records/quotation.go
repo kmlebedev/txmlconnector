@@ -2,7 +2,6 @@ package records
 
 import (
 	"fmt"
-	"math/bits"
 	"strconv"
 	"time"
 
@@ -75,37 +74,44 @@ func ParseQuotation(body []byte) (Quotation, error) {
 }
 
 // Event builds the typed <quotation> event, resolving the security, the board
-// code and the price decimals from the catalog and formatting the time with the
-// session time-zone bias (UTC = wall + bias).
-func (q Quotation) Event(cat *Catalog, bias time.Duration) model.Quotation {
+// code and the price decimals from the catalog. The time is formatted as UTC
+// (S: the raw Unix second is printed as-is; the general rule is I).
+func (q Quotation) Event(cat *Catalog) model.Quotation {
 	ev := model.Quotation{SecID: q.SecID}
 	if cat == nil {
 		return ev
 	}
-	if sec, ok := cat.Security(q.SecID); ok {
-		ev.Symbol = model.Symbol{SecCode: sec.SecCode}
-		if board, ok := cat.Board(q.Board); ok {
-			ev.Symbol.Board = board.Code
+	sec, ok := cat.Security(q.SecID)
+	if !ok {
+		// Unknown security: the price scale is unknown, so the price bits are
+		// skipped (the integer/status fields still go out).
+		for bit, raw := range q.Values {
+			q.apply(&ev.Fields, bit, raw, 0, false)
 		}
-		ev.Board = ev.Symbol.Board
+		return ev
+	}
+	ev.Symbol = model.Symbol{SecCode: sec.SecCode}
+	if board, ok := cat.Board(q.Board); ok {
+		ev.Symbol.Board = board.Code
+	}
+	ev.Board = ev.Symbol.Board
+	decimals, haveDecimals := cat.Decimals(q.SecID, q.Board)
+	if !haveDecimals {
 		if pit, ok := quotationPit(sec, q.Board); ok {
-			ev.Fields.PointCost = pointCostPtr(pit.PointCost)
-			decimals := pit.Decimals
-			for bit, raw := range q.Values {
-				q.apply(&ev.Fields, bit, raw, decimals, bias)
-			}
-			return ev
+			decimals, haveDecimals = pit.Decimals, true
 		}
 	}
-	// No pit: the price scale is unknown; still expose the integer fields.
+	if pit, ok := quotationPit(sec, q.Board); ok {
+		ev.Fields.PointCost = pointCostPtr(pit.PointCost)
+	}
 	for bit, raw := range q.Values {
-		q.apply(&ev.Fields, bit, raw, 0, bias)
+		q.apply(&ev.Fields, bit, raw, decimals, haveDecimals)
 	}
 	return ev
 }
 
 // apply fills the typed field of one mask bit.
-func (q Quotation) apply(fields *model.QuotationFields, bit int, raw int64, decimals uint8, bias time.Duration) {
+func (q Quotation) apply(fields *model.QuotationFields, bit int, raw int64, decimals uint8, haveDecimals bool) {
 	switch {
 	case quotationIntBits[bit] != "":
 		v := raw
@@ -132,6 +138,9 @@ func (q Quotation) apply(fields *model.QuotationFields, bit int, raw int64, deci
 			fields.Quantity = &v
 		}
 	case quotationPriceBits[bit] != "":
+		if !haveDecimals {
+			return
+		}
 		v := model.Decimal{Units: raw, Scale: decimals}
 		switch quotationPriceBits[bit] {
 		case "bid":
@@ -164,7 +173,7 @@ func (q Quotation) apply(fields *model.QuotationFields, bit int, raw int64, deci
 	case quotationOtherBits[bit] != "":
 		switch quotationOtherBits[bit] {
 		case "time":
-			fields.Time = quotationTimePtr(raw, bias)
+			fields.Time = quotationTimePtr(raw)
 		case "valtoday":
 			v := model.Decimal{Units: raw, Scale: 3}
 			fields.ValToday = &v
@@ -186,7 +195,7 @@ func (q Quotation) apply(fields *model.QuotationFields, bit int, raw int64, deci
 
 // quotationTimePtr formats the DLL <time>: below a day it is the seconds of the
 // trading day (HH:MM:SS), otherwise the server wall clock of the Unix second.
-func quotationTimePtr(raw int64, _ time.Duration) *string {
+func quotationTimePtr(raw int64) *string {
 	var s string
 	if raw >= 0 && raw < 86400 {
 		s = formatSecondsOfDay(raw)
@@ -231,7 +240,3 @@ func quotationPit(sec SecNew, board uint16) (Pit, bool) {
 	}
 	return Pit{}, false
 }
-
-// OnesCount exposes the number of values the record carries, for tests and the
-// records splitter.
-func (q Quotation) OnesCount() int { return bits.OnesCount64(q.Mask) }

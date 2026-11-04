@@ -209,3 +209,44 @@ func TestConnectorQuotes(t *testing.T) {
 		t.Fatalf("quotes = %s, want %s", got, want)
 	}
 }
+
+// TestConnectorQuotationsCommand checks the XML <quotations> subscription
+// matrix: mask 0x01, unsubscribe 0x00, combined alltrades+quotations mask 0x05,
+// and the S r8 rule that only the first <quotations> block is accepted.
+func TestConnectorQuotationsCommand(t *testing.T) {
+	srv := newRunServer(t)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	success := "<result success=" + quote + "true" + quote + "/>"
+	last := func() string {
+		payloads := subscribePayloads(srv)
+		if len(payloads) == 0 {
+			t.Fatal("no RQ_SUBSCRIBE sent")
+		}
+		return payloads[len(payloads)-1]
+	}
+	steps := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{"subscribe quotations", "<command id=" + quote + "subscribe" + quote + "><quotations><secid>26</secid></quotations></command>", "001a002501"},
+		{"unsubscribe quotations", "<command id=" + quote + "unsubscribe" + quote + "><quotations><secid>26</secid></quotations></command>", "001a002500"},
+		{"combined alltrades+quotations", "<command id=" + quote + "subscribe" + quote + "><alltrades><security><board>TQBR</board><seccode>SBER</seccode></security></alltrades><quotations><secid>26</secid></quotations></command>", "001a002505"},
+		{"first quotations block only", "<command id=" + quote + "subscribe" + quote + "><quotations><secid>379</secid></quotations><quotations><secid>26</secid></quotations><quotations><secid>20583</secid></quotations><quotations><secid>8326</secid></quotations></command>", "017b002501"},
+	}
+	for _, step := range steps {
+		if got := send(t, c, step.cmd); got != success {
+			t.Fatalf("%s: %s", step.name, got)
+		}
+		if got := last(); got != step.want {
+			t.Fatalf("%s: RQ_SUBSCRIBE = %s, want %s", step.name, got, step.want)
+		}
+	}
+}

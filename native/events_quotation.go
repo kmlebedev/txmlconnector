@@ -13,6 +13,6 @@ func decodeQuotation(c *Client, body []byte) ([]model.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	ev := q.Event(c.catalog, c.bias)
+	ev := q.Event(c.catalog)
 	return []model.Event{&ev}, nil
 }
