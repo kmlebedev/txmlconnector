@@ -24,6 +24,14 @@ type ClientConfig struct {
 	RequestTimeout time.Duration
 	// Dial opens the TCP connection; net.Dialer if nil.
 	Dial func(ctx context.Context, address string) (net.Conn, error)
+	// OnDictionaries is called once after RQ_STARTUP is parsed, before the
+	// first RQ_MAIN poll, so the session owner can emit <markets>/<boards>/
+	// <candlekinds> callbacks in the DLL's order.
+	OnDictionaries func(*xmlcompat.Startup)
+	// OnSecurities is called after every RQ_MAIN poll that carried new
+	// R_SEC_NEW records, with exactly those records, as the DLL emits
+	// <securities> chunks while the snapshot arrives.
+	OnSecurities func([]xmlcompat.SecNew)
 }
 
 // Symbol identifies a security on a board, the stable key across sessions.
@@ -65,6 +73,7 @@ type Stats struct {
 
 // Client is a native TRANSAQ session with typed market data.
 type Client struct {
+	cfg      ClientConfig
 	conn     *session.Conn
 	info     *session.Info
 	catalog  *xmlcompat.Catalog
@@ -101,7 +110,7 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 		nc.Close()
 		return nil, err
 	}
-	c := &Client{conn: conn, info: info, subs: map[[2]uint16]byte{}}
+	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[[2]uint16]byte{}}
 	if err := c.load(ctx); err != nil {
 		conn.Close()
 		return nil, err
@@ -128,6 +137,9 @@ func (c *Client) load(ctx context.Context) error {
 		return err
 	}
 	c.catalog = xmlcompat.NewCatalog(startup)
+	if c.cfg.OnDictionaries != nil {
+		c.cfg.OnDictionaries(startup)
+	}
 	for more := true; more; {
 		var batch []Trade
 		if batch, more, err = c.Poll(ctx); err != nil {
@@ -135,6 +147,11 @@ func (c *Client) load(ctx context.Context) error {
 		}
 		if len(batch) != 0 {
 			return errors.New("trades before subscription")
+		}
+		if c.cfg.OnSecurities != nil {
+			if secs := c.catalog.DrainPending(); len(secs) > 0 {
+				c.cfg.OnSecurities(secs)
+			}
 		}
 	}
 	return nil
@@ -231,7 +248,7 @@ func (c *Client) Poll(ctx context.Context) (trades []Trade, more bool, err error
 		}
 	}
 	for _, r := range recs {
-		if _, err := c.catalog.Apply(r); err != nil {
+		if _, err := c.catalog.ApplyMutations(r); err != nil {
 			return trades, reply.More, err
 		}
 		if r.Tag != xmlcompat.TagAllTrade {

@@ -177,6 +177,7 @@ func (st *Startup) Security(s SecNew) commands.Security {
 	if s.HasTimeZone {
 		out.SecTZ.Name, _ = TimeZoneName(s.TimeZone)
 	}
+	st.applyDerived(&out, s, st.SecurityFlags(s))
 	p, ok := s.DefaultPit()
 	if !ok {
 		return out

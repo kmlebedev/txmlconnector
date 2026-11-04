@@ -3,9 +3,10 @@
 // messages, so it can stand in for connector.New where a command is supported.
 //
 // Supported commands: connect, disconnect, server_status,
-// get_connector_version, and subscribe/unsubscribe for <alltrades>. Other
-// commands registered by the DLL answer with an explicit "not implemented"
-// error. See docs/protocol/commands.md. Client is the typed API without XML.
+// get_connector_version, get_securities, and subscribe/unsubscribe for
+// <alltrades>. Other commands registered by the DLL answer with an explicit
+// "not implemented" error. See docs/protocol/commands.md. Client is the typed
+// API without XML.
 package native
 
 import (
@@ -212,6 +213,15 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 	case "get_connector_version":
 		c.emit("<connector_version>" + escapeText(c.cfg.Version) + "</connector_version>")
 		return success(), nil
+	case "get_securities":
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		c.emit(client.Catalog().SecuritiesDumpXML())
+		return success(), nil
 	case "subscribe", "unsubscribe":
 		return c.subscribe(ctx, command, id == "subscribe")
 	default:
@@ -291,28 +301,53 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				}
 				c.emit(client.Catalog().AllTradesXML(raw, c.withMillis))
 			}
+			if secs := client.Catalog().DrainPending(); len(secs) > 0 {
+				c.emit(client.Catalog().Startup().SecuritiesXML(secs))
+				c.emit(client.Catalog().Startup().PitsXML(secs))
+			}
 		}
 	}
 }
 
 // open logs in, loads dictionaries and the snapshot, then reports
-// connected="true" (the DLL reports it after the snapshot).
+// connected="true" (the DLL reports it after the snapshot). Callbacks follow
+// the DLL order: <markets>, <boards>, <candlekinds>, then one <securities>
+// chunk per RQ_MAIN poll that carried new instruments, then <pits>.
 func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time.Duration) (*Client, error) {
+	var (
+		st   *xmlcompat.Startup
+		mErr error
+	)
 	client, err := Dial(ctx, ClientConfig{
 		Address: net.JoinHostPort(req.Host, req.Port), Login: req.Login, Password: req.Password,
 		Client: c.cfg.Client, RequestTimeout: timeout, Dial: c.cfg.Dial,
+		OnDictionaries: func(s *xmlcompat.Startup) {
+			st = s
+			for _, v := range []any{s.MarketsXML(), s.BoardsXML(), s.CandleKindsXML()} {
+				if mErr != nil {
+					return
+				}
+				m, err := xmlcompat.Marshal(v)
+				if err != nil {
+					mErr = err
+					return
+				}
+				c.emit(m)
+			}
+		},
+		OnSecurities: func(secs []xmlcompat.SecNew) {
+			if mErr == nil && st != nil {
+				c.emit(st.SecuritiesXML(secs))
+				c.emit(st.PitsXML(secs))
+			}
+		},
 	})
 	if err != nil {
 		return nil, err
 	}
-	st := client.Catalog().Startup()
-	for _, v := range []any{st.MarketsXML(), st.BoardsXML(), st.CandleKindsXML()} {
-		m, err := xmlcompat.Marshal(v)
-		if err != nil {
-			client.Close()
-			return nil, err
-		}
-		c.emit(m)
+	if mErr != nil {
+		client.Close()
+		return nil, mErr
 	}
 
 	c.mu.Lock()

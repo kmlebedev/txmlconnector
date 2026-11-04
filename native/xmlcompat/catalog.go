@@ -9,10 +9,28 @@ type Catalog struct {
 	codes     map[string]Board
 	secs      map[uint16]SecNew
 	symbols   map[symbol]uint16
+	order     []uint16 // R_SEC_NEW arrival order, the order the DLL reports
+	delivered int      // how many of order the last <securities> chunk already emitted
 	tradeDate int64
 }
 
 type symbol struct{ board, seccode string }
+
+// DrainPending returns the securities added since the last call: the chunk
+// the DLL emits in one <securities> callback per RQ_MAIN poll.
+func (c *Catalog) DrainPending() []SecNew {
+	if c.delivered >= len(c.order) {
+		return nil
+	}
+	out := make([]SecNew, 0, len(c.order)-c.delivered)
+	for _, id := range c.order[c.delivered:] {
+		if s, ok := c.secs[id]; ok {
+			out = append(out, s)
+		}
+	}
+	c.delivered = len(c.order)
+	return out
+}
 
 func NewCatalog(st *Startup) *Catalog {
 	c := &Catalog{
@@ -56,6 +74,9 @@ func (c *Catalog) Apply(rec Record) (bool, error) {
 
 // AddSecurity registers a security under every board it has parameters for.
 func (c *Catalog) AddSecurity(s SecNew) {
+	if _, seen := c.secs[s.SecID]; !seen {
+		c.order = append(c.order, s.SecID)
+	}
 	c.secs[s.SecID] = s
 	for _, p := range s.Pits {
 		if b, ok := c.boards[p.Board]; ok {
