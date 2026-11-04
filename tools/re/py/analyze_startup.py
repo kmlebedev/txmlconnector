@@ -3,7 +3,7 @@
 usage: python3 analyze_startup.py STARTUP_HEX [DLL_CALLBACKS]
 
 STARTUP_HEX: payload hex of the RQ_STARTUP reply (one line; e.g.
-native/xmlcompat/testdata/startup-demo.hex, or taken from a wire-decode dump).
+native/records/testdata/startup-demo.hex, or taken from a wire-decode dump).
 DLL_CALLBACKS: harness output with "CALLBACK: <markets>/<boards>/<candlekinds>"
 lines from the same session; when given, the rebuilt XML is compared byte for
 byte. This is how the six sections and the market 5 -> 4 rule were found

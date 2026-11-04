@@ -84,6 +84,11 @@ func TestCatalogTrade(t *testing.T) {
 	if !sber.Time.Equal(time.Date(2026, 11, 3, 20, 53, 20, 0, time.UTC)) {
 		t.Fatalf("SBER time = %v, want 2026-11-03 20:53:20 UTC", sber.Time)
 	}
+	// The decoded record stays available to consumers as Trade.Raw.
+	if sber.Raw.TradeNo != 9000000001 || sber.Raw.Price != 30512 || sber.Raw.SecID != 26 ||
+		sber.Raw.Flags&model.AllTradeOpenInterest != 0 {
+		t.Fatalf("SBER raw = %+v", sber.Raw)
+	}
 	gazp := trades[2]
 	if gazp.SecCode != "GAZP" || !gazp.HasOpenInterest || gazp.OpenInterest != 777 ||
 		gazp.Millis != 250 || !gazp.Time.Equal(time.Date(2026, 11, 3, 20, 53, 22, 250e6, time.UTC)) {
