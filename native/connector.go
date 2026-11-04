@@ -4,10 +4,11 @@
 //
 // Supported commands: connect, disconnect, server_status,
 // get_connector_version, get_securities, get_server_id,
-// get_servtime_difference, get_markets, and subscribe/unsubscribe for
-// <alltrades>. The remaining commands registered by the DLL answer with an
-// explicit "not implemented" error. See docs/protocol/commands.md. Client is the
-// typed API without XML.
+// get_servtime_difference, get_markets, get_securities_info, and
+// subscribe/unsubscribe for <alltrades>, <quotations> and <quotes>. The
+// remaining commands registered by the DLL answer with an explicit
+// "not implemented" error. See docs/protocol/commands.md. Client is the typed
+// API without XML.
 package native
 
 import (
@@ -15,6 +16,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"os"
@@ -271,6 +273,101 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		c.emit(msg)
 		return success(), nil
+	case "gethistorydata":
+		var req struct {
+			Security *struct {
+				Board   string `xml:"board"`
+				SecCode string `xml:"seccode"`
+			} `xml:"security"`
+			Period int    `xml:"period"`
+			Count  int    `xml:"count"`
+			Reset  string `xml:"reset"`
+			SecID  int    `xml:"secid,attr"`
+			// Attribute form: <command id="gethistorydata" secid=... period=...>
+			APeriod int    `xml:"period,attr"`
+			ACount  int    `xml:"count,attr"`
+			AReset  string `xml:"reset,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		var symbol model.Symbol
+		var ok bool
+		switch {
+		case req.Security != nil && req.Security.SecCode != "":
+			symbol, ok = client.SymbolByBoard(req.Security.Board, req.Security.SecCode)
+		case req.SecID != 0:
+			symbol, ok = client.SymbolBySecID(uint16(req.SecID))
+		}
+		if !ok {
+			return failure("unknown security"), nil
+		}
+		period, count := req.Period, req.Count
+		if period == 0 {
+			period = req.APeriod
+		}
+		if count == 0 {
+			count = req.ACount
+		}
+		reset := req.Reset == "true" || req.Reset == "1" || req.AReset == "true" || req.AReset == "1"
+		// The DLL accepts the command only with an established connection (S).
+		candles, err := client.History(ctx, HistoryRequest{Symbol: symbol, Period: period, Count: count, Reset: reset})
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.CandlesXML(candles))
+		return success(), nil
+	case "get_securities_info":
+		var req struct {
+			Security []struct {
+				Market  int    `xml:"market"`
+				SecCode string `xml:"seccode"`
+			} `xml:"security"`
+			SecIDs []int `xml:"secid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		var symbols []model.Symbol
+		for _, s := range req.Security {
+			symbol, ok := client.SymbolByMarket(s.Market, s.SecCode)
+			if !ok {
+				return failure("unknown security " + s.SecCode), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		for _, id := range req.SecIDs {
+			if id < 0 || id > 0xffff {
+				return failure(fmt.Sprintf("secid %d is out of range", id)), nil
+			}
+			symbol, ok := client.SymbolBySecID(uint16(id))
+			if !ok {
+				return failure(fmt.Sprintf("unknown secid %d", id)), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		// The DLL renders the callbacks from the local catalog/spec cache and
+		// sends no request to the server (S, r11 capture).
+		infos, err := client.SecuritiesInfo(ctx, symbols...)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		for _, info := range infos {
+			c.emit(xmlcompat.SecInfoXML(info))
+		}
+		return success(), nil
 	case "subscribe", "unsubscribe":
 		return c.subscribe(ctx, command, id == "subscribe")
 	default:
@@ -352,6 +449,12 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.PositionsXML([]model.MoneyPosition{*e}, c.micexRegisters))
 			case *model.Union:
 				c.emit(xmlcompat.UnionXML(*e))
+			case *model.SecInfoUpdate:
+				c.emit(xmlcompat.SecInfoUpdateXML(*e))
+			case *model.Quotation:
+				c.emit(xmlcompat.QuotationXML(*e))
+			case *model.Quotes:
+				c.emit(xmlcompat.QuotesXML(*e))
 			case model.ServerStatus:
 				switch {
 				case e.Recover:
@@ -430,6 +533,19 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 				c.emit(xmlcompat.PitsXML(st, secs))
 			}
 		},
+		OnLoadEvent: func(events []model.Event) {
+			if mErr != nil {
+				return
+			}
+			for _, ev := range events {
+				// Accounts, positions and unions are emitted from the state
+				// after the load (catalog/client store below), so only the
+				// updates the DLL reports per RQ_MAIN reply go from here.
+				if update, ok := ev.(*model.SecInfoUpdate); ok {
+					c.emit(xmlcompat.SecInfoUpdateXML(*update))
+				}
+			}
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -472,47 +588,72 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 }
 
 // subscribe handles <alltrades> of subscribe/unsubscribe, in either the
-// secid or the board+seccode form. Quotations and quotes are not implemented.
+// secid or the board+seccode form.
 func (c *Connector) subscribe(ctx context.Context, command string, on bool) (string, error) {
+	type feed struct {
+		SecIDs     []int `xml:"secid"`
+		Securities []struct {
+			Board   string `xml:"board"`
+			SecCode string `xml:"seccode"`
+		} `xml:"security"`
+	}
 	var req struct {
-		AllTrades struct {
-			SecIDs     []int `xml:"secid"`
-			Securities []struct {
-				Board   string `xml:"board"`
-				SecCode string `xml:"seccode"`
-			} `xml:"security"`
-		} `xml:"alltrades"`
-		Quotations *struct{} `xml:"quotations"`
-		Quotes     *struct{} `xml:"quotes"`
+		AllTrades  feed  `xml:"alltrades"`
+		Quotations *feed `xml:"quotations"`
+		Quotes     *feed `xml:"quotes"`
 	}
 	if err := xml.Unmarshal([]byte(command), &req); err != nil {
 		return failure(err.Error()), nil
 	}
-	if req.Quotations != nil || req.Quotes != nil {
-		return failure(msgNotImplemented), nil
-	}
 	c.mu.Lock()
 	client := c.client
 	c.mu.Unlock()
-	var symbols []model.Symbol
-	for _, s := range req.AllTrades.Securities {
-		symbols = append(symbols, model.Symbol{Board: s.Board, SecCode: s.SecCode})
-	}
-	for _, id := range req.AllTrades.SecIDs {
-		sec, ok := client.Catalog().Security(uint16(id))
-		p, hasPit := sec.DefaultPit()
-		board, hasBoard := client.Catalog().Board(p.Board)
-		if !ok || !hasPit || !hasBoard {
-			return failure(fmt.Sprintf("unknown secid %d", id)), nil
+	resolve := func(f feed) ([]model.Symbol, error) {
+		var symbols []model.Symbol
+		for _, s := range f.Securities {
+			symbols = append(symbols, model.Symbol{Board: s.Board, SecCode: s.SecCode})
 		}
-		symbols = append(symbols, model.Symbol{Board: board.Code, SecCode: sec.SecCode})
+		for _, id := range f.SecIDs {
+			sec, ok := client.Catalog().Security(uint16(id))
+			p, hasPit := sec.DefaultPit()
+			board, hasBoard := client.Catalog().Board(p.Board)
+			if !ok || !hasPit || !hasBoard {
+				return nil, fmt.Errorf("unknown secid %d", id)
+			}
+			symbols = append(symbols, model.Symbol{Board: board.Code, SecCode: sec.SecCode})
+		}
+		return symbols, nil
 	}
-	update := client.SubscribeAllTrades
-	if !on {
-		update = client.UnsubscribeAllTrades
-	}
-	if err := update(ctx, symbols...); err != nil {
+	var sub Subscription
+	symbols, err := resolve(req.AllTrades)
+	if err != nil {
 		return failure(err.Error()), nil
+	}
+	sub.AllTrades = symbols
+	// <quotations> needs document order: encoding/xml merges repeated elements,
+	// so the first block/child is picked by a streaming scan (S r8: a command
+	// with four <quotations> blocks subscribed only the first security).
+	if quotations, err := c.firstFeed(client, command, "quotations"); err != nil {
+		return failure(err.Error()), nil
+	} else if len(quotations) > 0 {
+		sub.Quotations = quotations
+	}
+	// <quotes>: the first-block rule is used by analogy with <quotations>; the
+	// live r10 capture subscribed one security per command, so the "only first
+	// element" behaviour for several <quotes> blocks is I, not S.
+	if quotes, err := c.firstFeed(client, command, "quotes"); err != nil {
+		return failure(err.Error()), nil
+	} else if len(quotes) > 0 {
+		sub.Quotes = quotes
+	}
+	var runErr error
+	if on {
+		runErr = client.Subscribe(ctx, sub)
+	} else {
+		runErr = client.Unsubscribe(ctx, sub)
+	}
+	if runErr != nil {
+		return failure(runErr.Error()), nil
 	}
 	return success(), nil
 }
@@ -656,4 +797,90 @@ func escapeText(s string) string {
 	var b strings.Builder
 	_ = xml.EscapeText(&b, []byte(s))
 	return b.String()
+}
+
+// firstFeed returns the first <feedName> child of the command in XML document
+// order (encoding/xml would merge repeated blocks and mix <secid> with
+// <security> children). The S rule "only the first element" is proven for
+// <quotations> (r8); <quotes> uses it by analogy (I).
+func (c *Connector) firstFeed(client *Client, command, feedName string) ([]model.Symbol, error) {
+	dec := xml.NewDecoder(strings.NewReader(command))
+	depth := 0
+	feedDepth := -1
+	type item struct {
+		secID   int
+		market  int
+		secCode string
+		isSec   bool
+	}
+	var first *item
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			depth++
+			if feedDepth < 0 {
+				if t.Name.Local == feedName {
+					feedDepth = depth
+				}
+				continue
+			}
+			if depth != feedDepth+1 {
+				continue
+			}
+			switch t.Name.Local {
+			case "secid":
+				var id int
+				if err := dec.DecodeElement(&id, &t); err != nil {
+					return nil, err
+				}
+				depth-- // DecodeElement consumed the whole element
+				if first == nil {
+					first = &item{secID: id, isSec: true}
+				}
+			case "security":
+				var sec struct {
+					Market  int    `xml:"market"`
+					SecCode string `xml:"seccode"`
+				}
+				if err := dec.DecodeElement(&sec, &t); err != nil {
+					return nil, err
+				}
+				depth-- // DecodeElement consumed the whole element
+				if first == nil {
+					first = &item{market: sec.Market, secCode: sec.SecCode}
+				}
+			}
+		case xml.EndElement:
+			if feedDepth > 0 && depth == feedDepth {
+				// End of the first <quotations> block.
+				if first == nil {
+					return nil, nil
+				}
+				if client == nil {
+					return nil, fmt.Errorf(msgNeedsConnection)
+				}
+				if first.isSec {
+					symbol, ok := client.SymbolBySecID(uint16(first.secID))
+					if !ok {
+						return nil, fmt.Errorf("unknown secid %d", first.secID)
+					}
+					return []model.Symbol{symbol}, nil
+				}
+				symbol, ok := client.SymbolByMarket(first.market, first.secCode)
+				if !ok {
+					return nil, fmt.Errorf("unknown security %s", first.secCode)
+				}
+				return []model.Symbol{symbol}, nil
+			}
+			depth--
+		}
+	}
+	return nil, nil
 }
