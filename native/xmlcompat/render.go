@@ -742,3 +742,28 @@ func stopOrderStatusName(status int) string {
 		return strconv.Itoa(status)
 	}
 }
+
+// The portfolio XML literals below are the only D-known forms: the element
+// schemas/field names are not recovered yet (portfolios.md, I), so these
+// helpers emit the literal envelope without fabricating data and are NOT wired
+// into Render until the oracle fixtures exist.
+
+// PortfoliosXML wraps the portfolio callbacks in the <portfolios> literal.
+func PortfoliosXML(inner string) string { return "<portfolios>" + inner + "</portfolios>" }
+
+// PortfolioTPlusXML is the literal <portfolio_tplus/> skeleton (fields I).
+func PortfolioTPlusXML() string { return "<portfolio_tplus/>" }
+
+// PortfolioCurrencyXML is the literal <portfolio_currency> skeleton (fields I).
+func PortfolioCurrencyXML() string { return "<portfolio_currency></portfolio_currency>" }
+
+// PortfolioMCTXML is the literal <portfolio_mct client> skeleton (fields I).
+func PortfolioMCTXML(client string) string {
+	return "<portfolio_mct client=" + quoteAttr(client) + "></portfolio_mct>"
+}
+
+// MCPortfolioXML is the literal <mc_portfolio> skeleton (fields I).
+func MCPortfolioXML() string { return "<mc_portfolio></mc_portfolio>" }
+
+// UnitedPortfolioXML is the literal <united_portfolio/> skeleton (fields I).
+func UnitedPortfolioXML() string { return "<united_portfolio/>" }

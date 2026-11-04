@@ -464,6 +464,18 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return transactionFailure(err), nil
 		}
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(req.TransactionID, 10) + "\"/>", nil
+	case "get_portfolio":
+		return failure("get_portfolio: layout not recovered (I)"), nil
+	case "get_portfolio_mct":
+		return failure("get_portfolio_mct: layout not recovered (I)"), nil
+	case "get_mc_portfolio":
+		return failure("get_mc_portfolio: layout not recovered (I)"), nil
+	case "get_united_portfolio":
+		return failure("get_united_portfolio: layout not recovered (I)"), nil
+	case "get_united_equity":
+		return failure("get_united_equity: layout not recovered (I)"), nil
+	case "get_united_go":
+		return failure("get_united_go: layout not recovered (I)"), nil
 	case "newstoporder":
 		var req struct {
 			SecID    int    `xml:"secid"`
