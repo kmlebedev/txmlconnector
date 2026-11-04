@@ -16,7 +16,7 @@ import (
 func (c *Client) accountByCode(code string) (model.ClientAccount, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, id := range c.accountRawOrder() {
+	for _, id := range c.accountOrder {
 		state := c.accounts[id]
 		if state != nil && state.account.ID == code && !state.account.Removed {
 			return state.account, true
@@ -28,23 +28,13 @@ func (c *Client) accountByCode(code string) (model.ClientAccount, bool) {
 func (c *Client) accountByUnion(union string) (model.ClientAccount, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, id := range c.accountRawOrder() {
+	for _, id := range c.accountOrder {
 		state := c.accounts[id]
 		if state != nil && state.account.Union == union && !state.account.Removed {
 			return state.account, true
 		}
 	}
 	return model.ClientAccount{}, false
-}
-
-// accountRawOrder returns the stored numeric account ids in arrival order; the
-// caller holds c.mu.
-func (c *Client) accountRawOrder() []int64 {
-	ids := make([]int64, 0, len(c.accounts))
-	for _, id := range c.accountOrder {
-		ids = append(ids, id)
-	}
-	return ids
 }
 
 // marginRows resolves the catalog identity of the requested securities and
@@ -57,11 +47,10 @@ func (c *Client) marginRows(symbols ...model.Symbol) ([]model.MaxBuySell, error)
 	}
 	rows := make([]model.MaxBuySell, 0, len(symbols))
 	for _, symbol := range symbols {
-		sec, board, ok := c.catalog.Lookup(symbol.Board, symbol.SecCode)
+		sec, _, ok := c.catalog.Lookup(symbol.Board, symbol.SecCode)
 		if !ok {
 			return nil, fmt.Errorf("Инструмент не найден ('seccode'=%s, 'board='%s)", symbol.SecCode, symbol.Board)
 		}
-		_ = board
 		rows = append(rows, model.MaxBuySell{SecID: sec.SecID, Market: int(sec.Market), SecCode: sec.SecCode})
 	}
 	return rows, nil
