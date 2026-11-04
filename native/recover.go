@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/session"
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
@@ -242,9 +243,11 @@ func (c *Client) relogin(ctx context.Context) error {
 		conn.Close()
 		return err
 	}
-	// The new session brings a new client store, positions and overnight flag.
+	// The new session brings a new client store, positions, overnight flag and
+	// sec spec cache.
 	c.mu.Lock()
 	c.resetAccountsLocked()
+	c.secSpecs = map[uint16]records.SecSpec{}
 	c.mu.Unlock()
 	// load re-runs the ClientConfig.OnDictionaries/OnSecurities callbacks, so
 	// the Connector emits the dictionary and securities callbacks again after a
