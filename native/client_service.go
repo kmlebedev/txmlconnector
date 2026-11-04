@@ -9,8 +9,13 @@ import (
 )
 
 // ServerTimeDifference is the DLL's get_servtime_difference: it sends RQ_TIME
-// and returns the server clock minus the local clock at that moment, so that a
-// caller can correct the local time by the server one.
+// and returns the server wall clock minus the local wall clock at that moment
+// (RE-2: -7200 s on a UTC+5 host against the MSK server), so that a caller can
+// correct the local time by the server one. Both sides are wall clocks compared
+// as fake UTC instants built from their calendar components: the server value
+// the DLL receives is a Windows SYSTEMTIME with no zone, encoded as Unix
+// seconds. Comparing it with time.Now().UTC() would mix in the host offset and
+// give a wrong difference outside UTC.
 func (c *Client) ServerTimeDifference(ctx context.Context) (time.Duration, error) {
 	conn := c.connection()
 	if conn == nil {
@@ -20,7 +25,9 @@ func (c *Client) ServerTimeDifference(ctx context.Context) (time.Duration, error
 	if err != nil {
 		return 0, err
 	}
-	return st.Wall.Sub(time.Now().UTC()), nil
+	now := time.Now()
+	localWall := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second(), 0, time.UTC)
+	return st.Wall.Sub(localWall), nil
 }
 
 // ServerID returns the SID from the RQ_PWD reply, the server id the DLL reports
