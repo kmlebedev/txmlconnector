@@ -11,8 +11,9 @@
 // The recorded session is the output of tools/wire-decode -payload -1: one
 // frame per line, "<seconds> <conn> C>S|S>C #<n> flags=0x<f> type=<t>
 // len=<n> <hex payload>"; lines starting with '#' are comments and a zero
-// payload has no hex field. Only the server replies are replayed, the requests
-// are decoded from the live client.
+// payload has no hex field. Client requests are decoded from the live client;
+// their recorded timestamps are used to cut the recorded RQ_MAIN tail the same
+// way replay_server.py does.
 package replay
 
 import (
@@ -24,6 +25,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/kmlebedev/txmlconnector/native/session"
 	"github.com/kmlebedev/txmlconnector/native/wire"
@@ -48,12 +50,15 @@ type Injection struct {
 type reply struct {
 	flags   byte
 	payload []byte
+	// at is the capture timestamp in seconds; the replay cut needs it.
+	at float64
 }
 
 // Session is the server side of one recorded TRANSAQ session.
 type Session struct {
-	replies map[byte][]reply
-	keys    *wire.Keys
+	replies  map[byte][]reply
+	reqTimes map[byte]float64 // first recorded timestamp of each request type
+	keys     *wire.Keys
 }
 
 // Load parses a capture decoded by wire-decode -payload -1 and unlocks the
@@ -64,7 +69,7 @@ func Load(r io.Reader, password string) (*Session, error) {
 	if password == "" {
 		return nil, errors.New("replay: the account password is required to unwrap the session key")
 	}
-	replies, err := parseDump(r)
+	replies, reqTimes, err := parseDump(r)
 	if err != nil {
 		return nil, err
 	}
@@ -76,13 +81,15 @@ func Load(r io.Reader, password string) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("replay: session key: %w", err)
 	}
-	return &Session{replies: replies, keys: keys}, nil
+	return &Session{replies: replies, reqTimes: reqTimes, keys: keys}, nil
 }
 
 // parseDump groups the recorded server replies by request type, keeping the
-// recorded order within a type.
-func parseDump(r io.Reader) (map[byte][]reply, error) {
+// recorded order within a type, and remembers the first recorded timestamp of
+// every request type (the RQ_MAIN cut point, see Serve).
+func parseDump(r io.Reader) (map[byte][]reply, map[byte]float64, error) {
 	replies := make(map[byte][]reply)
+	reqTimes := make(map[byte]float64)
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<22)
 	for n := 1; sc.Scan(); n++ {
@@ -94,42 +101,52 @@ func parseDump(r io.Reader) (map[byte][]reply, error) {
 		if len(fields) < 7 {
 			continue // a comment or a raw capture line, not a wire-decode frame
 		}
-		if fields[2] != "S>C" {
-			continue // only server replies are replayed
+		at, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil {
+			return nil, nil, fmt.Errorf("replay: line %d: bad timestamp %q", n, fields[0])
 		}
 		flags, err := parseHexField(fields[4], "flags")
 		if err != nil {
-			return nil, fmt.Errorf("replay: line %d: %w", n, err)
+			return nil, nil, fmt.Errorf("replay: line %d: %w", n, err)
 		}
 		typ, err := parseDecField(fields[5], "type")
 		if err != nil {
-			return nil, fmt.Errorf("replay: line %d: %w", n, err)
+			return nil, nil, fmt.Errorf("replay: line %d: %w", n, err)
 		}
 		if typ > 0xff {
-			return nil, fmt.Errorf("replay: line %d: request type %d does not fit a byte", n, typ)
+			return nil, nil, fmt.Errorf("replay: line %d: request type %d does not fit a byte", n, typ)
+		}
+		if fields[2] == "C>S" {
+			if _, seen := reqTimes[byte(typ)]; !seen {
+				reqTimes[byte(typ)] = at
+			}
+			continue
+		}
+		if fields[2] != "S>C" {
+			return nil, nil, fmt.Errorf("replay: line %d: unknown direction %q", n, fields[2])
 		}
 		size, err := parseDecField(fields[6], "len")
 		if err != nil {
-			return nil, fmt.Errorf("replay: line %d: %w", n, err)
+			return nil, nil, fmt.Errorf("replay: line %d: %w", n, err)
 		}
 		var payload []byte
 		if len(fields) > 7 {
 			if strings.HasSuffix(fields[7], "…") {
-				return nil, fmt.Errorf("replay: line %d: payload is truncated; decode the capture with wire-decode -payload -1", n)
+				return nil, nil, fmt.Errorf("replay: line %d: payload is truncated; decode the capture with wire-decode -payload -1", n)
 			}
 			if payload, err = hex.DecodeString(fields[7]); err != nil {
-				return nil, fmt.Errorf("replay: line %d: bad payload hex: %w", n, err)
+				return nil, nil, fmt.Errorf("replay: line %d: bad payload hex: %w", n, err)
 			}
 		}
 		if uint64(len(payload)) != size {
-			return nil, fmt.Errorf("replay: line %d: payload is %d bytes, len says %d", n, len(payload), size)
+			return nil, nil, fmt.Errorf("replay: line %d: payload is %d bytes, len says %d", n, len(payload), size)
 		}
-		replies[byte(typ)] = append(replies[byte(typ)], reply{flags: byte(flags), payload: payload})
+		replies[byte(typ)] = append(replies[byte(typ)], reply{flags: byte(flags), payload: payload, at: at})
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("replay: read dump: %w", err)
+		return nil, nil, fmt.Errorf("replay: read dump: %w", err)
 	}
-	return replies, nil
+	return replies, reqTimes, nil
 }
 
 // parseHexField parses "<name>=0x<hex>", the format wire-decode uses for flags.
@@ -158,6 +175,11 @@ func parseDecField(s, name string) (uint64, error) {
 // sent in their recorded order; once they are exhausted the client gets an
 // empty reply. RQ_LOGOUT is answered with a close, as the server does.
 //
+// Like replay_server.py, Serve stops replaying the recorded RQ_MAIN tail at the
+// recorded trigger request: the trigger type is Injection.AfterRequest, or
+// RQ_SUBSCRIBE when no injection is requested. Without a recorded trigger (a
+// synthetic dump) the recording is replayed as is.
+//
 // Serve keeps its state per call, so the same Session may serve several
 // connections, each time from the start of the recording.
 func (s *Session) Serve(nc net.Conn, inject Injection) error {
@@ -165,10 +187,16 @@ func (s *Session) Serve(nc net.Conn, inject Injection) error {
 	keys := wire.DefaultKeys()
 	next := make(map[byte]int, len(s.replies))
 	armed, injected := false, false
+	cutType := inject.AfterRequest
+	if cutType == 0 {
+		cutType = session.RqSubscribe
+	}
+	cutAt, hasCut := s.reqTimes[cutType]
 	for {
 		req, err := keys.Decode(wire.ClientToServer, nc)
 		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+				errors.Is(err, net.ErrClosed) || errors.Is(err, syscall.ECONNRESET) {
 				return nil
 			}
 			return err
@@ -179,20 +207,17 @@ func (s *Session) Serve(nc net.Conn, inject Injection) error {
 		if inject.AfterRequest != 0 && req.Type == inject.AfterRequest {
 			armed = true
 		}
-		var flags byte
+		var flags byte = wire.KindReply | wire.FlagPlain
 		var payload []byte
 		switch {
 		case req.Type == session.RqMain && armed:
-			flags = wire.KindReply | wire.FlagPlain
 			if !injected {
 				payload, injected = inject.Payload, true
 			}
-		case next[req.Type] < len(s.replies[req.Type]):
-			rec := s.replies[req.Type][next[req.Type]]
-			next[req.Type]++
-			flags, payload = rec.flags, rec.payload
 		default:
-			flags = wire.KindReply | wire.FlagPlain
+			if rec, ok := s.take(next, req.Type, cutAt, hasCut); ok {
+				flags, payload = rec.flags, rec.payload
+			}
 		}
 		out, err := keys.Encode(wire.ServerToClient, wire.Frame{Flags: flags, Type: req.Type, Payload: payload})
 		if err != nil {
@@ -205,4 +230,19 @@ func (s *Session) Serve(nc net.Conn, inject Injection) error {
 			keys = s.keys
 		}
 	}
+}
+
+// take returns the next recorded reply for a request type. Recorded RQ_MAIN
+// replies that came after the trigger request are skipped, mirroring the
+// replay_server.py load() cut; replies of other types are never cut.
+func (s *Session) take(next map[byte]int, typ byte, cutAt float64, hasCut bool) (reply, bool) {
+	for next[typ] < len(s.replies[typ]) {
+		rec := s.replies[typ][next[typ]]
+		next[typ]++
+		if typ == session.RqMain && hasCut && rec.at > cutAt {
+			continue
+		}
+		return rec, true
+	}
+	return reply{}, false
 }

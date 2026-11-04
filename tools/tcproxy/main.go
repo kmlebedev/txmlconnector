@@ -60,7 +60,8 @@ func main() {
 // the listener fails. Every chunk read in either direction is appended to logw.
 // Connections are numbered from 1; timestamps are seconds since proxy started.
 func proxy(ctx context.Context, ln net.Listener, upstream string, logw io.Writer) error {
-	logw = &syncWriter{w: logw}
+	locked := &syncWriter{w: logw}
+	logw = locked
 	start := time.Now()
 
 	var (
@@ -105,6 +106,7 @@ func proxy(ctx context.Context, ln net.Listener, upstream string, logw io.Writer
 			break
 		}
 		var d net.Dialer
+		d.Timeout = 15 * time.Second // py proxy: create_connection(timeout=15)
 		server, err := d.DialContext(ctx, "tcp", upstream)
 		if err != nil {
 			client.Close()
@@ -127,6 +129,9 @@ func proxy(ctx context.Context, ln net.Listener, upstream string, logw io.Writer
 	}
 	closeAll()
 	wg.Wait()
+	if err := locked.Err(); err != nil {
+		return fmt.Errorf("write capture: %w", err)
+	}
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -159,7 +164,9 @@ func pump(n int, dir string, src, dst net.Conn, logw io.Writer, start time.Time)
 	for {
 		k, err := src.Read(buf)
 		if k > 0 {
-			writeCapture(logw, n, dir, start, buf[:k])
+			if cerr := writeCapture(logw, n, dir, start, buf[:k]); cerr != nil {
+				return // a lost capture is worth stopping for; proxy reports it
+			}
 			if _, werr := dst.Write(buf[:k]); werr != nil {
 				return
 			}
@@ -174,19 +181,36 @@ func pump(n int, dir string, src, dst net.Conn, logw io.Writer, start time.Time)
 }
 
 // writeCapture appends one "<conn> <seconds> <dir> <len> <hex>" line.
-func writeCapture(w io.Writer, n int, dir string, start time.Time, p []byte) {
-	fmt.Fprintf(w, "%d %.3f %s %d %s\n", n, time.Since(start).Seconds(), dir, len(p), hex.EncodeToString(p))
+func writeCapture(w io.Writer, n int, dir string, start time.Time, p []byte) error {
+	_, err := fmt.Fprintf(w, "%d %.3f %s %d %s\n", n, time.Since(start).Seconds(), dir, len(p), hex.EncodeToString(p))
+	return err
 }
 
 // syncWriter serializes capture lines: the two pumps of a connection and
-// connections with each other write to one shared capture file.
+// connections with each other write to one shared capture file. It keeps the
+// first error so proxy can report a capture that silently stopped working.
 type syncWriter struct {
-	mu sync.Mutex
-	w  io.Writer
+	mu  sync.Mutex
+	w   io.Writer
+	err error
 }
 
 func (s *syncWriter) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.w.Write(p)
+	if s.err != nil {
+		return 0, s.err
+	}
+	n, err := s.w.Write(p)
+	if err != nil {
+		s.err = err
+	}
+	return n, err
+}
+
+// Err returns the first capture write error, if any.
+func (s *syncWriter) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
 }
