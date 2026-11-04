@@ -31,20 +31,20 @@ func TestRenderAllTradesUTCTime(t *testing.T) {
 	catalog := records.NewCatalog(&model.Startup{})
 	trade := model.Trade{
 		SecID: 26, Board: "TQBR", SecCode: "SBER", TradeNo: 1,
-		Time:     time.Date(2026, 11, 3, 20, 53, 20, 0, time.UTC),
+		Time:     time.Date(2026, 11, 3, 20, 53, 20, 250*int(time.Millisecond), time.UTC),
 		WallTime: time.Date(2026, 11, 3, 23, 53, 20, 0, time.UTC).Unix(),
-		Millis:   1000, Price: model.Decimal{Units: 30512, Scale: 2}, Quantity: 3,
+		Millis:   250, Price: model.Decimal{Units: 30512, Scale: 2}, Quantity: 3,
 		BuySell: 'B', Period: 'B',
 	}
 	got, ok := xmlcompat.Render(catalog, &trade, xmlcompat.Options{Milliseconds: true, UTCTime: true})
 	if !ok {
 		t.Fatal("Render does not accept a trade")
 	}
-	if !strings.Contains(got, "<time>03.11.2026 20:53:20.000</time>") {
+	if !strings.Contains(got, "<time>03.11.2026 20:53:20.250</time>") {
 		t.Fatalf("utc_time rendering = %s", got)
 	}
 	got, ok = xmlcompat.Render(catalog, &trade, xmlcompat.Options{Milliseconds: true})
-	if !ok || !strings.Contains(got, "<time>03.11.2026 23:53:20.000</time>") {
+	if !ok || !strings.Contains(got, "<time>03.11.2026 23:53:20.250</time>") {
 		t.Fatalf("default rendering = %s", got)
 	}
 }

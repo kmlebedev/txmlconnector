@@ -16,6 +16,11 @@ import (
 // the DLL receives is a Windows SYSTEMTIME with no zone, encoded as Unix
 // seconds. Comparing it with time.Now().UTC() would mix in the host offset and
 // give a wrong difference outside UTC.
+//
+// Unlike the DLL, which keeps a ring of samples and applies the RQL correction
+// with a 3/2/1 weighted average (docs/protocol/commands.md), this is the
+// instant difference of one RQ_TIME reply rounded to seconds by the caller; the
+// difference is documented and accepted for the native connector.
 func (c *Client) ServerTimeDifference(ctx context.Context) (time.Duration, error) {
 	conn := c.connection()
 	if conn == nil {

@@ -28,7 +28,9 @@ type ClientConfig struct {
 	Language string
 	// Milliseconds, UTCTime, AutoPos and MicexRegisters are the XML-layer
 	// <connect> options (RE-1). The typed client stores them; the Connector
-	// applies them to the rendered callbacks.
+	// applies Milliseconds and UTCTime to the rendered callbacks, while AutoPos
+	// and MicexRegisters are stored only (autopos' XML effect is not recovered;
+	// micex_registers affects <positions> and comes with task 7/20).
 	Milliseconds, UTCTime, AutoPos, MicexRegisters bool
 	// RqDelay is the default RQ_MAIN poll period of Run when RunOptions does not
 	// set one; 100 ms when 0.
@@ -37,7 +39,8 @@ type ClientConfig struct {
 	// values below 20 s are raised to 20 s, as the DLL does.
 	SessionTimeout time.Duration
 	// PushULimits and PushPosEquity are the client refresh periods of the
-	// limits and positions requests (the DLL timers; used with tasks 20/21).
+	// limits and positions requests; they are stored only, the periodic timers
+	// themselves come with tasks 20/21.
 	PushULimits, PushPosEquity time.Duration
 	// Dial opens the TCP connection; net.Dialer if nil.
 	Dial func(ctx context.Context, address string) (net.Conn, error)
@@ -105,6 +108,11 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 		nc.Close()
 		return nil, err
 	}
+	// The DLL normalizes request_timeout against session_timeout once RQ_PWD
+	// brought the server value: the default is 20 s, and a value >= the window
+	// becomes half the window (docs/protocol/connect.md).
+	cfg.RequestTimeout = normalizeRequestTimeout(cfg.RequestTimeout, effectiveSessionTTL(cfg.SessionTimeout, info))
+	conn.SetRequestTimeout(cfg.RequestTimeout)
 	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}}
 	if err := c.load(ctx, conn); err != nil {
 		conn.Close()
@@ -354,16 +362,7 @@ type RunOptions struct {
 // unknown record ends a batch: its model.UnknownRecord is the last event of
 // that batch and polling continues with the next RQ_MAIN.
 func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) error) error {
-	delay := opt.RqDelay
-	if delay == 0 {
-		delay = c.cfg.RqDelay
-	}
-	if delay == 0 {
-		delay = defaultRunRqDelay
-	}
-	if delay < minRunRqDelay {
-		delay = minRqDelay
-	}
+	delay := c.runRqDelay(opt)
 	for {
 		timer := time.NewTimer(delay)
 		select {
@@ -451,4 +450,20 @@ func languageTrailer(language string) (byte, error) {
 	default:
 		return 0, fmt.Errorf("unknown language %q", language)
 	}
+}
+
+// runRqDelay picks the RQ_MAIN poll period: RunOptions first, then the
+// ClientConfig.RqDelay default, then 100 ms; below 10 ms it is raised to 10 ms.
+func (c *Client) runRqDelay(opt RunOptions) time.Duration {
+	delay := opt.RqDelay
+	if delay == 0 {
+		delay = c.cfg.RqDelay
+	}
+	if delay == 0 {
+		delay = defaultRunRqDelay
+	}
+	if delay < minRunRqDelay {
+		delay = minRqDelay
+	}
+	return delay
 }

@@ -1,6 +1,7 @@
 package native
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"os"
@@ -152,6 +153,7 @@ func TestServiceCommandsMatchDLL(t *testing.T) {
 	rec.next(t, "<server_status")
 
 	// get_server_id: the result and the cached SID callback, byte for byte.
+	before := countNonMain(srv.Requests())
 	cmd := "<command id=" + quote + "get_server_id" + quote + "/>"
 	if got := send(t, c, cmd); got != results[0] {
 		t.Fatalf("get_server_id result = %s, want %s", got, results[0])
@@ -159,9 +161,15 @@ func TestServiceCommandsMatchDLL(t *testing.T) {
 	if got := rec.next(t, "<current_server"); got != callbacks[0] {
 		t.Fatalf("current_server = %s, want %s", got, callbacks[0])
 	}
+	if delta := countNonMain(srv.Requests()) - before; delta != 0 {
+		t.Fatalf("get_server_id sent %d non-RQ_MAIN request(s), want 0", delta)
+	}
 
-	// get_servtime_difference: one RQ_TIME on the wire and the diff attribute.
-	before := len(srv.Requests())
+	// get_servtime_difference: one RQ_TIME (50) on the wire and the diff
+	// attribute. RQ_MAIN polling runs in parallel, so only non-RQ_MAIN frames
+	// are counted (deterministic).
+	before = countNonMain(srv.Requests())
+	beforeTime := countType(srv.Requests(), session.RqTime)
 	cmd = "<command id=" + quote + "get_servtime_difference" + quote + "/>"
 	got := send(t, c, cmd)
 	if !strings.HasPrefix(got, "<result success="+quote+"true"+quote+" diff=") {
@@ -170,13 +178,15 @@ func TestServiceCommandsMatchDLL(t *testing.T) {
 	if actual := diffAttr(t, got); actual < -7201 || actual > -7199 {
 		t.Fatalf("diff = %d, want -7200 ±1 (fixture %s)", actual, results[1])
 	}
-	requests := srv.Requests()
-	if len(requests)-before != 1 || requests[len(requests)-1].Type != session.RqTime {
-		t.Fatalf("get_servtime_difference must send exactly one RQ_TIME, got %d new request(s)", len(requests)-before)
+	if delta := countNonMain(srv.Requests()) - before; delta != 1 {
+		t.Fatalf("get_servtime_difference sent %d non-RQ_MAIN request(s), want 1", delta)
+	}
+	if delta := countType(srv.Requests(), session.RqTime) - beforeTime; delta != 1 {
+		t.Fatalf("get_servtime_difference sent %d RQ_TIME request(s), want 1", delta)
 	}
 
 	// get_markets: cached RQ_STARTUP, no network request.
-	before = len(srv.Requests())
+	before = countNonMain(srv.Requests())
 	cmd = "<command id=" + quote + "get_markets" + quote + "/>"
 	if got := send(t, c, cmd); got != results[2] {
 		t.Fatalf("get_markets result = %s, want %s", got, results[2])
@@ -184,8 +194,8 @@ func TestServiceCommandsMatchDLL(t *testing.T) {
 	if got := rec.next(t, "<markets"); got != callbacks[1] {
 		t.Fatalf("markets = %s, want %s", got, callbacks[1])
 	}
-	if delta := len(srv.Requests()) - before; delta != 0 {
-		t.Fatalf("get_markets sent %d network request(s), want 0", delta)
+	if delta := countNonMain(srv.Requests()) - before; delta != 0 {
+		t.Fatalf("get_markets sent %d non-RQ_MAIN request(s), want 0", delta)
 	}
 }
 
@@ -350,9 +360,10 @@ func TestConnectOptionsMatchDLL(t *testing.T) {
 	for _, address := range strings.Split(fx["client.addresses"], ",") {
 		ci.Addresses = append(ci.Addresses, int32(parseHexOrDecimal(t, address)))
 	}
+	// RQ_PWD is encrypted with the password key; TESTPASS is the testserver
+	// credential, the fixture itself contains no password.
 	pwKey, err := cryptoprofile.NewCipher(cryptoprofile.PasswordKey(testserver.Password))
 	if err != nil {
-		// testserver.Password is the captured password "TESTPASS".
 		t.Fatal(err)
 	}
 	for _, run := range []string{"default", "options", "lang_en"} {
@@ -371,76 +382,131 @@ func TestConnectOptionsMatchDLL(t *testing.T) {
 		}
 	}
 
-	// The options must not change the frame types; language only changes the
-	// trailer. Compare the request type prefix with the capture (1,46,50,9)
-	// and the full type set of default vs options.
-	requests := func(t *testing.T, options string) (types []byte, pwd []byte) {
-		t.Helper()
+	// End-to-end check: the Connector must actually send these bytes. It gets the
+	// dummy ClientInfo from the fixture, and the testserver records the decrypted
+	// requests: compare the sent RQ_LOGIN payload and the RQ_PWD tail after the
+	// server challenge (a suffix comparison, so it is proof-length agnostic) and
+	// the sent frame-type sequence with the RLE list of the capture.
+	optionsXML := "<autopos>true</autopos><micex_registers>true</micex_registers>" +
+		"<utc_time>true</utc_time><push_u_limits>10</push_u_limits><push_pos_equity>10</push_pos_equity>"
+	runs := []struct{ run, extra string }{
+		{"default", ""},
+		{"options", optionsXML},
+		{"lang_en", "<language>en</language>"},
+	}
+	var traces [][]byte
+	for _, r := range runs {
 		srv := newTestServer(t)
-		c := New(Config{Dial: srv.Dial})
+		clientInfo := ci
+		clientInfo.Trailer = 0 // the language comes from <connect> below
+		c := New(Config{Client: clientInfo, Dial: srv.Dial})
 		rec := newRecorder()
 		if err := c.Start(rec.handle); err != nil {
 			t.Fatal(err)
 		}
-		defer c.Close()
-		connect := strings.Replace(connectCommand(), "</rqdelay>", "</rqdelay>"+options, 1)
+		connect := strings.Replace(connectCommand(), "</rqdelay>", "</rqdelay>"+r.extra, 1)
 		send(t, c, connect)
 		rec.next(t, "<server_status")
+		// The capture includes the harness get_servtime_difference command: it
+		// adds one RQ_TIME (50) after the load.
+		send(t, c, "<command id="+quote+"get_servtime_difference"+quote+"/>")
+		var types, login, pwd []byte
 		for _, f := range srv.Requests() {
 			types = append(types, f.Type)
-			if f.Type == session.RqPwd {
+			switch f.Type {
+			case session.RqLogin:
+				login = f.Payload
+			case session.RqPwd:
 				pwd = f.Payload
 			}
 		}
-		return types, pwd
-	}
-	options := "<autopos>true</autopos><micex_registers>true</micex_registers>" +
-		"<utc_time>true</utc_time><push_u_limits>10</push_u_limits><push_pos_equity>10</push_pos_equity>"
-	baseTypes, basePWD := requests(t, "")
-	optTypes, optPWD := requests(t, options)
-	prefix := []byte{session.RqLogin, session.RqPwd, session.RqTime, session.RqStartup}
-	for _, c := range []struct {
-		name  string
-		types []byte
-	}{{"default", baseTypes}, {"options", optTypes}} {
-		if len(c.types) < len(prefix) {
-			t.Fatalf("%s: %d requests, want at least %d", c.name, len(c.types), len(prefix))
+		c.Close()
+		if got, want := hex.EncodeToString(login), fx["rq_login"]; got != want {
+			t.Fatalf("%s: sent RQ_LOGIN = %s, want %s", r.run, got, want)
 		}
-		for i := range prefix {
-			if c.types[i] != prefix[i] {
-				t.Fatalf("%s: request %d = %d, want %d (capture starts 1,46,50,9)", c.name, i, c.types[i], prefix[i])
+		wantTail, err := hex.DecodeString(fx[r.run+".rq_pwd_tail"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.HasSuffix(pwd, wantTail) {
+			t.Fatalf("%s: sent RQ_PWD payload does not end with the captured tail", r.run)
+		}
+		if want := fixtureTrailer(t, fx, r.run); len(pwd) == 0 || pwd[len(pwd)-1] != want {
+			t.Fatalf("%s: sent RQ_PWD trailer = %x, want %d", r.run, pwd, want)
+		}
+		got := normalizeFrameTypes(types)
+		want := normalizeFrameTypes(expandRLE(t, fx[r.run+".c2s_types"]))
+		if len(got) != len(want) {
+			t.Fatalf("%s: sent frame types = %v, capture = %v", r.run, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("%s: sent frame types = %v, capture = %v", r.run, got, want)
 			}
 		}
+		traces = append(traces, got)
 	}
-	typeSet := func(types []byte) map[byte]bool {
-		set := map[byte]bool{}
-		for _, typ := range types {
-			set[typ] = true
+	if !bytes.Equal(traces[0], traces[1]) {
+		t.Fatalf("default types %v, options types %v: <connect> options changed the wire", traces[0], traces[1])
+	}
+	if !bytes.Equal(traces[0], traces[2]) {
+		t.Fatalf("default types %v, lang_en types %v: language changed the frame set", traces[0], traces[2])
+	}
+}
+
+// expandRLE expands a fixture "NxM" type list (NxM = type N repeated M times).
+func expandRLE(t *testing.T, spec string) []byte {
+	t.Helper()
+	var out []byte
+	for _, part := range strings.Split(spec, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
 		}
-		return set
-	}
-	baseSet, optSet := typeSet(baseTypes), typeSet(optTypes)
-	if len(baseSet) != len(optSet) {
-		t.Fatalf("default types %v, options types %v: <connect> options changed the wire", baseSet, optSet)
-	}
-	for typ := range baseSet {
-		if !optSet[typ] {
-			t.Fatalf("default types %v, options types %v: <connect> options changed the wire", baseSet, optSet)
+		typText, countText := part, "1"
+		if i := strings.IndexByte(part, 'x'); i >= 0 {
+			typText, countText = part[:i], part[i+1:]
+		}
+		typ, err := strconv.Atoi(typText)
+		if err != nil {
+			t.Fatalf("fixture type %q: %v", part, err)
+		}
+		count, err := strconv.Atoi(countText)
+		if err != nil {
+			t.Fatalf("fixture count %q: %v", part, err)
+		}
+		for i := 0; i < count; i++ {
+			out = append(out, byte(typ))
 		}
 	}
-	if len(basePWD) == 0 || basePWD[len(basePWD)-1] != 0 {
-		t.Fatalf("default RQ_PWD trailer = %x, want 0 (ru)", basePWD)
+	return out
+}
+
+// normalizeFrameTypes projects a frame-type trace onto the part both the DLL
+// capture and the Go connector must agree on: RQ_MAIN poll counts are timing
+// dependent; RQ_CLIENT_HOLDINGS (42) is the DLL end-of-load request of task 7
+// (not implemented here yet); RQ_LOGOUT (2) is teardown; repeated RQ_TIME frames
+// (the capture has one extra during the load) are collapsed.
+func normalizeFrameTypes(types []byte) []byte {
+	out := make([]byte, 0, len(types))
+	for _, typ := range types {
+		switch typ {
+		case session.RqMain, session.RqClientHoldings, session.RqLogout:
+			continue
+		case session.RqTime:
+			if len(out) > 0 && out[len(out)-1] == session.RqTime {
+				continue
+			}
+		}
+		out = append(out, typ)
 	}
-	if len(optPWD) == 0 || optPWD[len(optPWD)-1] != 0 {
-		t.Fatalf("<connect> options changed the RQ_PWD trailer: %x", optPWD)
-	}
-	enTypes, enPWD := requests(t, "<language>en</language>")
-	if len(enPWD) == 0 || enPWD[len(enPWD)-1] != 1 {
-		t.Fatalf("language=en RQ_PWD trailer = %x, want 1", enPWD)
-	}
-	if len(enTypes) < len(prefix) || enTypes[0] != session.RqLogin || enTypes[1] != session.RqPwd {
-		t.Fatalf("language=en request prefix = %v, want the same flow", enTypes)
-	}
+	return out
+}
+
+// fixtureTrailer returns the RQ_PWD trailer recorded for the run.
+func fixtureTrailer(t *testing.T, fx map[string]string, run string) byte {
+	t.Helper()
+	return byte(fixtureInt(t, fx, run+".rq_pwd_trailer"))
 }
 
 // parseHexOrDecimal parses a fixture number with an optional 0x prefix.
@@ -485,5 +551,160 @@ func TestServerTimeDifferenceLocalWall(t *testing.T) {
 	}
 	if diff < -1*time.Second || diff > 1*time.Second {
 		t.Fatalf("ServerTimeDifference = %v, want 0 ±1s for a server reporting the local wall clock", diff)
+	}
+}
+
+// countNonMain counts the deterministic (non-RQ_MAIN) requests; Run polls
+// RQ_MAIN in parallel, so its count is timing-dependent.
+func countNonMain(requests []wire.Frame) int {
+	n := 0
+	for _, f := range requests {
+		if f.Type != session.RqMain {
+			n++
+		}
+	}
+	return n
+}
+
+// countType counts the requests of one type.
+func countType(requests []wire.Frame, typ byte) int {
+	n := 0
+	for _, f := range requests {
+		if f.Type == typ {
+			n++
+		}
+	}
+	return n
+}
+
+// TestSessionTimeoutNormalization pins the DLL normalization of
+// session_timeout (FUN_1803895c0): 0 means "use the server value"; below 20 s
+// (and negative values) become 20 s; 20..299 s are seconds; 300 and above are
+// treated as milliseconds.
+func TestSessionTimeoutNormalization(t *testing.T) {
+	cases := []struct {
+		name     string
+		override time.Duration
+		want     time.Duration
+	}{
+		{"negative", -5 * time.Second, 20 * time.Second},
+		{"below 20s", 5 * time.Second, 20 * time.Second},
+		{"seconds", 30 * time.Second, 30 * time.Second},
+		{"milliseconds", 300 * time.Second, 300 * time.Millisecond},
+		{"more milliseconds", 1000 * time.Second, time.Second},
+	}
+	for _, c := range cases {
+		if got := effectiveSessionTTL(c.override, nil); got != c.want {
+			t.Fatalf("%s: effectiveSessionTTL(%v) = %v, want %v", c.name, c.override, got, c.want)
+		}
+	}
+	servers := []struct {
+		raw  int32
+		want time.Duration
+	}{
+		{10, 20 * time.Second},      // below 0x14 -> 20 s
+		{120, 120 * time.Second},    // seconds
+		{120000, 120 * time.Second}, // milliseconds
+	}
+	for _, c := range servers {
+		if got := effectiveSessionTTL(0, &session.Info{SessionTimeout: c.raw}); got != c.want {
+			t.Fatalf("server session_timeout %d: effectiveSessionTTL = %v, want %v", c.raw, got, c.want)
+		}
+	}
+}
+
+// TestRequestTimeoutNormalization pins the DLL request_timeout rules: 20 s by
+// default, and a value not below session_timeout becomes half the window.
+func TestRequestTimeoutNormalization(t *testing.T) {
+	cases := []struct {
+		request, ttl, want time.Duration
+	}{
+		{0, 120 * time.Second, session.DefaultRequestTimeout},
+		{5 * time.Second, 120 * time.Second, 5 * time.Second},
+		{10 * time.Second, 300 * time.Millisecond, 150 * time.Millisecond},
+		{120 * time.Second, 120 * time.Second, 60 * time.Second},
+	}
+	for _, c := range cases {
+		if got := normalizeRequestTimeout(c.request, c.ttl); got != c.want {
+			t.Fatalf("normalizeRequestTimeout(%v, %v) = %v, want %v", c.request, c.ttl, got, c.want)
+		}
+	}
+	// The Client applies it after RQ_PWD: the 300 ms testserver window turns a
+	// 10 s request timeout into 150 ms.
+	srv := newTestServer(t)
+	srv.SessionTimeout = 300
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, ClientConfig{
+		Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: srv.Dial,
+		RequestTimeout: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	if got := c.cfg.RequestTimeout; got != 150*time.Millisecond {
+		t.Fatalf("Client RequestTimeout = %v, want 150ms (session_timeout/2)", got)
+	}
+}
+
+// TestSessionTimeoutOverride checks that ClientConfig.SessionTimeout drives the
+// recovery window with the same normalization.
+func TestSessionTimeoutOverride(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	makeClient := func(t *testing.T, sessionTimeout time.Duration) *Client {
+		t.Helper()
+		srv := newTestServer(t)
+		c, err := Dial(ctx, ClientConfig{
+			Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: srv.Dial,
+			SessionTimeout: sessionTimeout,
+		})
+		if err != nil {
+			t.Fatalf("Dial: %v", err)
+		}
+		t.Cleanup(func() { c.Close() })
+		return c
+	}
+	if got := makeClient(t, 5*time.Second).sessionTimeout(); got != 20*time.Second {
+		t.Fatalf("SessionTimeout 5s: window = %v, want 20s", got)
+	}
+	if got := makeClient(t, 30*time.Second).sessionTimeout(); got != 30*time.Second {
+		t.Fatalf("SessionTimeout 30s: window = %v, want 30s", got)
+	}
+	if got := makeClient(t, 0).sessionTimeout(); got != 120*time.Second {
+		t.Fatalf("server session_timeout: window = %v, want 120s", got)
+	}
+}
+
+// TestRunRqDelayDefault checks that ClientConfig.RqDelay is the Run default and
+// RunOptions overrides it (the DLL's 100 ms default and 10 ms minimum).
+func TestRunRqDelayDefault(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	makeClient := func(t *testing.T, delay time.Duration) *Client {
+		t.Helper()
+		srv := newTestServer(t)
+		c, err := Dial(ctx, ClientConfig{
+			Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: srv.Dial,
+			RqDelay: delay,
+		})
+		if err != nil {
+			t.Fatalf("Dial: %v", err)
+		}
+		t.Cleanup(func() { c.Close() })
+		return c
+	}
+	if got := makeClient(t, 25*time.Millisecond).runRqDelay(RunOptions{}); got != 25*time.Millisecond {
+		t.Fatalf("RqDelay default = %v, want 25ms", got)
+	}
+	if got := makeClient(t, 25*time.Millisecond).runRqDelay(RunOptions{RqDelay: 40 * time.Millisecond}); got != 40*time.Millisecond {
+		t.Fatalf("RunOptions.RqDelay = %v, want 40ms", got)
+	}
+	if got := makeClient(t, 0).runRqDelay(RunOptions{}); got != 100*time.Millisecond {
+		t.Fatalf("default RqDelay = %v, want 100ms", got)
+	}
+	if got := makeClient(t, 5*time.Millisecond).runRqDelay(RunOptions{}); got != 10*time.Millisecond {
+		t.Fatalf("minimum RqDelay = %v, want 10ms", got)
 	}
 }

@@ -466,6 +466,15 @@ func (c *Conn) Close() error {
 	return nc.Close()
 }
 
+// SetRequestTimeout replaces the per-exchange timeout. The client calls it after
+// the RQ_PWD reply, when request_timeout is normalized against session_timeout
+// (docs/protocol/connect.md: request_timeout >= session_timeout -> half).
+func (c *Conn) SetRequestTimeout(d time.Duration) {
+	c.mu.Lock()
+	c.timeout = d
+	c.mu.Unlock()
+}
+
 // LastSeq returns the send counter value of the last ordinary request, the
 // lastSeq RQ_RECOVER carries.
 func (c *Conn) LastSeq() int32 {

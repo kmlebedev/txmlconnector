@@ -3,10 +3,11 @@
 // messages, so it can stand in for connector.New where a command is supported.
 //
 // Supported commands: connect, disconnect, server_status,
-// get_connector_version, get_securities, and subscribe/unsubscribe for
-// <alltrades>. Other commands registered by the DLL answer with an explicit
-// "not implemented" error. See docs/protocol/commands.md. Client is the typed
-// API without XML.
+// get_connector_version, get_securities, get_server_id,
+// get_servtime_difference, get_markets, and subscribe/unsubscribe for
+// <alltrades>. The remaining commands registered by the DLL answer with an
+// explicit "not implemented" error. See docs/protocol/commands.md. Client is the
+// typed API without XML.
 package native
 
 import (
