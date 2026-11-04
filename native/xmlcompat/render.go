@@ -585,3 +585,63 @@ func TradeXML(trade model.ClientTrade) string {
 	b.WriteString("</trade>")
 	return b.String()
 }
+
+// SecPositionXML renders one <positions><sec_position> callback (O).
+func SecPositionXML(pos model.SecPosition) string {
+	var b strings.Builder
+	b.WriteString("<positions><sec_position>")
+	b.WriteString("<client>" + escape(pos.Client) + "</client>")
+	b.WriteString("<union>" + escape(pos.Union) + "</union>")
+	b.WriteString("<secid>" + strconv.Itoa(int(pos.SecID)) + "</secid>")
+	b.WriteString("<market>" + strconv.Itoa(pos.Market) + "</market>")
+	b.WriteString("<shortname>" + escape(pos.ShortName) + "</shortname>")
+	b.WriteString("<seccode>" + escape(pos.SecCode) + "</seccode>")
+	b.WriteString("<saldoin>" + strconv.FormatInt(pos.SaldoIn, 10) + "</saldoin>")
+	b.WriteString("<saldomin>" + strconv.FormatInt(pos.SaldoMin, 10) + "</saldomin>")
+	b.WriteString("<bought>" + strconv.FormatInt(pos.Bought, 10) + "</bought>")
+	b.WriteString("<sold>" + strconv.FormatInt(pos.Sold, 10) + "</sold>")
+	b.WriteString("<saldo>" + strconv.FormatInt(pos.Saldo, 10) + "</saldo>")
+	b.WriteString("<ordbuy>" + strconv.FormatInt(pos.OrdBuy, 10) + "</ordbuy>")
+	b.WriteString("<ordsell>" + strconv.FormatInt(pos.OrdSell, 10) + "</ordsell>")
+	b.WriteString("</sec_position></positions>")
+	return b.String()
+}
+
+// FortsPositionsXML renders the get_forts_positions callback: one
+// <forts_position> per record and the aggregated <forts_money> (O).
+func FortsPositionsXML(positions []model.FortsPosition, money *model.FortsMoney) string {
+	var b strings.Builder
+	b.WriteString("<positions>")
+	for _, pos := range positions {
+		b.WriteString("<forts_position>")
+		b.WriteString("<client>" + escape(pos.Client) + "</client>")
+		b.WriteString("<secid>" + strconv.Itoa(int(pos.SecID)) + "</secid>")
+		b.WriteString("<union>" + escape(pos.Union) + "</union>")
+		b.WriteString("<seccode>" + escape(pos.SecCode) + "</seccode>")
+		b.WriteString("<markets><market>" + strconv.Itoa(pos.Market) + "</market></markets>")
+		b.WriteString("<startnet>" + strconv.FormatInt(pos.StartNet, 10) + "</startnet>")
+		b.WriteString("<openbuys>" + strconv.FormatInt(pos.OpenBuys, 10) + "</openbuys>")
+		b.WriteString("<opensells>" + strconv.FormatInt(pos.OpenSells, 10) + "</opensells>")
+		b.WriteString("<totalnet>" + strconv.FormatInt(pos.TotalNet, 10) + "</totalnet>")
+		b.WriteString("<todaybuy>" + strconv.FormatInt(pos.TodayBuy, 10) + "</todaybuy>")
+		b.WriteString("<todaysell>" + strconv.FormatInt(pos.TodaySell, 10) + "</todaysell>")
+		b.WriteString("<optmargin>" + orderAmount(pos.OptMargin) + "</optmargin>")
+		b.WriteString("<varmargin>" + orderAmount(pos.VarMargin) + "</varmargin>")
+		b.WriteString("<expirationpos>" + strconv.FormatInt(pos.ExpirationPos, 10) + "</expirationpos>")
+		b.WriteString("</forts_position>")
+	}
+	if money != nil {
+		b.WriteString("<forts_money>")
+		b.WriteString("<client>" + escape(money.Client) + "</client>")
+		b.WriteString("<union>" + escape(money.Union) + "</union>")
+		b.WriteString("<markets><market>" + strconv.Itoa(money.Market) + "</market></markets>")
+		b.WriteString("<shortname>" + escape(money.ShortName) + "</shortname>")
+		b.WriteString("<blocked>" + orderAmount(money.Blocked) + "</blocked>")
+		b.WriteString("<varmargin>" + orderAmount(money.VarMargin) + "</varmargin>")
+		b.WriteString("<current>" + orderAmount(money.Current) + "</current>")
+		b.WriteString("<free>" + orderAmount(money.Free) + "</free>")
+		b.WriteString("</forts_money>")
+	}
+	b.WriteString("</positions>")
+	return b.String()
+}

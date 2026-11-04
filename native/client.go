@@ -84,15 +84,17 @@ type Client struct {
 
 	// End-of-load state (task 7): the R_CLN_NEW client store, money
 	// positions, unions and the R_OVERNIGHT flag.
-	accounts      map[int64]*accountState
-	accountOrder  []int64
-	positions     map[positionKey]*positionState
-	positionOrder []positionKey
-	unions        []model.Union
-	overnight     model.Overnight
-	secSpecs      map[uint16]records.SecSpec
-	history       map[historyKey]*historyCollector
-	orders        map[uint64]*model.Order
+	accounts         map[int64]*accountState
+	accountOrder     []int64
+	positions        map[positionKey]*positionState
+	positionOrder    []positionKey
+	unions           []model.Union
+	overnight        model.Overnight
+	secSpecs         map[uint16]records.SecSpec
+	history          map[historyKey]*historyCollector
+	orders           map[uint64]*model.Order
+	secPositions     map[positionKey]model.SecPosition
+	secPositionOrder []positionKey
 }
 
 // Dial logs in, loads the dictionaries and the initial snapshot (RQ_TIME,
@@ -130,7 +132,7 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	// becomes half the window (docs/protocol/connect.md).
 	cfg.RequestTimeout = normalizeRequestTimeout(cfg.RequestTimeout, effectiveSessionTTL(cfg.SessionTimeout, info))
 	conn.SetRequestTimeout(cfg.RequestTimeout)
-	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}, secSpecs: map[uint16]records.SecSpec{}, history: map[historyKey]*historyCollector{}, orders: map[uint64]*model.Order{}}
+	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}, secSpecs: map[uint16]records.SecSpec{}, history: map[historyKey]*historyCollector{}, orders: map[uint64]*model.Order{}, secPositions: map[positionKey]model.SecPosition{}}
 	c.resetAccountsLocked()
 	if err := c.load(ctx, conn); err != nil {
 		conn.Close()
