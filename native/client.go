@@ -54,7 +54,7 @@ type Client struct {
 
 	mu         sync.Mutex
 	subs       map[model.Symbol]byte // stable board+seccode -> subscription mask
-	dedup      tradeDedup
+	dedup      records.TradeDedup
 	recovering bool // true while recover replaces the session
 	stats      Stats
 }
@@ -117,7 +117,6 @@ func (c *Client) load(ctx context.Context, conn *session.Conn) error {
 	catalog := records.NewCatalog(startup)
 	c.mu.Lock()
 	c.catalog = catalog
-	c.dedup.bind(catalog)
 	c.mu.Unlock()
 	if c.cfg.OnDictionaries != nil {
 		c.cfg.OnDictionaries(startup)
@@ -376,51 +375,18 @@ func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) 
 	}
 }
 
-// tradeDedup drops replays whose trade number is not above the last one seen
-// for the same security, as the DLL does ("old ALLTRADE No" in its log). The
-// key is the stable model.Symbol (board code + seccode), not the session-local
-// secid, so the replay a reconnected server sends for a trade already delivered
-// is dropped; records that cannot be resolved fall back to (secid, board).
-type tradeDedup struct {
-	catalog *records.Catalog
-	last    map[model.Symbol]int64
-	raw     map[[2]uint16]int64
-}
-
-// Fresh reports whether t is new and records it.
-func (d *tradeDedup) Fresh(t model.AllTrade) bool {
-	if d.last == nil {
-		d.last = map[model.Symbol]int64{}
-		d.raw = map[[2]uint16]int64{}
-	}
-	if key, ok := d.symbol(t); ok {
-		if last, seen := d.last[key]; seen && t.TradeNo <= last {
-			return false
-		}
-		d.last[key] = t.TradeNo
-		return true
-	}
-	key := [2]uint16{t.SecID, t.Board}
-	if last, seen := d.raw[key]; seen && t.TradeNo <= last {
-		return false
-	}
-	d.raw[key] = t.TradeNo
-	return true
-}
-
-// bind points the dedup at the catalog of the current session; the recorded
-// last trade numbers stay, which is what makes the cross-session dedup work.
-func (d *tradeDedup) bind(c *records.Catalog) { d.catalog = c }
-
-func (d *tradeDedup) symbol(t model.AllTrade) (model.Symbol, bool) {
-	if d.catalog == nil {
+// symbolOf resolves the stable symbol of a decoded record through the current
+// catalog; the decoder uses it for the cross-session trade dedup. It runs
+// under the client lock held by Poll.
+func (c *Client) symbolOf(t model.AllTrade) (model.Symbol, bool) {
+	if c.catalog == nil {
 		return model.Symbol{}, false
 	}
-	sec, ok := d.catalog.Security(t.SecID)
+	sec, ok := c.catalog.Security(t.SecID)
 	if !ok {
 		return model.Symbol{}, false
 	}
-	board, ok := d.catalog.Board(t.Board)
+	board, ok := c.catalog.Board(t.Board)
 	if !ok {
 		return model.Symbol{}, false
 	}

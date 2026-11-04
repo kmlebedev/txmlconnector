@@ -50,21 +50,42 @@ func ParseAllTrade(body []byte) (model.AllTrade, error) {
 }
 
 // TradeDedup drops trades whose number is not above the last one seen for
-// the same security and board, as the DLL does ("old ALLTRADE No" in its log).
-// It keeps replays after a reconnect out of the feed.
+// the same security, as the DLL does ("old ALLTRADE No" in its log). It keeps
+// replays after a reconnect out of the feed.
+//
+// The caller that knows the stable symbol (board code + seccode, which survives
+// a reconnect that changes the session-local secid) passes it to FreshSymbol;
+// Fresh is the fallback keyed by the raw (secid, board) pair for securities the
+// catalog does not know.
 type TradeDedup struct {
-	last map[[2]uint16]int64
+	last    map[model.Symbol]int64
+	lastRaw map[[2]uint16]int64
 }
 
-// Fresh reports whether t is new and records it.
-func (d *TradeDedup) Fresh(t model.AllTrade) bool {
+// FreshSymbol reports whether t is new for sym and records it. The symbol is
+// stable across sessions, so a trade replayed by the new session after a
+// reconnect (same trade number, new secid) is dropped.
+func (d *TradeDedup) FreshSymbol(t model.AllTrade, sym model.Symbol) bool {
 	if d.last == nil {
-		d.last = map[[2]uint16]int64{}
+		d.last = map[model.Symbol]int64{}
 	}
-	key := [2]uint16{t.SecID, t.Board}
-	if last, ok := d.last[key]; ok && t.TradeNo <= last {
+	if last, ok := d.last[sym]; ok && t.TradeNo <= last {
 		return false
 	}
-	d.last[key] = t.TradeNo
+	d.last[sym] = t.TradeNo
+	return true
+}
+
+// Fresh reports whether t is new, keyed by the session-local (secid, board)
+// pair. It is used when the security cannot be resolved to a stable symbol.
+func (d *TradeDedup) Fresh(t model.AllTrade) bool {
+	if d.lastRaw == nil {
+		d.lastRaw = map[[2]uint16]int64{}
+	}
+	key := [2]uint16{t.SecID, t.Board}
+	if last, ok := d.lastRaw[key]; ok && t.TradeNo <= last {
+		return false
+	}
+	d.lastRaw[key] = t.TradeNo
 	return true
 }
