@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -167,7 +168,7 @@ func TestConnectorOrders(t *testing.T) {
 	defer c.Close()
 	send(t, c, connectCommand())
 	rec.next(t, "<server_status")
-	srv.QueueMain(readOrderFixture(t, "order-new-inject.hex"))
+	srv.QueueMain(patchOrderClient(t, readOrderFixture(t, "order-new-inject.hex"), snapshotClientID(t)))
 	cmd := "<command id=" + quote + "neworder" + quote + "><secid>26</secid><client>TESTCLIEN</client>"
 	cmd += "<price>100</price><quantity>1</quantity><buysell>B</buysell><unfilled>PutInQueue</unfilled></command>"
 	if got := send(t, c, cmd); got != "<result success="+quote+"true"+quote+" transactionid="+quote+"1"+quote+"/>" {
@@ -186,5 +187,290 @@ func TestConnectorOrders(t *testing.T) {
 	}
 	if got := send(t, c, "<command id="+quote+"cancelorder"+quote+"/>"); !strings.Contains(got, "transactionid") {
 		t.Fatalf("cancelorder without id = %s", got)
+	}
+}
+
+// patchOrderClient rewrites the numeric client id of the R_ORD_NEW fixture
+// (body: L order_id, W secid, W board, G client_id, ...).
+func patchOrderClient(t *testing.T, payload []byte, clientID int64) []byte {
+	t.Helper()
+	recs, err := records.Records(payload)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("order fixture: %v", err)
+	}
+	body := recs[0].Body
+	if len(body) < 9 {
+		t.Fatalf("order body = %x", body)
+	}
+	// L order_id is one packed byte in the fixture (0x10); then W secid, W board.
+	prefix := body[:5]
+	var w wire.Writer
+	w.Int64(clientID)
+	patched := append([]byte(nil), prefix...)
+	patched = append(patched, w.Bytes()...)
+	patched = append(patched, body[8:]...)
+	record := make([]byte, 3+len(patched))
+	record[0] = records.TagOrderNew
+	record[1], record[2] = byte(len(patched)>>8), byte(len(patched))
+	copy(record[3:], patched)
+	return record
+}
+
+// snapshotClientID returns the numeric id of the client record in the load
+// snapshot used by clientSnapshot.
+func snapshotClientID(t *testing.T) int64 {
+	t.Helper()
+	recs, err := records.Records(snapshotTail(t))
+	if err != nil {
+		t.Fatalf("snapshot tail: %v", err)
+	}
+	for _, rec := range recs {
+		if rec.Tag != records.TagClientNew {
+			continue
+		}
+		cn, err := records.ParseClientNew(rec.Body)
+		if err != nil {
+			t.Fatalf("ParseClientNew: %v", err)
+		}
+		return cn.ID
+	}
+	t.Fatal("the snapshot tail has no R_CLN_NEW")
+	return 0
+}
+
+// TestNewOrderPriceScale is the P1 regression: the command <price>100</price>
+// (Decimal scale 0) must reach the payload as 10000 for the TQBR decimals.
+func TestNewOrderPriceScale(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = clientSnapshot(t)
+	var mu sync.Mutex
+	var captured []byte
+	srv.Handle(session.RqTransact, func(payload []byte) (byte, []byte) {
+		mu.Lock()
+		captured = append([]byte(nil), payload...)
+		mu.Unlock()
+		return wire.KindReply | wire.FlagPlain, mustHex(t, "00100010")
+	})
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	cmd := "<command id=" + quote + "neworder" + quote + "><secid>26</secid><client>TESTCLIEN</client>"
+	cmd += "<price>100</price><quantity>1</quantity><buysell>B</buysell><unfilled>PutInQueue</unfilled></command>"
+	if got := send(t, c, cmd); got != "<result success="+quote+"true"+quote+" transactionid="+quote+"1"+quote+"/>" {
+		t.Fatalf("neworder = %s", got)
+	}
+	mu.Lock()
+	payload := captured
+	mu.Unlock()
+	if payload == nil {
+		t.Fatal("no RQ_TRANSACT captured")
+	}
+	r := wire.NewReader(payload)
+	r.Byte()
+	r.Byte()
+	if _, err := r.Uint16(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Uint16(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Int64(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Byte(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Byte(); err != nil {
+		t.Fatal(err)
+	}
+	price, err := r.Int32()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if price != 10000 {
+		t.Fatalf("payload price = %d, want 10000 (Decimal scale normalized)", price)
+	}
+}
+
+// TestOrderForeignClientFiltered: an order of another numeric client is
+// dropped; the own order after it is still delivered.
+func TestOrderForeignClientFiltered(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = clientSnapshot(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, ClientConfig{Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: srv.Dial})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	clientID := snapshotClientID(t)
+	own := patchOrderClient(t, readOrderFixture(t, "order-new-inject.hex"), clientID)
+	foreign := patchOrderClient(t, readOrderFixture(t, "order-new-inject.hex"), clientID+12345)
+	orders := make(chan model.Order, 4)
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = c.Run(ctx, RunOptions{}, func(events []model.Event) error {
+			for _, ev := range events {
+				if order, ok := ev.(*model.Order); ok {
+					orders <- *order
+				}
+			}
+			return nil
+		})
+	}()
+	if err := c.SubscribeAllTrades(ctx, model.Symbol{Board: "TQBR", SecCode: "SBER"}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	srv.QueueMain(foreign)
+	srv.QueueMain(own)
+	select {
+	case order := <-orders:
+		if order.TransactionID != 1 || order.Client != "TESTCLIEN" {
+			t.Fatalf("foreign order leaked: %+v", order)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the own order was not delivered")
+	}
+	cancel()
+	<-runDone
+}
+
+// TestTransactionErrorMessages is the P2(4) check: DLL message without the Go
+// error prefix, unknown outcome as "Unknown error".
+func TestTransactionErrorMessages(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload []byte
+		want    string
+	}{
+		{"rsm", []byte{1}, "<result success=" + quote + "false" + quote + "><message>Клиент не допущен к торгам.</message></result>"},
+		{"empty", nil, "<result success=" + quote + "false" + quote + "><message>Unknown error</message></result>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newRunServer(t)
+			srv.Snapshot = clientSnapshot(t)
+			srv.Handle(session.RqTransact, func([]byte) (byte, []byte) {
+				return wire.KindReply | wire.FlagPlain, tc.payload
+			})
+			c := New(Config{Dial: srv.Dial})
+			rec := newRecorder()
+			if err := c.Start(rec.handle); err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			send(t, c, connectCommand())
+			rec.next(t, "<server_status")
+			cmd := "<command id=" + quote + "neworder" + quote + "><secid>26</secid><client>TESTCLIEN</client>"
+			cmd += "<price>100</price><quantity>1</quantity><buysell>B</buysell><unfilled>PutInQueue</unfilled></command>"
+			if got := send(t, c, cmd); got != tc.want {
+				t.Fatalf("result = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNewOrderRejectsUnsupportedFlags: flags without an oracle payload mapping
+// are rejected explicitly instead of silently becoming PutInQueue bytes.
+func TestNewOrderRejectsUnsupportedFlags(t *testing.T) {
+	c := &Client{}
+	_, err := c.NewOrder(context.Background(), model.NewOrder{Symbol: model.Symbol{Board: "TQBR", SecCode: "SBER"}, BuySell: 'B', Unfilled: "FOK"})
+	if err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("err = %v, want the explicit unsupported-flag error", err)
+	}
+}
+
+func mustHex(t *testing.T, s string) []byte {
+	t.Helper()
+	payload, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
+// patchOrderModifyClient rewrites the client id of the first 0x03 record inside
+// the order-modify batch (0x03+0x10) and keeps the modification record.
+func patchOrderModifyClient(t *testing.T, payload []byte, clientID int64) []byte {
+	t.Helper()
+	recs, err := records.Records(payload)
+	if err != nil || len(recs) != 2 {
+		t.Fatalf("order-modify fixture: %v", err)
+	}
+	var out []byte
+	for i, rec := range recs {
+		body := rec.Body
+		if i == 0 {
+			prefix := body[:5]
+			var w wire.Writer
+			w.Int64(clientID)
+			patched := append([]byte(nil), prefix...)
+			patched = append(patched, w.Bytes()...)
+			patched = append(patched, body[8:]...)
+			body = patched
+		}
+		out = append(out, rec.Tag, byte(len(body)>>8), byte(len(body)))
+		out = append(out, body...)
+	}
+	return out
+}
+
+// TestOrderModifyBatchOneCallback is the P2(2) regression: 0x03+0x10 in one
+// RQ_MAIN reply render as ONE final <orders> callback (no intermediate watching).
+func TestOrderModifyBatchOneCallback(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = clientSnapshot(t)
+	srv.Handle(session.RqTransact, func([]byte) (byte, []byte) {
+		return wire.KindReply | wire.FlagPlain, mustHex(t, "00100010")
+	})
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	srv.QueueMain(patchOrderModifyClient(t, readOrderFixture(t, "order-modify-inject.hex"), snapshotClientID(t)))
+	msg := rec.next(t, "<orders")
+	if !strings.Contains(msg, "<status>disabled</status>") || !strings.Contains(msg, "{37} Заявка отменена") {
+		t.Fatalf("batch callback = %s, want the final disabled order", msg)
+	}
+	time.Sleep(200 * time.Millisecond)
+	rec.mu.Lock()
+	count := 0
+	for _, m := range rec.msgs {
+		if strings.HasPrefix(m, "<orders") {
+			count++
+		}
+	}
+	rec.mu.Unlock()
+	if count != 1 {
+		t.Fatalf("<orders> callbacks = %d, want exactly 1", count)
+	}
+}
+
+// TestLoadOrdersEmitted: orders decoded while the snapshot loads are emitted at
+// the end of the load (their events are dropped by the load path).
+func TestLoadOrdersEmitted(t *testing.T) {
+	srv := newRunServer(t)
+	order := patchOrderClient(t, readOrderFixture(t, "order-new-inject.hex"), snapshotClientID(t))
+	srv.Snapshot = append(clientSnapshot(t), order...)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	msg := rec.next(t, "<orders")
+	if !strings.Contains(msg, "<status>watching</status>") {
+		t.Fatalf("load order callback = %s", msg)
 	}
 }

@@ -393,6 +393,10 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			Unfilled  string `xml:"unfilled"`
 			Hidden    int64  `xml:"hidden"`
 			BrokerRef string `xml:"brokerref"`
+			ByMarket  string `xml:"bymarket"`
+			UseCredit string `xml:"usecredit"`
+			NoSplit   string `xml:"nosplit"`
+			ExpDate   string `xml:"expdate"`
 		}
 		if err := xml.Unmarshal([]byte(command), &req); err != nil {
 			return failure(err.Error()), nil
@@ -431,10 +435,13 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			Client: req.Client, Union: req.Union, Symbol: symbol, Price: price,
 			Hidden: req.Hidden, Quantity: req.Quantity, BuySell: buySell,
 			Unfilled: req.Unfilled, BrokerRef: req.BrokerRef,
+			ByMarket:  strings.EqualFold(req.ByMarket, "true"),
+			UseCredit: strings.EqualFold(req.UseCredit, "true"),
+			NoSplit:   strings.EqualFold(req.NoSplit, "true"),
 		}
 		id, err := client.NewOrder(ctx, order)
 		if err != nil {
-			return failure(err.Error()), nil
+			return transactionFailure(err), nil
 		}
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(id), 10) + "\"/>", nil
 	case "cancelorder":
@@ -454,7 +461,7 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure("You have to specify transactionid."), nil
 		}
 		if err := client.CancelOrder(ctx, model.TransactionID(req.TransactionID)); err != nil {
-			return failure(err.Error()), nil
+			return transactionFailure(err), nil
 		}
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(req.TransactionID, 10) + "\"/>", nil
 	case "cancelstoporder":
@@ -474,7 +481,7 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure("You have to specify transactionid."), nil
 		}
 		if err := client.CancelStopOrder(ctx, model.TransactionID(req.TransactionID)); err != nil {
-			return failure(err.Error()), nil
+			return transactionFailure(err), nil
 		}
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(req.TransactionID, 10) + "\"/>", nil
 	case "get_client_limits":
@@ -641,6 +648,10 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 	reportedDown := false
 	err = client.Run(ctx, RunOptions{RqDelay: delay}, func(events []model.Event) error {
 		var trades []model.Trade
+		// Several order records of one RQ_MAIN batch (e.g. 0x03+0x10) render as
+		// ONE final <orders> callback (O): keep the last state per id.
+		orders := make(map[uint64]model.Order)
+		var orderOrder []uint64
 		for _, ev := range events {
 			switch e := ev.(type) {
 			case *model.Trade:
@@ -660,7 +671,10 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 			case *model.Quotes:
 				c.emit(xmlcompat.QuotesXML(*e))
 			case *model.Order:
-				c.emit(xmlcompat.OrdersXML([]model.Order{*e}))
+				if _, seen := orders[e.TransactionID]; !seen {
+					orderOrder = append(orderOrder, e.TransactionID)
+				}
+				orders[e.TransactionID] = *e
 			case *model.StopOrder:
 				c.emit(xmlcompat.StopOrdersXML([]model.StopOrder{*e}))
 			case *model.ClientTrade:
@@ -685,6 +699,9 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				Milliseconds: c.withMillis,
 				UTCTime:      c.withUTC,
 			}))
+		}
+		for _, id := range orderOrder {
+			c.emit(xmlcompat.OrdersXML([]model.Order{orders[id]}))
 		}
 		if secs := client.Catalog().DrainPending(); len(secs) > 0 {
 			st := client.Catalog().Startup()
@@ -775,6 +792,12 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 	}
 	if positions := client.MoneyPositions(); len(positions) > 0 {
 		c.emit(xmlcompat.PositionsXML(positions, req.MicexRegisters))
+	}
+	// Orders decoded during the load are not in the Run event stream: the DLL
+	// reports them at the end of the load, so emit them here (I for the exact
+	// place relative to <positions>).
+	for _, order := range client.Orders() {
+		c.emit(xmlcompat.OrdersXML([]model.Order{order}))
 	}
 	// A non-empty union is not in the live capture (the demo union is empty):
 	// the DLL position is inferred, so the callbacks go right after
@@ -1001,6 +1024,21 @@ func connectErrorXML(err error) string {
 }
 
 func success() string { return `<result success="true"/>` }
+
+// transactionFailure renders the <result> of a failed RQ_TRANSACT like the DLL:
+// a known RSM rejection carries only its message, an unknown/empty outcome is
+// "Unknown error" (orders.md, transact-*-dll.xml).
+func transactionFailure(err error) string {
+	var tx *session.TransactionError
+	if errors.As(err, &tx) {
+		return failure(tx.Message)
+	}
+	var outcome *session.OutcomeError
+	if errors.As(err, &outcome) {
+		return failure("Unknown error")
+	}
+	return failure(err.Error())
+}
 
 func failure(message string) string {
 	return `<result success="false"><message>` + escapeText(message) + `</message></result>`

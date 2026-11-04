@@ -17,8 +17,9 @@ const (
 // OrderNew is one decoded R_ORD_NEW body plus the wire board number the catalog
 // needs for the board code.
 type OrderNew struct {
-	Order   model.Order
-	BoardID uint16
+	Order    model.Order
+	BoardID  uint16
+	ClientID int64 // numeric client id: the DLL drops orders of other clients (O)
 }
 
 // ParseOrderNew decodes one 0x03 body. The wire fields are the oracle-confirmed
@@ -45,7 +46,7 @@ func ParseOrderNew(body []byte) (OrderNew, error) {
 		return out, fmt.Errorf("R_ORD_NEW board: %w", err)
 	}
 	out.BoardID = boardID
-	if _, err := r.Int64(); err != nil { // numeric client id (filter, not rendered)
+	if out.ClientID, err = r.Int64(); err != nil {
 		return out, fmt.Errorf("R_ORD_NEW client id: %w", err)
 	}
 	if o.BuySell, err = r.Byte(); err != nil {
@@ -158,9 +159,9 @@ func orderStatusResult(status int) string {
 }
 
 // ParseOrderModify decodes one 0x10 body: L order id, BE32 mask, then the fields
-// selected by the mask (D/O). Only the status branch (mask&1) is proven live;
-// the other branches are consumed from their D types so the record stays
-// aligned, without changing the render (I).
+// selected by the mask (D). Only the status branch is proven live; the other
+// branches are applied by the D order (price/quantity/balance/... are I) so a
+// valid update never aborts the poll.
 func ParseOrderModify(body []byte) (OrderModify, error) {
 	var out OrderModify
 	r := wire.NewReader(body)
@@ -173,53 +174,103 @@ func ParseOrderModify(body []byte) (OrderModify, error) {
 		return out, fmt.Errorf("R_ORD_MODIFY mask: %w", err)
 	}
 	mask := uint32(maskBytes[0])<<24 | uint32(maskBytes[1])<<16 | uint32(maskBytes[2])<<8 | uint32(maskBytes[3])
+	if mask&^uint32(0x7ff) != 0 {
+		return out, fmt.Errorf("R_ORD_MODIFY: unknown mask bits %#x (I)", mask&^uint32(0x7ff))
+	}
 	out.TransactionID = uint64(uint32(id))
 	out.Apply = func(*model.Order) {}
+	apply := func(fn func(*model.Order)) {
+		prev := out.Apply
+		out.Apply = func(o *model.Order) { prev(o); fn(o) }
+	}
 	if mask&1 != 0 {
 		status, err := r.Byte()
 		if err != nil {
 			return out, fmt.Errorf("R_ORD_MODIFY status: %w", err)
 		}
-		out.Apply = func(o *model.Order) {
+		apply(func(o *model.Order) {
 			o.Status = int(status)
 			o.Result = orderStatusResult(int(status))
-		}
+		})
 	}
-	skip := func(bit uint32, read func() error) error {
-		if mask&bit == 0 {
-			return nil
+	if mask&2 != 0 {
+		value, err := r.Int64()
+		if err != nil {
+			return out, fmt.Errorf("R_ORD_MODIFY mask 0x2: %w", err)
 		}
-		if err := read(); err != nil {
-			return fmt.Errorf("R_ORD_MODIFY mask %#x: %w", bit, err)
-		}
-		return nil
+		apply(func(o *model.Order) { o.OrderNo = uint64(value) })
 	}
-	_ = skip
-	readers := []struct {
-		bit  uint32
-		read func() error
-	}{
-		{2, func() error { _, err := r.Int64(); return err }},
-		{4, func() error { _, err := r.Int32(); return err }},
-		{8, func() error { _, err := r.Int32(); return err }},
-		{0x10, func() error { _, err := r.Int32(); return err }},
-		{0x20, func() error { _, err := r.Int32(); return err }},
-		{0x40, func() error { _, err := r.String(12); return err }},
-		{0x80, func() error { _, err := r.Int32(); return err }},
-		{0x100, func() error { _, err := r.Int32(); return err }},
-		{0x200, func() error { _, err := r.Int32(); return err }},
-	}
-	for _, rd := range readers {
-		if mask&rd.bit == 0 {
-			continue
+	if mask&4 != 0 {
+		value, err := r.Int32()
+		if err != nil {
+			return out, fmt.Errorf("R_ORD_MODIFY mask 0x4: %w", err)
 		}
-		if err := rd.read(); err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY mask %#x: %w", rd.bit, err)
+		apply(func(o *model.Order) { o.Price = model.Decimal{Units: int64(value), Scale: 2} })
+	}
+	if mask&8 != 0 {
+		value, err := r.Int32()
+		if err != nil {
+			return out, fmt.Errorf("R_ORD_MODIFY mask 0x8: %w", err)
+		}
+		apply(func(o *model.Order) { o.Quantity = int64(value) })
+	}
+	if mask&0x10 != 0 {
+		value, err := r.Int32()
+		if err != nil {
+			return out, fmt.Errorf("R_ORD_MODIFY mask 0x10: %w", err)
+		}
+		apply(func(o *model.Order) { o.Balance = int64(value) })
+	}
+	if mask&0x20 != 0 {
+		value, err := r.Int32()
+		if err != nil {
+			return out, fmt.Errorf("R_ORD_MODIFY mask 0x20: %w", err)
+		}
+		apply(func(o *model.Order) { o.ConditionValue = model.Decimal{Units: int64(value), Scale: 2} })
+	}
+	if mask&0x40 != 0 {
+		value, err := r.String(12)
+		if err != nil {
+			return out, fmt.Errorf("R_ORD_MODIFY mask 0x40: %w", err)
+		}
+		apply(func(o *model.Order) { o.BrokerRef = value })
+	}
+	if mask&0x80 != 0 {
+		value, err := r.Int32()
+		if err != nil {
+			return out, fmt.Errorf("R_ORD_MODIFY mask 0x80: %w", err)
+		}
+		apply(func(o *model.Order) { o.ValidAfter = value })
+	}
+	if mask&0x100 != 0 {
+		value, err := r.Int32()
+		if err != nil {
+			return out, fmt.Errorf("R_ORD_MODIFY mask 0x100: %w", err)
+		}
+		apply(func(o *model.Order) { o.ValidBefore = value })
+	}
+	if mask&0x200 != 0 {
+		if _, err := r.Int32(); err != nil { // maxcomission, not rendered yet (I)
+			return out, fmt.Errorf("R_ORD_MODIFY mask 0x200: %w", err)
 		}
 	}
 	if mask&0x400 != 0 {
-		// Status-dependent special block (D): not recovered (I), fail clearly.
-		return out, fmt.Errorf("R_ORD_MODIFY: special block mask 0x400 is not recovered (I)")
+		// Status-dependent special block (D): a B flag and, when set, a Z512
+		// string. It is a valid record, not an error; the content is I.
+		flag, err := r.Byte()
+		if err != nil {
+			return out, fmt.Errorf("R_ORD_MODIFY mask 0x400: %w", err)
+		}
+		if flag != 0 {
+			if _, err := r.String(512); err != nil {
+				return out, fmt.Errorf("R_ORD_MODIFY mask 0x400 text: %w", err)
+			}
+		}
+	}
+	if r.Len() > 0 {
+		if _, err := r.Raw(r.Len()); err != nil {
+			return out, fmt.Errorf("R_ORD_MODIFY tail: %w", err)
+		}
 	}
 	return out, nil
 }

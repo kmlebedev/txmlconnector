@@ -8,6 +8,7 @@ import (
 	"github.com/kmlebedev/txmlconnector/native/internal/oracle"
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
+	"github.com/kmlebedev/txmlconnector/native/wire"
 	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
 )
 
@@ -86,5 +87,45 @@ func TestOrdersMatchDLL(t *testing.T) {
 	want = strings.TrimSpace(string(loadPlainText(t, "order-modify-dll.xml")))
 	if got != want {
 		t.Fatalf("modified order\n got %s\nwant %s", got, want)
+	}
+}
+
+// TestOrderModifyMaskFields applies the mask branches to a stored order (I for
+// the field mapping, status is O) and never aborts the poll.
+func TestOrderModifyMaskFields(t *testing.T) {
+	var w wire.Writer
+	w.Int32(1) // order id
+	mask := uint32(1 | 4 | 8 | 0x10 | 0x40 | 0x400)
+	w.Raw([]byte{byte(mask >> 24), byte(mask >> 16), byte(mask >> 8), byte(mask)})
+	w.Byte(2)      // status
+	w.Int32(12345) // price
+	w.Int32(7)     // quantity
+	w.Int32(9)     // balance
+	w.String("REF", 12)
+	w.Byte(0) // special block flag
+	mod, err := records.ParseOrderModify(w.Bytes())
+	if err != nil {
+		t.Fatalf("ParseOrderModify: %v", err)
+	}
+	order := model.Order{TransactionID: 1}
+	mod.Apply(&order)
+	if order.Status != 2 || order.Price.Units != 12345 || order.Quantity != 7 || order.Balance != 9 || order.BrokerRef != "REF" {
+		t.Fatalf("applied order = %+v", order)
+	}
+}
+
+// TestOrderParseShortBodies is the negative path.
+func TestOrderParseShortBodies(t *testing.T) {
+	if _, err := records.ParseOrderNew(nil); err == nil {
+		t.Fatal("ParseOrderNew(nil) did not fail")
+	}
+	if _, err := records.ParseOrderNew([]byte{0x10}); err == nil {
+		t.Fatal("ParseOrderNew(short) did not fail")
+	}
+	if _, err := records.ParseOrderModify(nil); err == nil {
+		t.Fatal("ParseOrderModify(nil) did not fail")
+	}
+	if _, err := records.ParseOrderModify([]byte{0x10, 0x00, 0x00}); err == nil {
+		t.Fatal("ParseOrderModify(short mask) did not fail")
 	}
 }
