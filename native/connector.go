@@ -354,6 +354,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.UnionXML(*e))
 			case *model.SecInfoUpdate:
 				c.emit(xmlcompat.SecInfoUpdateXML(*e))
+			case *model.Quotation:
+				c.emit(xmlcompat.QuotationXML(*e))
 			case model.ServerStatus:
 				switch {
 				case e.Recover:
@@ -476,45 +478,68 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 // subscribe handles <alltrades> of subscribe/unsubscribe, in either the
 // secid or the board+seccode form. Quotations and quotes are not implemented.
 func (c *Connector) subscribe(ctx context.Context, command string, on bool) (string, error) {
+	type feed struct {
+		SecIDs     []int `xml:"secid"`
+		Securities []struct {
+			Board   string `xml:"board"`
+			SecCode string `xml:"seccode"`
+		} `xml:"security"`
+	}
 	var req struct {
-		AllTrades struct {
-			SecIDs     []int `xml:"secid"`
-			Securities []struct {
-				Board   string `xml:"board"`
-				SecCode string `xml:"seccode"`
-			} `xml:"security"`
-		} `xml:"alltrades"`
-		Quotations *struct{} `xml:"quotations"`
-		Quotes     *struct{} `xml:"quotes"`
+		AllTrades  feed  `xml:"alltrades"`
+		Quotations *feed `xml:"quotations"`
+		Quotes     *feed `xml:"quotes"`
 	}
 	if err := xml.Unmarshal([]byte(command), &req); err != nil {
 		return failure(err.Error()), nil
 	}
-	if req.Quotations != nil || req.Quotes != nil {
+	if req.Quotes != nil {
 		return failure(msgNotImplemented), nil
 	}
 	c.mu.Lock()
 	client := c.client
 	c.mu.Unlock()
-	var symbols []model.Symbol
-	for _, s := range req.AllTrades.Securities {
-		symbols = append(symbols, model.Symbol{Board: s.Board, SecCode: s.SecCode})
-	}
-	for _, id := range req.AllTrades.SecIDs {
-		sec, ok := client.Catalog().Security(uint16(id))
-		p, hasPit := sec.DefaultPit()
-		board, hasBoard := client.Catalog().Board(p.Board)
-		if !ok || !hasPit || !hasBoard {
-			return failure(fmt.Sprintf("unknown secid %d", id)), nil
+	resolve := func(f feed) ([]model.Symbol, error) {
+		var symbols []model.Symbol
+		for _, s := range f.Securities {
+			symbols = append(symbols, model.Symbol{Board: s.Board, SecCode: s.SecCode})
 		}
-		symbols = append(symbols, model.Symbol{Board: board.Code, SecCode: sec.SecCode})
+		for _, id := range f.SecIDs {
+			sec, ok := client.Catalog().Security(uint16(id))
+			p, hasPit := sec.DefaultPit()
+			board, hasBoard := client.Catalog().Board(p.Board)
+			if !ok || !hasPit || !hasBoard {
+				return nil, fmt.Errorf("unknown secid %d", id)
+			}
+			symbols = append(symbols, model.Symbol{Board: board.Code, SecCode: sec.SecCode})
+		}
+		return symbols, nil
 	}
-	update := client.SubscribeAllTrades
-	if !on {
-		update = client.UnsubscribeAllTrades
-	}
-	if err := update(ctx, symbols...); err != nil {
+	var sub Subscription
+	symbols, err := resolve(req.AllTrades)
+	if err != nil {
 		return failure(err.Error()), nil
+	}
+	sub.AllTrades = symbols
+	if req.Quotations != nil {
+		// The DLL accepts only the first <quotations> element of one command (S).
+		quotations, err := resolve(*req.Quotations)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		if len(quotations) > 1 {
+			quotations = quotations[:1]
+		}
+		sub.Quotations = quotations
+	}
+	var runErr error
+	if on {
+		runErr = client.Subscribe(ctx, sub)
+	} else {
+		runErr = client.Unsubscribe(ctx, sub)
+	}
+	if runErr != nil {
+		return failure(runErr.Error()), nil
 	}
 	return success(), nil
 }

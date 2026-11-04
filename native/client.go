@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"sort"
 	"sync"
 	"time"
 
@@ -232,71 +231,15 @@ func (c *Client) Stats() Stats {
 	return c.stats
 }
 
-// SubscribeAllTrades adds symbols to the <alltrades> feed.
+// SubscribeAllTrades adds symbols to the <alltrades> feed (a wrapper over
+// Subscribe with only the AllTrades part set).
 func (c *Client) SubscribeAllTrades(ctx context.Context, symbols ...model.Symbol) error {
-	return c.update(ctx, symbols, session.SubAllTrades, true)
+	return c.Subscribe(ctx, Subscription{AllTrades: symbols})
 }
 
 // UnsubscribeAllTrades removes symbols from the <alltrades> feed.
 func (c *Client) UnsubscribeAllTrades(ctx context.Context, symbols ...model.Symbol) error {
-	return c.update(ctx, symbols, session.SubAllTrades, false)
-}
-
-// update sends the full new mask of every touched security, as the DLL does.
-// Subscriptions are kept per stable model.Symbol, so they survive a reconnect
-// that changes the session-local secids; the ids are resolved on every send.
-func (c *Client) update(ctx context.Context, symbols []model.Symbol, bit byte, on bool) error {
-	c.mu.Lock()
-	next := make(map[model.Symbol]byte, len(symbols))
-	for _, s := range symbols {
-		mask := c.subs[s]
-		if m, ok := next[s]; ok {
-			mask = m
-		}
-		if on {
-			mask |= bit
-		} else {
-			mask &^= bit
-		}
-		next[s] = mask
-	}
-	if c.recovering {
-		c.mu.Unlock()
-		return errors.New("transaq: connection is being recovered")
-	}
-	conn := c.conn
-	catalog := c.catalog
-	c.mu.Unlock()
-	if conn == nil || catalog == nil {
-		return errors.New("transaq: client is not connected")
-	}
-	items := make([]session.SubscribeItem, 0, len(next))
-	for s, mask := range next {
-		sec, board, ok := catalog.Lookup(s.Board, s.SecCode)
-		if !ok {
-			return fmt.Errorf("unknown security %s", s)
-		}
-		items = append(items, session.SubscribeItem{SecID: sec.SecID, Board: board.Num, Mask: mask})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].SecID != items[j].SecID {
-			return items[i].SecID < items[j].SecID
-		}
-		return items[i].Board < items[j].Board
-	})
-	if err := conn.Subscribe(ctx, items); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	for s, mask := range next {
-		if mask == 0 {
-			delete(c.subs, s)
-		} else {
-			c.subs[s] = mask
-		}
-	}
-	c.mu.Unlock()
-	return nil
+	return c.Unsubscribe(ctx, Subscription{AllTrades: symbols})
 }
 
 // Poll sends one RQ_MAIN and returns the events of that reply in wire order;

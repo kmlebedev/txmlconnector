@@ -39,6 +39,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return UnionXML(*e), true
 	case *model.SecInfoUpdate:
 		return SecInfoUpdateXML(*e), true
+	case *model.Quotation:
+		return QuotationXML(*e), true
 	}
 	return "", false
 }
@@ -194,4 +196,68 @@ func moneyHundredths(d model.Decimal) string {
 		return "-" + text
 	}
 	return text
+}
+
+// QuotationXML renders one <quotations> callback (FUN_1800f7b40): identity and
+// the changed fields in the DLL's fixed order. point_cost comes first, followed
+// by a separating space exactly as the DLL prints it, and only present fields
+// are emitted.
+func QuotationXML(q model.Quotation) string {
+	var b strings.Builder
+	b.WriteString("<quotations><quotation secid=" + quoteAttr(strconv.Itoa(int(q.SecID))) + ">")
+	b.WriteString("<board>" + escape(q.Board) + "</board>")
+	b.WriteString("<seccode>" + escape(q.Symbol.SecCode) + "</seccode>")
+	f := q.Fields
+	// The DLL prints point_cost only in the callbacks that carry the trading
+	// status (the full updates); partial updates like a bid change omit it
+	// (S: the 16 r9 callbacks, rule inferred as I).
+	if f.PointCost != nil && (f.Status != nil || f.TradingStatus != nil) {
+		b.WriteString("<point_cost>" + f.PointCost.String() + "</point_cost> ")
+	}
+	stringField := func(name string, v *string) {
+		if v != nil {
+			b.WriteString("<" + name + ">" + escape(*v) + "</" + name + ">")
+		}
+	}
+	intField := func(name string, v *int64) {
+		if v != nil {
+			b.WriteString("<" + name + ">" + strconv.FormatInt(*v, 10) + "</" + name + ">")
+		}
+	}
+	decField := func(name string, v *model.Decimal) {
+		if v != nil {
+			b.WriteString("<" + name + ">" + v.String() + "</" + name + ">")
+		}
+	}
+	stringField("status", f.Status)
+	stringField("tradingstatus", f.TradingStatus)
+	decField("last", f.Last)
+	intField("quantity", f.Quantity)
+	stringField("time", f.Time)
+	decField("change", f.Change)
+	decField("priceminusprevwaprice", f.PriceMinusPrevWaPrice)
+	intField("openpositions", f.OpenPositions)
+	decField("bid", f.Bid)
+	intField("biddepth", f.BidDepth)
+	intField("biddeptht", f.BidDepthT)
+	intField("numbids", f.NumBids)
+	decField("offer", f.Offer)
+	intField("offerdepth", f.OfferDepth)
+	intField("offerdeptht", f.OfferDepthT)
+	intField("numoffers", f.NumOffers)
+	decField("open", f.Open)
+	decField("high", f.High)
+	decField("low", f.Low)
+	decField("highbid", f.HighBid)
+	decField("lowoffer", f.LowOffer)
+	intField("voltoday", f.VolToday)
+	intField("numtrades", f.NumTrades)
+	decField("valtoday", f.ValToday)
+	decField("waprice", f.WaPrice)
+	decField("closeprice", f.ClosePrice)
+	decField("lcurrentprice", f.LCurrentPrice)
+	decField("buydeposit", f.BuyDeposit)
+	decField("selldeposit", f.SellDeposit)
+	b.WriteString("</quotation></quotations>")
+	return b.String()
 }
