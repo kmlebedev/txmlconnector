@@ -93,3 +93,18 @@ input-фикстуры (reply/hex) пока не применимы: commands lo
   `get_portfolio_mct` (формат client), `<portfolio_tplus>`/`<portfolio_forts>`/`<united_portfolio>`
   (в этом прогоне не отдались; в первом probe были `<portfolio_tplus>`×2 и `<united_portfolio>`).EOF
 echo ok
+
+## Статус (итог ночной RE-сессии)
+
+- **local render (S/O):** команды get_portfolio / get_united_portfolio / get_mc_portfolio
+  отвечают success и рендерят XML локально из сторов (в C>S нет кадров 86/84/85/82) — подтверждено
+  оракулом на записанной сессии; <portfolio_currency> и <mc_portfolio> формы сняты и лежат в
+  фикстурах portfolio-currency-dll.xml, portfolio-mc-dll.xml (обезличены).
+- **D:** имена/строки обменников и preliminary-форматы 86/84/85/82 (FUN_180383d30/FUN_180382940/
+  FUN_180383100; RQ_GET_RPSREPO — адрес требует уточнения).
+- **I (не восстановлено):** формулы equity/cover/init_req/maint_req/unrealized_pnl; формат параметра
+  client для get_portfolio_mct (сейчас «{8} Неверное значение szClient»); <portfolio_tplus>,
+  <portfolio_forts>, <united_portfolio>; RQ_FORTS_FIRM_MONEY (47) layout.
+- **Утро (S):** команды неторговые — портфели снимаются в S-серии после тиков/лимитов по
+  docs/deepseek/re-session-checklist.md; input-фикстуры RE не снимает (go-engineer синтезирует
+  0x02/0x3b через testserver и сверяет с нашими XML-фикстурами).
