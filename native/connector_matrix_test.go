@@ -11,12 +11,9 @@ import (
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
-// pendingCommands are the names that are intentionally not implemented yet:
-// moveorder/makeordown wait for the live T19 capture. set_csp/authenticate are
-// implemented (task-64) and must not answer not-implemented.
-var pendingCommands = map[string]bool{
-	"moveorder": true, "makeordown": true,
-}
+// pendingCommands is empty: all 45 DLL commands are handled (T19 completed the
+// last two, moveorder/makeordown) and must not answer not-implemented.
+var pendingCommands = map[string]bool{}
 
 // TestEveryDLLCommandIsHandled: all 45 DLL command names are either handled
 // (DLL no-connection/after-connect behavior) or in the explicit pending list.

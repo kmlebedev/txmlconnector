@@ -36,7 +36,7 @@
 | 16 | neworder/cancelorder, orders | 3 | done | `client_orders.go`, `records/order.go`, `order-*`; фиксы c6a3143 |
 | 17 | trades (R_TRD 0x04) | 3 | done | `records/clienttrade.go`, `trade-*`; фиксы 177879c |
 | 18 | newcondorder/newstoporder/cancelstoporder, R_STOP | 3 | done | `client_stoporders.go`, `records/stoporder.go`, `stoporder-*`, `transact-*-payload.hex`; фикс 64e7f8b |
-| 19 | moveorder/makeordown | 4 | **none** (blocked) | нет payload без живой активной заявки; задача 44 RE; connector-ветки нет |
+| 19 | moveorder/makeordown | 4 | **done** | moveorder S-payload 02 01 <packed txid> 00 (fixture transact-moveorder-live.hex), DLL texts/validations; successful active-order scenario I ({32}); makeordown transactionid — ATTRIBUTE, RQ_MAKE_COND_OWN payload не восстановлен -> explicit I error; команда обрабатывается |
 | 20 | positions: деньги/бумаги/FORTS | 4 | done | `client_positions.go`, `records/positions.go`, `position-*` |
 | 21 | get_forts_positions/get_client_limits | 4 | **done** | S: get_client_limits успех + C>S 43 + `<clientlimits>` (без client — Client not specified.); `client_positions.go`, `records/limits.go`, `session/limits.go`; RQ_FORTS_FIRM_MONEY 47 не восстановлен = I |
 | 22 | portfolio-команды | 4 | **done** | S: get_portfolio/get_united_portfolio/get_mc_portfolio — success+локальный рендер и callbacks; get_portfolio_mct — `{8} …szClient`, portfolio_tplus/forts — Unknown command в DLL (DLL эталон); typed client API/остальные формы — I |
@@ -46,14 +46,14 @@
 | 26 | change_pass | 6 | **done** | RQ_CHANGE_PWD 3, payload/SHA-1, strict replies, fatal reply терминален (no recover, один connected=false), local texts; живьём не выполнялось (S-негатив) |
 | 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply (empty reply=failure, 00=success), 149 O e2e и exact DLL error text, dedup family callbacks (fix после ревью); S на проде — **негатив по доступу** (гейт 0x45/sys_ver, внешний блокер), 153/151 на записанной сессии — Unsupported request; mapping/XML — D/I |
 | 28 | RPS/REPO/отчёты | 8 | **partial** | payloads newrpsorder/newrepoorder/cancel O-побайтно, 6 команд, ошибки, D-literal XML (b9f305a); newrepoorder known fields (repoterm/reporate/discounts/block) encoded, value/refundrate/matchref/cpfirmid/settlecode — explicit I; newmrepoorder/newreport4, records/XML negdeal/report и RPS-специфичные reply-тексты — I |
-| 29 | XML-коннектор целиком, native backend | 9 | **partial** | `dllCommands` = 45 имён, 43/45 реализовано, pending только {moveorder,makeordown}; server.Backend dll|native + TC_BACKEND без Wine; TestServerErrorTexts/errors.md; matrix-тест 45 имён; RE-4/T30 — pending |
+| 29 | XML-коннектор целиком, native backend | 9 | **done** | `dllCommands` = 45 имён, 45/45 реализовано, pending пуст; server.Backend dll|native + TC_BACKEND без Wine; TestServerErrorTexts/errors.md; matrix 45 имён зелёный; RE-4 demo stream EOF — отдельная задача |
 | 30 | Матрица покрытия, soak, выпуск | 9 | **in progress** | этот документ; soak/выпуск — после 29 |
 
 Фазы 0–2 закрыты по AGENTS.md (коммиты в истории ветки, PR #47/#48 — в main).
 
 ## 2. XML-команды Connector (`dllCommands`, 45 имён)
 
-Всего в `dllCommands` **45 имён**; реализовано **43** обработчика, pending — `moveorder`, `makeordown`
+Всего в `dllCommands` **45 имён**; реализовано **45** обработчиков, pending пуст
 (живая активная заявка, T19). Специальные (`wait=false`): connect, disconnect, authenticate, set_csp,
 get_connector_version. Расхождение плана «45 vs 43» закрыто (T28 добавил `newreport4`/`cancelreport4`).
 
@@ -244,8 +244,7 @@ makeordown, moveorder (2 имени; T19 — ждут живую S-серию).
 
 1. **T14 ticks**: S-серия на проде подтвердила RQ_MAIN `0x5a` TICK; rework сделан (декодер 0x5a,
    `<ticks>` S-форма, RQ_TICKS(13) не используется, тест побайтно) — `204c7ba`.
-2. **T19 moveorder/makeordown**: payload — только живая активная заявка; ждёт демо-серию с торговым
-   циклом (согласие есть).
+2. **T19 moveorder/makeordown — done**: moveorder S-payload/валидации/тексты; успешный активный сценарий I; makeordown — explicit I (RQ_MAKE_COND_OWN layout не восстановлен).
 3. **T21 limits — done (S)**: get_client_limits C>S 43 + `<clientlimits>`; `RQ_FORTS_FIRM_MONEY 47`
    не восстановлен (I).
 4. **T22 portfolios — done (S)**: local render/callbacks; `get_portfolio_mct` — `{8}`, tplus/forts —

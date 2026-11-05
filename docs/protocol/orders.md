@@ -443,3 +443,19 @@ echo ok
   сценарий (успешный move активной заявки) и makeordown остаются **I**: нужен либо разбор
   `FUN_18037a7d0` (условия {32}), либо серия с makeordown-совместимой транзакцией.
 - Активных заявок не оставлено: все созданные заявки сняты/отклонены.
+
+
+## T19 Go implementation (S payload, 2026-11-05)
+
+- `Client.MoveOrder`: body `B 01, packed L transactionid, B 00`, TRN 0x02; full RQ_TRANSACT payload
+  `02 01 41 01 00` (txid 20) matches `transact-moveorder-live.hex` byte-for-byte (S).
+- Validations (D, exact texts): transactionid element/attr and >0 (`Wrong transactionid value.`),
+  price (`Price not found.` / `Price have to be a number.`), moveflag 0..3
+  (`Cannot find moveflag.` / `Wrong moveflag value.`), quantity required for 1/2
+  (`Cannot find quantity.` / `Quantity have to be a number.`).
+- Successful active-order move remains **I**: the oracle returns `{32}` for an active order; the S
+  payload was captured only for already-cancelled transactions, so the Go command sends it and relies
+  on the server reply/order update.
+- `Connector` `moveorder` parses the XML elements/attrs; `makeordown` parses `transactionid` as an
+  **attribute** and returns the explicit `RQ_MAKE_COND_OWN payload is not recovered (I)` error —
+  the command is processed, not "not implemented".

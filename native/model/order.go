@@ -78,3 +78,14 @@ func ParseDecimal(text string) (Decimal, error) {
 	}
 	return Decimal{Units: units, Scale: uint8(len(frac))}, nil
 }
+
+// MoveOrder is the T19 moveorder request. The DLL validates transactionid,
+// price and moveflag 0..3 (quantity for 1/2); the successful active-order
+// scenario is I ({32} in the oracle, S payload only for already-cancelled
+// transactions), so the Go client sends the S payload and lets the server reply.
+type MoveOrder struct {
+	TransactionID TransactionID
+	Price         Decimal
+	MoveFlag      byte
+	Quantity      int64
+}

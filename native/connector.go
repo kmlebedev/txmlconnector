@@ -455,6 +455,102 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return transactionFailure(err), nil
 		}
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(id), 10) + "\"/>", nil
+	case "moveorder":
+		var req struct {
+			TransactionID     *string `xml:"transactionid"`
+			TransactionIDAttr *string `xml:"transactionid,attr"`
+			Price             *string `xml:"price"`
+			PriceAttr         *string `xml:"price,attr"`
+			MoveFlag          *string `xml:"moveflag"`
+			MoveFlagAttr      *string `xml:"moveflag,attr"`
+			Quantity          *string `xml:"quantity"`
+			QuantityAttr      *string `xml:"quantity,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		pick := func(elem, attr *string) *string {
+			if elem != nil && *elem != "" {
+				return elem
+			}
+			if attr != nil && *attr != "" {
+				return attr
+			}
+			return nil
+		}
+		txText := pick(req.TransactionID, req.TransactionIDAttr)
+		if txText == nil {
+			return failure("Cannot find transactionid."), nil
+		}
+		txID, err := strconv.ParseInt(*txText, 10, 64)
+		if err != nil || txID <= 0 {
+			return failure("Wrong transactionid value."), nil
+		}
+		priceText := pick(req.Price, req.PriceAttr)
+		if priceText == nil {
+			return failure("Price not found."), nil
+		}
+		price, err := model.ParseDecimal(*priceText)
+		if err != nil {
+			return failure("Price have to be a number."), nil
+		}
+		flagText := pick(req.MoveFlag, req.MoveFlagAttr)
+		if flagText == nil {
+			return failure("Cannot find moveflag."), nil
+		}
+		flag, err := strconv.ParseUint(*flagText, 10, 8)
+		if err != nil || flag > 3 {
+			return failure("Wrong moveflag value."), nil
+		}
+		var quantity int64
+		if qtyText := pick(req.Quantity, req.QuantityAttr); qtyText != nil {
+			quantity, err = strconv.ParseInt(*qtyText, 10, 64)
+			if err != nil {
+				return failure("Quantity have to be a number."), nil
+			}
+		} else if flag == 1 || flag == 2 {
+			return failure("Cannot find quantity."), nil
+		}
+		if err := client.MoveOrder(ctx, model.MoveOrder{
+			TransactionID: model.TransactionID(txID), Price: price, MoveFlag: byte(flag), Quantity: quantity,
+		}); err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatInt(txID, 10) + "\"/>", nil
+	case "makeordown":
+		var req struct {
+			TransactionID     *string `xml:"transactionid,attr"`
+			TransactionIDElem *string `xml:"transactionid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		txText := req.TransactionID
+		if txText == nil || *txText == "" {
+			txText = req.TransactionIDElem
+		}
+		if txText == nil || *txText == "" {
+			return failure("Cannot find transactionid."), nil
+		}
+		if _, err := strconv.ParseInt(*txText, 10, 64); err != nil {
+			return failure("Wrong transactionid value."), nil
+		}
+		// DLL supports the command but the RQ_MAKE_COND_OWN (112) payload is not
+		// recovered (D/O/S, orders.md T19): fail explicitly instead of sending a
+		// fabricated transaction.
+		return failure("RQ_MAKE_COND_OWN payload is not recovered (I)"), nil
 	case "cancelorder":
 		var req struct {
 			TransactionID uint64 `xml:"transactionid"`

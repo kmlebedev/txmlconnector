@@ -91,6 +91,33 @@ func (c *Client) CancelOrder(ctx context.Context, transactionID model.Transactio
 	return err
 }
 
+// MoveOrder sends moveorder: S payload B 01, packed L transactionid, B 00
+// (fixture transact-moveorder-live.hex: 02 01 41 01 00 for txid=20). The valid
+// active-order scenario is I; the server reply/order update is handled by Run.
+func (c *Client) MoveOrder(ctx context.Context, req model.MoveOrder) error {
+	if req.TransactionID == 0 {
+		return errors.New("Wrong transactionid value.")
+	}
+	if req.MoveFlag > 3 {
+		return errors.New("Wrong moveflag value.")
+	}
+	if req.MoveFlag == 1 || req.MoveFlag == 2 {
+		if req.Quantity == 0 {
+			return errors.New("Cannot find quantity.")
+		}
+	}
+	var w wire.Writer
+	w.Byte(1)
+	w.Int32(int32(req.TransactionID))
+	w.Byte(0)
+	conn := c.connection()
+	if conn == nil {
+		return errors.New("transaq: client is not connected")
+	}
+	_, err := conn.Transact(ctx, session.TxMoveOrder, w.Bytes())
+	return err
+}
+
 // clientNumericIDLocked maps the client code (or union) to the numeric id the
 // neworder payload carries (the accounts raw records keep it).
 func (c *Client) clientNumericIDLocked(client, union string) (int64, bool) {
