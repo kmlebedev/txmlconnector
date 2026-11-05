@@ -155,10 +155,16 @@ Workflow [`.github/workflows/compat-release.yml`](../.github/workflows/compat-re
 | macos-arm64 | macos-14 | `libtxmlconnector.dylib` + `libtxmlconnector64.dylib` | да |
 | macos-amd64 | macos-13 | `libtxmlconnector.dylib` + `libtxmlconnector64.dylib` | да |
 
-Каждый job: `go test ./cmd/connector/...`, `go build -buildmode=c-shared -trimpath -buildvcs=false`,
-C ABI-тест, `SHA256SUMS`, `upload-artifact`. На тег `compat-v*` дополнительно публикуется GitHub
-Release (`softprops/action-gh-release`, `generate_release_notes`). Заголовок `txmlconnector.h`
-кладётся в каждый архив. Локально те же шаги: `make cabi` (текущая ОС), `make cabi-test`.
+Каждый build-job: `go test ./cmd/connector/...`, `go build -buildmode=c-shared -trimpath -buildvcs=false`,
+C ABI-тест, C5 conformance, упаковка **одного архива на target** и `upload-artifact`. Архив содержит
+канонические имена библиотек, `txmlconnector.h`, `VERSION.txt` (drop-in version/commit/date/target)
+и README; имена: `txmlconnector-<target>.tar.gz` (linux/macos) / `.zip` (windows).
+
+На тег `compat-v*` отдельный job `release` (ubuntu-latest, `needs: build`) скачивает все 5
+артефактов, формирует один `SHA256SUMS` по архивам и публикует **один** GitHub Release
+(`softprops/action-gh-release`, `generate_release_notes`, `prerelease=true` для `*rc*`). Это
+устраняет гонку, когда каждый matrix-job создавал один и тот же Release (C3.1). Локально те же шаги:
+`make cabi` (текущая ОС), `make cabi-test`, `make cabi-conformance`.
 
 **Первый CI-прогон (2026-11-05, run 42023156690):** linux-amd64, linux-arm64, macos-arm64,
 windows-amd64 — успешно (включая C ABI-тесты; windows mingw best-effort — success). macos-amd64
@@ -192,9 +198,12 @@ windows-amd64 — успешно (включая C ABI-тесты; windows mingw
 5. **CI-матрица:** workflow `compat-release.yml` (§5.1) собирает все цели §5 и запускает C ABI-тест
    на linux/macos; Windows ABI-тест — best-effort до C4. Проверка артефакта: `sha256sum -c SHA256SUMS`
    внутри архива; заголовок — `txmlconnector.h`. Wine-сверка с эталоном — отдельный job (C5).
-6. **Live C ABI-тест:** `make cabi-live-test` (§4.1) на demo.env — read-only connect → connected=true →
+6. **Архивы релиза (C3.1):** на каждый target — `txmlconnector-<target>.{tar.gz,zip}` с
+   каноническими библиотеками, header, `VERSION.txt`, README; `SHA256SUMS` и пять архивов — в одном
+   GitHub Release. Проверка: `sha256sum -c SHA256SUMS` после скачивания.
+7. **Live C ABI-тест:** `make cabi-live-test` (§4.1) на demo.env — read-only connect → connected=true →
    get_securities → disconnect; macOS arm64 PASS (761 callback).
-7. **Проверка CI-артефактов (2026-11-05):** скачаны архивы linux-amd64/arm64, macos-arm64,
+8. **Проверка CI-артефактов (2026-11-05):** скачаны архивы linux-amd64/arm64, macos-arm64,
    windows-amd64. `sha256sum -c SHA256SUMS` — OK; `file` — ELF x86-64/aarch64, Mach-O arm64,
    PE32+ DLL x86-64; экспорты: 9/9 в `nm -D` (linux), `nm -gU` (macOS), `objdump -p` (windows).
    Linux arm64 в CI проверен нативным runner (ABI-тест success).
