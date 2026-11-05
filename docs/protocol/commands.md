@@ -129,6 +129,39 @@ lot_volume, isin, regnumber, buybackprice, buybackdate, currencyid`; пусты�
   RQ_SUBSCRIBE_TICKS: `B filter; {W secid, W board, G tradeno}*`. В вечерней сессии демо тиков не
   было (ни RQ_TICKS 13, ни `<ticks>`) — **S-негатив**; для сверки нужен прогон в основную сессию.
 
+
+## `set_csp` и `authenticate` (T29, D + O)
+
+Обе команды **обрабатываются DLL и без соединения, и с соединением** — в матрице 45 команд они не
+«not implemented»; после `connect` они отвечают своими предметными ошибками (O, replay loopback
+2026-11-05, `.re-run/t49/auth1`). Сетевых запросов не делают.
+
+### `set_csp` — D: `FUN_180197d60` → `FUN_180109170`
+
+- Вход: `<command id="set_csp"><csp type="…"/></command>`; элемент `csp` и его атрибут `type`
+  (D: `FUN_18040c140`/`FUN_18040cf20`). Допустимые значения `type` (D, строки
+  `0x180835a90`/`0x180835a44`…): `NONE` (0), `MS` (1), `CP` (2), `SC` (3), `MPSSL`? (`MP` 4,
+  `MPSSL` 5), `CPBB` (6), `CPBB_2012_256` (7), `CPBB_2012_512` (8); тип сохраняется в
+  `connector+0x688`.
+- Нет элемента `csp` → **успех** (no-op, D: ветка `local_d0 == 0 → return 1`; O: пустая команда
+  `<command id="set_csp"/>` → `<result success="true"/>`).
+- Элемент есть, атрибута `type` нет → `You have to specify at least one CSP.` (D).
+- Неизвестный `type` → `Unsupported CSP type.` (D).
+- **Соединение установлено** → `Данная операция требует отключения от сервера. Необходимо выполнить
+  команду Disconnect.` (D: CP1251-строка `0x180835aa0`; O: то же после `connect` — все варианты
+  `set_csp` вернули эту ошибку).
+
+### `authenticate` — D: `FUN_180197da0` → `FUN_1800d8850`
+
+- Поведение зависит от криптопровайдера (`connector+0x678`, режим `+0x10`): при режиме 3 требуется
+  атрибут `pin` (D: ошибка `attribute "pin" not found`), дальше — асинхронная аутентификация с
+  колбэком `<authentication status="error">Authentication request failed</authentication>` (D) или
+  успешным колбэком (форма не снята — **I**).
+- O (обе команды до и после `connect`, провайдер по умолчанию): `<result success="false"><message>Illegal
+  context for "sendpin" command</message></result>`; атрибут `pin` на результат не влияет.
+- Для матрицы: `authenticate` не «not implemented»; конкретный успешный сценарий требует
+  настроенного криптопровайдера (I, вне T29).
+
 ## Нативная реализация
 
 - `connect` разбирает `commands.Connect` (`host`, `port`, `login`, `password`, `rqdelay`, `request_timeout`) и сразу возвращает успех. Дальше в фоне идут логин, RQ_TIME, RQ_STARTUP, колбэки `<markets>`, `<boards>`, `<candlekinds>` (побайтно как у DLL), выборка снапшота RQ_MAIN с колбэками `<securities>` на каждый опрос с новыми инструментами, `<pits>`, затем `server_status connected="true"`. После этого RQ_MAIN опрашивается каждые `rqdelay` (по умолчанию 100 мс, не меньше 10 мс), как в DLL, и это держит сессию.
