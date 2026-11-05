@@ -129,23 +129,52 @@ func TestEveryDLLCommandAfterConnect(t *testing.T) {
 	}
 }
 
-// TestDLLCommandCountAgainstDocs pins the 45-name mismatch fix: the docs command
-// table and dllCommands must not drift apart silently (T29/task-index §8.1).
+// expectedDLLCommands is the plan's 45-name table (task 29; task-index §8.1).
+var expectedDLLCommands = []string{
+	"set_csp", "connect", "authenticate", "disconnect", "gethistorydata",
+	"subscribe", "unsubscribe", "makeordown", "neworder", "moveorder",
+	"change_pass", "newcondorder", "newstoporder", "newrpsorder", "newrepoorder",
+	"newmrepoorder", "cancelorder", "cancelstoporder", "cancelnegdeal",
+	"newreport4", "cancelreport4", "get_forts_positions", "get_client_limits",
+	"get_markets", "server_status", "get_securities", "get_servtime_difference",
+	"get_portfolio", "get_portfolio_mct", "get_united_portfolio",
+	"get_mc_portfolio", "get_max_buy_sell_tplus", "get_max_buy_sell",
+	"subscribe_ticks", "get_old_news", "get_news_body", "get_server_id",
+	"get_connector_version", "get_securities_info", "get_united_equity",
+	"get_united_go", "get_cln_sec_permissions", "get_options",
+	"get_option_families", "get_family_strikes",
+}
+
+// TestDLLCommandCountAgainstDocs pins the whole 45-name table: every planned
+// name is dispatched, no extra names exist, and commands.md keeps the two
+// historical outliers documented (T28/T29, task-index §8.1).
 func TestDLLCommandCountAgainstDocs(t *testing.T) {
+	if len(dllCommands) != 45 {
+		t.Fatalf("dllCommands = %d names, want 45", len(dllCommands))
+	}
+	if len(expectedDLLCommands) != 45 {
+		t.Fatalf("expected list = %d names, want 45", len(expectedDLLCommands))
+	}
+	seen := map[string]bool{}
+	for _, name := range expectedDLLCommands {
+		if _, ok := dllCommands[name]; !ok {
+			t.Errorf("dllCommands is missing %s", name)
+		}
+		seen[name] = true
+	}
+	for name := range dllCommands {
+		if !seen[name] {
+			t.Errorf("dllCommands has an unknown name %q", name)
+		}
+	}
 	raw, err := os.ReadFile("../docs/protocol/commands.md")
 	if err != nil {
 		t.Skipf("commands.md not available: %v", err)
 	}
-	// The docs table is maintained by RE; only fail when the two obvious
-	// outliers (newreport4/cancelreport4, the historical 45 vs 43 mismatch) are
-	// missing from one side.
 	text := string(raw)
 	for _, name := range []string{"newreport4", "cancelreport4"} {
 		if !strings.Contains(text, name) {
 			t.Errorf("commands.md does not mention %s (45-name table)", name)
-		}
-		if !dllCommands[name] {
-			t.Fatalf("dllCommands is missing %s", name)
 		}
 	}
 }

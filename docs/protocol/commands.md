@@ -187,10 +187,10 @@ lot_volume, isin, regnumber, buybackprice, buybackdate, currencyid`; пусты�
 - `connect` разбирает `commands.Connect` (`host`, `port`, `login`, `password`, `rqdelay`, `request_timeout`) и сразу возвращает успех. Дальше в фоне идут логин, RQ_TIME, RQ_STARTUP, колбэки `<markets>`, `<boards>`, `<candlekinds>` (побайтно как у DLL), выборка снапшота RQ_MAIN с колбэками `<securities>` на каждый опрос с новыми инструментами, `<pits>`, затем `server_status connected="true"`. После этого RQ_MAIN опрашивается каждые `rqdelay` (по умолчанию 100 мс, не меньше 10 мс), как в DLL, и это держит сессию.
 - Потеря связи: колбэк `server_status connected="true" recover="true"` в момент обрыва; короткое восстановление (`RQ_RELOGIN`/`RQ_RECOVER`) сохраняет сессию и каталог, иначе — `connected="false"` и новый `connect` (см. [connect.md](connect.md)).
 - `disconnect` останавливает опрос, даже если запрос RQ_MAIN уже в полёте. Затем отправляет `RQ_LOGOUT` (без ответа, таймаут 4 с) и отдаёт колбэк `connected="false"` до возврата.
-- `subscribe`/`unsubscribe` поддерживают `<alltrades>`; `<quotations>` и `<quotes>` отвечают «not implemented».
+- `subscribe`/`unsubscribe` поддерживают `<alltrades>`, `<quotations>` и `<quotes>` (фаза 2; первые блоки, см. раздел подписок).
 - `get_securities` отдаёт `<result success="true"/>` и колбэк `<securities>` со всем каталогом, элемент в элемент как DLL (`FUN_18011f4a0`, см. [dictionaries.md](dictionaries.md)).
 - `get_server_id`, `get_servtime_difference` и `get_markets` реализованы по R6 (`native/testdata/service-dll.xml`): SID и рынки из кэша без сети, разница времени — через RQ_TIME, ответ с атрибутом `diff` (см. ниже).
-- Остальные команды из таблицы DLL (всего в `dllCommands` 45 имён: 43 реализовано, pending — `moveorder`/`makeordown`) отвечают `Command is not implemented by the native connector.`, а если требуют соединения и его нет — сообщением DLL.
+- В `dllCommands` 45 имён; реализовано 43, pending — только `moveorder`/`makeordown` (ждут демо-цикл T19). Pending-команды отвечают `Command is not implemented by the native connector.`, а без соединения — сообщением DLL.
 - `get_connector_version` возвращает `6.47.2.26.4-native`: версию DLL, поведение которой воспроизводится, с пометкой реализации.
 - Колбэки доставляются по порядку из одной горутины, как из потока колбэков DLL.
 
