@@ -802,3 +802,13 @@ docs/alltrades.md и др.); в истории git значение остаёт
 
 
 
+
+**RE-4 (native gRPC без Wine):** интеграционный тест `TCClient` на native backend (testserver) проходит
+(`2799fe7`); direct `native.Client.Dial` на demo.env — OK; raw backend + connect XML даёт
+`connected="true"`. Но 3 попытки RE-4 на живом демо (после cooldown) дали `connected=error`/таймаут 60с —
+серверная занятость demo-сессии (single-session/duplicate login, I) — **внешний блокер**, не код;
+зафиксировано как partial для T29. Прод-RE-4 остаётся заблокированным (`connected=error`).
+
+**T30 soak:** short live-run на demo.env PASS (`UnknownRecords=0`, `Duplicates=0`, `recoveries=0`,
+RSS 30 MiB, `maxGap` 662 мс, 5 мин, 2222–2393 polls, 5946–7523 trades; exit 0) — `820df86`.
+Full-day soak (10:00–23:50) в этой сессии не выполнялся — ограничение, зафиксировано.
