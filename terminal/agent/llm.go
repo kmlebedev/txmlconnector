@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/kmlebedev/txmlconnector/terminal/automation"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 )
 
@@ -98,12 +100,22 @@ type llmChatRequest struct {
 	Stream      bool         `json:"stream"`
 }
 
+// llmUsage is the token usage of one chat completion. The OpenAI-compatible
+// providers and the DSH LLM bridge report it in the same `usage` object; a
+// provider that omits it yields zero tokens (the tool call is still counted).
+type llmUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 // llmChatResponse is the (subset of the) response body we parse.
 type llmChatResponse struct {
 	Choices []struct {
 		Message      llmMessage `json:"message"`
 		FinishReason string     `json:"finish_reason"`
 	} `json:"choices"`
+	Usage llmUsage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -261,7 +273,7 @@ func (e *Engine) chatLLM(ctx context.Context, message, conversationID string, sc
 		if err := contextErr(ctx); err != nil {
 			return fail(err)
 		}
-		msg, err := e.llmComplete(ctx, messages, tools)
+		msg, usage, err := e.llmComplete(ctx, messages, tools)
 		if err != nil {
 			return fail(err)
 		}
@@ -279,6 +291,10 @@ func (e *Engine) chatLLM(ctx context.Context, message, conversationID string, sc
 		}
 		messages = append(messages, assistantMessage)
 		turn = append(turn, assistantMessage)
+		// The executed calls of this round trip are priced with its usage by the
+		// automation ledger (plan Task 18): the repeated tool workflows and their
+		// token cost are the input of the "automate instead of prompting" loop.
+		turnCalls := make([]automation.ToolCall, 0, len(msg.ToolCalls))
 		for _, tc := range msg.ToolCalls {
 			name := tc.Function.Name
 			args, parseErr := parseToolArguments(tc.Function.Arguments)
@@ -301,6 +317,7 @@ func (e *Engine) chatLLM(ctx context.Context, message, conversationID string, sc
 				}, name, args)
 			}
 			resp.ToolCalls = append(resp.ToolCalls, call)
+			turnCalls = append(turnCalls, toAutomationCall(call))
 			if artifact != nil {
 				resp.Artifacts = append(resp.Artifacts, *artifact)
 			}
@@ -312,10 +329,11 @@ func (e *Engine) chatLLM(ctx context.Context, message, conversationID string, sc
 			messages = append(messages, toolMessage)
 			turn = append(turn, toolMessage)
 		}
+		recordToolUsage(conversationID, turnCalls, usage)
 	}
 
 	if answer == "" {
-		msg, err := e.llmComplete(ctx, messages, nil)
+		msg, _, err := e.llmComplete(ctx, messages, nil)
 		if err != nil {
 			return fail(err)
 		}
@@ -334,8 +352,10 @@ func (e *Engine) chatLLM(ctx context.Context, message, conversationID string, sc
 	return resp, nil
 }
 
-// llmComplete performs one POST {BaseURL}/chat/completions request.
-func (e *Engine) llmComplete(ctx context.Context, messages []llmMessage, tools []llmTool) (llmMessage, error) {
+// llmComplete performs one POST {BaseURL}/chat/completions request. It returns
+// the assistant message and the token usage of the round trip (the ledger of plan
+// Task 18 prices the executed tool calls with it).
+func (e *Engine) llmComplete(ctx context.Context, messages []llmMessage, tools []llmTool) (llmMessage, llmUsage, error) {
 	body := llmChatRequest{
 		Model:       e.cfg.LLM.Model,
 		Messages:    messages,
@@ -348,7 +368,7 @@ func (e *Engine) llmComplete(ctx context.Context, messages []llmMessage, tools [
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return llmMessage{}, &llmError{Class: "invalid_request", Err: err}
+		return llmMessage{}, llmUsage{}, &llmError{Class: "invalid_request", Err: err}
 	}
 
 	timeout := e.cfg.LLM.Timeout
@@ -360,7 +380,7 @@ func (e *Engine) llmComplete(ctx context.Context, messages []llmMessage, tools [
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, e.cfg.LLM.BaseURL+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
-		return llmMessage{}, &llmError{Class: "invalid_request", Err: err}
+		return llmMessage{}, llmUsage{}, &llmError{Class: "invalid_request", Err: err}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+e.cfg.LLM.APIKey)
@@ -372,33 +392,33 @@ func (e *Engine) llmComplete(ctx context.Context, messages []llmMessage, tools [
 	httpResp, err := client.Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || reqCtx.Err() != nil {
-			return llmMessage{}, &llmError{Class: "timeout"}
+			return llmMessage{}, llmUsage{}, &llmError{Class: "timeout"}
 		}
-		return llmMessage{}, &llmError{Class: "network"}
+		return llmMessage{}, llmUsage{}, &llmError{Class: "network"}
 	}
 	defer httpResp.Body.Close()
 
 	data, readErr := io.ReadAll(io.LimitReader(httpResp.Body, 8<<20))
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return llmMessage{}, &llmError{Class: fmt.Sprintf("http_%d", httpResp.StatusCode)}
+		return llmMessage{}, llmUsage{}, &llmError{Class: fmt.Sprintf("http_%d", httpResp.StatusCode)}
 	}
 	if readErr != nil {
-		return llmMessage{}, &llmError{Class: "network"}
+		return llmMessage{}, llmUsage{}, &llmError{Class: "network"}
 	}
 	var parsed llmChatResponse
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		return llmMessage{}, &llmError{Class: "invalid_response", Err: err}
+		return llmMessage{}, llmUsage{}, &llmError{Class: "invalid_response", Err: err}
 	}
 	if parsed.Error != nil {
 		// The provider message may echo request details; keep only the class.
-		return llmMessage{}, &llmError{Class: "provider_error"}
+		return llmMessage{}, llmUsage{}, &llmError{Class: "provider_error"}
 	}
 	if len(parsed.Choices) == 0 {
-		return llmMessage{}, &llmError{Class: "invalid_response", Err: errors.New("no choices")}
+		return llmMessage{}, llmUsage{}, &llmError{Class: "invalid_response", Err: errors.New("no choices")}
 	}
 	msg := parsed.Choices[0].Message
 	msg.Role = "assistant"
-	return msg, nil
+	return msg, parsed.Usage, nil
 }
 
 // llmTools converts the frozen ToolInfo catalog to OpenAI tool definitions.
@@ -452,6 +472,77 @@ func contentString(content any) string {
 	}
 }
 
+// toolAsOfArg reads the required point-in-time `asOf` argument of a research
+// tool: only data published or observed at or before that instant may be used
+// (plan Global Constraint; the point-in-time rule of the vintage data). The error
+// is a model-facing argument error that says exactly what to pass.
+func toolAsOfArg(args map[string]any) (time.Time, error) {
+	raw, ok := args["asOf"]
+	if !ok || raw == nil {
+		return time.Time{}, fmt.Errorf(
+			"%w: asOf is required — передайте момент, на который известны данные (point-in-time, RFC3339 UTC), например 2026-11-05T07:00:00Z",
+			errBadArgument)
+	}
+	asOf, err := toolTimeArg(args, "asOf")
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: %v", errBadArgument, err)
+	}
+	return asOf, nil
+}
+
+// maxStoredToolArtifacts bounds the in-process artifact store: a compact model
+// payload names its full result by artifactId, and only the last few dozen
+// artifacts are kept (the UI receives the artifact itself, the id is what the
+// model may quote in a later turn).
+const maxStoredToolArtifacts = 64
+
+// toolArtifactStore keeps the full payload behind the artifactId of a compact
+// model payload (plan Task 18). It is bounded and safe for concurrent use.
+type toolArtifactStore struct {
+	mu    sync.Mutex
+	next  int
+	order []string
+	byID  map[string]any
+}
+
+// toolArtifacts is the process-wide artifact store of the research tools.
+var toolArtifacts = &toolArtifactStore{byID: make(map[string]any)}
+
+// store keeps payload under a new "kind-N" id and returns the id. The oldest
+// artifact is evicted when the store is full.
+func (s *toolArtifactStore) store(kind string, payload any) string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.next++
+	id := fmt.Sprintf("%s-%d", kind, s.next)
+	if s.byID == nil {
+		s.byID = make(map[string]any)
+	}
+	s.byID[id] = payload
+	s.order = append(s.order, id)
+	for len(s.order) > maxStoredToolArtifacts {
+		oldest := s.order[0]
+		s.order = s.order[1:]
+		delete(s.byID, oldest)
+	}
+	return id
+}
+
+// get returns the stored payload of id (the UI/research layer reads a compact
+// payload's full result through it).
+func (s *toolArtifactStore) get(id string) (any, bool) {
+	if s == nil || id == "" {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	payload, ok := s.byID[id]
+	return payload, ok
+}
+
 // toolMessageContent renders one tool result for the model. Large payloads
 // (equity curves, bar arrays) are compacted so the context stays small.
 func toolMessageContent(call ToolCall) string {
@@ -496,6 +587,18 @@ func toolResultForLLM(name string, result any) any {
 			}
 			return out
 		}
+	case toolNameGetNews:
+		if res, ok := result.(newsResult); ok {
+			return compactNews(res)
+		}
+	case toolNameDetectExecutionAlgos:
+		if res, ok := result.(executionAlgosResult); ok {
+			return compactExecutionAlgos(res)
+		}
+	case toolNameVolEvents:
+		if res, ok := result.(volEventsResult); ok {
+			return compactVolEvents(res)
+		}
 	case "get_history":
 		if hist, ok := result.(historyResult); ok {
 			summary := map[string]any{
@@ -512,6 +615,141 @@ func toolResultForLLM(name string, result any) any {
 		}
 	}
 	return result
+}
+
+// Bounds of the compact get_news model payload: the full list stays in the
+// artifact named by artifactId, the model gets the newest few stories with a
+// truncated body and stays inside the 2 KB tool-result budget.
+const (
+	maxCompactNews      = 3
+	maxCompactNewsTitle = 100
+	maxCompactNewsBody  = 120
+)
+
+// Bounds of the compact detect_execution_algos model payload: the evidence map
+// and the full footprint list stay in the artifact, the model gets the first few
+// footprints with their confidence.
+const maxCompactFootprints = 5
+
+// Bounds of the compact vol_events model payload: the model gets the first
+// markers and the counters, the artifact carries the full calendar.
+const maxCompactVolEvents = 4
+
+// compactVolEvents keeps a few release markers with a short title and the news
+// counters; the full calendar is in the artifact named by artifactId.
+func compactVolEvents(res volEventsResult) map[string]any {
+	events := res.Events
+	if len(events) > maxCompactVolEvents {
+		events = events[:maxCompactVolEvents]
+	}
+	rows := make([]map[string]any, 0, len(events))
+	for _, event := range events {
+		rows = append(rows, map[string]any{
+			"at":       event.At,
+			"category": event.Category,
+			"title":    truncateText(event.Title, 80),
+			"country":  event.Country,
+			"exact":    event.Exact,
+		})
+	}
+	out := map[string]any{
+		"asOf":         res.AsOf,
+		"from":         res.From,
+		"to":           res.To,
+		"count":        len(res.Events),
+		"events":       rows,
+		"news":         res.News,
+		"newsPositive": res.Positive,
+		"newsNegative": res.Negative,
+	}
+	if res.ArtifactID != "" {
+		out["artifactId"] = res.ArtifactID
+	}
+	if len(res.Warnings) > 0 {
+		out["warnings"] = res.Warnings
+	}
+	return out
+}
+
+// compactExecutionAlgos keeps the first footprints (kind, side, window,
+// confidence) and the total count: the model reads the summary, the artifact
+// carries the evidence.
+func compactExecutionAlgos(res executionAlgosResult) map[string]any {
+	items := res.Footprints
+	if len(items) > maxCompactFootprints {
+		items = items[:maxCompactFootprints]
+	}
+	rows := make([]map[string]any, 0, len(items))
+	for _, footprint := range items {
+		rows = append(rows, map[string]any{
+			"kind":       footprint.Kind,
+			"side":       footprint.Side,
+			"from":       footprint.From,
+			"to":         footprint.To,
+			"confidence": footprint.Confidence,
+		})
+	}
+	out := map[string]any{
+		"symbol":     res.Symbol,
+		"from":       res.From,
+		"to":         res.To,
+		"count":      len(res.Footprints),
+		"footprints": rows,
+	}
+	if res.ArtifactID != "" {
+		out["artifactId"] = res.ArtifactID
+	}
+	if len(res.Warnings) > 0 {
+		out["warnings"] = res.Warnings
+	}
+	return out
+}
+
+// compactNews keeps the newest few stories with a short title and a truncated
+// body; count is the total number of stories of the artifact.
+func compactNews(res newsResult) map[string]any {
+	items := res.News
+	if len(items) > maxCompactNews {
+		items = items[:maxCompactNews]
+	}
+	news := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		row := map[string]any{
+			"id":        item.ID,
+			"firstSeen": item.FirstSeen,
+			"source":    item.Source,
+			"title":     truncateText(item.Title, maxCompactNewsTitle),
+		}
+		if item.Body != "" {
+			row["body"] = truncateText(item.Body, maxCompactNewsBody)
+		}
+		if !item.Published.IsZero() {
+			row["published"] = item.Published
+		}
+		news = append(news, row)
+	}
+	out := map[string]any{
+		"asOf":  res.AsOf,
+		"since": res.Since,
+		"count": len(res.News),
+		"news":  news,
+	}
+	if res.ArtifactID != "" {
+		out["artifactId"] = res.ArtifactID
+	}
+	return out
+}
+
+// truncateText shortens text to at most max runes (UTF-8 safe) and marks the cut.
+func truncateText(text string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= max {
+		return text
+	}
+	return string(runes[:max]) + "…"
 }
 
 // compactBacktest keeps the metrics and trades of a result, dropping the
@@ -535,6 +773,51 @@ func compactBacktest(res backtest.Result) map[string]any {
 		out["trades"] = trades
 	}
 	return out
+}
+
+// automationLedger is the process-wide token ledger of the agent (plan Task 18).
+// The Engine has no ledger field in the frozen exported API (docs/ai-terminal/
+// ARCHITECTURE.md §9), so the ledger is package state: it records every executed
+// tool call together with the usage of the LLM round trip that produced it, and
+// the UI/research layer reads the repeated workflows from it. The Ledger itself
+// is concurrency-safe; the variable is written only by tests.
+var automationLedger = automation.New()
+
+// AutomationHotspots returns the tool sequences executed at least minCalls times
+// in this process, priced by the LLM tokens they cost (plan Task 18). A repeated
+// sequence with a high token price is a candidate for a Go function or an MCP tool
+// instead of paying the model every time.
+func (e *Engine) AutomationHotspots(minCalls int) []automation.Hotspot {
+	return automationLedger.Hotspots(minCalls)
+}
+
+// toAutomationCall converts one executed agent tool call into the ledger view. The
+// tool result is not kept: the ledger prices the call, it does not re-store the
+// data.
+func toAutomationCall(call ToolCall) automation.ToolCall {
+	return automation.ToolCall{Name: call.Name, Args: call.Args, Error: call.Error}
+}
+
+// recordToolUsage attributes the usage of one LLM round trip to the tool calls it
+// produced. A response may carry several tool calls but only one usage object, so
+// the prompt and completion tokens are split evenly and the remainder goes to the
+// last call: the ledger total equals the provider usage and no tokens are counted
+// twice. A round trip without tool calls is not recorded — the ledger prices tool
+// workflows, and a plain answer is not a workflow step.
+func recordToolUsage(conversationID string, calls []automation.ToolCall, usage llmUsage) {
+	if len(calls) == 0 {
+		return
+	}
+	promptShare := usage.PromptTokens / len(calls)
+	completionShare := usage.CompletionTokens / len(calls)
+	for index, call := range calls {
+		promptTokens, completionTokens := promptShare, completionShare
+		if index == len(calls)-1 {
+			promptTokens += usage.PromptTokens - promptShare*len(calls)
+			completionTokens += usage.CompletionTokens - completionShare*len(calls)
+		}
+		automationLedger.Record(conversationID, call, promptTokens, completionTokens)
+	}
 }
 
 // summarizeArtifacts builds a deterministic Russian summary from the collected

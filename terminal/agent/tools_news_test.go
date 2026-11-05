@@ -48,19 +48,22 @@ func (f *fakeNewsStore) query() (symbol string, since time.Time, limit int) {
 	return f.symbol, f.since, f.limit
 }
 
-// TestGetNewsToolFiltersBySince is the plan Task 12 test: get_news passes the
-// since filter (and the limit) to the news store, which returns only news first
-// seen at or after it.
+// TestGetNewsToolFiltersBySince is the plan Task 12 test, extended by Task 18
+// with the point-in-time rule: get_news passes the since window to the store, and
+// a story first seen after asOf is not known at that moment and is dropped.
 func TestGetNewsToolFiltersBySince(t *testing.T) {
 	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	store := &fakeNewsStore{items: []NewsItem{
 		{ID: 1, FirstSeen: now.Add(-2 * time.Hour), Published: now.Add(-3 * time.Hour), Title: "старая"},
 		{ID: 2, FirstSeen: now.Add(-30 * time.Minute), Published: now.Add(-40 * time.Minute), Title: "средняя"},
 		{ID: 3, FirstSeen: now.Add(-time.Minute), Published: now.Add(-2 * time.Minute), Title: "свежая"},
+		{ID: 4, FirstSeen: now.Add(time.Hour), Published: now.Add(time.Hour), Title: "будущая"},
 	}}
 	engine := &Engine{cfg: withDefaults(Config{Now: func() time.Time { return now }})}
+	asOf := now.Format(time.RFC3339)
 	since := now.Add(-time.Hour)
 	items, err := engine.toolGetNews(context.Background(), store, map[string]any{
+		"asOf":  asOf,
 		"since": since.Format(time.RFC3339),
 		"limit": 2,
 	})
@@ -78,8 +81,30 @@ func TestGetNewsToolFiltersBySince(t *testing.T) {
 		t.Fatalf("store limit = %d, want 2", gotLimit)
 	}
 
-	// Without arguments the window is the last 24 hours and the limit 50.
-	if _, err := engine.toolGetNews(context.Background(), store, map[string]any{}); err != nil {
+	// Point-in-time: the story first seen an hour after asOf did not exist for
+	// the research request, even though the store returns it.
+	items, err = engine.toolGetNews(context.Background(), store, map[string]any{"asOf": asOf, "limit": 10})
+	if err != nil {
+		t.Fatalf("toolGetNews point-in-time: %v", err)
+	}
+	for _, item := range items {
+		if item.ID == 4 {
+			t.Fatalf("items = %+v, a story first seen after asOf leaked into the result", items)
+		}
+		if item.FirstSeen.After(now) {
+			t.Fatalf("item %+v is later than asOf", item)
+		}
+	}
+
+	// Without asOf the tool is an argument error with a hint: a research call has
+	// no implicit "now".
+	if _, err := engine.toolGetNews(context.Background(), store, map[string]any{"since": "2h"}); !errors.Is(err, errBadArgument) ||
+		!strings.Contains(err.Error(), "asOf") {
+		t.Fatalf("missing asOf error = %v, want errBadArgument mentioning asOf", err)
+	}
+
+	// The default window is the 24 hours before asOf; the limit is 50.
+	if _, err := engine.toolGetNews(context.Background(), store, map[string]any{"asOf": asOf}); err != nil {
 		t.Fatalf("toolGetNews default window: %v", err)
 	}
 	_, gotSince, gotLimit = store.query()
@@ -87,8 +112,9 @@ func TestGetNewsToolFiltersBySince(t *testing.T) {
 		t.Fatalf("default since/limit = %v/%d, want %v/50", gotSince, gotLimit, now.Add(-24*time.Hour))
 	}
 
-	// A duration is accepted as a relative window ("2h" = last two hours).
-	if _, err := engine.toolGetNews(context.Background(), store, map[string]any{"since": "2h"}); err != nil {
+	// A duration is accepted as a relative window ("2h" = the two hours before
+	// asOf, not before the wall clock).
+	if _, err := engine.toolGetNews(context.Background(), store, map[string]any{"asOf": asOf, "since": "2h"}); err != nil {
 		t.Fatalf("toolGetNews duration window: %v", err)
 	}
 	if _, gotSince, _ = store.query(); !gotSince.Equal(now.Add(-2 * time.Hour)) {
@@ -96,7 +122,7 @@ func TestGetNewsToolFiltersBySince(t *testing.T) {
 	}
 
 	// The optional symbol is trimmed and passed through as the text filter.
-	if _, err := engine.toolGetNews(context.Background(), store, map[string]any{"symbol": " SBER "}); err != nil {
+	if _, err := engine.toolGetNews(context.Background(), store, map[string]any{"asOf": asOf, "symbol": " SBER "}); err != nil {
 		t.Fatalf("toolGetNews symbol: %v", err)
 	}
 	if symbol, _, _ := store.query(); symbol != "SBER" {
@@ -104,12 +130,18 @@ func TestGetNewsToolFiltersBySince(t *testing.T) {
 	}
 
 	// An unparsable since is an argument error for the model, not a silent
-	// fallback; a missing store is a configuration error.
-	if _, err := engine.toolGetNews(context.Background(), store, map[string]any{"since": "вчера"}); !errors.Is(err, errBadArgument) {
+	// fallback; since after asOf is rejected too.
+	if _, err := engine.toolGetNews(context.Background(), store, map[string]any{"asOf": asOf, "since": "вчера"}); !errors.Is(err, errBadArgument) {
 		t.Fatalf("bad since error = %v, want errBadArgument", err)
 	}
-	if _, err := engine.toolGetNews(context.Background(), nil, nil); err == nil {
-		t.Fatal("a nil news store must fail")
+	if _, err := engine.toolGetNews(context.Background(), store, map[string]any{
+		"asOf": asOf, "since": now.Add(2 * time.Hour).Format(time.RFC3339),
+	}); !errors.Is(err, errBadArgument) {
+		t.Fatalf("since after asOf error = %v, want errBadArgument", err)
+	}
+	if _, err := engine.toolGetNews(context.Background(), nil, map[string]any{"asOf": asOf}); err == nil ||
+		!strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("a nil news store must fail with a configuration error, got %v", err)
 	}
 }
 
@@ -123,20 +155,26 @@ func TestNewsToolCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("schema: %v", err)
 	}
-	for _, want := range []string{"symbol", "since", "limit"} {
+	for _, want := range []string{"symbol", "asOf", "since", "limit"} {
 		if !strings.Contains(string(schema), want) {
 			t.Fatalf("schema %s is missing %q", schema, want)
 		}
+	}
+	if !strings.Contains(string(schema), "required") {
+		t.Fatalf("schema %s must mark asOf as required", schema)
 	}
 }
 
 // TestInvokeToolGetNewsDispatch checks the GAP-2 wiring: get_news is in the
 // tool catalog and invokeTool dispatches it to the NewsStore of the engine
-// config; without a store the tool is a clear configuration error.
+// config; without a store the tool is a clear configuration error. Task 18 adds
+// the point-in-time asOf, the artifact with the full list and the compact model
+// payload named by its artifactId.
 func TestInvokeToolGetNewsDispatch(t *testing.T) {
-	store := &fakeNewsStore{items: []NewsItem{{
-		ID: 3, FirstSeen: testNow.Add(-time.Minute), Published: testNow.Add(-2 * time.Minute), Title: "свежая",
-	}}}
+	store := &fakeNewsStore{items: []NewsItem{
+		{ID: 3, FirstSeen: testNow.Add(-time.Minute), Published: testNow.Add(-2 * time.Minute), Title: "свежая"},
+		{ID: 4, FirstSeen: testNow.Add(time.Hour), Published: testNow.Add(time.Hour), Title: "будущая"},
+	}}
 	engine := newTestEngineWith(t, Config{NewsStore: store}, newFakeDataSource(), nil)
 	found := false
 	for _, tool := range engine.Tools() {
@@ -148,7 +186,8 @@ func TestInvokeToolGetNewsDispatch(t *testing.T) {
 	if !found {
 		t.Fatalf("get_news is missing from the tool catalog")
 	}
-	result, artifact, err := engine.invokeTool(context.Background(), toolInvocation{}, toolNameGetNews, map[string]any{})
+	args := map[string]any{"asOf": testNow.Format(time.RFC3339)}
+	result, artifact, err := engine.invokeTool(context.Background(), toolInvocation{}, toolNameGetNews, args)
 	if err != nil {
 		t.Fatalf("invokeTool(get_news): %v", err)
 	}
@@ -156,13 +195,35 @@ func TestInvokeToolGetNewsDispatch(t *testing.T) {
 	if !ok || len(payload.News) != 1 || payload.News[0].ID != 3 {
 		t.Fatalf("get_news result = %#v", result)
 	}
-	if artifact != nil {
-		t.Fatalf("get_news artifact = %+v, want none", artifact)
+	if !payload.AsOf.Equal(testNow) || payload.ArtifactID == "" {
+		t.Fatalf("get_news payload = %+v, want asOf=%v and an artifactId", payload, testNow)
+	}
+	if artifact == nil || artifact.Kind != "news" {
+		t.Fatalf("get_news artifact = %+v, want the full news artifact", artifact)
+	}
+	if stored, ok := toolArtifacts.get(payload.ArtifactID); !ok {
+		t.Fatalf("artifact %q is not stored", payload.ArtifactID)
+	} else if full, ok := stored.(newsResult); !ok || len(full.News) != len(payload.News) {
+		t.Fatalf("stored artifact = %#v, want the full news result", stored)
+	}
+	// The model payload is compact and names the full result by artifactId.
+	content := toolMessageContent(ToolCall{Name: toolNameGetNews, Result: payload})
+	if len(content) > 2048 {
+		t.Fatalf("model payload = %d bytes, want <= 2048", len(content))
+	}
+	if !strings.Contains(content, payload.ArtifactID) {
+		t.Fatalf("model payload lost the artifactId: %s", content)
 	}
 	// Without a configured store the dispatch reports the pipeline state.
 	bare := newTestEngineWith(t, Config{}, newFakeDataSource(), nil)
-	if _, _, err := bare.invokeTool(context.Background(), toolInvocation{}, toolNameGetNews, nil); err == nil || !strings.Contains(err.Error(), "not configured") {
+	if _, _, err := bare.invokeTool(context.Background(), toolInvocation{}, toolNameGetNews, args); err == nil ||
+		!strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("get_news without a store error = %v", err)
+	}
+	// Without asOf the tool refuses to invent a point in time.
+	if _, _, err := engine.invokeTool(context.Background(), toolInvocation{}, toolNameGetNews, map[string]any{}); err == nil ||
+		!strings.Contains(err.Error(), "asOf") {
+		t.Fatalf("get_news without asOf error = %v, want an asOf hint", err)
 	}
 }
 
