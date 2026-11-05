@@ -695,6 +695,12 @@ func (e *Engine) Hints(ctx context.Context, symbol string, periodSec int) (Marke
   `tool_choice:"auto"`, `temperature:0.2`, `stream:false`. Ответ — `choices[0].message.tool_calls[]`
   (`function.name`, `function.arguments` — JSON-строка). До 8 итераций tool-loop, затем финальный
   ответ без tools (если модель не вернула текст — суммаризация локальным аналитиком по артефактам).
+- Контекст экрана (plan Task 8): UI прикладывает к запросу `ChatRequest.Context`
+  (`ScreenContext`: символ, период, видимый диапазон графика, выделение, активная вкладка; времена —
+  RFC3339 UTC). Движок добавляет отдельное системное сообщение `Текущий экран: …` в payload LLM,
+  но **не** сохраняет его в ограниченной истории диалога, чтобы устаревший экран не попадал в
+  следующие ходы. В UI shift+drag по графику выделяет диапазон, кнопка «Спросить AI о выделенном»
+  открывает чат и отправляет запрос с этим контекстом.
 - Системный промпт: русский, роль — торговый аналитик терминала, только инструменты из списка,
   не выдумывать цифры, предупреждать о рисках, отвечать ≤ 200 слов, использовать реальные данные
   инструментов. Если запрос про «запусти автоторговлю» — сначала бэктест, потом предложить/запустить
@@ -880,7 +886,7 @@ func (s *Server) Handler() http.Handler // mux, обёрнутый в Guard; п�
 | `GET /api/backtest/strategies` | — | `{strategies:[StrategyInfo]}` |
 | `POST /api/backtest` | `{symbol,periodSec,strategy,params?,initialCash?,feeBps?,slippageBps?,count?}` | `{result: backtest.Result}` |
 | `GET /api/agent/tools` | — | `{tools:[{name,title,description,input}]}` |
-| `POST /api/agent/chat` | `{message,conversationId?}` | `ChatResponse`; если `conversationId` не передан, в ответе приходит сгенерированный id (§9.2) |
+| `POST /api/agent/chat` | `{message,conversationId?,context?}` — `context` = `ScreenContext` (§10.2), эфемерный контекст экрана | `ChatResponse`; если `conversationId` не передан, в ответе приходит сгенерированный id (§9.2) |
 | `GET /api/agent/status` | — | `agent.Status` + `{autonomy,llm}` |
 | `POST /api/agent/autonomy` | `{action:"start"\|"stop", config?}` | `{autonomy: AutonomyStatus}` |
 | `GET /api/agent/autonomy/log?limit=200` | — | `{log:[LogEntry]}` |
@@ -924,6 +930,12 @@ func (s *Server) Handler() http.Handler // mux, обёрнутый в Guard; п�
 
 // LogEntry
 {"time":"...","kind":"signal|order|fill|risk_block|start|stop|error","message":"...","data":{}}
+
+// ScreenContext (plan Task 8): контекст видимого экрана в ChatRequest; передаётся в LLM
+// отдельным эфемерным системным сообщением и в историю диалога не попадает.
+// Range/interval times — RFC3339 UTC.
+{"symbol":"TQBR:SBER","periodSec":300,"from":"2026-11-05T07:00:00Z","to":"2026-11-05T12:00:00Z",
+ "selection":{"from":"2026-11-05T09:00:00Z","to":"2026-11-05T10:00:00Z"},"activeTab":"chart"}
 
 // ChatResponse
 {"answer":"...","toolCalls":[{"name":"run_backtest","args":{},"result":{},"error":"",
