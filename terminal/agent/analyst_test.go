@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 )
@@ -79,9 +80,9 @@ func TestLocalAnalystBestStrategy(t *testing.T) {
 	if call.Args["periodSec"] != 900 {
 		t.Errorf("periodSec = %v, want 900", call.Args["periodSec"])
 	}
-	// 7 days of 15m bars = 672 → clamped to 600.
-	if call.Args["count"] != 600 {
-		t.Errorf("count = %v, want 600", call.Args["count"])
+	// 7 days of 15m bars = 672.
+	if call.Args["count"] != 672 {
+		t.Errorf("count = %v, want 672", call.Args["count"])
 	}
 }
 
@@ -175,8 +176,19 @@ func TestParseIntent(t *testing.T) {
 		{message: "пробой канала SBER", symbol: "TQBR:SBER", period: 300, strategy: "donchian_breakout"},
 		{message: "моментум SBER", symbol: "TQBR:SBER", period: 300, strategy: "momentum"},
 		{message: "запусти автоторговлю на SBER", symbol: "TQBR:SBER", period: 300, start: true},
+		{message: "запускай автоторговлю на SBER", symbol: "TQBR:SBER", period: 300, start: true},
+		{message: "стартуй автоторговлю на SBER", symbol: "TQBR:SBER", period: 300, start: true},
+		{message: "включи автоторговлю на SBER", symbol: "TQBR:SBER", period: 300, start: true},
+		{message: "начни торговать SBER", symbol: "TQBR:SBER", period: 300, start: true},
 		{message: "торгуй SBER", symbol: "TQBR:SBER", period: 300, start: true},
 		{message: "start trading SBER", symbol: "TQBR:SBER", period: 300, start: true},
+		// Questions, doubts and negations must never start a paper runner.
+		{message: "Протестируй лучшую стратегию на SBER за последний месяц и скажи, стоит ли запускать", symbol: "TQBR:SBER", period: 300},
+		{message: "стоит ли запускать автоторговлю?", symbol: "TQBR:SBER", period: 300},
+		{message: "запускать?", symbol: "TQBR:SBER", period: 300},
+		{message: "Запусти автоторговлю?", symbol: "TQBR:SBER", period: 300},
+		{message: "не запускай автоторговлю", symbol: "TQBR:SBER", period: 300},
+		{message: "не надо запускать автоторговлю", symbol: "TQBR:SBER", period: 300},
 	}
 	for _, tc := range cases {
 		intent, err := e.parseIntent(tc.message)
@@ -199,6 +211,141 @@ func TestParseIntent(t *testing.T) {
 		if intent.Start != tc.start {
 			t.Errorf("%q: start = %v, want %v", tc.message, intent.Start, tc.start)
 		}
+	}
+}
+
+// TestLocalAnalystQuestionDoesNotStartAutonomy is the regression test for the
+// false autonomy launch: "скажи, стоит ли запускать" is a question, not an
+// imperative, so no runner may start.
+func TestLocalAnalystQuestionDoesNotStartAutonomy(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	resp, err := e.Chat(context.Background(), ChatRequest{
+		Message: "Протестируй лучшую стратегию на SBER за последний месяц и скажи, стоит ли запускать",
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if _, ok := findToolCall(resp.ToolCalls, "start_autonomy"); ok {
+		t.Fatalf("question must not start autonomy; tools = %v", toolNames(resp.ToolCalls))
+	}
+	if e.Status().Autonomy.Running {
+		t.Fatal("autonomy was started by a question")
+	}
+	if !strings.Contains(resp.Answer, "Лучшая стратегия: sma_cross") {
+		t.Errorf("answer must name a traded strategy: %q", resp.Answer)
+	}
+	btCall, ok := findToolCall(resp.ToolCalls, "run_backtest")
+	if !ok || btCall.Args["strategy"] != "sma_cross" {
+		t.Errorf("run_backtest = %+v", btCall)
+	}
+	if !strings.Contains(resp.Answer, "Чтобы запустить автоторговлю") {
+		t.Errorf("answer does not offer the explicit command: %q", resp.Answer)
+	}
+}
+
+// TestLocalAnalystNoSignalsNoAutonomy: when no strategy traded, the analyst
+// must say there are no signals instead of picking a zero-trade "best".
+func TestLocalAnalystNoSignalsNoAutonomy(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	e.backtestRun = func(req backtest.Request) (backtest.Result, error) {
+		return makeFakeResult(req, 0, 0, 0, 0), nil
+	}
+	resp, err := e.Chat(context.Background(), ChatRequest{
+		Message: "протестируй лучшую стратегию на SBER за месяц",
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if !strings.Contains(resp.Answer, "ни одна стратегия не дала сделок") {
+		t.Errorf("answer = %q", resp.Answer)
+	}
+	if !strings.Contains(resp.Answer, "не рекомендую") {
+		t.Errorf("answer = %q", resp.Answer)
+	}
+	if _, ok := findToolCall(resp.ToolCalls, "start_autonomy"); ok {
+		t.Fatal("no-signal analysis must not start autonomy")
+	}
+	if _, ok := findToolCall(resp.ToolCalls, "run_backtest"); ok {
+		t.Fatal("no-signal analysis must not run a zero-trade backtest artifact")
+	}
+	if e.Status().Autonomy.Running {
+		t.Fatal("autonomy was started without signals")
+	}
+	if len(resp.Artifacts) != 0 {
+		t.Errorf("artifacts = %+v, want none for a no-signal comparison", resp.Artifacts)
+	}
+}
+
+// TestLocalAnalystNoTradeStrategyDoesNotStartAutonomy: an explicitly requested
+// strategy that produced no trades is never started as paper autonomy.
+func TestLocalAnalystNoTradeStrategyDoesNotStartAutonomy(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	e.backtestRun = func(req backtest.Request) (backtest.Result, error) {
+		if req.Strategy == "rsi_reversion" {
+			return makeFakeResult(req, 0, 0, 0, 0), nil
+		}
+		return makeFakeResult(req, 5, 2.0, 1.0, -1.0), nil
+	}
+	resp, err := e.Chat(context.Background(), ChatRequest{
+		Message: "запусти автоторговлю по RSI на SBER",
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if _, ok := findToolCall(resp.ToolCalls, "start_autonomy"); ok {
+		t.Fatalf("zero-trade strategy must not be started; tools = %v", toolNames(resp.ToolCalls))
+	}
+	if !strings.Contains(resp.Answer, "не дала сделок") || !strings.Contains(resp.Answer, "не рекомендую") {
+		t.Errorf("answer = %q", resp.Answer)
+	}
+	if e.Status().Autonomy.Running {
+		t.Fatal("autonomy was started on a zero-trade strategy")
+	}
+}
+
+// TestLocalAnalystAlreadyRunningNoSecondRunner: repeating "запусти" while a
+// runner is active must not create a second one.
+func TestLocalAnalystAlreadyRunningNoSecondRunner(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	e.stepDelay = func(float64) time.Duration { return 20 * time.Millisecond }
+	if err := e.StartAutonomy(context.Background(), AutonomyConfig{
+		Symbol: "TQBR:SBER", PeriodSec: 300, Strategy: "sma_cross",
+	}); err != nil {
+		t.Fatalf("StartAutonomy: %v", err)
+	}
+	before := e.Status().Autonomy
+
+	resp, err := e.Chat(context.Background(), ChatRequest{
+		Message: "запусти автоторговлю по SMA на SBER",
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	call, ok := findToolCall(resp.ToolCalls, "start_autonomy")
+	if !ok {
+		t.Fatalf("start_autonomy call is missing; tools = %v", toolNames(resp.ToolCalls))
+	}
+	if !strings.Contains(call.Error, "already running") {
+		t.Errorf("start_autonomy error = %q, want already running", call.Error)
+	}
+	if !strings.Contains(resp.Answer, "уже запущена") {
+		t.Errorf("answer = %q", resp.Answer)
+	}
+	after := e.Status().Autonomy
+	if !after.StartedAt.Equal(before.StartedAt) {
+		t.Errorf("StartedAt changed from %v to %v: a second runner was created", before.StartedAt, after.StartedAt)
+	}
+	starts := 0
+	for _, entry := range after.Log {
+		if entry.Kind == "start" {
+			starts++
+		}
+	}
+	if starts != 1 {
+		t.Errorf("start log entries = %d, want 1 (single runner)", starts)
+	}
+	if err := e.StopAutonomy(); err != nil {
+		t.Fatalf("StopAutonomy: %v", err)
 	}
 }
 

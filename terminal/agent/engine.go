@@ -22,7 +22,8 @@ const (
 	defaultHistoryLimit  = 20
 	defaultAutonomyLimit = 200_000.0
 	defaultAutonomySpeed = 5.0
-	defaultMaxBars       = 600
+	maxHistoryBars       = 600
+	maxBacktestBars      = 5000
 	autonomyBars         = 500
 	autonomyLogLimit     = 500
 	maxToolIterations    = 8

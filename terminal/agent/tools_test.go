@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -71,6 +72,86 @@ func TestToolCompareStrategies(t *testing.T) {
 	}
 }
 
+// TestCompareStrategiesSkipsZeroTradeStrategies is the regression test for the
+// "momentum with zero trades wins" defect: a zero-trade strategy has zero
+// Sharpe/drawdown, so it must never outrank a strategy that actually traded —
+// even a losing one.
+func TestCompareStrategiesSkipsZeroTradeStrategies(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	e.backtestRun = func(req backtest.Request) (backtest.Result, error) {
+		switch req.Strategy {
+		case "sma_cross":
+			return makeFakeResult(req, 14, -1.5, 0.8, -2.0), nil
+		case "rsi_reversion":
+			return makeFakeResult(req, 5, -2.0, 0.5, -3.0), nil
+		case "donchian_breakout":
+			return makeFakeResult(req, 6, -0.5, 1.0, -1.5), nil
+		case "momentum":
+			return makeFakeResult(req, 0, 0, 0, 0), nil
+		default:
+			return backtest.Result{}, fmt.Errorf("unexpected strategy %q", req.Strategy)
+		}
+	}
+	call, artifact := e.executeToolCall(context.Background(), "compare_strategies", map[string]any{
+		"symbol": "TQBR:SBER", "periodSec": 300, "count": 600,
+	})
+	if call.Error != "" {
+		t.Fatalf("compare_strategies: %s", call.Error)
+	}
+	cmp := call.Result.(compareResult)
+	if cmp.Best.Strategy == "momentum" {
+		t.Fatal("zero-trade momentum must never be chosen as the best strategy")
+	}
+	if cmp.Best.Strategy != "donchian_breakout" {
+		t.Errorf("best = %q, want donchian_breakout (best return among traded strategies)", cmp.Best.Strategy)
+	}
+	if cmp.Best.Result.Metrics.Trades <= 0 {
+		t.Errorf("best result has %d trades, want > 0", cmp.Best.Result.Metrics.Trades)
+	}
+	last := cmp.Ranked[len(cmp.Ranked)-1]
+	if last.Strategy != "momentum" {
+		t.Errorf("zero-trade strategy is not last: %v", cmp.Ranked)
+	}
+	if last.Warning == "" {
+		t.Error("zero-trade strategy must carry a warning")
+	}
+	if artifact == nil || artifact.Kind != "backtest" {
+		t.Fatalf("artifact = %+v, want backtest of the traded winner", artifact)
+	}
+}
+
+// TestCompareStrategiesNoSignals returns no best strategy when nothing traded.
+func TestCompareStrategiesNoSignals(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	e.backtestRun = func(req backtest.Request) (backtest.Result, error) {
+		return makeFakeResult(req, 0, 0, 0, 0), nil
+	}
+	call, artifact := e.executeToolCall(context.Background(), "compare_strategies", map[string]any{
+		"symbol": "TQBR:SBER", "periodSec": 300, "count": 600,
+	})
+	if call.Error != "" {
+		t.Fatalf("compare_strategies: %s", call.Error)
+	}
+	cmp := call.Result.(compareResult)
+	if cmp.Best.Strategy != "" {
+		t.Errorf("best = %q, want no best strategy without trades", cmp.Best.Strategy)
+	}
+	if len(cmp.Warnings) == 0 {
+		t.Error("no-signals comparison must carry a warning")
+	}
+	if artifact != nil {
+		t.Errorf("no-signals comparison must not produce a backtest artifact, got %+v", artifact)
+	}
+	for _, row := range cmp.Ranked {
+		if row.Warning == "" {
+			t.Errorf("ranked row %q has no warning", row.Strategy)
+		}
+	}
+	if got := len(e.Backtests()); got != 0 {
+		t.Errorf("Backtests() = %d, want 0 (zero-trade runs are not recorded)", got)
+	}
+}
+
 // TestToolGetQuoteAndHistory checks the JSON shapes of two data tools.
 func TestToolGetQuoteAndHistory(t *testing.T) {
 	e, _, _ := newTestEngine(t)
@@ -99,8 +180,8 @@ func TestToolGetQuoteAndHistory(t *testing.T) {
 	if !ok {
 		t.Fatalf("history result type = %T", historyCall.Result)
 	}
-	if len(history.Bars) > defaultMaxBars {
-		t.Errorf("history returned %d bars, want <= %d", len(history.Bars), defaultMaxBars)
+	if len(history.Bars) > maxHistoryBars {
+		t.Errorf("history returned %d bars, want <= %d", len(history.Bars), maxHistoryBars)
 	}
 	if history.Source == "" || history.Symbol != "TQBR:SBER" {
 		t.Errorf("unexpected history: %+v", history)

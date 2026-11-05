@@ -230,13 +230,13 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 			return nil, nil, errors.New("agent: symbol is required")
 		}
 		period := e.normalizePeriod(argInt(args, "periodSec", 0))
-		count := clampCount(argInt(args, "count", defaultMaxBars), defaultMaxBars)
+		count := clampCount(argInt(args, "count", maxHistoryBars), maxHistoryBars)
 		bars, err := e.data.History(ctx, symbol, period, count)
 		if err != nil {
 			return nil, nil, fmt.Errorf("agent: history for %s: %w", symbol, err)
 		}
-		if len(bars) > defaultMaxBars {
-			bars = bars[len(bars)-defaultMaxBars:]
+		if len(bars) > maxHistoryBars {
+			bars = bars[len(bars)-maxHistoryBars:]
 		}
 		return historyResult{Symbol: symbol, PeriodSec: period, Source: "feed", Bars: bars}, nil, nil
 	case "run_backtest":
@@ -250,7 +250,11 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 		if err != nil {
 			return nil, nil, err
 		}
-		return res, &Artifact{Kind: "backtest", Payload: best}, nil
+		if best == nil {
+			// No strategy traded on this history: there is no backtest card.
+			return res, nil, nil
+		}
+		return res, &Artifact{Kind: "backtest", Payload: *best}, nil
 	case "get_quote":
 		res, err := e.toolQuote(ctx, args)
 		if err != nil {
@@ -344,10 +348,12 @@ type quoteResult struct {
 	Book      bookView  `json:"book"`
 }
 
-// rankedStrategy is one compare_strategies row.
+// rankedStrategy is one compare_strategies row. Warning is set for a strategy
+// that produced no trades on the selected history (it is never "the best").
 type rankedStrategy struct {
 	Strategy string           `json:"strategy"`
 	Metrics  backtest.Metrics `json:"metrics"`
+	Warning  string           `json:"warning,omitempty"`
 }
 
 // bestStrategy is the winner of compare_strategies.
@@ -357,10 +363,13 @@ type bestStrategy struct {
 	Result   backtest.Result    `json:"result"`
 }
 
-// compareResult is the compare_strategies tool payload.
+// compareResult is the compare_strategies tool payload. Best.Strategy is empty
+// when no strategy produced trades ("no signals"): callers must not treat a
+// zero-trade run as the winner (its zero Sharpe/drawdown is meaningless).
 type compareResult struct {
-	Ranked []rankedStrategy `json:"ranked"`
-	Best   bestStrategy     `json:"best"`
+	Ranked   []rankedStrategy `json:"ranked"`
+	Best     bestStrategy     `json:"best"`
+	Warnings []string         `json:"warnings,omitempty"`
 }
 
 // toolRunBacktest implements run_backtest.
@@ -374,7 +383,7 @@ func (e *Engine) toolRunBacktest(ctx context.Context, args map[string]any) (back
 		return backtest.Result{}, errors.New("agent: strategy is required")
 	}
 	period := e.normalizePeriod(argInt(args, "periodSec", 0))
-	count := clampCount(argInt(args, "count", defaultMaxBars), defaultMaxBars)
+	count := clampCount(argInt(args, "count", maxHistoryBars), maxBacktestBars)
 	bars, err := e.data.History(ctx, symbol, period, count)
 	if err != nil {
 		return backtest.Result{}, fmt.Errorf("agent: history for %s: %w", symbol, err)
@@ -401,23 +410,28 @@ func (e *Engine) toolRunBacktest(ctx context.Context, args map[string]any) (back
 }
 
 // toolCompareStrategies implements compare_strategies: every catalog strategy
-// is replayed on the same bars and ranked by total return.
-func (e *Engine) toolCompareStrategies(ctx context.Context, args map[string]any) (compareResult, backtest.Result, error) {
+// is replayed on the same bars. Only strategies that actually traded are
+// eligible for "best" (ranked by total return, then Sharpe as tie-break);
+// zero-trade strategies are pushed to the end with a warning because their
+// zero Sharpe/drawdown must never win. When nothing traded the returned best is
+// nil and the payload says there are no signals.
+func (e *Engine) toolCompareStrategies(ctx context.Context, args map[string]any) (compareResult, *backtest.Result, error) {
 	symbol := e.resolveSymbol(argString(args, "symbol"))
 	if symbol == "" {
-		return compareResult{}, backtest.Result{}, errors.New("agent: symbol is required")
+		return compareResult{}, nil, errors.New("agent: symbol is required")
 	}
 	period := e.normalizePeriod(argInt(args, "periodSec", 0))
-	count := clampCount(argInt(args, "count", defaultMaxBars), defaultMaxBars)
+	count := clampCount(argInt(args, "count", maxHistoryBars), maxBacktestBars)
 	bars, err := e.data.History(ctx, symbol, period, count)
 	if err != nil {
-		return compareResult{}, backtest.Result{}, fmt.Errorf("agent: history for %s: %w", symbol, err)
+		return compareResult{}, nil, fmt.Errorf("agent: history for %s: %w", symbol, err)
 	}
 	if len(bars) < 2 {
-		return compareResult{}, backtest.Result{}, fmt.Errorf("agent: not enough history for %s (%d bars)", symbol, len(bars))
+		return compareResult{}, nil, fmt.Errorf("agent: not enough history for %s (%d bars)", symbol, len(bars))
 	}
 
 	results := make([]backtest.Result, 0, len(e.strategyCatalog()))
+	warnings := make([]string, 0, 1)
 	var failures []string
 	for _, info := range e.strategyCatalog() {
 		req := backtest.Request{
@@ -436,12 +450,23 @@ func (e *Engine) toolCompareStrategies(ctx context.Context, args map[string]any)
 		results = append(results, res)
 	}
 	if len(results) == 0 {
-		return compareResult{}, backtest.Result{}, fmt.Errorf("agent: all strategies failed: %s", strings.Join(failures, "; "))
+		return compareResult{}, nil, fmt.Errorf("agent: all strategies failed: %s", strings.Join(failures, "; "))
+	}
+	if len(failures) > 0 {
+		warnings = append(warnings, "не удалось прогнать: "+strings.Join(failures, "; "))
 	}
 	sort.SliceStable(results, func(i, j int) bool {
 		a, b := results[i].Metrics, results[j].Metrics
+		tradedA, tradedB := a.Trades > 0, b.Trades > 0
+		if tradedA != tradedB {
+			// Traded strategies always rank above zero-trade strategies.
+			return tradedA
+		}
 		if a.TotalReturnPct != b.TotalReturnPct {
 			return a.TotalReturnPct > b.TotalReturnPct
+		}
+		if a.Sharpe != b.Sharpe {
+			return a.Sharpe > b.Sharpe
 		}
 		if a.MaxDrawdownPct != b.MaxDrawdownPct {
 			return a.MaxDrawdownPct > b.MaxDrawdownPct
@@ -449,19 +474,27 @@ func (e *Engine) toolCompareStrategies(ctx context.Context, args map[string]any)
 		return results[i].Strategy < results[j].Strategy
 	})
 
-	out := compareResult{
-		Ranked: make([]rankedStrategy, 0, len(results)),
-		Best: bestStrategy{
-			Strategy: results[0].Strategy,
-			Params:   results[0].Params,
-			Result:   results[0],
-		},
-	}
+	out := compareResult{Ranked: make([]rankedStrategy, 0, len(results))}
 	for _, res := range results {
-		out.Ranked = append(out.Ranked, rankedStrategy{Strategy: res.Strategy, Metrics: res.Metrics})
+		row := rankedStrategy{Strategy: res.Strategy, Metrics: res.Metrics}
+		if res.Metrics.Trades <= 0 {
+			row.Warning = "нет сделок на выбранном периоде"
+		}
+		out.Ranked = append(out.Ranked, row)
 	}
-	e.recordBacktest(results[0])
-	return out, results[0], nil
+	if results[0].Metrics.Trades <= 0 {
+		out.Warnings = append(out.Warnings,
+			"нет стратегий со сделками на выбранном периоде: сигналов нет, лучшая стратегия не выбирается")
+		return out, nil, nil
+	}
+	bestResult := results[0]
+	out.Best = bestStrategy{
+		Strategy: bestResult.Strategy,
+		Params:   bestResult.Params,
+		Result:   bestResult,
+	}
+	e.recordBacktest(bestResult)
+	return out, &bestResult, nil
 }
 
 // toolQuote implements get_quote.
