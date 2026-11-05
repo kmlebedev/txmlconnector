@@ -179,3 +179,28 @@ connection» (повторный snapshot ломает состояние) — �
 4. Снять `native/records/testdata/ticks-live.hex.gz` (RQ_MAIN reply/куски) и `ticks-dll.xml.gz`
 (колбэки `<ticks>/<tick>`); обновить это приложение и docs/commands.md, статус S.
 5. Если пользователь не поднимет сессию — зафиксировать как внешний блокер, не выдумывать данные.
+
+## S: тики на проде в основную сессию (2026-11-05, read-only)
+
+- Команда (`S`): `<command id="subscribe_ticks"><filter>true</filter><security><board>TQBR</board>
+  <seccode>SBER</seccode><tradeno>0</tradeno></security></command>`; с `<secid>` вместо
+  board/seccode — `Wrong security format.`; `unsubscribe_ticks` — `Unknown command.`.
+- C>S `type=120` payload (**S**): `01 096c 004b 00 0602 004b 00` = `B filter=1; {W secid, W board,
+  G tradeno}*`; на проде `secid SBER=2412, GAZP=1538, board TQBR=75` (на демо board=37); S>C
+  reply `type=120` пустой.
+- **Тики приходят записями RQ_MAIN `0x5a` (TICK), а не кадром RQ_TICKS (13)**: в 25-секундном
+  захвате основной сессии **ни одного `type=13`** (ни C>S, ни S>C) — прежняя гипотеза о поллинге
+  опровергнута (**S**).
+- Запись `0x5a` (**D + S**): диспетчер case `0x59` → `FUN_1803bf6c0` → `FUN_1803858b0`
+  (строки `TICK: incorrect buffer 1/2`); тело — цикл до `W secid == 0xffff`:
+  `W secid; W board; G tradeno; L time; L price; L quantity; B period; B buysell; L X; L Y`.
+  `tradeno` и `time` — накопительные (суммируемые) дельты, при нуле time подставляется начало дня
+  (`FUN_18017c360`); в снятом тике time уже абсолютное Unix-время (**S**: 1793865395 →
+  `05.11.2026 07:56:35`).
+- XML `<ticks><tick>…</tick></ticks>` (**S**): `<secid>`, `<board>`, `<seccode>`, `<tradeno>`,
+  `<tradetime>` (`DD.MM.YYYY HH:MM:SS`), `<price>` (Decimal), `<quantity>`, `<period>` (`N`),
+  `<buysell>` (`B`/`S`); один колбэк может нести несколько `<tick>`.
+- S-фикстура: `native/records/testdata/ticks-live-inject.hex` (запись 0x5a) +
+  `ticks-live-dll.xml` + `ticks-live-repro.md`.
+- Для T14: декодер — RQ_MAIN-запись `0x5a` (не поллинг RQ_TICKS 13); `X`/`Y`-поля записи —
+  семантика **I**.
