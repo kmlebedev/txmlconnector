@@ -461,3 +461,24 @@ echo ok
   the command is processed, not "not implemented".
 
 - Task-67 live-load fix: cancelled/removed/denied/rejected R_ORD_NEW bodies are shorter than the linear 52-read scheme; `ParseOrderNew` marks them `Short` and the event decoder skips them (I) instead of failing the load. R_RES 0x0f parsing added per RE-2 task-68.
+
+
+## makeordown: RQ_MAKE_COND_OWN (112) — D + O (2026-11-05, закрывает I)
+
+- **D** (`FUN_1800efda0` → `FUN_1803861e0`): `transactionid` читается только из **атрибута**; ноль,
+  отсутствие, нечисловое значение и неизвестная транзакция дают один текст
+  `Cannot make specified transaction_id an own conditional order`. Запрос — **не** RQ_TRANSACT, а
+  отдельный тип `0x70` (112) с телом `L transactionid` (упакованное). Ответ — C-строка до 0x200:
+  пустая — успех, непустая — текст ошибки DLL.
+- **Проверки DLL перед отправкой (D):** транзакция найдена в хранилище `+0x4f0` (`FUN_18025d1e0`
+  копирует объект заявки), байт `+0x12a` (тип условия, поле №11 R_ORD_NEW) ≠ 0 и байт `+0x1a8` == 1.
+- **O** (replay `r14` + DLL, инъекция одной записи 0x03 из `order-new-inject.hex` — условная заявка
+  `watching`): `makeordown transactionid="1"` → `<result success="true"/>`, C>S `type=112 len=1 10`
+  (фикстура `makecondown-payload.hex`); ответ проигрывателя пустой. `transactionid="2"` (нет в
+  хранилище) → текст отказа, запрос не уходит. После записи 0x10 (заявка отменена, `disabled`) —
+  тоже отказ.
+- **Go:** `session.RqMakeCondOwn`, `Conn.MakeCondOwn`, `Client.MakeOrdOwn`. Локальная проверка —
+  O-эквивалент: известная заявка с условием в статусе `watching`. Что именно хранит `+0x1a8` и
+  точная форма `<result>` при непустом ответе сервера — **I**. Нативный коннектор на том же
+  проигрывании дал те же два ответа и тот же payload (O).
+- Живой S на демо не снимался: нужна условная заявка (торговая команда, отдельное согласие).

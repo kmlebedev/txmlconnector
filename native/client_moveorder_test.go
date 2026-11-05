@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -89,11 +90,25 @@ func TestMoveOrderConnectorT19(t *testing.T) {
 	}
 }
 
-// TestMakeOrdOwnConnectorT19: transactionid is an ATTRIBUTE and the command is
-// processed (explicit I reason, not not-implemented).
+// TestMakeOrdOwnConnectorT19: makeordown sends RQ_MAKE_COND_OWN (112) with
+// the packed transactionid (D: FUN_1803861e0; O: payload 10 for txid 1) only
+// for a known conditional order that is watching (O: success for the
+// order-new-inject record, refusal after the 0x10 cancel and for unknown ids);
+// otherwise the DLL text, and nothing is sent.
 func TestMakeOrdOwnConnectorT19(t *testing.T) {
 	srv := newRunServer(t)
 	srv.Snapshot = clientSnapshot(t)
+	var (
+		mu       sync.Mutex
+		captured [][]byte
+		reply    []byte
+	)
+	srv.Handle(session.RqMakeCondOwn, func(payload []byte) (byte, []byte) {
+		mu.Lock()
+		defer mu.Unlock()
+		captured = append(captured, append([]byte(nil), payload...))
+		return wire.KindReply | wire.FlagPlain, reply
+	})
 	c := New(Config{Dial: srv.Dial})
 	rec := newRecorder()
 	if err := c.Start(rec.handle); err != nil {
@@ -102,14 +117,30 @@ func TestMakeOrdOwnConnectorT19(t *testing.T) {
 	defer c.Close()
 	send(t, c, connectCommand())
 	rec.next(t, "<server_status")
-	got := send(t, c, "<command id="+quote+"makeordown"+quote+" transactionid="+quote+"20"+quote+"/>")
-	if !strings.Contains(got, "RQ_MAKE_COND_OWN payload is not recovered (I)") {
+	refused := "<result success=" + quote + "false" + quote + "><message>Cannot make specified transaction_id an own conditional order</message></result>"
+	for _, cmd := range []string{
+		"<command id=" + quote + "makeordown" + quote + " transactionid=" + quote + "1" + quote + "/>", // unknown yet
+		"<command id=" + quote + "makeordown" + quote + " transactionid=" + quote + "x" + quote + "/>",
+		"<command id=" + quote + "makeordown" + quote + "/>",
+		"<command id=" + quote + "makeordown" + quote + "><transactionid>1</transactionid></command>", // element is ignored (D)
+	} {
+		if got := send(t, c, cmd); got != refused {
+			t.Fatalf("%s = %s, want %s", cmd, got, refused)
+		}
+	}
+	srv.QueueMain(patchOrderClient(t, readOrderFixture(t, "order-new-inject.hex"), snapshotClientID(t)))
+	rec.next(t, "<orders")
+	cmd := "<command id=" + quote + "makeordown" + quote + " transactionid=" + quote + "1" + quote + "/>"
+	if got := send(t, c, cmd); got != "<result success="+quote+"true"+quote+"/>" {
 		t.Fatalf("makeordown = %s", got)
 	}
-	if strings.Contains(got, "not implemented by the native connector") {
-		t.Fatalf("makeordown still not-implemented: %s", got)
+	mu.Lock()
+	if len(captured) != 1 || hex.EncodeToString(captured[0]) != "10" {
+		t.Fatalf("112 payloads = %x, want [10]", captured)
 	}
-	if got := send(t, c, "<command id="+quote+"makeordown"+quote+" transactionid="+quote+"x"+quote+"/>"); !strings.Contains(got, "Wrong transactionid value.") {
-		t.Fatalf("bad makeordown txid = %s", got)
+	reply = append([]byte("\xcd\xe5\xf2"), 0) // CP1251 "Нет"
+	mu.Unlock()
+	if got := send(t, c, cmd); got != "<result success="+quote+"false"+quote+"><message>Нет</message></result>" {
+		t.Fatalf("makeordown with server text = %s", got)
 	}
 }
