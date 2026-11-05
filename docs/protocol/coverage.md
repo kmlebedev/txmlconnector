@@ -64,7 +64,7 @@ get_connector_version. Расхождение плана «45 vs 43» закры
 | connect | done | RQ_LOGIN 1 + RQ_STARTUP 9 | S/O | `TestLoginAgainstRecordedServer`, `startup-demo.hex`, `connect-options-live*` | параметры/язык/UTC — done (task 6) |
 | disconnect | done | RQ_LOGOUT 2 | S | `TestLogoutSendsWithoutWaiting` | — |
 | subscribe / unsubscribe | done | RQ_SUBSCRIBE 10 | O | `subscribe*`, `TestSubscribeMasksMatchDLL` | маски 0x01/0x02 |
-| subscribe_ticks | done (команда) | RQ_SUBSCRIBE_TICKS 120, опрос RQ_TICKS 13 | S/O | `TestConnectorSubscribeTicks`, `session/ticks_test.go` | XML `<ticks>` ещё нет (T14 partial) |
+| subscribe_ticks | done | RQ_SUBSCRIBE_TICKS 120; тики — RQ_MAIN 0x5a | S | `TestConnectorSubscribeTicks`, `TestTickMatchDLL`, `TestSubscribeTicks*` | XML `<ticks>` S-форма, batch/накопление; RQ_TICKS(13) не используется |
 | gethistorydata | done | RQ_HISTORY_EXT 148 (RQ_HISTORY 11 — константа) | O | `TestConnectorHistory*`, `candles-*` | результат — до candles (не блокирующе) |
 | get_forts_positions | done | RQ_CLIENT_HOLDINGS 42 | O | `TestPositionsMatchDLL`, `position-forts-*` | FORTS-позиции |
 | get_client_limits | done (D) | RQ_CLIENT_LIMITS 43 | D (+oracle pending) | `TestClientLimitsCommand/Parse` | `<clientlimits>` XML — синтетика; ждёт O-фикстуру |
@@ -206,9 +206,9 @@ makeordown, moveorder (2 имени; T19 — ждут живую S-серию).
 | `<portfolio_currency>`/`<mc_portfolio>` | MoneyPosition (local) | `PortfolioCurrencyXML`/`MCPortfolioXML` | `portfolio-*-dll.xml` | O |
 | `<marketord>` | MarketOrd | `MarketOrdXML` | `marketord-dll.xml` | O |
 | `<portfolio_tplus>`/`<portfolio_forts>`/`<united_portfolio>`/`<portfolio_mct>` | — | только литеральные скелеты, не в Render | — | I (T22 remaining) |
-| `<ticks>` | Tick | рендер не реализован | нет | T14 partial |
+| `<ticks>` | Tick/Ticks | `TicksXML` | `ticks-live-dll.xml` | S |
 | `<news_header>` | NewsHeader | `NewsHeaderXML` | `news-dll.xml` | O |
-| `<news_body>` | NewsBody | `NewsBodyXML` (D-форма) | нет O | I (task-56) |
+| `<news_body>` | NewsBody | `NewsBodyXML` | `news-body-live-dll.xml` | S |
 | `<messages>` | Messages batch | `MessagesXML` | `message-dll.xml` | O |
 | `<option_families>`/`<family_strikes>`/`<options_failed>` | OptionFamily/OptionStrikes/EndOfFamily | `OptionFamiliesXML`/`FamilyStrikesXML`/`OptionsFailedXML` | нет O | I (D-литералы) |
 | `<negdeal>` | RPSTradeForExecution | `NegDealXML` | нет O | I (D-литералы) |

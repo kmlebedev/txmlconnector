@@ -15,9 +15,8 @@ type NewsHeader struct {
 
 func (*NewsHeader) isEvent() {}
 
-// NewsBody is one <news_body> callback (PDF 4.20, D form). The reply/emit
-// mechanics of RQ_GETNEWS are not recovered yet (news.md I), so only the D
-// shape is typed here.
+// NewsBody is one <news_body> callback (PDF 4.20). S: reply 73 is empty and the
+// body arrives as RQ_MAIN 0x36 flags=2; Text is UTF-8 (CP1251 decoded).
 type NewsBody struct {
 	ID   int64
 	Text string

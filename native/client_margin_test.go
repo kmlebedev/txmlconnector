@@ -1,9 +1,13 @@
 package native
 
 import (
+	"context"
+	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
@@ -420,15 +424,46 @@ func TestMarginRateUnknownFails(t *testing.T) {
 	}
 }
 
-// TestReloginResetsMarginRates: the per-secid R_SEC_RATE cache must not survive
-// the relogin/account reset (a new session can have different secids).
+// TestReloginResetsMarginRates: a real Reconnect installs a new session and
+// must not keep per-secid R_SEC_RATE prices from the previous one.
 func TestReloginResetsMarginRates(t *testing.T) {
-	c := &Client{marginRates: map[uint16]int64{26: 29146}}
+	first := newRunServer(t)
+	first.Snapshot = marginSnapshot(t)
+	second := newRunServer(t)
+	second.Snapshot = clientSnapshot(t)
+	var mu sync.Mutex
+	connects := 0
+	dial := func(ctx context.Context, address string) (net.Conn, error) {
+		mu.Lock()
+		connects++
+		n := connects
+		mu.Unlock()
+		if n == 1 {
+			return first.Dial(ctx, address)
+		}
+		return second.Dial(ctx, address)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, ClientConfig{Address: "testserver:0", Login: testLogin, Password: testPassword, Dial: dial})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
 	c.mu.Lock()
-	c.resetAccountsLocked()
+	before := len(c.marginRates)
 	c.mu.Unlock()
-	if c.marginRates != nil {
-		t.Fatalf("marginRates after reset = %v, want nil", c.marginRates)
+	if before == 0 {
+		t.Fatal("initial session has no marginRates")
+	}
+	if err := c.Reconnect(ctx); err != nil {
+		t.Fatalf("Reconnect: %v", err)
+	}
+	c.mu.Lock()
+	after := c.marginRates
+	c.mu.Unlock()
+	if after != nil {
+		t.Fatalf("marginRates after Reconnect = %v, want nil", after)
 	}
 }
 

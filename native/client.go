@@ -110,8 +110,8 @@ type Client struct {
 	// from/to rule uses the MINIMUM stored id (news.md D+O, task-56).
 	news      map[int64]model.NewsHeader
 	newsOrder []int64
-	// newsBodies keeps the unpacked 0x36 body only when the header is known; the
-	// DLL emitter path for <news_body> is not recovered (I).
+	// newsBodies keeps the unpacked UTF-8 0x36 body when the header is known;
+	// S: the <news_body> callback is emitted for the requested header.
 	newsBodies map[int64]string
 	// Options state (task 27): families/strikes end-of-family records are D-only;
 	// the XML forms are I until the S series.

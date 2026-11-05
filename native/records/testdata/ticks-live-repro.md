@@ -12,7 +12,7 @@
 | §ticks-live-dll.xml§ | ожидаемый колбэк DLL §<ticks><tick>…</tick></ticks>§ (S, из того же прогона) |
 
 Тик: secid 2412 (SBER, TQBR prod), tradeno 18027673956, time 1 793 865 395 (Unix; 05.11.2026
-07:56:35 MSK), price 29 045 (290.45), quantity 45, period §N§, buysell §B§.
+07:56:35 UTC), price 29 045 (290.45), quantity 45, period §N§, buysell §B§.
 
 ## Команда (S)
 
@@ -42,7 +42,7 @@ W secid; W board; G tradeno; L time; L price; L quantity; B period; B buysell; L
 
 - §G tradeno§ и §L time§ — **накопительные дельты** (D: суммы §local_a0 += local_90§, §local_d4 +=
   local_88§; при нуле time подставляется начало дня §FUN_18017c360§); в снятой записи время уже
-  абсолютное Unix-время (S: 1 793 865 395 → 07:56:35 MSK).
+  абсолютное Unix-время (S: 1 793 865 395 → 07:56:35 UTC).
 - §price§/§quantity§ — packed-L; §period§/§buysell§ — по байту (§N§/§B§); §X§/§Y§ — L (S: 0 и 803;
   семантика — I).
 - S-декод записи: §5a 096c 004b 73e02f…§ (полный hex — в фикстуре).

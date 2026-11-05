@@ -1,6 +1,7 @@
 package native
 
 import (
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
@@ -146,3 +147,48 @@ func TestSubscribeTicksNoRQ_TICKS(t *testing.T) {
 }
 
 var _ = session.RqSubscribe
+
+// TestSubscribeTicksMultiSecurity: the S payload mirrors the XML list in reverse
+// order: filter then {W secid, W board, G tradeno} for each security.
+func TestSubscribeTicksMultiSecurity(t *testing.T) {
+	srv := newRunServer(t)
+	snapshot := clientSnapshot(t)
+	gazpRecs, err := records.Records(secNewRecord(t, "GAZP", 27))
+	if err != nil || len(gazpRecs) != 1 {
+		t.Fatalf("gazp sec record: %v", err)
+	}
+	rec := gazpRecs[0]
+	snapshot = append(snapshot, rec.Tag, byte(len(rec.Body)>>8), byte(len(rec.Body)))
+	snapshot = append(snapshot, rec.Body...)
+	srv.Snapshot = snapshot
+	var captured []byte
+	srv.Handle(120, func(payload []byte) (byte, []byte) {
+		captured = append([]byte(nil), payload...)
+		return wire.KindReply | wire.FlagPlain, nil
+	})
+	c := New(Config{Dial: srv.Dial})
+	recorder := newRecorder()
+	if err := c.Start(recorder.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	recorder.next(t, "<server_status")
+	cmd := "<command id=" + quote + "subscribe_ticks" + quote + "><filter>true</filter>"
+	cmd += "<security><board>TQBR</board><seccode>SBER</seccode><tradeno>0</tradeno></security>"
+	cmd += "<security><board>TQBR</board><seccode>GAZP</seccode><tradeno>0</tradeno></security></command>"
+	if got := send(t, c, cmd); !strings.Contains(got, "success="+quote+"true"+quote) {
+		t.Fatalf("subscribe_ticks multi = %s", got)
+	}
+	var w wire.Writer
+	w.Byte(1)
+	w.Uint16(27)
+	w.Uint16(37)
+	w.Int64(0)
+	w.Uint16(26)
+	w.Uint16(37)
+	w.Int64(0)
+	if hex.EncodeToString(captured) != hex.EncodeToString(w.Bytes()) {
+		t.Fatalf("multi subscribe payload = %x, want %x", captured, w.Bytes())
+	}
+}
