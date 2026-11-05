@@ -39,7 +39,9 @@ func (c *Client) Exec(ctx context.Context, sql string) error
 
 ## 2. Схемы базы `md` (DDL)
 
-Создаются `recorder.EnsureSchema` (`CREATE TABLE IF NOT EXISTS`), точный DDL — в
+Создаются `recorder.EnsureSchema`: **сначала `CREATE DATABASE IF NOT EXISTS md`**, затем таблицы
+(`CREATE TABLE IF NOT EXISTS`), — на чистом ClickHouse базы `md` нет, и `CREATE TABLE md.*` без
+этого шага упал бы с «Database md does not exist». Точный DDL — в
 [`recorder/schema.go`](../../terminal/recorder/schema.go).
 
 ```sql
@@ -152,7 +154,8 @@ export MD_SYMBOLS=TQBR:SBER,TQBR:GAZP
 go run ./cmd/md-recorder
 ```
 
-Порядок работы: `EnsureSchema` → цикл сессий `native.Dial` → `recorder.Run`. При обрыве сессия
+Порядок работы: `EnsureSchema` (создаёт базу `md` и таблицы) → цикл сессий `native.Dial` →
+`recorder.Run`. При обрыве сессия
 переоткрывается с backoff 5 с → 1 мин (сброс после 5 минут стабильной работы); `SIGINT`/`SIGTERM`
 завершают запись штатно. В лог пишутся только режим, адрес, число символов и класс ошибки — креды и
 значения переменных не печатаются.

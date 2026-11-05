@@ -50,6 +50,9 @@ func (s *chStub) captured() (query, body []string) {
 func TestSchemaStatements(t *testing.T) {
 	ddl := strings.Join(Schema(), "\n")
 	for _, want := range []string{
+		// On a clean ClickHouse md does not exist yet, so the database must be
+		// created before the first CREATE TABLE md.*.
+		"CREATE DATABASE IF NOT EXISTS md",
 		"CREATE TABLE IF NOT EXISTS md.book_events",
 		"ts DateTime64(3, 'UTC')",
 		"recv_ts DateTime64(6, 'UTC')",
@@ -76,7 +79,8 @@ func TestSchemaStatements(t *testing.T) {
 	}
 }
 
-// TestEnsureSchemaCreatesTables runs the DDL through the HTTP client.
+// TestEnsureSchemaCreatesTables runs the DDL through the HTTP client: the
+// database first, then the two tables.
 func TestEnsureSchemaCreatesTables(t *testing.T) {
 	stub, srv := newCHStub(t)
 	client := chstore.New(srv.URL, "", "", srv.Client())
@@ -84,11 +88,17 @@ func TestEnsureSchemaCreatesTables(t *testing.T) {
 		t.Fatalf("EnsureSchema: %v", err)
 	}
 	query, _ := stub.captured()
-	if len(query) != 2 {
-		t.Fatalf("requests = %d, want 2", len(query))
+	if len(query) != 3 {
+		t.Fatalf("requests = %d, want 3", len(query))
 	}
-	if !strings.Contains(query[0], "CREATE TABLE IF NOT EXISTS md.book_events") || !strings.Contains(query[1], "CREATE TABLE IF NOT EXISTS md.trades") {
-		t.Fatalf("DDL requests = %q", query)
+	for i, want := range []string{
+		"CREATE DATABASE IF NOT EXISTS md",
+		"CREATE TABLE IF NOT EXISTS md.book_events",
+		"CREATE TABLE IF NOT EXISTS md.trades",
+	} {
+		if !strings.Contains(query[i], want) {
+			t.Fatalf("DDL request %d = %q, want %q", i, query[i], want)
+		}
 	}
 	if err := EnsureSchema(context.Background(), nil); err == nil {
 		t.Fatal("nil ClickHouse client must fail")

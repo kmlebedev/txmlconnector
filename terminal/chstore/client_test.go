@@ -137,6 +137,14 @@ func TestChstoreInsertBatchesJSONEachRow(t *testing.T) {
 	if err := client.Insert(context.Background(), "md.book_events FORMAT JSONEachRow; DROP TABLE md.trades", rows[:1]); err == nil {
 		t.Fatal("Insert with an unsafe table name must fail")
 	}
+	// The separator in database.table is a literal dot, not "any character":
+	// a hyphenated name is not a valid identifier and must be rejected.
+	if err := client.Insert(context.Background(), "md-book_events", rows[:1]); err == nil {
+		t.Fatal("Insert with a non-identifier table name must fail")
+	}
+	if err := client.Insert(context.Background(), "md.book_events", rows[:1]); err != nil {
+		t.Fatalf("Insert into database.table: %v", err)
+	}
 }
 
 // TestChstoreQueryParams is the plan test: Query sends the SQL with

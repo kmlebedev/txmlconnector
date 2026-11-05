@@ -30,9 +30,12 @@ const (
 	timeMicrosLayout = "2006-01-02 15:04:05.000000"
 )
 
-// schemaDDL is executed by EnsureSchema. The columns, enums, ordering and
-// partitioning are the plan Task 11 contract; data.md records the semantics.
+// schemaDDL is executed by EnsureSchema. The first statement creates the md
+// database itself: on a clean ClickHouse the CREATE TABLE md.* would fail with
+// "Database md does not exist". The columns, enums, ordering and partitioning
+// are the plan Task 11 contract; data.md records the semantics.
 var schemaDDL = []string{
+	"CREATE DATABASE IF NOT EXISTS " + Database,
 	`CREATE TABLE IF NOT EXISTS md.book_events (
 	ts DateTime64(3, 'UTC'),
 	recv_ts DateTime64(6, 'UTC'),
@@ -61,13 +64,13 @@ PARTITION BY toYYYYMMDD(ts)`,
 ORDER BY (sec_code, trade_no)`,
 }
 
-// Schema returns the CREATE TABLE IF NOT EXISTS statements of the md database
-// (a copy, for tools and tests).
+// Schema returns the CREATE DATABASE / CREATE TABLE IF NOT EXISTS statements of
+// the md database (a copy, for tools and tests).
 func Schema() []string {
 	return append([]string(nil), schemaDDL...)
 }
 
-// EnsureSchema creates the md tables if they do not exist yet.
+// EnsureSchema creates the md database and its tables if they do not exist yet.
 func EnsureSchema(ctx context.Context, cl *chstore.Client) error {
 	if cl == nil {
 		return fmt.Errorf("recorder: nil ClickHouse client")
