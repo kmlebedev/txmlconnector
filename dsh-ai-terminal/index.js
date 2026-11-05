@@ -333,7 +333,7 @@ export function apply(ctx, config) {
 
   own(ctx.webServer.register({
     kind: 'prefix',
-    path: `${MOUNT}/`,
+    path: MOUNT,
     handler: (req, res) => {
       if (backend.state.phase !== 'running' && !(backend.starting || backend.child)) {
         // The panel polls the status route; answer API calls with a clear 503
