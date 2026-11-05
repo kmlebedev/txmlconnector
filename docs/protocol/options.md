@@ -27,8 +27,8 @@ DLL под Wine, только loopback). Статусы: **S** — демо-се
 
 ### Гейт версии сервера (D + O)
 
-- В `FUN_1803b9950` (153) и `FUN_1803b9cd0` (150/151) проверяется
-  `*(int*)(symbolStore + 0x694) < 0x45` → текст `Unsupported request.`
+- В `FUN_1803b9950` (153) и `FUN_1803b9cd0` (151) проверяется; у 150 гейта нет (D):
+  `*(int*)(symbolStore + 0x694) < 0x45` → текст `Unsupported request.` (150 отправляется без этой проверки)
   (то же в кэше-рендере `FUN_1803583e0`/`FUN_180358460`).
 - В записанной сессии версия = **68 (0x44)** → `get_family_strikes` и `get_options` недоступны:
   O-наблюдение `Unsupported request.` / `success=false`; `get_option_families` (149 гейта не
@@ -57,7 +57,7 @@ DLL под Wine, только loopback). Статусы: **S** — демо-се
 - 151 (`FUN_1803b9cd0`): для каждого элемента списка опционов — `FUN_1801c2030(1)` +
   `Z25 opt_code` (строка до 25), затем `FUN_180355d50(...,0x97,"RQ_CERTAIN_OPTIONS",-1)`.
 - 150 (`FUN_1803b9600`): `FUN_1801c2030(1)`; `W secid`; `Z6 str`; `L`; `L`;
-  `FUN_180355d50(...,0x96,"RQ_FAMILIY_OPTIONS")`; ответ — C-строка до 0x200.
+  `FUN_180355d50(...,0x96,"RQ_FAMILIY_OPTIONS")`; ответ — C-строка до 0x200. Гейта 0x45 нет.
 
 ## Записи RQ_MAIN опционов (D)
 

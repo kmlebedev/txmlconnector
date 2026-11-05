@@ -42,12 +42,15 @@ func TestOptionsReply(t *testing.T) {
 		wantErr bool
 	}{
 		{"ok", readOptionsFixture(t, "option-families-reply-ok.hex"), "", false},
-		{"empty", nil, "", false},
+		{"zero-length", nil, "", true},
 		{"error", readOptionsFixture(t, "option-families-reply-error.hex"), "No families", false},
 	} {
 		message, err := OptionsReply(tc.payload)
 		if message != tc.want || (err != nil) != tc.wantErr {
 			t.Fatalf("%s: message=%q err=%v", tc.name, message, err)
+		}
+		if tc.wantErr && (err == nil || !strings.Contains(err.Error(), "incorrect server buffer")) {
+			t.Fatalf("%s: err = %v", tc.name, err)
 		}
 	}
 	if _, err := OptionsReply([]byte{0x41, 0xff}); err == nil {
