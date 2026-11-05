@@ -57,6 +57,47 @@ make terminal                      # bin/terminal
 | `autoStart` | `true` | запускать бэкенд при загрузке плагина |
 | `repoDir` | авто | checkout с `cmd/terminal` (по умолчанию — родитель каталога плагина) |
 | `binaryPath` | авто | заранее собранный бэкенд; по умолчанию `<repoDir>/bin/terminal` |
+| `llmProvider` | `deepseek-official` | provider Harness LLM для агента терминала (мост задачи 10) |
+| `llmModel` | `deepseek-flash` | модель Harness LLM для агента терминала; `request.model` бэкенда игнорируется |
+| `dataDir` | — | каталог сгенерированных паттернов; его `skills/` отдаёт провайдер навыков |
+| `autonomy` | `{enabled:false, tokenBudget:200000, maxWallMinutes:60, approvalMode:'confirm'}` | автономный ночной workflow, бюджет токенов и kill-switch (см. «Автономный ночной цикл») |
+
+### Автономный ночной цикл (`autonomy`, план Task 21)
+
+Host-половина поднимает workflow **`ai-terminal-nightly`** и расписание Harness:
+
+- **Расписание.** Задача «AI-терминал: ночное исследование», cron `30 0 * * 2-6`
+  (`Europe/Moscow` — 00:30 МСК, ночи после понедельник–пятница), target `new_once`.
+  Prompt расписания просит агента новой сессии вызвать инструмент
+  `terminal_nightly_research` и пересказать сводку. При `autonomy.enabled: false` задача
+  не создаётся, а ранее созданная — ставится на паузу (идемпотентно по title).
+- **Workflow.** `dsh-ai-terminal/workflows/nightly-research.js` передаётся в
+  `ctx.workflowEngine.start({script, meta})` как текст JS-body; фазы: данные → волатильность
+  (asOf=now) → walk-forward по универсуму → роботы (`detect_execution_algos`) → черновики
+  навыков (`draft_skill_pattern`) → `propose_automation` → итоговая сводка. Мутирующие действия
+  не выполняются: предложения ждут подтверждения человека (`approvalMode: 'confirm'`).
+- **Инструмент.** `terminal_nightly_research` (`autonomy.js`) запускает workflow, блокирует
+  вызов до завершения и возвращает сводку в сессию; повторный запуск при активном прогоне
+  отклоняется.
+- **Бюджет.** Пока прогон активен, плагин перехватывает waterfall `llm/stream` и суммирует
+  `usage` чанки детей; при превышении `tokenBudget` — `run.cancel('token-budget')`.
+  `maxWallMinutes` отменяет прогон с причиной `max-wall`.
+- **Kill-switch.** Вкладка правой панели **«Автономия»** (последний прогон, бюджет, кнопки
+  «Запустить сейчас» / «Стоп»); control API плагина: `GET /ai-terminal-ctl/autonomy/status`,
+  `POST /ai-terminal-ctl/autonomy/run` (202, не блокирует), `POST /ai-terminal-ctl/autonomy/stop`
+  (отменяет workflow и вызывает бэкендовый `stop_autonomy`).
+
+**Расхождения с планом Task 21 (зафиксированы, план не переписывался):**
+
+- план: `timing:{kind:'cron', expr:'30 0 * * 2-6'}` → факт: селектор cron
+  `{kind:'cron', cron:{expression, time_zone}}` (S: dsh-schedule/README.md:64-70);
+- план: `Asia/Moscow` → `Europe/Moscow` (IANA; `Asia/Moscow` не существует);
+- бюджет токенов: план «по usage из моста LLM» → факт: workflow-дети ходят через общий
+  `ctx.llm`, поэтому usage собирается перехватом `llm/stream` (S:
+  dsh-llm/lib/index.js:2403), а не OpenAI-мостом задачи 10;
+- расписание доставляет prompt в сессию, а не вызывает плагинный код напрямую, поэтому запуск
+  детерминирован инструментом `terminal_nightly_research`;
+- `storage` из плана — это сервис `storageDomain` в Harness (S: dsh-integration §2.8).
 
 ## Ограничения и безопасность
 
@@ -120,6 +161,16 @@ make terminal                      # bin/terminal
   (аутентифицированную страницу нельзя скриншотить без управления браузером).
   Проверка: открыть Harness → иконка «AI-терминал» в левой панели → панель
   должна показать статус и встроенный терминал.
+
+- **Автономный ночной цикл (2026-11-06, задача 21):** `node --test dsh-ai-terminal/test/` —
+  все тесты Host-половины зелёные, включая `test/autonomy.test.mjs`: остановка по бюджету
+  токенов (fake `ctx.on('llm/stream')`), отсутствие расписания при `enabled:false`, пауза
+  существующего расписания, kill-switch (cancel + `stop_autonomy`), идемпотентное создание
+  cron-расписания и регистрация `terminal_nightly_research`.
+- **Не проверено (задача 21, Step 5):** живой прогон workflow в Harness на офлайн-данных —
+  сводка в сессии, черновики в `<dataDir>/skills`, задачи в `automation-backlog.md`, реальный
+  `ctx.schedule`/LLM-водопад и живой kill-switch. Скриншоты не создавались; требуется живой
+  DSH с Web-композицией и настроенным LLM.
 
 ## Dev-проверка Host-половины
 

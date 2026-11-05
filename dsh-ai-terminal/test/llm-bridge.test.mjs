@@ -377,9 +377,10 @@ test('client surfaces register the tab, header action and selection interaction'
   };
   client.apply(ctx);
 
-  assert.equal(tabs.length, 1);
-  assert.equal(tabs[0].id, 'ai-terminal/terminal');
-  assert.equal(tabs[0].kind, 'ai-terminal');
+  const tabIds = tabs.map((tab) => tab.id);
+  assert.ok(tabIds.includes('ai-terminal/terminal'), 'the terminal tab type is registered');
+  assert.ok(tabIds.includes('ai-terminal/autonomy'), 'the autonomy tab type is registered (plan Task 21)');
+  assert.equal(tabs.find((tab) => tab.id === 'ai-terminal/terminal').kind, 'ai-terminal');
   const names = registered.map((entry) => entry.spec.name);
   assert.ok(names.includes('sidebar.right.pane.tab'));
   assert.ok(names.includes('conversation.session.header.actions'));
