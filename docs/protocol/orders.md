@@ -383,3 +383,63 @@ Time требует другого типа значения — I).
 TP-only — 26 Б, `03 10`; обе ноги — 35 Б, `03 11`; validafter/validbefore на флаги не влияют.
 Точные смещения takeprofit/condition-структур — I.EOF
 echo ok
+
+## S: демо-цикл neworder → moveorder → makeordown → cancelorder (2026-11-05)
+
+Живой прогон на **демо-сервере** (только `~/re/demo.env`, 1 лот SBER, цена далеко от рынка,
+немедленная отмена; на проде торговых команд не было). Фикстуры —
+`native/records/testdata/transact-{neworder,cancelorder,moveorder}-live.hex` + `demo-trade-repro.md`.
+
+### neworder (S)
+
+- Payload 24 Б (client обезличен): `B 01 `(TRN_NEWORDER)`, B 00, W secid, W board, G client,
+  B buysell('B'), B 00, L price(packed), L quantity(packed), 9 нулевых байт`. Пример:
+  `0100001a0025020001420062f80610000000000000000000` (secid=26, board=37, price=28550=285.50, qty=1).
+- Reply type=14: `B status(0), L transactionid, L server_time, B 00` (**S**: `00 a1 05 94 73 c5 ae
+  06 00` → transactionid=90).
+- Ценовой коридор сервера: цена ниже минимума отклоняется, заявка сразу `status="removed"`,
+  `<result>(579)Для выбранного финансового инструмента цена должна быть не меньше 284.62</result>`
+  (**S**; минимум плавающий: во втором прогоне 284.64).
+- transactionid выдаёт сервер; наблюдённые значения 10, 20, 40, 60, 80, 90 — по-видимому,
+  `10 × число успешных транзакций клиента` (**I**, гипотеза).
+
+### cancelorder (S)
+
+- Payload 5 Б: `B 02` (TRN_CANCELORDER), `B 00`, `L transactionid` (packed), `B 00`;
+  пример `02 00 a1 05 00`.
+- Reply: `B status(0)` (len=1); колбэк `<order … status="cancelled"><result>{42} Заявка
+  снята.</result></order>` (**S**).
+- Отмена работает и в **новой** сессии (DLL передаёт id как есть); для несуществующей транзакции
+  сервер отвечает `[151]Объект операции не найден` (**S**; формат с квадратными скобками — как у
+  серверных текстов).
+
+### moveorder (D + O, успешный payload не снят — I)
+
+- D: `FUN_180198420` → `FUN_1800dbb10` → `FUN_1800dc190`: `transactionid` — дочерний
+  элемент/атрибут (`FUN_18040c140`), число; поиск транзакции в сторе (`FUN_18025d1e0`);
+  нет — `Wrong transactionid value.`; `price` — элемент, число; `moveflag` — элемент, число
+  **0..3**, иначе `Wrong moveflag value.`; для `moveflag` 1/2 обязателен `quantity`; затем
+  `FUN_18037a7d0(conn, 0x13, txid, errbuf)` — отправка/ошибка в errbuf.
+- Payload (снят для уже снятых транзакций; сервер ответил `[151]`): `B 02, B 01, L transactionid,
+  B 00` — например `02 01 41 01 00` (txid=20) и `02 01 81 02 00` (txid=40).
+- O: для **активной** заявки, созданной в этой же сессии (txid=90, moveflag=0, price=286), DLL
+  отвечает `{32} Недопустимое значение параметра 'TransactionID' для данной транзакции` и payload
+  НЕ шлёт (то же для moveflag=2/3) — **I**: условие успешной валидации в `FUN_18037a7d0` не
+  восстановлено (вероятно, moveorder применим только к «своим условным» заявкам, создаваемым
+  makeordown — гипотеза).
+
+### makeordown (D + O, payload не снят — I)
+
+- D: `FUN_1801983a0` → `FUN_1800efda0`: `transactionid` — **атрибут** (`FUN_18040cf20`),
+  не элемент; ищет транзакцию (`FUN_18025d1e0`), условия `iVar1 != 0 && local_11e != 0 &&
+  local_a0 == 1`, затем транзакция RQ_MAKE_COND_OWN (112). Ошибка при несоответствии:
+  `Cannot make specified transaction_id an own conditional order` (**D + S**).
+- O: `<command id="makeordown" transactionid="90"/>` на активную заявку → эта ошибка;
+  payload RQ_MAKE_COND_OWN не снят — **I**.
+
+### Итог по T19/task-44
+
+- neworder/cancelorder — payload'ы сняты (S) ✔; moveorder — формат payload снят (S), но валидный
+  сценарий (успешный move активной заявки) и makeordown остаются **I**: нужен либо разбор
+  `FUN_18037a7d0` (условия {32}), либо серия с makeordown-совместимой транзакцией.
+- Активных заявок не оставлено: все созданные заявки сняты/отклонены.
