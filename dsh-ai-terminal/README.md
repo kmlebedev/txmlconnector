@@ -66,11 +66,31 @@ make terminal                      # bin/terminal
   панели покажет причину, кнопка «Перезапустить» перезапустит его после
   исправления окружения.
 
-## Проверено
+## Проверено (2026-11-05, профиль `desktop`)
 
-- Host-половина протестирована локальным harness'ом: реальный HTTP-сервер с
-  зарегистрированными роутами + настоящий Go-бэкенд; проверены index/assets,
-  REST (GET/POST), SSE-стрим, restart, lifecycle (бэкенд завершается при
-  dispose).
-- Client-половина: синтаксис, регистрация slots `main`/`sidebar.panellist`
-  через `cordis_inspect_query` после установки.
+- Плагин установлен через `plugin_manager install_bundle` (`application: applied`,
+  без restart); Host-половина подняла бэкенд на `127.0.0.1:18090`
+  (`/api/health` → `mode=offline`, 11 бумаг).
+- Через origin Harness (`:52729`) проверены: `GET /ai-terminal/` (SPA),
+  `/ai-terminal/app.js`, `/ai-terminal/styles.css`, `/ai-terminal/api/health`,
+  `/api/instruments`, `POST /api/orders` (paper fill), `POST /api/backtest`
+  (700 баров), `POST /api/agent/chat` (локальный аналитик), SSE
+  `/ai-terminal/api/events` (поток `quote`), `POST /ai-terminal-ctl/restart`
+  (бэкенд перезапущен, health восстановился).
+- Терминал, загруженный через плагин, проверен в реальном браузере (CDP):
+  11 инструментов, `ДЕМО/онлайн`, график и SSE-котировки —
+  [скриншот](../docs/ai-terminal/screenshot-dsh-embedded.png).
+- Client-половина: слоты `sidebar.panellist` и `main` содержат активную запись
+  `ai-terminal` (проверено `cordis_inspect_query`); установлены locale en/ru/zh
+  и иконка.
+- **Не проверено:** визуальный вид самой обёртки панели внутри Harness
+  (аутентифицированную страницу нельзя скриншотить без управления браузером).
+  Проверка: открыть Harness → иконка «AI-терминал» в левой панели → панель
+  должна показать статус и встроенный терминал.
+
+## Dev-проверка Host-половины
+
+```bash
+make terminal
+node dsh-ai-terminal/test/proxy-smoke.mjs   # порты 18097/18098
+```
