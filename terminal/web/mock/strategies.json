@@ -1,0 +1,96 @@
+{
+ "strategies": [
+  {
+   "id": "sma_cross",
+   "name": "SMA-кросс",
+   "description": "Пересечение быстрой и медленной скользящих средних",
+   "params": [
+    {
+     "key": "fast",
+     "title": "Быстрая SMA, баров",
+     "default": 10,
+     "min": 2,
+     "max": 80,
+     "step": 1
+    },
+    {
+     "key": "slow",
+     "title": "Медленная SMA, баров",
+     "default": 30,
+     "min": 5,
+     "max": 200,
+     "step": 1
+    }
+   ]
+  },
+  {
+   "id": "rsi_reversion",
+   "name": "RSI-возврат",
+   "description": "Вход на перепроданности, выход на перекупленности",
+   "params": [
+    {
+     "key": "period",
+     "title": "Период RSI",
+     "default": 14,
+     "min": 2,
+     "max": 50,
+     "step": 1
+    },
+    {
+     "key": "oversold",
+     "title": "Уровень перепроданности",
+     "default": 30,
+     "min": 5,
+     "max": 45,
+     "step": 1
+    },
+    {
+     "key": "overbought",
+     "title": "Уровень перекупленности",
+     "default": 55,
+     "min": 50,
+     "max": 95,
+     "step": 1
+    }
+   ]
+  },
+  {
+   "id": "donchian_breakout",
+   "name": "Пробой Дончиана",
+   "description": "Вход на пробое максимума периода, выход на пробое минимума",
+   "params": [
+    {
+     "key": "period",
+     "title": "Период канала, баров",
+     "default": 20,
+     "min": 5,
+     "max": 120,
+     "step": 1
+    }
+   ]
+  },
+  {
+   "id": "momentum",
+   "name": "Моментум",
+   "description": "Вход при доходности за период выше порога, выход при её смене знака",
+   "params": [
+    {
+     "key": "lookback",
+     "title": "Окно импульса, баров",
+     "default": 20,
+     "min": 3,
+     "max": 120,
+     "step": 1
+    },
+    {
+     "key": "thresholdPct",
+     "title": "Порог доходности, %",
+     "default": 1.0,
+     "min": 0.1,
+     "max": 10,
+     "step": 0.1
+    }
+   ]
+  }
+ ]
+}

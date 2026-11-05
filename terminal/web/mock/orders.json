@@ -1,0 +1,79 @@
+{
+ "orders": [
+  {
+   "id": "ord_000014",
+   "symbol": "TQBR:SBER",
+   "side": "buy",
+   "type": "market",
+   "qty": 100,
+   "filled": 100,
+   "price": 0,
+   "avgFillPrice": 293.18,
+   "status": "filled",
+   "createdAt": "2026-11-05T07:42:11Z",
+   "updatedAt": "2026-11-05T07:42:11Z",
+   "source": "ui",
+   "message": ""
+  },
+  {
+   "id": "ord_000015",
+   "symbol": "TQBR:GAZP",
+   "side": "buy",
+   "type": "limit",
+   "qty": 500,
+   "filled": 0,
+   "price": 126.9,
+   "avgFillPrice": 0,
+   "status": "new",
+   "createdAt": "2026-11-05T11:05:32Z",
+   "updatedAt": "2026-11-05T11:05:32Z",
+   "source": "ui",
+   "message": ""
+  },
+  {
+   "id": "ord_000016",
+   "symbol": "TQBR:PLZL",
+   "side": "sell",
+   "type": "limit",
+   "qty": 10,
+   "filled": 0,
+   "price": 16700.0,
+   "avgFillPrice": 0,
+   "status": "new",
+   "createdAt": "2026-11-05T12:20:04Z",
+   "updatedAt": "2026-11-05T12:20:04Z",
+   "source": "agent",
+   "message": ""
+  },
+  {
+   "id": "ord_000017",
+   "symbol": "TQBR:ROSN",
+   "side": "sell",
+   "type": "limit",
+   "qty": 200,
+   "filled": 0,
+   "price": 690.0,
+   "avgFillPrice": 0,
+   "status": "cancelled",
+   "createdAt": "2026-11-05T08:30:27Z",
+   "updatedAt": "2026-11-05T08:55:03Z",
+   "source": "ui",
+   "message": "отменена пользователем"
+  },
+  {
+   "id": "ord_000018",
+   "symbol": "TQBR:OZON",
+   "side": "buy",
+   "type": "market",
+   "qty": 50,
+   "filled": 50,
+   "price": 0,
+   "avgFillPrice": 5020.4,
+   "status": "filled",
+   "createdAt": "2026-11-05T09:10:18Z",
+   "updatedAt": "2026-11-05T09:10:18Z",
+   "source": "autonomy",
+   "message": ""
+  }
+ ]
+}
