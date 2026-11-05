@@ -219,7 +219,11 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 	case "list_instruments":
 		return e.data.Instruments(), nil, nil
 	case "get_market_hints":
-		h, err := e.Hints(ctx, argString(args, "symbol"), argInt(args, "periodSec", 0))
+		periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+		if err != nil {
+			return nil, nil, err
+		}
+		h, err := e.Hints(ctx, argString(args, "symbol"), int(periodSec))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -229,8 +233,16 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 		if symbol == "" {
 			return nil, nil, errors.New("agent: symbol is required")
 		}
-		period := e.normalizePeriod(argInt(args, "periodSec", 0))
-		count := clampCount(argInt(args, "count", maxHistoryBars), maxHistoryBars)
+		periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+		if err != nil {
+			return nil, nil, err
+		}
+		countArg, err := argIntStrict(args, "count", maxHistoryBars, minToolCount, maxBacktestBars)
+		if err != nil {
+			return nil, nil, err
+		}
+		period := e.normalizePeriod(int(periodSec))
+		count := clampCount(int(countArg), maxHistoryBars)
 		bars, err := e.data.History(ctx, symbol, period, count)
 		if err != nil {
 			return nil, nil, fmt.Errorf("agent: history for %s: %w", symbol, err)
@@ -269,7 +281,11 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 	case "get_strategies":
 		return e.strategyCatalog(), nil, nil
 	case "place_order":
-		order, err := e.toolPlaceOrder(args)
+		qty, err := argIntStrict(args, "qty", 0, minToolQty, maxToolQty)
+		if err != nil {
+			return nil, nil, err
+		}
+		order, err := e.toolPlaceOrder(args, qty)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -288,7 +304,10 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 		}
 		return map[string]any{"order": order}, nil, nil
 	case "start_autonomy":
-		cfg := e.autonomyConfigFromArgs(args)
+		cfg, err := e.autonomyConfigFromArgs(args)
+		if err != nil {
+			return nil, nil, err
+		}
 		if cfg.Live {
 			return nil, nil, errLiveAutonomy
 		}
@@ -382,8 +401,16 @@ func (e *Engine) toolRunBacktest(ctx context.Context, args map[string]any) (back
 	if strategy == "" {
 		return backtest.Result{}, errors.New("agent: strategy is required")
 	}
-	period := e.normalizePeriod(argInt(args, "periodSec", 0))
-	count := clampCount(argInt(args, "count", maxHistoryBars), maxBacktestBars)
+	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+	if err != nil {
+		return backtest.Result{}, err
+	}
+	countArg, err := argIntStrict(args, "count", maxHistoryBars, minToolCount, maxBacktestBars)
+	if err != nil {
+		return backtest.Result{}, err
+	}
+	period := e.normalizePeriod(int(periodSec))
+	count := clampCount(int(countArg), maxBacktestBars)
 	bars, err := e.data.History(ctx, symbol, period, count)
 	if err != nil {
 		return backtest.Result{}, fmt.Errorf("agent: history for %s: %w", symbol, err)
@@ -420,8 +447,16 @@ func (e *Engine) toolCompareStrategies(ctx context.Context, args map[string]any)
 	if symbol == "" {
 		return compareResult{}, nil, errors.New("agent: symbol is required")
 	}
-	period := e.normalizePeriod(argInt(args, "periodSec", 0))
-	count := clampCount(argInt(args, "count", maxHistoryBars), maxBacktestBars)
+	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+	if err != nil {
+		return compareResult{}, nil, err
+	}
+	countArg, err := argIntStrict(args, "count", maxHistoryBars, minToolCount, maxBacktestBars)
+	if err != nil {
+		return compareResult{}, nil, err
+	}
+	period := e.normalizePeriod(int(periodSec))
+	count := clampCount(int(countArg), maxBacktestBars)
 	bars, err := e.data.History(ctx, symbol, period, count)
 	if err != nil {
 		return compareResult{}, nil, fmt.Errorf("agent: history for %s: %w", symbol, err)
@@ -526,15 +561,16 @@ func (e *Engine) toolQuote(ctx context.Context, args map[string]any) (quoteResul
 	return out, nil
 }
 
-// toolPlaceOrder implements place_order with the risk limits of §9.4.
-func (e *Engine) toolPlaceOrder(args map[string]any) (OrderView, error) {
+// toolPlaceOrder implements place_order with the risk limits of §9.4. The
+// integer qty is validated by the caller (argIntStrict), never truncated here.
+func (e *Engine) toolPlaceOrder(args map[string]any, qty int64) (OrderView, error) {
 	if e.broker == nil {
 		return OrderView{}, errors.New("agent: paper broker is not configured")
 	}
 	req, err := e.checkOrderRisk(
 		argString(args, "symbol"),
 		argString(args, "side"),
-		argInt64(args, "qty", 0),
+		qty,
 		argString(args, "type"),
 		argFloat(args, "price", 0),
 	)
@@ -548,11 +584,17 @@ func (e *Engine) toolPlaceOrder(args map[string]any) (OrderView, error) {
 	return order, nil
 }
 
-// autonomyConfigFromArgs maps raw tool arguments to AutonomyConfig.
-func (e *Engine) autonomyConfigFromArgs(args map[string]any) AutonomyConfig {
+// autonomyConfigFromArgs maps raw tool arguments to AutonomyConfig. The
+// integer periodSec is validated strictly; an error is returned to the model
+// as a tool error.
+func (e *Engine) autonomyConfigFromArgs(args map[string]any) (AutonomyConfig, error) {
+	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+	if err != nil {
+		return AutonomyConfig{}, err
+	}
 	return AutonomyConfig{
 		Symbol:         e.resolveSymbol(argString(args, "symbol")),
-		PeriodSec:      argInt(args, "periodSec", 0),
+		PeriodSec:      int(periodSec),
 		Strategy:       argString(args, "strategy"),
 		Params:         argFloatMap(args, "params"),
 		Speed:          argFloat(args, "speed", 0),
@@ -562,7 +604,7 @@ func (e *Engine) autonomyConfigFromArgs(args map[string]any) AutonomyConfig {
 		TakeProfitPct:  argFloat(args, "takeProfitPct", 0),
 		DailyLossPct:   argFloat(args, "dailyLossPct", 0),
 		Live:           argBool(args, "live"),
-	}
+	}, nil
 }
 
 // --- JSON schema helpers ---
@@ -652,24 +694,6 @@ func argFloat(args map[string]any, key string, def float64) float64 {
 		}
 	}
 	return def
-}
-
-// argInt returns an integer argument or def when it is missing/unparsable.
-func argInt(args map[string]any, key string, def int) int {
-	v, ok := args[key]
-	if !ok || v == nil {
-		return def
-	}
-	return int(argFloat(args, key, float64(def)))
-}
-
-// argInt64 returns an int64 argument or def when it is missing/unparsable.
-func argInt64(args map[string]any, key string, def int64) int64 {
-	v, ok := args[key]
-	if !ok || v == nil {
-		return def
-	}
-	return int64(argFloat(args, key, float64(def)))
 }
 
 // argBool returns a boolean argument.

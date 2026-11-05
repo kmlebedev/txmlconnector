@@ -78,7 +78,7 @@ func (r *autonomyRun) appendLog(entry LogEntry) {
 // are loaded and the strategy is built synchronously, then the replay runs in
 // its own goroutine. Live autonomy is rejected.
 func (e *Engine) StartAutonomy(ctx context.Context, cfg AutonomyConfig) error {
-	cfg, bars, strategy, err := e.prepareAutonomy(ctx, cfg)
+	cfg, riskBlocks, bars, strategy, err := e.prepareAutonomy(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -93,6 +93,14 @@ func (e *Engine) StartAutonomy(ctx context.Context, cfg AutonomyConfig) error {
 	}
 	e.autonomy = run
 	e.mu.Unlock()
+
+	// Every value reduced by the engine risk ceilings is logged as risk_block
+	// before the "start" line, so the UI explains the effective limits of the
+	// run instead of only showing the model's request.
+	for _, entry := range riskBlocks {
+		run.appendLog(entry)
+		e.publish(Event{Type: "log", Data: entry})
+	}
 
 	// Seed Running/StartedAt/LastActionAt and the "start" log entry
 	// synchronously: the API and the UI must see a started runner immediately
@@ -132,23 +140,29 @@ func (e *Engine) StopAutonomy() error {
 	return nil
 }
 
-// prepareAutonomy validates the config, applies defaults and loads the replay
-// bars and strategy. It runs synchronously so validation errors are returned
-// from StartAutonomy instead of being lost in the goroutine.
-func (e *Engine) prepareAutonomy(ctx context.Context, cfg AutonomyConfig) (AutonomyConfig, []backtest.Bar, backtest.Strategy, error) {
+// prepareAutonomy validates the config, applies defaults, clamps it to the
+// engine risk limits and loads the replay bars and strategy. It runs
+// synchronously so validation errors are returned from StartAutonomy instead of
+// being lost in the goroutine.
+//
+// The returned riskBlocks are risk_block log entries for every value that
+// clampAutonomy had to reduce. The autonomy run object does not exist yet while
+// the config is prepared, so StartAutonomy appends these entries to the run log
+// and emits them over SSE before the "start" line (review finding R2).
+func (e *Engine) prepareAutonomy(ctx context.Context, cfg AutonomyConfig) (AutonomyConfig, []LogEntry, []backtest.Bar, backtest.Strategy, error) {
 	if cfg.Live {
-		return AutonomyConfig{}, nil, nil, errLiveAutonomy
+		return AutonomyConfig{}, nil, nil, nil, errLiveAutonomy
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	cfg.Symbol = e.resolveSymbol(cfg.Symbol)
 	if cfg.Symbol == "" {
-		return AutonomyConfig{}, nil, nil, errors.New("agent: autonomy symbol is required")
+		return AutonomyConfig{}, nil, nil, nil, errors.New("agent: autonomy symbol is required")
 	}
 	cfg.PeriodSec = e.normalizePeriod(cfg.PeriodSec)
 	if cfg.Strategy == "" {
-		return AutonomyConfig{}, nil, nil, errors.New("agent: autonomy strategy is required")
+		return AutonomyConfig{}, nil, nil, nil, errors.New("agent: autonomy strategy is required")
 	}
 	if cfg.Speed <= 0 {
 		cfg.Speed = defaultAutonomySpeed
@@ -177,18 +191,29 @@ func (e *Engine) prepareAutonomy(ctx context.Context, cfg AutonomyConfig) (Auton
 	if cfg.Params == nil {
 		cfg.Params = map[string]float64{}
 	}
+	// Risk limits are ceilings: the model may ask for a stricter run but never
+	// for a looser one. The free cash of the paper account bounds the budget.
+	var cash float64
+	if e.broker != nil {
+		cash = e.broker.Cash()
+	}
+	cfg, warnings := clampAutonomy(cfg, e.cfg.Risk, cash)
+	riskBlocks := make([]LogEntry, 0, len(warnings))
+	for _, warning := range warnings {
+		riskBlocks = append(riskBlocks, LogEntry{Time: e.now(), Kind: "risk_block", Message: warning})
+	}
 	strategy, err := e.newBacktestStrategy(cfg.Strategy, cfg.Params)
 	if err != nil {
-		return AutonomyConfig{}, nil, nil, fmt.Errorf("agent: strategy %q: %w", cfg.Strategy, err)
+		return AutonomyConfig{}, nil, nil, nil, fmt.Errorf("agent: strategy %q: %w", cfg.Strategy, err)
 	}
 	bars, err := e.data.History(ctx, cfg.Symbol, cfg.PeriodSec, autonomyBars)
 	if err != nil {
-		return AutonomyConfig{}, nil, nil, fmt.Errorf("agent: autonomy history for %s: %w", cfg.Symbol, err)
+		return AutonomyConfig{}, nil, nil, nil, fmt.Errorf("agent: autonomy history for %s: %w", cfg.Symbol, err)
 	}
 	if len(bars) < 2 {
-		return AutonomyConfig{}, nil, nil, fmt.Errorf("agent: not enough history for %s (%d bars)", cfg.Symbol, len(bars))
+		return AutonomyConfig{}, nil, nil, nil, fmt.Errorf("agent: not enough history for %s (%d bars)", cfg.Symbol, len(bars))
 	}
-	return cfg, bars, strategy, nil
+	return cfg, riskBlocks, bars, strategy, nil
 }
 
 // runAutonomy replays the bars: the strategy decides on the close of bar i and
