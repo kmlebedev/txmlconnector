@@ -86,6 +86,56 @@ func readNewsHeaderFields(r *wire.Reader) (NewsHeaderRecord, error) {
 	return h, nil
 }
 
+// newsBodyPackageLen returns the length of an S flags=2 package (int32
+// uncompressed size + zlib stream) after the fixed unknown 4-byte field. The
+// zlib stream end is located by decoding it; an invalid stream is an explicit
+// ErrUnknownRecord, never a silent "consume the rest" fallback.
+func newsBodyPackageLen(rest []byte) (int, error) {
+	if len(rest) < 8 {
+		return 0, fmt.Errorf("%w: R_NEWS_UPLOAD package is %d bytes", ErrUnknownRecord, len(rest))
+	}
+	counter := &byteCounter{data: rest[4:]}
+	zr, err := zlib.NewReader(counter)
+	if err != nil {
+		return 0, fmt.Errorf("%w: R_NEWS_UPLOAD zlib: %v", ErrUnknownRecord, err)
+	}
+	_, readErr := io.Copy(io.Discard, zr)
+	closeErr := zr.Close()
+	if readErr != nil {
+		return 0, fmt.Errorf("%w: R_NEWS_UPLOAD zlib: %v", ErrUnknownRecord, readErr)
+	}
+	if closeErr != nil {
+		return 0, fmt.Errorf("%w: R_NEWS_UPLOAD zlib: %v", ErrUnknownRecord, closeErr)
+	}
+	return 4 + counter.off, nil
+}
+
+// byteCounter reads exactly as many bytes as the zlib decoder asks for and
+// implements io.ByteReader, so compress/zlib does not wrap it in a buffered
+// reader that would over-read into the next RQ_MAIN record.
+type byteCounter struct {
+	data []byte
+	off  int
+}
+
+func (b *byteCounter) Read(p []byte) (int, error) {
+	if b.off >= len(b.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, b.data[b.off:])
+	b.off += n
+	return n, nil
+}
+
+func (b *byteCounter) ReadByte() (byte, error) {
+	if b.off >= len(b.data) {
+		return 0, io.EOF
+	}
+	c := b.data[b.off]
+	b.off++
+	return c, nil
+}
+
 // SkipNews consumes one 0x35/0x36 record body from the splitter reader.
 func SkipNews(tag byte, r *wire.Reader) error {
 	switch tag {
@@ -108,22 +158,28 @@ func SkipNews(tag byte, r *wire.Reader) error {
 					return fmt.Errorf("R_NEWS_UPLOAD news id: %w", err)
 				}
 			}
-			size, err := r.Int32()
-			if err != nil {
-				return fmt.Errorf("R_NEWS_UPLOAD package length: %w", err)
-			}
-			if size >= 0 && int(size) <= r.Len() {
-				if _, err := r.Raw(int(size)); err != nil {
-					return fmt.Errorf("R_NEWS_UPLOAD package: %w", err)
+			if flags&1 != 0 {
+				// Header+body (flags=3): legacy explicit package length; it has
+				// no S capture and stays on the previous D/O layout.
+				size, err := r.Int32()
+				if err != nil {
+					return fmt.Errorf("R_NEWS_UPLOAD package length: %w", err)
 				}
-				return nil
+				if size < 0 || int(size) > r.Len() {
+					return &UnknownRecordError{Tag: TagNewsUpload, Offset: 0}
+				}
+				return r.Skip(int(size))
 			}
-			// S body-only form: an unknown 4-byte field follows the id and the
-			// package occupies the rest of the record (news.md S, package_len
-			// decoding I). Consume the rest to stay aligned.
-			if _, err := r.Raw(r.Len()); err != nil {
-				return fmt.Errorf("R_NEWS_UPLOAD package: %w", err)
+			// S flags=2: L id, 4 unknown bytes, then int32+zlib package. Find the
+			// zlib stream end instead of guessing the unknown field as a length.
+			if err := r.Skip(4); err != nil {
+				return &UnknownRecordError{Tag: TagNewsUpload, Offset: 0}
 			}
+			n, err := newsBodyPackageLen(r.Remaining())
+			if err != nil {
+				return err
+			}
+			return r.Skip(n)
 		}
 		return nil
 	default:
@@ -168,19 +224,28 @@ func ParseNewsUpload(body []byte) (NewsUpload, error) {
 			}
 			out.NewsID, out.HasID = int64(id), true
 		}
-		size, err := r.Int32()
-		if err != nil {
-			return out, fmt.Errorf("R_NEWS_UPLOAD package length: %w", err)
-		}
-		if size >= 0 && int(size) <= r.Len() {
+		if flags&1 != 0 {
+			size, err := r.Int32()
+			if err != nil {
+				return out, fmt.Errorf("R_NEWS_UPLOAD package length: %w", err)
+			}
+			if size < 0 || int(size) > r.Len() {
+				return out, fmt.Errorf("%w: R_NEWS_UPLOAD package length %d", ErrUnknownRecord, size)
+			}
 			if out.Package, err = r.Raw(int(size)); err != nil {
 				return out, fmt.Errorf("R_NEWS_UPLOAD package: %w", err)
 			}
 		} else {
-			// S body-only form: after the id there is an unknown 4-byte field
-			// and the package occupies the rest of the body (news.md S; the
-			// package_len decoding is I).
-			if out.Package, err = r.Raw(r.Len()); err != nil {
+			// S flags=2: L id, unknown 4 bytes, then int32+zlib package; take
+			// exactly the zlib stream, do not guess the unknown field as a length.
+			if err := r.Skip(4); err != nil {
+				return out, fmt.Errorf("%w: R_NEWS_UPLOAD body", ErrUnknownRecord)
+			}
+			n, err := newsBodyPackageLen(r.Remaining())
+			if err != nil {
+				return out, err
+			}
+			if out.Package, err = r.Raw(n); err != nil {
 				return out, fmt.Errorf("R_NEWS_UPLOAD package: %w", err)
 			}
 		}

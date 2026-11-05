@@ -234,3 +234,5 @@ O: `tools/replay-server` + `tools/tcproxy` + DLL под Wine 11.21, dump `.re-ru
 - S-форма flags=2: после L id идёт неизвестное 4-байтовое поле, package = int32 uncompressed_size
   + zlib до конца записи; при валидном явном package_len используется он (I-уточнение сохранено).
 - Тест `TestNewsBodyCallbackS` сверяет callback побайтно с `news-body-live-dll.xml`.
+
+- T24 review-fix: `<news_body>` эмитится только для flags=2 и известного запрошенного заголовка; flags=3/неизвестный заголовок — тихо в стор; package S формы ограничивается концом zlib (не length-guess, иначе ErrUnknownRecord), запись после body не теряется; source/title конвертируются CP1251->UTF-8 (S-фикстуры).

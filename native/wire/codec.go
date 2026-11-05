@@ -5,6 +5,7 @@ package wire
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 )
 
@@ -99,6 +100,18 @@ type Reader struct {
 func NewReader(b []byte) *Reader { return &Reader{buf: b} }
 
 func (r *Reader) Len() int { return len(r.buf) - r.off }
+
+// Remaining returns the unread bytes without consuming them (splitter helpers).
+func (r *Reader) Remaining() []byte { return r.buf[r.off:] }
+
+// Skip consumes n unread bytes (splitter helpers).
+func (r *Reader) Skip(n int) error {
+	if n < 0 || n > r.Len() {
+		return fmt.Errorf("wire: skip %d with %d bytes left", n, r.Len())
+	}
+	r.off += n
+	return nil
+}
 
 // Byte reads one byte (FUN_1801bd290, FUN_1801bd510).
 func (r *Reader) Byte() (byte, error) {
