@@ -141,10 +141,40 @@ jobs:
             cmd/connector/testdata/abi_test.c "dist/${{ matrix.lib }}"
           PATH="$PWD/dist:$PATH" ./dist/abi_test.exe "dist/${{ matrix.lib }}"
 
+      - name: C ABI conformance (DLL reference, linux/macos)
+        if: matrix.abi && !matrix.cross
+        shell: bash
+        run: |
+          ${{ matrix.cc }} -I cmd/connector/include -o dist/abi_conformance \
+            cmd/connector/testdata/abi_conformance.c
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            DYLD_LIBRARY_PATH=dist ./dist/abi_conformance "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
+          else
+            LD_LIBRARY_PATH=dist ./dist/abi_conformance "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
+          fi
+
+      - name: C ABI conformance (cross macOS via Rosetta, best effort)
+        if: matrix.cross
+        continue-on-error: true
+        shell: bash
+        run: |
+          ${{ matrix.cc }} -arch x86_64 -I cmd/connector/include -o dist/abi_conformance \
+            cmd/connector/testdata/abi_conformance.c
+          arch -x86_64 env DYLD_LIBRARY_PATH=dist ./dist/abi_conformance "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
+
+      - name: C ABI conformance (windows, best effort)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: bash
+        run: |
+          gcc -I cmd/connector/include -o dist/abi_conformance.exe \
+            cmd/connector/testdata/abi_conformance.c
+          PATH="$PWD/dist:$PATH" ./dist/abi_conformance.exe "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
+
       - name: SHA-256 checksums
         shell: bash
         run: |
-          rm -f dist/abi_test dist/abi_test.exe
+          rm -f dist/abi_test dist/abi_test.exe dist/abi_conformance dist/abi_conformance.exe
           cd dist
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum * > SHA256SUMS
