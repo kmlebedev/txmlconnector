@@ -26,8 +26,11 @@
 - постановка пользователя от 2026-11-05 (этот документ, раздел «Постановка»);
 - обзор API Harness `docs/ai-terminal/dsh-integration.md` — создаётся в задаче 9 из отчёта по `app.asar/dsh/node_modules/@deepseek-ai/*/README.md`;
 - `docs/ai-terminal/ARCHITECTURE.md` (контракт итерации 1);
-- публикация Финама «Бот на RSI за несколько промптов» (smart-lab, 29.10.2026, https://smart-lab.ru/mobile/topic/1368304/) и комментарий к ней — идеи Фазы G;
-- Finam Trade API: proto из `finam-trade-api/proto/grpc/tradeapi/v1/` — REST-шлюз `POST /v1/sessions`, `GET /v1/instruments/{symbol}/bars`, `TimeFrame` `TIME_FRAME_M1…TIME_FRAME_MN`.
+- публикации Финама — идеи Фазы G:
+  - «Бот на RSI за несколько промптов» (smart-lab, 29.10.2026, https://smart-lab.ru/mobile/topic/1368304/) и комментарий к ней;
+  - «Собираем стратегию с помощью ИИ и Финам API» (finam.ru, 27.10.2026, https://www.finam.ru/publications/item/sobiraem-strategiyu-s-pomoshchyu-ii-i-finam-api-20261027-1440/).
+
+  Источник данных у нас — прямой native-доступ к TRANSAQ (`native.Client`), Trade API не используется.
 
 ## Постановка (кратко)
 
@@ -45,19 +48,20 @@
    - сравнение нескольких тикеров с buy & hold одной таблицей;
    - график входов и выходов с периодами в позиции и панелью индикатора;
    - токен — только в `.env`, никогда в чат;
-   - необработанная (незакрытая) свеча не участвует в сигнале.
+   - необработанная (незакрытая) свеча не участвует в сигнале;
+   - путь от бэктеста к боту: `--check` → dry-run → бумага (у них → демо → реальный счёт); перед заявкой проверяется позиция, при обрыве потока — переподключение.
 
    Из комментария к публикации:
    - история не короче 5 лет;
    - комиссии и проскальзывание обязательны.
 
-   Finam Trade API — второй источник длинной истории.
+   Главное требование: переход «бэктест → бот» идёт **в одном окне DSH-сессии**, максимально нативно, и всё, что делает бот (AI-агент), видно прямо в Harness.
 
 ## Global Constraints
 
 - Реальная маршрутизация заявок остаётся выключенной. Всё исполнение — бумажный брокер или replay; задача, которая включает live, вне этого плана.
 - `native/...` не меняется, кроме задачи 5; новых зависимостей в `go.mod` нет. ClickHouse — через `net/http`, MCP — собственный JSON-RPC на stdlib.
-- Секреты только из окружения: `TC_LOGIN`, `TC_PASSWORD`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `MD_CLICKHOUSE_URL`, `TERMINAL_API_TOKEN`, `FINAM_SECRET_KEY` (синоним `TRADE_API_SECRET`, как в Finam Skill). В логах, фикстурах, SKILL-файлах и коммитах их нет. Навыки прямо запрещают агенту просить токен в чате.
+- Секреты только из окружения: `TC_LOGIN`, `TC_PASSWORD`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `MD_CLICKHOUSE_URL`, `TERMINAL_API_TOKEN`. В логах, фикстурах, SKILL-файлах и коммитах их нет. Навыки прямо запрещают агенту просить токен в чате.
 - Бэктест по умолчанию считает комиссию (`FeeBps=5`) и проскальзывание (`SlippageBps=1`). Нулевые значения допустимы только явно и дают предупреждение `no_costs` в `Result.Warnings`.
 - Сигналы считаются только по закрытым барам: незакрытый последний бар живой истории отбрасывается или помечается `Bar.Partial=true` и стратегиям не передаётся.
 - Время — `time.Time` в UTC на границах API. Торговый день и расписания — `Europe/Moscow` через `feed.MoscowLocation()`.
@@ -75,7 +79,8 @@
 4. **Переобученный паттерн.** SKILL не переходит в `validated` без out-of-sample окна и минимального числа сделок. Тест `TestSkillPromotionRequiresOOS` — задача 19.
 5. **Вызов инструмента из Harness при упавшем бэкенде и при отмене.** Инструмент возвращает понятную ошибку, а `exec.signal` прерывает HTTP-запрос к бэкенду. Тест `tool bridge aborts upstream on signal` — задача 9.
 6. **Две сделки за 90 дней (как в примере Финама).** Результат не выдаётся за значимый: ответ содержит предупреждение `small_sample` (меньше 30 сделок или меньше 5 лет на дневках) и не может стать основой SKILL. Тест `TestBatchBacktestFlagsSmallSample` — задача 24.
-7. **Незакрытая свеча в живой истории.** RSI на последнем часе не меняется после закрытия часа, сигналы бэктеста и живой ленты совпадают. Тест `TestRulesIgnorePartialBar` — задача 23.
+7. **Незакрытая свеча в живой истории.** RSI на последнем часе не меняется после закрытия часа, сигналы бэктеста и живой ленты совпадают. Тест `TestRulesIgnorePartialBar` — задача 23; `TestBotSignalsMatchBacktest` — задача 22.
+8. **Обрыв потока у работающего бота.** После переподключения пропущенные бары догружаются из истории, сигнал не дублируется и не теряется, карточка в Harness продолжает журнал с того же `seq`. Тесты `TestBotReconnectBackfillsWithoutDuplicates` — задача 22; `relay resubscribes after backend restart and resumes from last seq` — задача 26.
 
 ---
 
@@ -89,7 +94,7 @@
 | D. Данные | 11–14 | запись стакана, сделок и новостей в ClickHouse; винтажный доступ; replay стакана |
 | E. Исследования | 15–18 | walk-forward трендовых стратегий, оракул волатильности, отпечатки роботов |
 | F. Самообучающийся контур | 19–21 | SKILL-паттерны, задачи на автоматизацию ради экономии токенов, автономный ночной цикл |
-| G. Идеи Финама | 22–25 | история из Finam Trade API, стратегия из промпта, сравнение тикеров с графиком, переносимые навыки `npx skills add` |
+| G. От бэктеста к боту в одном окне | 22–26 | стратегия из промпта, сравнение тикеров с графиком, бот check → dry-run → бумага на native-свечах, пульт бота в DSH-сессии, переносимые навыки `npx skills add` |
 | X. Внешние репозитории | X1–X3 | ALFRED-винтажи и календарь FOMC, исправление схемы `transaq_quotes` |
 
 Зависимости:
@@ -97,9 +102,14 @@
 - D зависит только от A.
 - E зависит от D (задачи 13–14) и B (задача 7).
 - F зависит от C и E.
-- G: задачи 22–24 зависят только от A, задача 25 — от C (задача 10). Задачу 15 удобно делать после 23: трендовые стратегии можно описать правилами.
+- G: порядок внутри фазы — 23 → 24 → 22 → 26.
+  - 23 и 24 зависят только от A.
+  - 22 зависит от 4, 7 и 23.
+  - 26 — от 9, 10, 22 и 24.
+  - 25 — от 10.
+  - Задачу 15 удобно делать после 23: трендовые стратегии можно описать правилами.
 
-Параллельно можно вести C, D и G22–G24, затем E15/E16/E17 между собой.
+Параллельно можно вести C, D и G23–G24, затем E15/E16/E17 между собой.
 
 ## Карта файлов
 
@@ -128,7 +138,8 @@
 | `dsh-ai-terminal/autonomy.js` | workflow и расписание автономного цикла |
 | `dsh-ai-terminal/workflows/nightly-research.js` | скрипт workflow |
 | `skills/trading-*/SKILL.md` | ручные навыки исследования (в репозитории); один источник для DSH и для `npx skills add` |
-| `terminal/feed/finam.go` | история баров из Finam Trade API (REST, stdlib) |
+| `terminal/bot/` | рантайм ботов: стадии check/dry_run/paper, журнал решений, живые закрытые свечи |
+| `dsh-ai-terminal/bot-relay.js`, `bot-ui.js` | пульт бота в DSH-сессии: карточки, журнал, комментарии агента, kill-switch |
 | `terminal/backtest/rules/` | декларативные стратегии из промпта: индикаторы, условия, фильтры |
 | `terminal/research/batch.go` | пакетный бэктест по тикерам с buy & hold и проверкой выборки |
 | `docs/ai-terminal/{dsh-integration,data,research}.md` | документация фаз C–E |
@@ -710,44 +721,100 @@
 
 ---
 
-## Фаза G. Идеи из публикации Финама
+## Фаза G. От бэктеста к боту в одном окне Harness
 
-Публикация показывает сценарий «навык + Trade API + промпт → бэктест → бот» в Cursor. Терминал повторяет его нативно:
-- то же делается без генерации Python на каждый запрос;
-- со стоимостью сделок, проверкой выборки и walk-forward;
-- с теми же навыками, доступными в любом агенте.
+Публикации Финама (smart-lab 29.10.2026; finam.ru 27.10.2026 «Собираем стратегию с помощью ИИ и Финам API») показывают путь в Cursor:
+1. Навык.
+2. Бэктест промптом.
+3. Отдельный скрипт-бот с режимами `--check` → dry-run → `--execute`. Свечи грузятся историей и потоком, расчёт идёт только по закрытым свечам; перед заявкой проверяется позиция; при обрыве потока бот переподключается; останавливается по Ctrl-C в терминале.
 
-### Task 22: Длинная история из Finam Trade API
+Слабые места у них:
+- бот — отдельный процесс, и что он делает, видно только в консоли;
+- код бота генерируется заново под каждую стратегию;
+- API не отличает бумаги бота от купленных вручную.
+
+У нас тот же путь проходит **в одном окне DSH-сессии**:
+- бэктест, проверка, dry-run и бумажный бот — одна сущность `Bot`, собранная из тех же правил (задача 23);
+- исполняется Go-рантаймом на прямом native-доступе к TRANSAQ: история `gethistorydata` и живые свечи из того же `native.Client`, без Trade API;
+- каждое решение бота (закрытая свеча, индикаторы, сигнал, риск-проверка, заявка, переподключение) видно в чате живой карточкой, а агент Harness комментирует значимые события;
+- у каждого бота свой бумажный подсчёт (задача 4), поэтому его позиции не смешиваются с ручными.
+
+### Task 22: Рантайм бота: check → dry-run → бумага на живых свечах
 
 **Files:**
-- Create: `terminal/feed/finam.go`, `terminal/feed/finam_test.go`
-- Modify: `terminal/feed/feed.go` (выбор источника истории), `cmd/terminal/main.go` (флаг `-history-source=transaq|finam|auto`), `docs/ai-terminal/data.md`
+- Create: `terminal/bot/{bot.go,stages.go,bars.go,journal.go,manager.go,bot_test.go}`
+- Modify: `terminal/feed/live.go` (поток закрытых свечей), `terminal/agent/tools.go` (инструменты `bot_*`), `terminal/api/handlers.go` (REST `/api/bots…`), `terminal/api/sse.go` (событие `bot`), `cmd/terminal/wiring.go`
 
 **Interfaces:**
+- Consumes:
+  - задача 4: `paper.Broker.PlaceAt`, отдельный счёт `account="bot:<id>"`;
+  - задача 7: предложения и подтверждения;
+  - задача 23: `rules.Spec`, `rules.Compile`;
+  - `feed` (живые свечи из `native.Client`).
 - Produces:
-  - `type HistorySource interface { Bars(ctx context.Context, symbol string, periodSec int, from, to time.Time) ([]backtest.Bar, error) }`
-  - `func NewFinamHistory(baseURL, secret string, hc *http.Client) HistorySource`
-  - Базовый URL по умолчанию — `https://api.finam.ru`; проверяется на первом живом прогоне, статус в `data.md`.
-- Протокол (из proto `finam-trade-api`, статус **D** до живой проверки):
-  - `POST /v1/sessions` с `{secret}` → JWT; кешируется до истечения, обновляется при 401.
-  - `GET /v1/instruments/{symbol}/bars?timeframe=TIME_FRAME_H1&interval.start_time=…&interval.end_time=…`
-- Символы:
-  - `TQBR:SBER` ↔ `SBER@MISX` (таблица board→MIC в `finam.go`: `TQBR`, `TQTF`, `TQCB`, `TQOB` → `MISX`; `SPBFUT` → `RTSX`, статус **I**).
-  - Период: `periodSec` → `TimeFrame` (60→M1, 300→M5, 900→M15, 3600→H1, 86400→D).
-- Длинные интервалы режутся на окна по лимиту сервера; лимит — константа с пометкой **I** до проверки.
-- `auto`: Finam для запросов глубже, чем отдаёт TRANSAQ, TRANSAQ — для свежего хвоста; склейка по времени без дублей.
+  - `type Stage string` — константы `StageCheck="check"`, `StageDryRun="dry_run"`, `StagePaper="paper"`, `StageStopped="stopped"`.
+    - `live` в этом плане не существует: `Promote` на него возвращает `ErrLiveDisabled`.
+  - `type Bot struct { ID, Symbol string; PeriodSec int; Spec rules.Spec; Qty int64; Stage Stage; FromBacktest string; CreatedAt time.Time }`
+  - `type JournalEntry struct { Seq uint64; Time, BarTime time.Time; Kind string; Close float64; Indicators map[string]float64; Signal string; Message string; Data map[string]any }`
+    - `Kind`: `closed_bar|signal|risk_check|order|fill|reconnect|error|stage`.
+    - `Signal`: `none|entry|exit`.
+  - `type Manager struct{…}` с методами:
+    - `func NewManager(feed BarStream, broker Broker, approver Approver, now func() time.Time) *Manager` — `Broker` — локальный интерфейс пакета с методами `PlaceAt` и `Position(account, symbol string) int64`.
+    - `func (m *Manager) CreateFromBacktest(res backtest.Result, spec rules.Spec, qty int64) (Bot, error)`
+    - `func (m *Manager) Check(ctx context.Context, id string) (JournalEntry, error)` — один расчёт по истории, без подписки и без чтения счёта; запись вида `close=… rsi=… signal=…`.
+    - `func (m *Manager) Start(ctx context.Context, id string, stage Stage) error`
+    - `func (m *Manager) Promote(id string, to Stage) (proposalID string, err error)` — переход `dry_run→paper` только через предложение задачи 7.
+    - `type Approver interface { Propose(tool string, args map[string]any, summary string) (id string, err error) }` — реализуется `agent.Engine`; пакет `bot` не импортирует `agent`, чтобы не было цикла.
+    - Подтверждённое предложение исполняет `bot_start(id, "paper")`.
+    - `func (m *Manager) Stop(id string) error`
+    - `func (m *Manager) StopAll() error` — kill-switch.
+    - `func (m *Manager) Journal(id string, afterSeq uint64, limit int) []JournalEntry`
+    - `func (m *Manager) Subscribe(fn func(BotEvent)) (cancel func())`
+  - `type BarStream interface { History(ctx context.Context, symbol string, periodSec, count int) ([]backtest.Bar, error); SubscribeClosedBars(ctx context.Context, symbol string, periodSec int) (<-chan backtest.Bar, error) }`
+    - Живая реализация в `feed` собирает бары из `<alltrades>` и свечей `native.Client`.
+    - Закрытый бар выдаётся по первому тику следующего интервала или по таймеру на границе интервала + 2 с (статус **I**).
+    - После reconnect поток выдаёт `reconnect`, догружает пропущенные бары из истории и продолжает без дублей.
+  - Инструменты агента:
+    - `bot_create_from_backtest(backtestId, qty)`
+    - `bot_check(id)`
+    - `bot_start(id, stage)` — `stage` ∈ `dry_run|paper`.
+    - `bot_promote(id, stage)`
+    - `bot_stop(id)`
+    - `bot_status(id?)`
+    - `bot_journal(id, afterSeq, limit)` — ответ сжат: последние 20 записей и счётчики по `Kind`.
+  - REST:
+    - `GET /api/bots`
+    - `POST /api/bots` (из бэктеста)
+    - `POST /api/bots/{id}/check`
+    - `POST /api/bots/{id}/start`
+    - `POST /api/bots/{id}/promote`
+    - `POST /api/bots/{id}/stop`
+    - `POST /api/bots/stop-all`
+    - `GET /api/bots/{id}/journal?after=&limit=`
+  - SSE `bot` с `BotEvent{BotID, Entry}`.
+- Правила исполнения:
+  - Сигнал считается по закрытым барам.
+  - На `paper` перед заявкой проверяется позиция счёта бота: вход только с нуля, продажа не больше позиции.
+  - Действуют риск-лимиты задачи 2 и лимит сделок в час.
+  - Заявка исполняется по следующей котировке `paper`; каждая заявка получает `ClientOrderID = botID + ":" + barTime`.
+  - Журнал бота ограничен 5000 записями в памяти и дублируется в `<dataDir>/bots/<id>.jsonl`.
 
-- [ ] **Step 1: Write the failing tests** (`httptest`):
-  - `TestFinamAuthCachesJWTAndRefreshesOn401`
-  - `TestFinamBarsPagesLongInterval`: 5 лет дневок → несколько запросов, бары без дублей и по возрастанию.
-  - `TestFinamSymbolMapping`
-  - `TestFinamSecretNeverLogged`: ни в ошибке, ни в логе нет секрета.
-  - `TestAutoHistoryStitchesWithoutDuplicates`
-- [ ] **Step 2:** `go test ./terminal/feed -run Finam -v` → FAIL.
-- [ ] **Step 3: Implement** на `net/http` + `encoding/json`, без SDK Финама (запрет новых зависимостей).
+- [ ] **Step 1: Write the failing tests** (фейковый `BarStream`, `cfg.Now` и брокер):
+  - `TestBotCheckDoesNotSubscribeOrReadAccount`
+  - `TestBotDryRunLogsSignalsWithoutOrders`: на синтетике с RSI ниже 0,2 есть `signal=entry`, а брокер не вызван.
+  - `TestBotPaperEntersOnlyFromFlat`: два сигнала входа подряд дают одну заявку.
+  - `TestBotPaperSellsNoMoreThanPosition`
+  - `TestBotPositionsIsolatedFromManual`: ручная покупка того же тикера не влияет на позицию бота.
+  - `TestBotSignalsMatchBacktest`: тот же `Spec` на тех же барах даёт те же сигналы, что `backtest.Run` (связь «бэктест = бот»).
+  - `TestBotReconnectBackfillsWithoutDuplicates`
+  - `TestBotPromoteToPaperRequiresApproval`
+  - `TestBotPromoteToLiveRejected`
+  - `TestStopAllStopsEveryBot`
+- [ ] **Step 2:** `go test ./terminal/bot -v` → FAIL (`undefined: NewManager`).
+- [ ] **Step 3: Implement** `terminal/bot` и живой `BarStream` в `feed`.
 - [ ] **Step 4:** `make verify` → exit 0.
-- [ ] **Step 5: Live check** (с согласия пользователя, демо-счёт Финама): `GAZP@MISX` H1 за 90 дней совпадает по числу баров с примером публикации ± выходные. Результат — в `data.md` (**S**).
-- [ ] **Step 6: Commit** `feat(feed): long bar history from the Finam Trade API`
+- [ ] **Step 5: Live check** (окно демо-сервера, read-only, с согласия пользователя). Бот `dry_run` по `TQBR:SBER` M5 30 минут: в журнале есть `closed_bar` каждые 5 минут, а время закрытия совпадает с границами МСК. Результат — в `docs/ai-terminal/research.md` (**S**).
+- [ ] **Step 6: Commit** `feat(bot): rule bots from backtests with check, dry-run and paper stages`
 
 ### Task 23: Стратегия из промпта — декларативные правила
 
@@ -767,12 +834,12 @@
     - `Left`/`Right` — имя индикатора, `close` или число.
   - `func Compile(spec Spec) (backtest.Strategy, error)` — валидирует имена и периоды; ошибка понятна модели.
   - `backtest.Bar.Partial bool` (`json:"partial,omitempty"`). Живая лента (`feed`) ставит его последнему незакрытому бару. `backtest.Run` и `rules` такие бары не передают стратегии — это реализация Global Constraint о закрытых барах.
-- Пример из публикации как фикстура `testdata/rsi_finam.json`: `rsi_wilder(14, scale 0.01)`, вход `rsi < 0.2`, выход `rsi > 0.8`, фильтр-расширение `close > sma(200)`.
+- Пример из публикации как фикстура `testdata/rsi_example.json`: `rsi_wilder(14, scale 0.01)`, вход `rsi < 0.2`, выход `rsi > 0.8`, фильтр-расширение `close > sma(200)`.
 - Агент присылает JSON-правила вместо кода: это экономит токены и даёт воспроизводимость (`Spec` сохраняется в `Result.Params` как хеш и в истории бэктестов целиком).
 
 - [ ] **Step 1: Write the failing tests:**
   - `TestRSIWilderMatchesReference`: эталонные значения RSI(14) Уайлдера на фиксированном ряде, допуск 1e-9.
-  - `TestRulesFinamExampleSignals`: фикстура генерирует входы только при `rsi<0.2` без позиции и выходы при `rsi>0.8`.
+  - `TestRulesPublicationExampleSignals`: фикстура генерирует входы только при `rsi<0.2` без позиции и выходы при `rsi>0.8`.
   - `TestRulesIgnorePartialBar` (Review Focus 7)
   - `TestCompileRejectsUnknownIndicator`
   - `TestRulesNoLookahead`: значение условия на баре i не зависит от баров > i (мутация будущих баров не меняет сигнал).
@@ -790,11 +857,12 @@
   - `dsh-ai-terminal/client.js` (карточка `terminal_batch_backtest` в `tool.call.toolview`: таблица + мини-график).
 
 **Interfaces:**
-- Consumes: задача 22 (`HistorySource`), задача 23 (`rules.Spec`), `research.WalkForward` (задача 15, если уже есть; иначе только in-sample с предупреждением `in_sample_only`).
+- Consumes: `agent.DataSource.History` (native TRANSAQ), задача 23 (`rules.Spec`), `research.WalkForward` (задача 15, если уже есть; иначе только in-sample с предупреждением `in_sample_only`).
 - Produces:
-  - `type BatchRequest struct { Symbols []string; PeriodSec int; From, To time.Time; Strategy string; Params map[string]float64; Rules *rules.Spec; FeeBps, SlippageBps float64 }`
-  - `type BatchRow struct { Symbol string; Trades int; ReturnPct, BuyHoldPct, MaxDrawdownPct, Sharpe float64; Warnings []string }`
-  - `func Batch(ctx context.Context, hs feed.HistorySource, req BatchRequest) ([]BatchRow, error)` — тикеры параллельно, не больше `GOMAXPROCS`.
+  - `type HistoryFunc func(ctx context.Context, symbol string, periodSec, count int) ([]backtest.Bar, error)` — в проводке это `DataSource.History` поверх `native.Client`.
+  - `type BatchRequest struct { Symbols []string; PeriodSec int; Count int; Strategy string; Params map[string]float64; Rules *rules.Spec; FeeBps, SlippageBps float64 }`
+  - `type BatchRow struct { Symbol string; Trades int; ReturnPct, BuyHoldPct, MaxDrawdownPct, Sharpe float64; From, To time.Time; BacktestID string; Warnings []string }`
+  - `func Batch(ctx context.Context, hist HistoryFunc, req BatchRequest) ([]BatchRow, error)` — тикеры параллельно, не больше `GOMAXPROCS`. `BacktestID` позволяет одной кнопкой создать бота из строки (задача 22).
 - Правила выборки:
   - `small_sample`: `Trades < 30`, или период меньше 5 лет для `periodSec >= 86400`, или меньше 1 года для внутридневных;
   - `no_costs`: `FeeBps == 0 && SlippageBps == 0`.
@@ -822,7 +890,7 @@
   - Навык описывает два способа работы: MCP-сервер терминала (если запущен) и `scripts/terminal.sh` — curl к REST API с токеном из `.env`.
   - В DSH тот же навык приходит от провайдера плагина: один источник, без копий.
 - Правила в тексте навыков:
-  - токен только в `.env` (`FINAM_SECRET_KEY` или `TRADE_API_SECRET`, `TERMINAL_API_TOKEN`), никогда в чат;
+  - токен терминала (`TERMINAL_API_TOKEN`) и логин/пароль TRANSAQ (`TC_LOGIN`/`TC_PASSWORD`) только в `.env`, никогда в чат;
   - реальные заявки недоступны;
   - перед выводами — проверка выборки и стоимости сделок.
 
@@ -835,6 +903,56 @@
 - [ ] **Step 4:** `make verify` → exit 0.
 - [ ] **Step 5: Manual check.** `npx skills add <локальный путь репозитория> --skill trading-terminal` в чистом каталоге Claude Code. Затем промпт «покажи котировку SBER из терминала» выполняется через навык.
 - [ ] **Step 6: Commit** `feat(skills): portable trading skills installable with npx skills add`
+
+### Task 26: Пульт бота в DSH-сессии — бэктест, запуск и наблюдение в одном окне
+
+**Files:**
+- Create: `dsh-ai-terminal/bot-relay.js` (host), `dsh-ai-terminal/bot-ui.js` (client), `dsh-ai-terminal/test/bot-relay.test.mjs`
+- Modify: `dsh-ai-terminal/index.js` (`inject` += `agents`, `sessionController`), `dsh-ai-terminal/client.js`, `dsh-ai-terminal/tools.js` (карточки `terminal_bot_*`), `skills/trading-terminal/SKILL.md` (сценарий «бэктест → бот»), `dsh-ai-terminal/README.md`
+
+**Interfaces:**
+- Consumes:
+  - задача 9 (инструменты `terminal_*` и `tool.call.toolview`);
+  - задача 10 (общий LLM);
+  - задача 22 (REST/SSE ботов и `bot_*`);
+  - задача 24 (`BacktestID` в строках сравнения);
+  - задача 7 (предложения).
+- Produces — клиентские поверхности (слоты из отчёта по API Harness):
+  - **Карточка бэктеста** (`tool.call.toolview` для `terminal_run_backtest`, `terminal_backtest_rules`, `terminal_batch_backtest`): график с входами и выходами, заливкой «в позиции» и панелью индикатора с уровнями. Кнопки «Проверить» (`check`), «Запустить dry-run», «Перевести на бумагу». Кнопки вызывают тот же REST, что и инструменты; переход на бумагу открывает предложение с «Подтвердить / Отклонить».
+  - **Живая карточка бота** (`conversation.chat.turnTail` у сообщения, где бот создан, и закреплённая мини-версия в `conversation.input.dock`). Показывает:
+    - стадию (бейдж `check|dry_run|paper|stopped`);
+    - последнюю закрытую свечу (время МСК, close), индикаторы (`rsi=0,19`), сигнал;
+    - позицию и PnL счёта бота; мини-график последних 100 баров с отметками сигналов;
+    - ленту журнала — последние 50 записей, фильтр по `Kind`.
+
+    Обновляется по SSE `bot` через прокси плагина.
+  - **Kill-switch** в `conversation.session.header.actions`: «Стоп всех ботов» → `POST /api/bots/stop-all`, видим, пока есть бот не в `stopped`.
+  - **Вкладка правой панели** (`sidebar.right.pane.tab`) «Боты»: список ботов сессии, переход к карточке.
+- Produces — host-реле `bot-relay.js`:
+  - `function startBotRelay(ctx, backend, opts): () => void`. Подписывается на SSE `bot` и для каждого бота помнит `sessionId`, в котором он создан: инструмент `terminal_bot_*` передаёт `exec.sessionId`.
+  - Значимые события (`signal`, `order`, `fill`, `risk_check` с отказом, `reconnect`, `error`, `stage`) доставляются агенту этой сессии через `ctx.agents` (`inject()` в inbox агента). Агент коротко комментирует в чате: «Вход по SBER: RSI 0,19 < 0,2, позиция 0 → заявка 10 шт по бумаге, лимиты в норме».
+  - `closed_bar` без сигнала в агента не идёт — только в карточку. Так токены тратятся на решения, а не на каждую свечу.
+  - Лимит комментариев: `relay.maxAgentEventsPerHour` (по умолчанию 12); лишние события копятся и уходят одной сводкой. Расход записывается в бюджет токенов задачи 21.
+- Сценарий в одном окне (проверяется вручную, Step 5):
+  1. Промпт «RSI 14 0,2/0,8 на SBER, GAZP, LKOH, сравни с buy & hold».
+  2. Таблица и графики.
+  3. Кнопка «Проверить» у строки SBER → `close=… rsi=… signal=none`.
+  4. «Запустить dry-run» → живая карточка, журнал свечей.
+  5. Сигнал → комментарий агента.
+  6. «Перевести на бумагу» → подтверждение → заявка видна в карточке и в портфеле терминала.
+  7. «Стоп всех ботов».
+
+- [ ] **Step 1: Write the failing node tests:**
+  - `relay delivers signal events to the bot session agent`
+  - `relay keeps closed_bar out of the agent`
+  - `relay batches events above the hourly limit into one summary`
+  - `relay resubscribes after backend restart and resumes from last seq` (по `afterSeq` журнала, без дублей)
+  - `kill switch action calls stop-all and hides when no bot runs`
+- [ ] **Step 2:** `node --test dsh-ai-terminal/test/bot-relay.test.mjs` → FAIL.
+- [ ] **Step 3: Implement** реле, карточки и действия. Если `ctx.agents.inject` недоступен из плагина (проверить в задаче 9), запасной путь — `ctx.sessionController.prompt` с системной пометкой `[bot:<id>]`; выбор записать в `docs/ai-terminal/dsh-integration.md`.
+- [ ] **Step 4:** `node --test dsh-ai-terminal/test/ && make verify` → exit 0.
+- [ ] **Step 5: Manual check** на офлайн-снапшоте и затем на живом read-only потоке: сценарий из 7 шагов выше в одной DSH-сессии. Скриншоты — `docs/ai-terminal/screenshot-dsh-bot-{backtest,live,signal}.png`.
+- [ ] **Step 6: Commit** `feat(dsh-plugin): bot control room inside the Harness session`
 
 ---
 
