@@ -44,6 +44,7 @@
 | `-fee-bps` | `5` | комиссия бумажных сделок, б.п. (0.05%) |
 | `-llm` | из env | `off` принудительно выключает LLM |
 | `-live-trading` | `false` | разрешить реальные заявки (дополнительно к env) |
+| `-allowed-origins` | — | дополнительные Origin для небезопасных методов API, через запятую (свой Origin принимается всегда; §10.4) |
 | `-version` | — | печать версии и выход |
 
 Env:
@@ -58,9 +59,11 @@ Env:
 | `TERMINAL_LLM_MODEL` | модель, по умолчанию `deepseek-chat` |
 | `TERMINAL_LLM_TIMEOUT` | таймаут одного запроса, default `90s` |
 | `TERMINAL_LIVE_TRADING` | `1` — разрешить реальные заявки (вместе с флагом) |
+| `TERMINAL_API_TOKEN` | токен локального API: при заданном значении все `/api/*`, кроме `/api/health`, требуют `X-Terminal-Token` или cookie `terminal_token` (§10.4). Плагин DSH генерирует его на каждый запуск бэкенда |
+| `TERMINAL_INSTANCE_ID` | nonce запуска бэкенда: отдаётся в `/api/health` как `instanceId`; плагин DSH принимает бэкенд на порту только при совпадении (§10.4) |
 
-Правила: значения секретов никогда не печатать/не логировать/не коммитить. Все тесты — без сети,
-live-проверки только у Lead с согласия пользователя.
+Правила: значения секретов, токен API и nonce запуска никогда не печатать/не логировать/не
+коммитить. Все тесты — без сети, live-проверки только у Lead с согласия пользователя.
 
 ## 3. Структура и владельцы (write scopes)
 
@@ -732,8 +735,21 @@ type Config struct {
 	LiveTradingAllowed bool // -live-trading && TERMINAL_LIVE_TRADING=1
 	PaperInitialCash float64
 	SeedGeneratedAt  time.Time
-	Web              fs.FS // статика SPA; в main — terminal.WebFS()
+	Web              fs.FS        // статика SPA; в main — terminal.WebFS()
+	Guard            GuardConfig  // защита loopback-API (§10.4)
+	InstanceID       string       // TERMINAL_INSTANCE_ID: nonce запуска для /api/health
 }
+
+// GuardConfig и Guard живут в terminal/api/guard.go.
+type GuardConfig struct {
+	AllowedOrigins []string // -allowed-origins; собственный Origin запроса принимается всегда
+	AllowedHosts   []string // дополнительные Host (reverse proxy)
+	Token          string   // TERMINAL_API_TOKEN; пусто — токен не требуется
+}
+
+// Guard — единая точка проверок Host → Origin (небезопасные методы) →
+// Content-Type тела → токен. Server.Handler() ставит её перед mux.
+func Guard(cfg GuardConfig, next http.Handler) http.Handler
 
 // Интерфейсы объявлены в api, чтобы обработчики тестировались фейками, а
 // конкретные feed.Service/paper.Broker/agent.Engine подключались в main через
@@ -775,7 +791,7 @@ type Deps struct {
 }
 
 func New(cfg Config, deps Deps) (*Server, error)
-func (s *Server) Handler() http.Handler
+func (s *Server) Handler() http.Handler // mux, обёрнутый в Guard; первый вызов стартует event loop
 ```
 
 Все ответы — `application/json; charset=utf-8`, ошибки:
@@ -785,14 +801,16 @@ func (s *Server) Handler() http.Handler
 ```
 
 Коды: `bad_request` 400, `not_found` 404, `conflict` 409, `unavailable` 503,
-`live_trading_disabled` 403, `internal` 500. Маппинг ошибок агента: повторный `start` при
-работающем runner → 409 `conflict`; невалидный конфиг/`live=true` → 400; нереализованное → 503.
+`live_trading_disabled` 403, `internal` 500. Коды Guard (§10.4): `forbidden_host` 421,
+`forbidden_origin` 403, `unsupported_media_type` 415, `unauthorized` 401. Маппинг ошибок агента:
+повторный `start` при работающем runner → 409 `conflict`; невалидный конфиг/`live=true` → 400;
+нереализованное → 503.
 
 ### 10.1 REST
 
 | Метод/путь | Тело/параметры | Ответ |
 |---|---|---|
-| `GET /api/health` | — | `{ok,version,mode,connected,message,serverTime,exchangeTZ,seedGeneratedAt,llm:{enabled,model,note},trading:{paper:true,live:bool}}` |
+| `GET /api/health` | — | `{ok,version,mode,connected,message,serverTime,exchangeTZ,seedGeneratedAt,instanceId,llm:{enabled,model,note},trading:{paper:true,live:bool}}` (`instanceId` — nonce запуска, `TERMINAL_INSTANCE_ID`; пустая строка, если не задан) |
 | `GET /api/instruments` | — | `{serverTime, instruments:[Instrument]}` (см. §10.2) |
 | `GET /api/instruments/{symbol}/candles?period=300&count=500` | period sec, count ≤ 5000 | `{symbol,periodSec,source,note,candles:[{t,o,h,l,c,v}]}` |
 | `GET /api/instruments/{symbol}/orderbook` | — | `{symbol,last,time,bids,asks,source}` |
@@ -816,6 +834,12 @@ func (s *Server) Handler() http.Handler
 
 `symbol` = `BOARD:SECCODE` в URL нужно кодировать (`TQBR%3ASBER`) — Go/JS `encodeURIComponent`;
 сервер обязан принимать и `TQBR:SBER` в path (роутер `r.URL.Path` split по последнему `:`).
+
+Запрос с телом обязан иметь `Content-Type: application/json` (иначе 415 `unsupported_media_type`);
+небезопасный метод (не GET/HEAD) с заголовком `Origin` принимается только от своего Origin или из
+`-allowed-origins` (иначе 403 `forbidden_origin`); при заданном `TERMINAL_API_TOKEN` все `/api/*`,
+кроме `/api/health`, требуют `X-Terminal-Token` или cookie `terminal_token` (иначе 401
+`unauthorized`). Политика целиком — §10.4.
 
 ### 10.2 JSON-формы
 
@@ -879,17 +903,54 @@ data: {"type":"quote","data":{...}}
 Сервер: hub с буферизованными каналами (256), медленные клиенты отбрасываются, поддержка
 `r.Context().Done()`. Каждая SSE-запись выполняется с write-deadline (`http.ResponseController`,
 10 с): клиент, переставший читать, обрывается, а не блокирует горутину навсегда. CORS не нужен
-(same origin). `Cache-Control: no-store`.
+(same origin). `Cache-Control: no-store`. Токен проверяется как у остальных `/api/*`: браузер
+прямого доступа присылает cookie `terminal_token` (EventSource шлёт cookie сам), прокси плагина —
+заголовок `X-Terminal-Token`.
 
 ### 10.4 Безопасность
 
+Loopback-API доступен любому процессу на машине и любому сайту, открытому в браузере, поэтому
+`terminal/api/guard.go` ставит единый middleware `Guard` перед mux. Порядок проверок:
+
+1. **Host** — только loopback-имена: `127.0.0.1:*`, `localhost:*`, `[::1]:*` и всё, что
+   разрешено в `GuardConfig.AllowedHosts`; иначе 421 `forbidden_host`. Это закрывает
+   DNS-rebinding: страница со своего домена, резолвящегося в `127.0.0.1`, присылает свой `Host`.
+2. **Origin** — для небезопасных методов (не GET/HEAD) при наличии заголовка: принимается
+   собственный Origin запроса (`scheme://Host`) и значения из `-allowed-origins`; иначе 403
+   `forbidden_origin`. GET/HEAD не проверяются: безопасные методы не меняют состояние, а чтения
+   защищены токеном.
+3. **Content-Type** — при непустом теле (`ContentLength != 0`) требуется `application/json`
+   (параметры вроде `charset=utf-8` допускаются), иначе 415 `unsupported_media_type`. Это
+   закрывает CSRF через CORS «simple request»: `text/plain` и form-urlencoded уходят без
+   preflight. `DELETE /api/orders/{id}` без тела проходит.
+4. **Токен** — при заданном `TERMINAL_API_TOKEN` все `/api/*`, кроме `/api/health`, требуют токен:
+   заголовок `X-Terminal-Token` или cookie `terminal_token`, иначе 401 `unauthorized`. Cookie
+   ставится при отдаче `index.html` (`HttpOnly; SameSite=Strict; Path=/`), поэтому SPA и
+   `EventSource` прямого доступа работают без правок JS, а межсайтовые запросы cookie не несут.
+   Токен сравнивается в постоянном времени и не попадает в логи.
+
+`GET /api/health` открыт (без токена): по нему плагин проверяет, что на порту его собственный
+бэкенд. Бэкенд, запущенный плагином, получает `TERMINAL_INSTANCE_ID` (nonce запуска) и отдаёт его
+в `health.instanceId`; плагин принимает бэкенд только при совпадении, иначе выставляет
+`phase=error` «порт занят чужим процессом» и не помечает бэкенд `reused`. Плагин также strip-ает
+из проксируемых запросов `cookie`, `authorization` и `x-dsh-*` (креды сессии Harness не должны
+попадать в Go-бэкенд), подставляет `X-Terminal-Token`, не отдаёт браузеру `Set-Cookie` бэкенда и
+сохраняет исходный `Host`, чтобы проверка Origin оставалась осмысленной.
+
+Граничный кейс — порт занят молчащим процессом, который не отвечает на `/api/health`: плагин не
+может отличить его от свободного порта и запускает свой бэкенд. Ребёнок падает с bind error
+(`address already in use`), обработчик завершения переводит панель в `phase=error` с текстом
+stderr; циклов перезапуска нет, ожидание ограничено `HEALTH_TIMEOUT_MS`.
+
 - Сервер слушает loopback по умолчанию; пустой host (`:8090`), `0.0.0.0` и `::` означают все
-  интерфейсы — для них печатается предупреждение (не запрещено, но API без аутентификации).
+  интерфейсы — для них печатается предупреждение. Если `TERMINAL_API_TOKEN` не задан, при старте
+  пишется предупреждение, что `/api/*` без токена (остаются Host/Origin/Content-Type).
 - Реальные заявки: разрешены только если `cfg.LiveTradingAllowed` **и** тело содержит
   `"confirm":"LIVE"`; иначе 403 `live_trading_disabled`. В итерации 1 live-ордера в API
   реализованы как заглушка с этим кодом (маршрутизация на биржу — roadmap), но UI обязан
   показывать статус «только бумага».
-- Никакой аутентификации в итерации 1 (loopback); в README явно указать запуск только локально.
+- Запускать сервер по-прежнему только локально: `-allowed-origins` не заменяет изоляцию и не
+  открывает API наружу.
 
 ## 11. Frontend (`terminal/web/`, без сборки)
 
@@ -941,7 +1002,9 @@ left rail `#23262b`, радиус панелей 8–10px, плотные таб
 `main` читает флаги/env → `feed.New` → `feed.Start` (live) → `paper.New` → `agent.New` (адаптеры:
 `feedAdapter`, `paperAdapter` в `cmd/terminal/wiring.go`) → `api.New` → `http.Server` с
 `ReadHeaderTimeout`, graceful shutdown по SIGINT/SIGTERM, лог одной строкой о режиме и URL без
-секретов. `BACKTEST`-функция для API: получает бары из feed, конвертирует в `backtest.Bar`,
+секретов. Guard собирается из `-allowed-origins`, env `TERMINAL_API_TOKEN` и
+`TERMINAL_INSTANCE_ID` и передаётся через `api.Config` (§10.4); значение токена не логируется.
+`BACKTEST`-функция для API: получает бары из feed, конвертирует в `backtest.Bar`,
 вызывает `backtest.Run`.
 
 **Отклонение (принято 2026-11-05):** HTTP `POST /api/backtest` **не** пишет результат в историю
@@ -960,12 +1023,15 @@ left rail `#23262b`, радиус панелей 8–10px, плотные таб
    за месяц» → tool-cards и equity; «запусти автоторговлю» → автономия в paper-replay, лог,
    PnL; отобразить equity/сделки на графике; портфель/заявки/история обновляются.
 4. `curl /api/instruments` — реальные цены; `curl -X POST /api/backtest` — реальная история.
+   Если задан `TERMINAL_API_TOKEN` (например, бэкенд запущен плагином), добавьте
+   `-H "X-Terminal-Token: $TERMINAL_API_TOKEN"`: `/api/*` кроме `/api/health` вернёт 401.
 5. Live read-only: `-mode live` с env биржи → те же UI-данные; реальная торговля выключена.
 6. Deep links демо (проверено): `/?view=ai`, `/?view=ai&ask=<urlencoded>`, `/?tab=analytics`,
    `/?symbol=TQBR:SBER` — детерминированные состояния UI для демонстрации и скриншотов.
 7. Проверки: `gofmt -l $(git ls-files '*.go')`, `go vet ./...`, `go build ./...`,
    `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...`, `CGO_ENABLED=0 GOOS=darwin
-   GOARCH=arm64 go build ./...`, `go test -race ./...`, `node --check` для JS, headless-Chrome
+   GOARCH=arm64 go build ./...`, `go test -race ./...`, `node --check` для JS,
+   `node --test dsh-ai-terminal/test/` (тесты Host-половины плагина), headless-Chrome
    скриншоты 1680×1050 (Lead).
 
 ## 14. Роли и границы (RTC)

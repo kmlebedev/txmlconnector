@@ -117,6 +117,12 @@ curl -X POST http://127.0.0.1:8090/api/agent/chat \
   -H 'Content-Type: application/json' -d '{"message":"протестируй лучшую стратегию на SBER"}'
 ```
 
+Если задан `TERMINAL_API_TOKEN` (так делает плагин DSH), добавьте к запросам
+`-H "X-Terminal-Token: $TERMINAL_API_TOKEN"`; `/api/health` открыт всегда. Без токена API
+защищён проверками Host (только loopback), Origin (свой Origin или `-allowed-origins`) и
+Content-Type (`application/json` для запросов с телом); подробно —
+[ARCHITECTURE §10.4](ARCHITECTURE.md#104-безопасность).
+
 ## Проверки и данные
 
 ```bash
@@ -149,6 +155,9 @@ go test -race ./terminal/... ./cmd/terminal/ ./tools/llm-stub/
 - Автономия работает на replay исторических баров, а не на живом потоке.
 - Модель T+1/маржи и корпоративные действия не моделируются; комиссия фиксированная (5 б.п.).
 - Seed — данные демо-сервера; справочные поля (например, лот) такие, какие отдал демо-каталог.
-- Сервер без аутентификации слушает loopback; запускать только локально.
+- API слушает loopback и защищён `Guard`: Host (только loopback), Origin для небезопасных
+  методов, `Content-Type: application/json` для запросов с телом и токен `TERMINAL_API_TOKEN`
+  для `/api/*` кроме `/api/health` (плагин DSH подставляет токен сам). Запускать всё равно
+  только локально — см. [ARCHITECTURE §10.4](ARCHITECTURE.md#104-безопасность).
 
 Архитектура и замороженные контракты: [ARCHITECTURE.md](ARCHITECTURE.md).
