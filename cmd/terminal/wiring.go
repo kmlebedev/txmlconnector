@@ -11,6 +11,7 @@ import (
 
 	"github.com/kmlebedev/txmlconnector/terminal/agent"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
+	"github.com/kmlebedev/txmlconnector/terminal/chstore"
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
 	"github.com/kmlebedev/txmlconnector/terminal/paper"
 )
@@ -360,6 +361,21 @@ func resolveMode(flagMode string, cfg exchangeConfig) (feed.Mode, error) {
 	default:
 		return "", fmt.Errorf("неизвестный режим %q: ожидается auto, offline или live", flagMode)
 	}
+}
+
+// newsStoreFromEnv builds the optional recorded-news source of the agent: the
+// md.news table written by cmd/md-recorder. The ClickHouse endpoint comes from
+// MD_CLICKHOUSE_URL or CLICKHOUSE_URL (the MD_* variables win); without an
+// endpoint the get_news tool reports that the recording pipeline is off
+// instead of failing the whole terminal.
+func newsStoreFromEnv() agent.NewsStore {
+	rawURL := firstNonEmpty(os.Getenv("MD_CLICKHOUSE_URL"), os.Getenv("CLICKHOUSE_URL"))
+	if rawURL == "" {
+		return nil
+	}
+	user := firstNonEmpty(os.Getenv("MD_CLICKHOUSE_USER"), os.Getenv("CLICKHOUSE_USER"))
+	password := firstNonEmpty(os.Getenv("MD_CLICKHOUSE_PASSWORD"), os.Getenv("CLICKHOUSE_PASSWORD"))
+	return agent.NewClickHouseNewsStore(chstore.New(rawURL, user, password, nil))
 }
 
 // llmConfigFromEnv builds the OpenAI-compatible LLM config from TERMINAL_LLM_*.

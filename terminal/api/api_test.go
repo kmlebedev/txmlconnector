@@ -1125,6 +1125,66 @@ func TestFeedEventForwarding(t *testing.T) {
 	t.Fatal("forwarded quote not seen on SSE")
 }
 
+// TestFeedNewsForwarding is the GAP-1 regression: a recorded news event of the
+// live feed reaches the SSE clients as a news DTO with RFC3339 UTC timestamps.
+func TestFeedNewsForwarding(t *testing.T) {
+	deps, f, _, _ := defaultDeps()
+	_, ts := newTestServer(t, deps, Config{})
+	resp, err := http.Get(ts.URL + "/api/events")
+	if err != nil {
+		t.Fatalf("GET /api/events: %v", err)
+	}
+	defer resp.Body.Close()
+	subs := f.subscribers()
+	if len(subs) == 0 {
+		t.Fatal("feed was not subscribed by the event loop")
+	}
+	published := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	firstSeen := time.Date(2026, 11, 5, 9, 0, 5, 0, time.UTC)
+	// Emit a news story through the feed subscription.
+	subs[0](feed.Event{Type: "news", Data: feed.News{
+		ID: 11, Published: published, FirstSeen: firstSeen,
+		Source: "SRC", Title: "Заголовок", Body: "Текст",
+	}})
+	reader := bufio.NewReader(resp.Body)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read SSE: %v", err)
+		}
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var frame struct {
+			Type string `json:"type"`
+			Data struct {
+				ID        int64  `json:"id"`
+				Published string `json:"published"`
+				FirstSeen string `json:"firstSeen"`
+				Source    string `json:"source"`
+				Title     string `json:"title"`
+				Body      string `json:"body"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &frame); err != nil {
+			t.Fatalf("decode SSE %q: %v", line, err)
+		}
+		if frame.Type != "news" {
+			continue
+		}
+		if frame.Data.ID != 11 || frame.Data.Source != "SRC" || frame.Data.Title != "Заголовок" || frame.Data.Body != "Текст" {
+			t.Fatalf("news payload = %+v", frame.Data)
+		}
+		if frame.Data.Published != published.Format(time.RFC3339) || frame.Data.FirstSeen != firstSeen.Format(time.RFC3339) {
+			t.Fatalf("news times = %q/%q, want RFC3339 UTC", frame.Data.Published, frame.Data.FirstSeen)
+		}
+		return
+	}
+	t.Fatal("forwarded news not seen on SSE")
+}
+
 // TestPaperOnQuoteFillsRestingOrder checks that the 1s tick drives paper limit
 // execution: a resting limit order fills when the quote touches it.
 func TestPaperOnQuoteFillsRestingOrder(t *testing.T) {

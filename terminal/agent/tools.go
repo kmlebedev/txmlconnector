@@ -35,6 +35,7 @@ var toolCatalogNames = []string{
 	"get_backtest_history",
 	toolNameBacktestRules,
 	toolNameBatchBacktest,
+	toolNameGetNews,
 }
 
 // buildTools returns the tool catalog with JSON schemas. Research tools
@@ -169,7 +170,10 @@ func buildTools() []ToolInfo {
 			Input:       objSchema(map[string]any{}),
 		},
 	}
-	return append(tools, researchToolCatalog()...)
+	tools = append(tools, researchToolCatalog()...)
+	// The recorded-news tool (plan Task 12) is appended from tools_news.go so
+	// its schema and dispatch stay with the md.news implementation.
+	return append(tools, newsToolCatalog()...)
 }
 
 // Tools returns the tool catalog with JSON schemas.
@@ -262,6 +266,11 @@ func (e *Engine) invokeTool(ctx context.Context, inv toolInvocation, name string
 	// Research tools (declarative rules, walk-forward, batch backtests, …) are
 	// dispatched from tools_research.go; handled=false falls through.
 	if result, artifact, handled, err := e.invokeResearchTool(ctx, name, args); handled {
+		return result, artifact, err
+	}
+	// The recorded-news tool (plan Task 12) is dispatched from tools_news.go
+	// against the md.news store of the command wiring.
+	if result, artifact, handled, err := e.invokeNewsTool(ctx, e.news, name, args); handled {
 		return result, artifact, err
 	}
 	switch name {
