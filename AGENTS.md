@@ -16,7 +16,7 @@
 него `native.Connector` обслуживает XML-клиентов так же, как `txmlconnector64-6.47.2.26.4.dll`.
 
 Единственный источник задач — план:
-[`docs/superpowers/plans/2026-11-04-native-transaq-client.md`](docs/superpowers/plans/2026-11-04-native-transaq-client.md)
+[`docs/superpowers/plans/2026-11-05-ai-native-terminal.md`](docs/superpowers/plans/2026-11-05-ai-native-terminal.md)
 (30 задач, 10 фаз). План не переписывается «по ходу»: если план противоречит коду или DLL, это
 фиксируется в `docs/protocol/` и сообщается Lead, а не молча исправляется в коде.
 
