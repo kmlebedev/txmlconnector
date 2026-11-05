@@ -2,7 +2,6 @@ package native
 
 import (
 	"encoding/hex"
-	"os"
 	"strings"
 	"testing"
 
@@ -12,30 +11,44 @@ import (
 	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
 )
 
-func rpsFixture(t *testing.T, name string) []byte {
-	t.Helper()
-	raw, err := os.ReadFile("records/testdata/" + name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out, err := hex.DecodeString(strings.TrimSpace(string(raw)))
-	if err != nil {
-		t.Fatalf("%s: %v", name, err)
-	}
-	return out
-}
-
-// rpsExpected replaces the masked client id of the O fixture with the session
-// catalog id (the fixtures use 4096).
-func rpsExpected(t *testing.T, fixture string, clientID int64) []byte {
-	t.Helper()
-	raw := rpsFixture(t, fixture)
+// rpsOrderPayloadExpected builds the O payloads literally (client id comes from
+// the session catalog) instead of patching the fixture, so the test is not
+// circular (T28 review P3).
+func rpsOrderPayloadExpected(kind string, clientID int64) []byte {
 	var w wire.Writer
-	w.Int64(clientID)
-	out := append([]byte(nil), raw[:5]...)
-	out = append(out, w.Bytes()...)
-	out = append(out, raw[8:]...)
-	return out
+	switch kind {
+	case "newrpsorder":
+		w.Byte(0x04)
+		w.Uint16(26)
+		w.Uint16(37)
+		w.Int64(clientID)
+		w.Byte('B')
+		w.Byte(0)
+		w.Raw(make([]byte, 11))
+		w.Int32(10000)
+		w.Int32(1)
+		w.Raw(make([]byte, 5))
+	case "newrepoorder":
+		w.Byte(0x0e)
+		w.Uint16(26)
+		w.Uint16(37)
+		w.Int64(clientID)
+		w.Byte('B')
+		w.Byte(0)
+		w.Raw(make([]byte, 11))
+		w.Int32(1) // repoterm
+		w.Byte(0)
+		w.Byte(0)
+		w.Int32(1000)  // reporate 10 * 100
+		w.Int32(10000) // price
+		w.Int32(1)     // quantity
+		w.Int32(100)
+		w.Int32(100)
+		w.Int32(100)
+		w.Byte('N')
+		w.Raw(make([]byte, 2))
+	}
+	return w.Bytes()
 }
 
 // TestRPSPayloads: the four O payloads (newrpsorder, newrepoorder, cancel*)
@@ -66,18 +79,18 @@ func TestRPSPayloads(t *testing.T) {
 		t.Fatal("no numeric client id")
 	}
 	cases := []struct {
-		name    string
-		cmd     string
-		fixture string
+		name string
+		cmd  string
+		kind string
 	}{
-		{"newrpsorder", "<command id=" + quote + "newrpsorder" + quote + "><secid>26</secid><client>TESTCLIEN</client><buysell>B</buysell><quantity>1</quantity><price>100</price><repoterm>1</repoterm><reporate>10</reporate></command>", "rps-transact-newrpsorder.hex"},
-		{"newrepoorder", "<command id=" + quote + "newrepoorder" + quote + "><secid>26</secid><client>TESTCLIEN</client><buysell>B</buysell><quantity>1</quantity><price>100</price><repoterm>1</repoterm><reporate>10</reporate></command>", "rps-transact-newrepoorder.hex"},
+		{"newrpsorder", "<command id=" + quote + "newrpsorder" + quote + "><secid>26</secid><client>TESTCLIEN</client><buysell>B</buysell><quantity>1</quantity><price>100</price><repoterm>1</repoterm><reporate>10</reporate></command>", "newrpsorder"},
+		{"newrepoorder", "<command id=" + quote + "newrepoorder" + quote + "><secid>26</secid><client>TESTCLIEN</client><buysell>B</buysell><quantity>1</quantity><price>100</price><repoterm>1</repoterm><reporate>10</reporate></command>", "newrepoorder"},
 	}
 	for _, tc := range cases {
 		if got := send(t, c, tc.cmd); !strings.Contains(got, "transactionid") {
 			t.Fatalf("%s = %s", tc.name, got)
 		}
-		want := rpsExpected(t, tc.fixture, clientID)
+		want := rpsOrderPayloadExpected(tc.kind, clientID)
 		if hex.EncodeToString(captured) != hex.EncodeToString(want) {
 			t.Fatalf("%s payload\n got %x\nwant %x", tc.name, captured, want)
 		}
@@ -123,6 +136,9 @@ func TestRPSErrors(t *testing.T) {
 		{"rps bad buysell", "<command id=" + quote + "newrpsorder" + quote + "><secid>26</secid><client>TESTCLIEN</client><buysell>X</buysell></command>", "Buisell can be only"},
 		{"rps no qty", "<command id=" + quote + "newrpsorder" + quote + "><secid>26</secid><client>TESTCLIEN</client><buysell>B</buysell></command>", "Cannot find quantity."},
 		{"mrepo I", "<command id=" + quote + "newmrepoorder" + quote + "><secid>26</secid><client>TESTCLIEN</client><buysell>B</buysell><quantity>1</quantity></command>", "newmrepoorder payload layout is not recovered (I)"},
+		{"repo value I", "<command id=" + quote + "newrepoorder" + quote + "><secid>26</secid><client>TESTCLIEN</client><buysell>B</buysell><quantity>1</quantity><price>100</price><repoterm>1</repoterm><reporate>10</reporate><value>100</value></command>", "newrepoorder value layout is not recovered (I)"},
+		{"rps unknown client", "<command id=" + quote + "newrpsorder" + quote + "><secid>26</secid><client>NOPE</client><buysell>B</buysell><quantity>1</quantity><price>100</price></command>", "Wrong client specifited."},
+		{"bad quantity", "<command id=" + quote + "newrpsorder" + quote + "><secid>26</secid><client>TESTCLIEN</client><buysell>B</buysell><quantity>x</quantity></command>", "Quantity have to be a number."},
 		{"report no leg", "<command id=" + quote + "newreport4" + quote + "><reportid>1</reportid></command>", `ustrade_leg`},
 		{"report I", "<command id=" + quote + "newreport4" + quote + "><ustrade_leg></ustrade_leg></command>", "newreport4 payload layout is not recovered (I)"},
 		{"cancelneg no id", "<command id=" + quote + "cancelnegdeal" + quote + "/>", "You have to specify transactionid."},
@@ -152,5 +168,64 @@ func TestRPSRenderD(t *testing.T) {
 	wantReport := "<report transactionid=" + quote + "2" + quote + "><reportno>7</reportno><reportkind>1</reportkind><reporttype>2</reporttype><repotradeno>3</repotradeno><repovalue>0</repovalue><repo2value>0</repo2value></report>"
 	if got := xmlcompat.ReportXML(report); got != wantReport {
 		t.Fatalf("ReportXML = %s, want %s", got, wantReport)
+	}
+}
+
+// TestRepoOrderFieldsPayload checks the fields whose payload layout is known:
+// repoterm, reporate (x100), start/lower/upper discounts (x100) and
+// blocksecurities; unknown fields are refused explicitly (value/refundrate/...).
+func TestRepoOrderFieldsPayload(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = clientSnapshot(t)
+	var captured []byte
+	srv.Handle(session.RqTransact, func(payload []byte) (byte, []byte) {
+		captured = append([]byte(nil), payload...)
+		return wire.KindReply | wire.FlagPlain, mustHex(t, "00100010")
+	})
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+	client.mu.Lock()
+	clientID, ok := client.clientNumericIDLocked("TESTCLIEN", "")
+	client.mu.Unlock()
+	if !ok {
+		t.Fatal("no numeric client id")
+	}
+	cmd := "<command id=" + quote + "newrepoorder" + quote + "><secid>26</secid><client>TESTCLIEN</client>"
+	cmd += "<buysell>B</buysell><quantity>1</quantity><price>100</price><repoterm>3</repoterm>"
+	cmd += "<reporate>12.5</reporate><startdiscount>2</startdiscount><lowerdiscount>0.5</lowerdiscount>"
+	cmd += "<upperdiscount>3</upperdiscount><blocksecurities>Y</blocksecurities></command>"
+	if got := send(t, c, cmd); !strings.Contains(got, "transactionid") {
+		t.Fatalf("newrepoorder fields = %s", got)
+	}
+	var w wire.Writer
+	w.Byte(0x0e)
+	w.Uint16(26)
+	w.Uint16(37)
+	w.Int64(clientID)
+	w.Byte('B')
+	w.Byte(0)
+	w.Raw(make([]byte, 11))
+	w.Int32(3) // repoterm
+	w.Byte(0)
+	w.Byte(0)
+	w.Int32(1250)  // reporate 12.5 * 100
+	w.Int32(10000) // price
+	w.Int32(1)     // quantity
+	w.Int32(200)   // startdiscount 2.00
+	w.Int32(50)    // lowerdiscount 0.50
+	w.Int32(300)   // upperdiscount 3.00
+	w.Byte('Y')    // blocksecurities
+	w.Raw(make([]byte, 2))
+	if hex.EncodeToString(captured) != hex.EncodeToString(w.Bytes()) {
+		t.Fatalf("repo fields payload\n got %x\nwant %x", captured, w.Bytes())
 	}
 }

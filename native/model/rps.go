@@ -12,12 +12,18 @@ type NewRPSOrder struct {
 }
 
 type NewRepoOrder struct {
-	Symbol   Symbol
-	Client   string
-	Union    string
-	BuySell  byte
-	Price    Decimal
-	Quantity int64
+	Symbol    Symbol
+	Client    string
+	Union     string
+	BuySell   byte
+	Price     Decimal
+	Quantity  int64
+	RepoTerm  int64
+	RepoRate  Decimal
+	StartDisc Decimal
+	LowerDisc Decimal
+	UpperDisc Decimal
+	Block     byte // 'Y'/'N'; default N
 }
 
 // RPSTradeForExecution is the PDF 5.7 event (<negdeal>); the fields are the
