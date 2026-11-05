@@ -98,8 +98,8 @@ type Client struct {
 	orderOrder       []uint64
 	secPositions     map[positionKey]model.SecPosition
 	secPositionOrder []positionKey
-	// marginRates is the R_SEC_RATE (0x0a) price P per secid (lot cost in
-	// kopecks) used by the local max-buy/sell formula (task 23/52).
+	// marginRates is the R_SEC_RATE (0x0a) price V per secid (kopecks per unit;
+	// lot value = V*lotsize) used by the local max-buy/sell formula (task 23/52).
 	marginRates map[uint16]int64
 	// 0x5a tick deltas accumulate per (secid,board) across RQ_MAIN records (S).
 	tickTradeNos map[tickKey]int64
@@ -502,6 +502,13 @@ func (c *Client) fatalError() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.fatal
+}
+
+// clearFatal resets the terminal failure on an explicit Reconnect.
+func (c *Client) clearFatal() {
+	c.mu.Lock()
+	c.fatal = nil
+	c.mu.Unlock()
 }
 
 // markFatal records the terminal failure under the client lock.

@@ -188,6 +188,9 @@ func (c *Client) Reconnect(ctx context.Context) error {
 
 // shortRecover makes one DLL short-recovery attempt on a fresh TCP connection.
 func (c *Client) shortRecover(ctx context.Context) error {
+	if err := c.fatalError(); err != nil {
+		return err
+	}
 	conn := c.connection()
 	if conn == nil {
 		return errors.New("transaq: session connection is gone")
@@ -207,6 +210,8 @@ func (c *Client) shortRecover(ctx context.Context) error {
 // client state on it: catalog, securities callbacks and subscriptions. It is the
 // explicit Client.Reconnect path.
 func (c *Client) relogin(ctx context.Context) error {
+	// An explicit Reconnect starts a new session and clears a previous fatal.
+	c.clearFatal()
 	c.mu.Lock()
 	cfg := c.cfg
 	c.mu.Unlock()

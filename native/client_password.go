@@ -45,9 +45,11 @@ func (c *Client) ChangePassword(ctx context.Context, oldPassword, newPassword st
 	reply, err := conn.ChangePassword(ctx, oldPassword, newPassword)
 	if err != nil {
 		if errors.Is(err, session.ErrChangePasswordFatal) {
-			// Terminal: Run must stop without the recover=true/connected=true
-			// sequence and report connected="false" exactly once.
+			// Order matters: publish the terminal failure first, then close the
+			// socket; a concurrent Run poll that sees net.ErrClosed also sees
+			// fatal and must not start recover.
 			c.markFatal(err)
+			_ = conn.Close()
 		}
 		return err
 	}
