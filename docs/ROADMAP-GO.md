@@ -134,6 +134,12 @@ tools/reference-harness/       # создать на M1
 - Матрица покрытия и known I/blockers — `docs/protocol/coverage.md` (sections 3/4/5 + 5.1).
 - Открыто: demo moveorder/makeordown payloads (T19), RE-4 live прогон/full matrix (T29), финальный PR.
 
+## Совместимость с DLL и собственная библиотека (2026-11-05)
+
+Уровни совместимости L0–L4, контракт 9 экспортов эталона, текущие расхождения, результат прототипа
+C-обёртки (macOS arm64/amd64) и дорожная карта C1–C8 к собственной `.dll`/`.so`/`.dylib` —
+[COMPATIBILITY.md](COMPATIBILITY.md).
+
 ## Ближайшие задачи
 
 - [x] Определить PE-архитектуру, хеш, экспорты и статические ориентиры.
