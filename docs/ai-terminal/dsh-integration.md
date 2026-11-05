@@ -193,6 +193,14 @@ super(ctx, "sessionController", { namespace: "session" })), :235 (async createSe
   на этого агента (S: dsh-agent/README.md:73-75).
 - agent.model.select({provider, model, reasoningEffort?}) — выбор модели на следующий step
   (S: dsh-agent/README.md:46-53).
+- **identity id = session id (T26).** ctx.agents.create({sessionId}) строит агента и сессию «под одной
+  identity»; в фабрике identity.id → sessionId (S: dsh-agent-loop/lib/index.js:1275-1281), а сам
+  Agent хранит публичные поля `id` и `session` (S: :539-545); ctx.agents.get(id) ищет агента по
+  Session id (S: dsh-agent/lib/index.js:726 — store keyed by id, lookup by session id).
+  Исполнение инструмента получает `exec.agent` (S: dsh-tools/lib/pipeline.js:307-323; отдельного
+  `exec.sessionId` в контракте нет), поэтому для инструментов `terminal_bot_*` **sessionId =
+  exec.agent.id** (S по коду; живой прогон — I). Fallback при отсутствии живого агента —
+  `ctx.sessionController.prompt` с пометкой `[bot:<id>]` (§2.6), выбор зафиксирован в T26.
 
 ### 2.8 ctx.storageDomain — S
 
@@ -296,6 +304,21 @@ ctx.slots.inject(name, factory) оборачивает регистрацию в
 Замечание S: conversation.session.header.actions **не описан в README** пакета, но слот
 рендерится кодом (renderSlot("conversation.session.header.actions", {})) — факт подтверждён кодом,
 не документацией.
+
+Подтверждено T26 (2026-11-06):
+
+- `conversation.chat.turnTail` — список; регистрация
+  `ctx.slots.register({name, id, locale, inject:(sessionId)=>({sessionId})}, Component)`
+  (S: dsh-client-ui-action-cards/lib/client.js:855-870); owner-props компонента —
+  `{turn, seq, openFile}` (S: dsh-client-ui-chat/lib/client.js:9030-9034). Рендерится после
+  каждого turn'а, поэтому живая карточка бота сама решает, показывать ли себя (есть ли боты).
+- `conversation.input.dock` — список; регистрация `{name, id, order, locale, inject?}`
+  (S: dsh-client-ui-conversation/lib/client.js:19938-19950, 22357-22370).
+- **Клиентский bundle — один файл на пакет.** Harness client-modules раздаёт ровно пакетный
+  `./client` entry; `require.async` принимает только compiler-generated (tsdown) chunk, а не
+  произвольные sibling-файлы (S: dsh-client-modules/README.md:13,35,44,78). Поэтому разделение
+  `bot-ui.js` (Host view-model: карточки tools.js, комментарии реле, тесты) и `client.js`
+  (рендер) — вынужденное и зафиксировано в README; импортировать bot-ui.js из client.js нельзя.
 
 ### 3.4 insertQuote и вставка цитаты в поле ввода — S/I
 
@@ -444,6 +467,36 @@ dsh-client-ui-conversation/lib/client.js:15340-15375.
   Экспорты пакета: Config, apply, createMcpToolDefinition, inject, name — API добавления сервера
   в рантайме нет (S: dsh-mcp-client/lib/index.js:837; I — интерпретация отсутствия).
 
+### Task 26 — пульт бота (реализовано)
+
+Реализация T26 (2026-11-06, ветка plan/ai-terminal-a):
+
+- **`dsh-ai-terminal/bot-relay.js`** — Host-реле: SSE `/api/events` бэкенда (X-Terminal-Token,
+  loopback), событие `{type:'bot',data:{botId,entry}}`; маппинг botId → sessionId из вызовов
+  `terminal_bot_*` (`exec.agent.id`, §2.7); доставка `ctx.agents.inject` (fallback
+  `sessionController.prompt`); значимые kind — signal/order/fill/risk_check-отказ/reconnect/error/
+  stage, тихий closed_bar не идёт агенту; лимит `relay.maxAgentEventsPerHour`=12 с батчингом в
+  сводку (`relay.summaryBatch`=5); реконнект с догоном журнала `after=lastSeq` и дедупом по seq.
+- **`dsh-ai-terminal/bot-ui.js`** — Host view-model: stage/kind-подписи, `parseBotFromReply`,
+  `isSignificantEvent`, `eventComment`, `botToolCardModel` (мета карточек `tools.js`),
+  `killSwitchVisible`, `botsSummary`; используется `tools.js`, `bot-relay.js` и тестами.
+- **`dsh-ai-terminal/tools.js`** — карточки `terminal_bot_*`: мета kind bot/bots, render-текст;
+  в мету бэктеста добавляются `rules` из аргументов вызова (мост «бэктест → бот») и `tool`;
+  `bridge.setToolResultHook` для маппинга botId→sessionId.
+- **`dsh-ai-terminal/client.js`** — карточки ботов и кнопки «Проверить / Dry-run / На бумагу»
+  (REST `/api/bots`, promote → proposal «Подтвердить/Отклонить» через /api/agent/proposals);
+  живая карточка в `conversation.chat.turnTail` (стадия, последняя закрытая свеча, индикаторы,
+  сигнал, мини-график, журнал с фильтром); мини-карточка в `conversation.input.dock`;
+  kill-switch в `conversation.session.header.actions` (виден только при боте не в stopped);
+  вкладка правой панели «Боты».
+- **`dsh-ai-terminal/index.js`** — `inject += agents`; конфиг `relay`; создание реле и
+  HTTP-транспорта, запуск при apply, dispose; `toolBridge.setToolResultHook` → реле.
+- **`skills/trading-terminal/SKILL.md`** — §9 «бэктест → бот»; README — раздел «Пульт бота».
+- Тесты: `test/bot-relay.test.mjs` (5 тестов, fake SSE/agents): доставка signal, closed_bar не
+  тратит токены, батчинг сверх лимита, реконнект с afterSeq без дублей, kill-switch stop-all и
+  видимость. **Живой Step 5 (7 шагов в DSH, реальные SSE/комментарии агента, скриншоты) —
+  НЕ ПРОВЕРЕНО.**
+
 ## 5. Расхождения с планом (проверено)
 
 | План говорит | Факт установленного Harness | Статус |
@@ -526,3 +579,10 @@ dsh-client-ui-conversation/lib/client.js:15340-15375.
   ctx.llm.stream).
 - Стартовая гонка строки MCP-клиента (бэкенд поднимается после apply) проверена только по
   reconnect-коду пакета (I); живого прогона нет.
+- T26 Step 5: живой сценарий «бэктест → проверка → dry-run → бумага → сигнал → стоп всех ботов»
+  в одной DSH-сессии, реальные SSE-события ботов и комментарии агента (ctx.agents.inject),
+  карточки turnTail/input.dock, kill-switch в браузере — **НЕ ПРОВЕРЕНО**; скриншоты
+  screenshot-dsh-bot-{backtest,live,signal}.png не создавались.
+- T26: `exec.agent.id` как sessionId подтверждён кодом (S: dsh-agent-loop/lib/index.js:1275-1281,
+  dsh-agent/lib/index.js:726), но живой вызов `terminal_bot_*` из агента с доставкой inject не
+  прогонялся (I); fallback `sessionController.prompt` — тот же статус.

@@ -17,6 +17,8 @@
 // schema-valued additionalProperties (a typed map), which normalizeToolInput
 // relaxes to true: the Go layer validates the argument values anyway.
 
+import { botRenderText, botToolCardModel } from './bot-ui.js';
+
 const TOOL_PREFIX = 'terminal_';
 const REQUEST_TIMEOUT_MS = 120_000;
 const MAX_RENDER_CHARS = 2000;
@@ -175,7 +177,10 @@ function compactMetrics(metrics) {
  * proposal is rendered as a text instruction: the model must not assume the
  * action ran.
  */
-export function renderToolResult(_args, value) {
+export function renderToolResult(args, value, toolName = '') {
+  if (typeof toolName === 'string' && toolName.startsWith('bot_')) {
+    return [{ type: 'text', text: botRenderText(toolName, args, value) }];
+  }
   const reply = isRecord(value) ? value : {};
   if (isRecord(reply.proposal)) {
     const proposal = reply.proposal;
@@ -201,7 +206,12 @@ export function renderToolResult(_args, value) {
  * Harness pipeline and delivered to the tool.call.toolview component as
  * block.meta.
  */
-export function toolPresentationMeta(_args, value) {
+export function toolPresentationMeta(args, value, toolName = '') {
+  if (typeof toolName === 'string' && toolName.startsWith('bot_')) {
+    const model = botToolCardModel(toolName, args, value);
+    if (model !== null) return model;
+    return { kind: 'result', preview: previewText(value).slice(0, 600) };
+  }
   const reply = isRecord(value) ? value : {};
   if (isRecord(reply.proposal)) return { kind: 'proposal', proposal: reply.proposal };
   if (isRecord(reply.artifact) && reply.artifact.kind === 'backtest' && isRecord(reply.artifact.payload)) {
@@ -215,6 +225,11 @@ export function toolPresentationMeta(_args, value) {
       metrics: compactMetrics(result.metrics),
       equity: downsample(result.equity),
       warnings: Array.isArray(result.warnings) ? result.warnings : [],
+      tool: toolName,
+      // The rules.Spec is the bridge from a rules backtest to a rule bot
+      // (plan Task 26): the model passed it in the tool call, so the card can
+      // create the bot through the same REST the tools use.
+      ...(isRecord(args) && isRecord(args.rules) ? { rules: args.rules } : {}),
     };
   }
   const result = reply.result;
@@ -243,12 +258,22 @@ export function buildToolDefinition(info, bridge) {
       // The canonical invoke reply is arbitrary JSON: an empty schema accepts
       // any lossless value, and render builds the model-facing text.
       schema: {},
-      render: renderToolResult,
-      presentationMeta: toolPresentationMeta,
+      render: (args, value) => renderToolResult(args, value, info.name),
+      presentationMeta: (args, value) => toolPresentationMeta(args, value, info.name),
     },
     async execute(args, exec) {
       const signal = exec && exec.signal;
-      return bridge.invoke(info.name, isRecord(args) ? args : {}, signal);
+      const reply = await bridge.invoke(info.name, isRecord(args) ? args : {}, signal);
+      // The relay learns which DSH session created a bot from the tool call
+      // context (plan Task 26); the hook must never break the tool result.
+      if (typeof toolResultHook === 'function') {
+        try {
+          toolResultHook(info.name, args, exec, reply);
+        } catch {
+          // A relay bookkeeping failure must not fail the tool call.
+        }
+      }
+      return reply;
     },
   };
 }
@@ -277,6 +302,7 @@ export function createToolBridge(options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const baseURL = 'http://127.0.0.1:' + port;
   const state = { disposers: [], seq: 0, closed: false };
+  let toolResultHook = null;
 
   function warn(message) {
     log('warn', message);
@@ -370,6 +396,11 @@ export function createToolBridge(options = {}) {
     unregister();
   }
 
-  const bridge = { invoke, refresh, unregister, close, warn, port, token };
+  /** Observe every terminal tool reply (the bot relay maps botId -> session). */
+  function setToolResultHook(hook) {
+    toolResultHook = typeof hook === 'function' ? hook : null;
+  }
+
+  const bridge = { invoke, refresh, unregister, close, warn, port, token, setToolResultHook };
   return bridge;
 }
