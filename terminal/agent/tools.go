@@ -174,8 +174,47 @@ func (e *Engine) Tools() []ToolInfo {
 	return out
 }
 
+// mutatingTools is the frozen set of tools with side effects. The local
+// fallback must never replay them after an LLM failure (review finding R3).
+var mutatingTools = map[string]bool{
+	"place_order":    true,
+	"cancel_order":   true,
+	"start_autonomy": true,
+	"stop_autonomy":  true,
+}
+
+// isMutatingTool reports whether a tool changes state (orders or autonomy).
+func isMutatingTool(name string) bool { return mutatingTools[name] }
+
+// toolInvocation carries the LLM call identity into tool execution so a
+// mutating tool can build an idempotent client order id. Direct tool calls
+// (the local analyst, tests) leave it empty.
+type toolInvocation struct {
+	ConversationID string
+	ToolCallID     string
+}
+
+// clientOrderID is the idempotency key of one agent order:
+// conversationID + ":" + toolCallID. Without a conversation id the tool call id
+// alone is already unique, so it is used as the key.
+func (inv toolInvocation) clientOrderID() string {
+	if inv.ToolCallID == "" {
+		return ""
+	}
+	if inv.ConversationID == "" {
+		return inv.ToolCallID
+	}
+	return inv.ConversationID + ":" + inv.ToolCallID
+}
+
 // executeToolCall runs one tool, emits SSE events and measures its duration.
 func (e *Engine) executeToolCall(ctx context.Context, name string, args map[string]any) (ToolCall, *Artifact) {
+	return e.executeToolCallFor(ctx, toolInvocation{}, name, args)
+}
+
+// executeToolCallFor runs one tool on behalf of one LLM call: mutating tools
+// receive the call identity needed for their ClientOrderID.
+func (e *Engine) executeToolCallFor(ctx context.Context, inv toolInvocation, name string, args map[string]any) (ToolCall, *Artifact) {
 	if args == nil {
 		args = map[string]any{}
 	}
@@ -185,7 +224,7 @@ func (e *Engine) executeToolCall(ctx context.Context, name string, args map[stri
 	start := time.Now()
 	e.publish(Event{Type: "tool_call", Data: map[string]any{"name": name, "args": args}})
 	call := ToolCall{Name: name, Args: args}
-	result, artifact, err := e.invokeTool(ctx, name, args)
+	result, artifact, err := e.invokeTool(ctx, inv, name, args)
 	call.DurationMs = time.Since(start).Milliseconds()
 	if err != nil {
 		call.Error = err.Error()
@@ -206,7 +245,7 @@ func (e *Engine) executeToolCall(ctx context.Context, name string, args map[stri
 
 // invokeTool is the in-process tool dispatch. Panics inside a data source or a
 // tool implementation are recovered and reported as tool errors.
-func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]any) (result any, artifact *Artifact, err error) {
+func (e *Engine) invokeTool(ctx context.Context, inv toolInvocation, name string, args map[string]any) (result any, artifact *Artifact, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			result, artifact, err = nil, nil, fmt.Errorf("agent: tool %s panicked: %v", name, r)
@@ -285,7 +324,7 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 		if err != nil {
 			return nil, nil, err
 		}
-		order, err := e.toolPlaceOrder(args, qty)
+		order, err := e.toolPlaceOrder(args, qty, inv.clientOrderID())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -562,8 +601,9 @@ func (e *Engine) toolQuote(ctx context.Context, args map[string]any) (quoteResul
 }
 
 // toolPlaceOrder implements place_order with the risk limits of §9.4. The
-// integer qty is validated by the caller (argIntStrict), never truncated here.
-func (e *Engine) toolPlaceOrder(args map[string]any, qty int64) (OrderView, error) {
+// integer qty is validated by the caller (argIntStrict), never truncated here;
+// clientOrderID is the idempotency key of the LLM tool call.
+func (e *Engine) toolPlaceOrder(args map[string]any, qty int64, clientOrderID string) (OrderView, error) {
 	if e.broker == nil {
 		return OrderView{}, errors.New("agent: paper broker is not configured")
 	}
@@ -577,6 +617,7 @@ func (e *Engine) toolPlaceOrder(args map[string]any, qty int64) (OrderView, erro
 	if err != nil {
 		return OrderView{}, err
 	}
+	req.ClientOrderID = clientOrderID
 	order, err := e.broker.Place(req)
 	if err != nil {
 		return OrderView{}, fmt.Errorf("agent: place order: %w", err)

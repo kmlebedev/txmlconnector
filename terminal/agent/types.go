@@ -94,6 +94,10 @@ type PlaceOrder struct {
 	Qty    int64   `json:"qty"`
 	Type   string  `json:"type"`
 	Price  float64 `json:"price"`
+	// ClientOrderID is the idempotency key of one agent order:
+	// conversationID + ":" + toolCallID. The paper broker rejects a repeated id,
+	// so a failed LLM round trip can never execute the same order twice.
+	ClientOrderID string `json:"clientOrderId,omitempty"`
 }
 
 // OrderView is the agent-facing paper order.
@@ -174,7 +178,11 @@ type ChatResponse struct {
 	ToolCalls []ToolCall `json:"toolCalls"`
 	Artifacts []Artifact `json:"artifacts"`
 	LLM       bool       `json:"llm"`
-	ElapsedMs int64      `json:"elapsedMs"`
+	// Partial marks an incomplete answer: the LLM failed after a mutating tool
+	// already ran, so the local fallback was skipped to avoid replaying the
+	// side effects. ToolCalls still lists what was executed.
+	Partial   bool  `json:"partial"`
+	ElapsedMs int64 `json:"elapsedMs"`
 }
 
 // Event is one agent SSE event.
