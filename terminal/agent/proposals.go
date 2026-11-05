@@ -166,6 +166,32 @@ func (e *Engine) Reject(id string) error {
 	return nil
 }
 
+// Propose creates one pending proposal for a mutating action initiated outside
+// the tool loop (the bot runtime promotion, plan Task 22). It is the
+// bot.Approver implementation of the engine: the proposal is published via the
+// normal SSE "proposal" channel and approved/rejected exactly like a
+// tool-generated one. The returned id is used by the caller in its journal.
+func (e *Engine) Propose(tool string, args map[string]any, summary string) (string, error) {
+	tool = strings.TrimSpace(tool)
+	if tool == "" {
+		return "", errors.New("agent: proposal tool is required")
+	}
+	if !isMutatingTool(tool) {
+		return "", fmt.Errorf("agent: proposal for a non-mutating tool %q", tool)
+	}
+	e.proposalMu.Lock()
+	proposal := e.newProposalLocked(tool, args)
+	if custom := strings.TrimSpace(summary); custom != "" {
+		if stored := e.proposals[proposal.ID]; stored != nil {
+			stored.Summary = custom
+			proposal = cloneProposal(*stored)
+		}
+	}
+	e.proposalMu.Unlock()
+	e.publish(Event{Type: "proposal", Data: proposal})
+	return proposal.ID, nil
+}
+
 // ProposalResult returns the executed tool call of an approved proposal, if it
 // has been executed already.
 func (e *Engine) ProposalResult(id string) (ToolCall, bool) {
@@ -360,6 +386,12 @@ func summarizeTool(tool string, args map[string]any) string {
 		return summary
 	case "stop_autonomy":
 		return "Остановить автономию (kill-switch)"
+	case "bot_start":
+		return fmt.Sprintf("Запустить бота %s в стадии %s", argString(args, "id"), argString(args, "stage"))
+	case "bot_promote":
+		return "Перевести бота " + argString(args, "id") + " на бумажный счёт"
+	case "bot_stop":
+		return "Остановить бота " + argString(args, "id")
 	default:
 		return tool
 	}
