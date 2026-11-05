@@ -1,6 +1,7 @@
 ---
 name: trading-terminal
 description: Use when the user asks to backtest a trading idea, to turn a strategy prompt into declarative rules, or to compare a rule strategy with buy & hold in the AI terminal — covers the rules.Spec JSON format, the backtest_rules tool, cost and sample caveats and the closed-bar rule.
+whenToUse: Use when the user asks for a quote, candles, backtest, walk-forward or news of the AI terminal from any agent (Cursor, Claude Code, Qwen Code, Codex) over the REST script or MCP — or when a trading idea has to be turned into declarative rules.
 ---
 
 # Торговый терминал: правила из промпта
@@ -139,3 +140,35 @@ RSI Уайлдера 14 в шкале 0–1; вход `rsi < 0.2`, выход `r
    покажи пользователю сводку предложения и дождись подтверждения в карточке чата
    (approve/reject). Никогда не утверждай, что заявка исполнена, если вернулся proposal.
 4. После подтверждения проверь статус заявки/автономии и снова напомни о рисках и paper-режиме.
+
+## 9. Переносимый навык: установка через npx и REST-скрипт
+
+Каталог \`skills/\` — единственный источник навыка: DSH-плагин \`dsh-ai-terminal\` отдаёт его из
+репозитория (один источник, без копий), а другие агенты ставят одной командой:
+
+\`\`\`
+npx skills add github.com/kmlebedev/txmlconnector --skill trading-terminal
+\`\`\`
+
+Вне DSH (Cursor, Claude Code, Qwen Code, Codex) работают два способа:
+
+1. MCP-сервер терминала, если он запущен: \`POST /mcp\` с заголовком \`X-Terminal-Token\` (§8).
+2. \`scripts/terminal.sh\` — тонкая обёртка над тем же REST API (curl, только чтение):
+\`\`\`
+sh scripts/terminal.sh health
+sh scripts/terminal.sh quote TQBR:SBER
+sh scripts/terminal.sh book TQBR:SBER
+sh scripts/terminal.sh history TQBR:SBER 300 700
+sh scripts/terminal.sh backtest TQBR:SBER rsi_reversion 300
+sh scripts/terminal.sh news 20
+sh scripts/terminal.sh vol TQBR:SBER
+\`\`\`
+
+Бэкенд по умолчанию — \`http://127.0.0.1:8090\` (\`TERMINAL_URL\`). Токен и креды живут только в
+\`.env\` рядом с проектом или в \`~/.config/ai-terminal/.env\`: \`TERMINAL_API_TOKEN\`,
+\`TC_LOGIN\`, \`TC_PASSWORD\`. Скрипт читает из \`.env\` только эти ключи и ничего из окружения не
+печатает; отправлять, отменять или переносить заявки он не умеет — это read-only инструмент.
+
+Правила: токен и пароль TRANSAQ никогда не попадают в чат, промпт, SKILL.md или коммит; реальные
+заявки недоступны (paper-only); перед выводами проверяй размер выборки и стоимость сделок (§5).
+
