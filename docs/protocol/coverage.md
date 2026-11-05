@@ -51,11 +51,11 @@
 
 Фазы 0–2 закрыты по AGENTS.md (коммиты в истории ветки, PR #47/#48 — в main).
 
-## 2. XML-команды Connector (`dllCommands`, 43 имени)
+## 2. XML-команды Connector (`dllCommands`, 45 имён)
 
-Всего в `dllCommands` 43 имени; реализовано в `SendCommand` 26. Специальные
-(`wait=false`): connect, disconnect, authenticate, set_csp, get_connector_version.
-Расхождение плана: нет `newreport4`/`cancelreport4` (45 vs 43, task-index `8.1).
+Всего в `dllCommands` **45 имён**; реализовано **43** обработчика, pending — `moveorder`, `makeordown`
+(живая активная заявка, T19). Специальные (`wait=false`): connect, disconnect, authenticate, set_csp,
+get_connector_version. Расхождение плана «45 vs 43» закрыто (T28 добавил `newreport4`/`cancelreport4`).
 
 ### 2.1 Сетевые команды (шлют RQ_* в сессию)
 
@@ -228,26 +228,31 @@ makeordown, moveorder (2 имени; T19 — ждут живую S-серию).
 
 ## 7. Открытые I-точки и блокеры
 
-1. **T14 ticks**: запись/сессия/команда есть, XML `<ticks>` и DoD — ждут S-серию (10:00+ МСК).
-2. **T19 moveorder/makeordown**: payload не снимается без живой активной заявки; после S-серии.
-3. **T21 limits**: `<clientlimits>` XML — синтетика (D), ждёт O-фикстуру; RQ_FORTS_FIRM_MONEY 47
-   не реализован (формат I, portfolios/limits.md).
-4. **T22 portfolios**: `portfolio_tplus/forts/united/mct`, typed client-API и формулы
-   equity/cover/init_req/maint_req/unrealized_pnl — I (зафиксировано в коде и portfolios.md).
-5. **T23**: local render 3 команд и <marketord> сделаны (b29b757/6867d83); maxbuy/maxsell — точная
-   формула из R_SEC_RATE 0x0a + позиций (a217bc1, побайтно по margin-dll.xml). Остаются I:
-   permissions=false/regrate=0 (mask/rates FUN_18001a700 не в RQ_MAIN), источник R и начальный V — I.
-   **T24**: заголовки/команды сделаны (7484ffc), `<news_body>` reply-механика — I (task-56).
-   **T25**: сделано (73a4acc/6cb9697), O-побайтно.
-   **T26**: change_pass сделан (7427b10): payload SHA-1, replies, fatal empty reply; живой смены
-   пароля не было (S-негатив), политика безопасности сервера — I.
-   **T27**: опционы частично (9b7204f): 149 payload/reply O, 151 payload D, 153/150 и XML — D/I;
-   гейт версии 0x45 и family mapping не восстановлены (I).
-6. **T26–T28**: не начаты (change_pass, options, RPS/REPO).
-7. **T29**: 35/43 XML-команд в Connector; native backend `server/`, матрица 45 имён и тексты
-   ошибок (Task 29 Step 1/1b) — не сделаны; нет `newreport4`/`cancelreport4` (task-index `8.1).
-8. **Windows/Wine**: нативный клиент сборками `make server_build/queues_build` и `make verify`
-   проверяется; отдельного прогона native на Windows не было (не проверено).
+1. **T14 ticks**: S-серия на проде подтвердила — тики приходят **RQ_MAIN `0x5a` TICK**
+   (`W secid, W board, G tradeno, L time, L price, L quantity, B period, B buysell, L X, L Y`,
+   накопление tradeno/time), `RQ_TICKS(13)` не используется; `subscribe_ticks` — board/seccode/tradeno,
+   `unsubscribe_ticks` — Unknown command. Осталось: rework T14 (декодер 0x5a, XML по S-форме, без
+   поллинга 13) — в работе.
+2. **T19 moveorder/makeordown**: payload — только живая активная заявка; ждёт демо-серию с торговым
+   циклом (согласие есть).
+3. **T21 limits**: `get_client_limits` S-проверен (C>S 43 payload, `<clientlimits>`); O-фикстура — после
+   S; `RQ_FORTS_FIRM_MONEY 47` не восстановлен (I).
+4. **T22 portfolios**: `get_portfolio`/`get_united_portfolio`/`get_mc_portfolio` — S-проверены
+   (local render), `get_portfolio_mct` — `{8}`, `get_portfolio_tplus/forts` — Unknown command; typed
+   client-API, формулы и остальные формы — I.
+5. **T23**: local render 3 команд + `<marketord>`; maxbuy/maxsell — точная формула (R_SEC_RATE 0x0a +
+   open_balance/lots, a217bc1, побайтно margin-dll.xml). I: permissions/rates (FUN_18001a700 нет в RQ_MAIN),
+   источник R и начальный V.
+6. **T24**: `news_header`/`news_body` **полностью S-сняты** (reply 73 пуст, 0x36 flags=1/2, lastId=MIN);
+   осталось: доработка кода news_body по S. **T25**: done O-побайтно (wall-время + bias).
+7. **T26**: change_pass done (payload SHA-1, reply-коды); в работе ревью-P1 — терминальность fatal reply;
+   I: политика conn+0x279. **T27**: 149 O, 151 payload D, гейт 153/151, XML D/I (O-форм нет).
+   **T28**: 4 O-payload, D-XML I, `newmrepoorder`/`newreport4` — I.
+8. **T29**: native backend/`TC_BACKEND`/`make server` без Wine, матрица 45 имён (43 обработчика, pending
+   `{moveorder, makeordown}`), error texts/errortable, `set_csp`/`authenticate` — сделано; осталось:
+   RE-4 на живом сервере, полный matrix после T19, синхронизация доков.
+9. **Windows/Wine**: нативный клиент проверяется сборками `make server_build/queues_build` и `make verify`;
+   отдельного прогона native на Windows не было (не проверено).
 
 ## 8. Ссылки
 

@@ -706,14 +706,14 @@ T14 (subscribe_ticks) — D-каркас, живые S-фикстуры в ос�
 - T28 RPS/REPO: `b9f305a` (6 команд, 4 O-payload-фикстуры, DLL-тексты, D-XML; dllCommands -> 45).
 - T29 (частично): `043d7c9` server.Backend dll|native + TC_BACKEND + native gRPC backend на
   testserver без DLL/Wine; `5aea9d5` Makefile `TC_BACKEND=native make server` (go run, без wine64);
-  матрица 45 команд с pending-списком {moveorder, makeordown, set_csp, authenticate}.
+  матрица 45 команд с pending-списком {moveorder, makeordown}.
 
 **RE-материалы (все карточки 49–52, 56–59 закрыты):** margin.md (local render, dead 84/85, marketord,
 точная формула maxbuy), news.md (RQ_GETNEWS, 0x35/0x36, news_body I), messages.md (R_MSG), changepass.md,
 options.md (версионный гейт), rps.md (payloads/ошибки/литералы), errors/фикстуры.
 
-**Coverage (docs/protocol/coverage.md):** 41/45 XML-команд; не реализованы `authenticate`,
-`set_csp` (T29/RE-63), `moveorder`, `makeordown` (T19 — живые payload'ы).
+**Coverage (docs/protocol/coverage.md):** 43/45 XML-команд; не реализованы `moveorder`, `makeordown`
+(T19 — живые payload'ы).
 
 **Осталось только live-зависимое (S-серия 5 ноября, основная сессия):** T14 `<ticks>` XML,
 T21 oracle `<clientlimits>`, T22 `portfolio_tplus/forts/united` S-формы, T19 `moveorder`/

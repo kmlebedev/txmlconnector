@@ -190,7 +190,7 @@ lot_volume, isin, regnumber, buybackprice, buybackdate, currencyid`; пусты�
 - `subscribe`/`unsubscribe` поддерживают `<alltrades>`; `<quotations>` и `<quotes>` отвечают «not implemented».
 - `get_securities` отдаёт `<result success="true"/>` и колбэк `<securities>` со всем каталогом, элемент в элемент как DLL (`FUN_18011f4a0`, см. [dictionaries.md](dictionaries.md)).
 - `get_server_id`, `get_servtime_difference` и `get_markets` реализованы по R6 (`native/testdata/service-dll.xml`): SID и рынки из кэша без сети, разница времени — через RQ_TIME, ответ с атрибутом `diff` (см. ниже).
-- Остальные 33 команды из таблицы DLL (всего их 43) отвечают `Command is not implemented by the native connector.`, а если требуют соединения и его нет — сообщением DLL.
+- Остальные команды из таблицы DLL (всего в `dllCommands` 45 имён: 43 реализовано, pending — `moveorder`/`makeordown`) отвечают `Command is not implemented by the native connector.`, а если требуют соединения и его нет — сообщением DLL.
 - `get_connector_version` возвращает `6.47.2.26.4-native`: версию DLL, поведение которой воспроизводится, с пометкой реализации.
 - Колбэки доставляются по порядку из одной горутины, как из потока колбэков DLL.
 
