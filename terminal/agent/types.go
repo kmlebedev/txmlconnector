@@ -125,18 +125,40 @@ type PositionView struct {
 	ProfitPct float64 `json:"profitPct"`
 }
 
-// PortfolioView is the paper portfolio snapshot.
+// AccountView is one paper sub-account of the broker: cash, marked positions
+// and realized PnL. The autonomy runner trades the "autonomy" account.
+type AccountView struct {
+	Cash        float64        `json:"cash"`
+	TotalValue  float64        `json:"totalValue"`
+	RealizedPnL float64        `json:"realizedPnl"`
+	Positions   []PositionView `json:"positions"`
+	Orders      int            `json:"orders"`
+	Trades      int            `json:"trades"`
+}
+
+// PortfolioView is the paper portfolio snapshot. The top-level fields describe
+// the main account (the terminal portfolio); Accounts is the per-account view,
+// including the "autonomy" sub-account after an autonomy run.
 type PortfolioView struct {
-	TotalValue   float64        `json:"totalValue"`
-	Cash         float64        `json:"cash"`
-	DayChange    float64        `json:"dayChange"`
-	DayChangePct float64        `json:"dayChangePct"`
-	Positions    []PositionView `json:"positions"`
+	TotalValue   float64                `json:"totalValue"`
+	Cash         float64                `json:"cash"`
+	DayChange    float64                `json:"dayChange"`
+	DayChangePct float64                `json:"dayChangePct"`
+	Positions    []PositionView         `json:"positions"`
+	Accounts     map[string]AccountView `json:"accounts,omitempty"`
 }
 
 // Broker is implemented by the cmd/terminal paper adapter.
 type Broker interface {
 	Place(PlaceOrder) (OrderView, error)
+	// PlaceAt executes an order at the explicit replay quote and instant on the
+	// named paper account ("" means the main account). The autonomy replay uses
+	// it so every fill goes through the paper broker instead of a private cash
+	// simulation.
+	PlaceAt(req PlaceOrder, fill Quote, at time.Time, account string) (OrderView, error)
+	// Allocate moves amount from the main account to the named sub-account; the
+	// autonomy runner uses it to reserve its budget out of the main cash.
+	Allocate(account string, amount float64) error
 	Cancel(id string) (OrderView, error)
 	Orders() []OrderView
 	Portfolio() PortfolioView

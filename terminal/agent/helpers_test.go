@@ -168,7 +168,9 @@ func crashBars(n int) []backtest.Bar {
 	return bars
 }
 
-// fakeBroker is a thread-safe paper broker fake.
+// fakeBroker is a thread-safe paper broker fake. The top-level cash/positions
+// fields emulate the main account; accounts holds the named sub-accounts
+// (e.g. "autonomy") used by the T4 replay tests.
 type fakeBroker struct {
 	mu         sync.Mutex
 	cash       float64
@@ -179,6 +181,71 @@ type fakeBroker struct {
 	seq        int
 	cancelErr  error
 	placeErr   error
+
+	accounts map[string]*fakeAccount
+}
+
+// fakeAccount is one named sub-account of the fakeBroker.
+type fakeAccount struct {
+	cash      float64
+	realized  float64
+	positions []PositionView
+	orders    []OrderView
+	trades    int
+}
+
+// accountLocked returns the named sub-account, creating it on demand. The
+// caller holds b.mu.
+func (b *fakeBroker) accountLocked(name string) *fakeAccount {
+	if b.accounts == nil {
+		b.accounts = map[string]*fakeAccount{}
+	}
+	acc := b.accounts[name]
+	if acc == nil {
+		acc = &fakeAccount{}
+		b.accounts[name] = acc
+	}
+	return acc
+}
+
+// addPosition applies a signed quantity at price to a position list and keeps
+// the average price, mirroring the paper broker.
+func addPosition(positions []PositionView, symbol string, qty int64, price float64) []PositionView {
+	for i := range positions {
+		if positions[i].Symbol != symbol {
+			continue
+		}
+		pos := &positions[i]
+		if qty > 0 {
+			total := pos.AvgPrice*float64(pos.Qty) + price*float64(qty)
+			pos.Qty += qty
+			pos.AvgPrice = total / float64(pos.Qty)
+			pos.Value = pos.AvgPrice * float64(pos.Qty)
+			pos.Price = price
+		} else {
+			pos.Qty += qty
+			pos.Value = pos.AvgPrice * float64(pos.Qty)
+		}
+		if pos.Qty <= 0 {
+			return append(positions[:i], positions[i+1:]...)
+		}
+		return positions
+	}
+	if qty <= 0 {
+		return positions
+	}
+	value := price * float64(qty)
+	return append(positions, PositionView{Symbol: symbol, Qty: qty, AvgPrice: price, Price: price, Value: value})
+}
+
+// positionOf returns the quantity and average price of one symbol.
+func positionOf(positions []PositionView, symbol string) (int64, float64) {
+	for _, pos := range positions {
+		if pos.Symbol == symbol {
+			return pos.Qty, pos.AvgPrice
+		}
+	}
+	return 0, 0
 }
 
 func newFakeBroker(cash float64) *fakeBroker {
@@ -218,6 +285,85 @@ func (b *fakeBroker) Place(req PlaceOrder) (OrderView, error) {
 	return order, nil
 }
 
+// Allocate mimics the paper budget transfer from the main account.
+func (b *fakeBroker) Allocate(account string, amount float64) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if account == "" || account == "main" {
+		return fmt.Errorf("fake: cannot allocate to the main account")
+	}
+	if amount <= 0 {
+		return fmt.Errorf("fake: allocation amount must be positive")
+	}
+	if b.cash < amount {
+		return fmt.Errorf("fake: insufficient main cash %.2f for %.2f", b.cash, amount)
+	}
+	b.cash -= amount
+	b.accountLocked(account).cash += amount
+	return nil
+}
+
+// PlaceAt mimics paper.PlaceAt: a market order fills at the replay price
+// fill.Last on the named sub-account, moving its cash and positions.
+func (b *fakeBroker) PlaceAt(req PlaceOrder, fill Quote, at time.Time, account string) (OrderView, error) {
+	if account == "" || account == "main" {
+		req.Price = fill.Last
+		return b.Place(req)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.placeErr != nil {
+		return OrderView{}, b.placeErr
+	}
+	price := fill.Last
+	if price <= 0 {
+		return OrderView{}, fmt.Errorf("fake: no replay price for %s", req.Symbol)
+	}
+	if req.Qty <= 0 {
+		return OrderView{}, fmt.Errorf("fake: qty must be positive")
+	}
+	acc := b.accountLocked(account)
+	const fakeFeeBps = 5.0
+	notional := price * float64(req.Qty)
+	fee := notional * fakeFeeBps / 10000
+	switch req.Side {
+	case "buy":
+		if acc.cash < notional+fee {
+			return OrderView{}, fmt.Errorf("fake: account %q has %.2f cash, order costs %.2f", account, acc.cash, notional+fee)
+		}
+		acc.cash -= notional + fee
+		acc.positions = addPosition(acc.positions, req.Symbol, req.Qty, price)
+	case "sell":
+		qty, avg := positionOf(acc.positions, req.Symbol)
+		if qty < req.Qty {
+			return OrderView{}, fmt.Errorf("fake: sell %d exceeds position %d", req.Qty, qty)
+		}
+		acc.cash += notional - fee
+		acc.realized += (price - avg) * float64(req.Qty)
+		acc.positions = addPosition(acc.positions, req.Symbol, -req.Qty, price)
+		acc.trades++
+	default:
+		return OrderView{}, fmt.Errorf("fake: unknown side %q", req.Side)
+	}
+	b.seq++
+	order := OrderView{
+		ID:           fmt.Sprintf("aut_%06d", b.seq),
+		Symbol:       req.Symbol,
+		Side:         req.Side,
+		Type:         req.Type,
+		Status:       "filled",
+		Qty:          req.Qty,
+		Filled:       req.Qty,
+		Price:        req.Price,
+		AvgFillPrice: price,
+		CreatedAt:    at,
+	}
+	acc.orders = append(acc.orders, order)
+	b.orders = append(b.orders, order)
+	b.placements = append(b.placements, req)
+	return order, nil
+}
+
 func (b *fakeBroker) Cancel(id string) (OrderView, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -242,11 +388,43 @@ func (b *fakeBroker) Orders() []OrderView {
 func (b *fakeBroker) Portfolio() PortfolioView {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return PortfolioView{
+	view := PortfolioView{
 		TotalValue: b.totalValue,
 		Cash:       b.cash,
 		Positions:  append([]PositionView(nil), b.positions...),
 	}
+	if len(b.accounts) == 0 {
+		return view
+	}
+	view.Accounts = make(map[string]AccountView, len(b.accounts)+1)
+	main := AccountView{
+		Cash:       b.cash,
+		TotalValue: b.totalValue,
+		Positions:  append([]PositionView(nil), b.positions...),
+	}
+	for _, order := range b.orders {
+		main.Orders++
+		if order.Filled > 0 {
+			main.Trades++
+		}
+	}
+	view.Accounts["main"] = main
+	for name, acc := range b.accounts {
+		item := AccountView{
+			Cash:        acc.cash,
+			RealizedPnL: acc.realized,
+			Positions:   append([]PositionView(nil), acc.positions...),
+			Orders:      len(acc.orders),
+			Trades:      acc.trades,
+		}
+		total := acc.cash
+		for _, pos := range acc.positions {
+			total += pos.AvgPrice * float64(pos.Qty)
+		}
+		item.TotalValue = total
+		view.Accounts[name] = item
+	}
+	return view
 }
 
 func (b *fakeBroker) Cash() float64 {
