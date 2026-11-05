@@ -59,8 +59,8 @@ func TestConnectorOptionFamilies(t *testing.T) {
 				if got != "<result success="+quote+"true"+quote+"/>" {
 					t.Fatalf("get_option_families = %s", got)
 				}
-			} else if !strings.Contains(got, tc.message) {
-				t.Fatalf("get_option_families = %s, want %q", got, tc.message)
+			} else if want := "<result success=" + quote + "false" + quote + "><message>" + tc.message + "</message></result>"; got != want {
+				t.Fatalf("get_option_families = %s, want %s", got, want)
 			}
 			if hex.EncodeToString(captured) != "001a" {
 				t.Fatalf("149 payload = %x, want 001a", captured)
@@ -99,6 +99,13 @@ func TestConnectorGetOptions(t *testing.T) {
 	}
 	if got := send(t, c, "<command id="+quote+"get_options"+quote+"/>"); !strings.Contains(got, "No seccodes found") {
 		t.Fatalf("empty get_options = %s", got)
+	}
+	srv.Handle(session.RqCertainOptions, func([]byte) (byte, []byte) {
+		return wire.KindReply | wire.FlagPlain, optionFixture(t, "option-families-reply-error.hex")
+	})
+	out := "<command id=" + quote + "get_options" + quote + "><opt_code>OPT1</opt_code></command>"
+	if got := send(t, c, out); got != "<result success="+quote+"false"+quote+"><message>No families</message></result>" {
+		t.Fatalf("get_options error = %s", got)
 	}
 }
 
@@ -155,4 +162,46 @@ func TestOptionFamilyEvent(t *testing.T) {
 		t.Fatalf("option_families = %s", got)
 	}
 	_ = model.OptionFamily{}
+}
+
+// TestOptionFamiliesNoDuplicate: the command must not re-emit the family store;
+// only the run/OnLoad event stream renders <option_families> (no O form exists
+// for a command-side replay, so this is a dedup fix with I scope).
+func TestOptionFamiliesNoDuplicate(t *testing.T) {
+	srv := newRunServer(t)
+	var family wire.Writer
+	family.Uint16(26)
+	family.String("SBER", 6)
+	family.Int32(0)
+	family.Int32(1)
+	srv.Snapshot = append(clientSnapshot(t), append([]byte{records.TagFamily}, family.Bytes()...)...)
+	srv.Handle(session.RqOptionFamilies, func([]byte) (byte, []byte) {
+		return wire.KindReply | wire.FlagPlain, optionFixture(t, "option-families-reply-ok.hex")
+	})
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<option_families")
+	rec.next(t, "<server_status")
+	cmd := "<command id=" + quote + "get_option_families" + quote + "><security><board>TQBR</board><seccode>SBER</seccode></security></command>"
+	if got := send(t, c, cmd); got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("get_option_families = %s", got)
+	}
+	send(t, c, "<command id="+quote+"server_status"+quote+"/>")
+	rec.next(t, "<server_status")
+	rec.mu.Lock()
+	count := 0
+	for _, msg := range rec.msgs {
+		if strings.HasPrefix(msg, "<option_families") {
+			count++
+		}
+	}
+	rec.mu.Unlock()
+	if count != 1 {
+		t.Fatalf("<option_families> callbacks = %d, want 1 (no command-side duplicate)", count)
+	}
 }

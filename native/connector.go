@@ -1010,13 +1010,15 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure("unknown security"), nil
 		}
 		_ = secID
-		families, err := client.OptionFamilies(ctx, symbol)
-		if err != nil {
+		if _, err := client.OptionFamilies(ctx, symbol); err != nil {
+			if message, ok := optionsServerMessage(err); ok {
+				return failure(message), nil
+			}
 			return failure(err.Error()), nil
 		}
-		for _, family := range families {
-			c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{family}))
-		}
+		// Families are rendered by the run/OnLoad event stream. Emitting the
+		// store here again would duplicate every <option_families> callback
+		// (there is no O form to confirm a command-side replay; dedup like this).
 		return success(), nil
 	case "get_family_strikes":
 		var req struct {
@@ -1057,6 +1059,9 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure("No seccodes found"), nil
 		}
 		if _, err := client.Options(ctx, model.OptionsRequest{OptCodes: req.OptCodes}); err != nil {
+			if message, ok := optionsServerMessage(err); ok {
+				return failure(message), nil
+			}
 			return failure(err.Error()), nil
 		}
 		return success(), nil

@@ -1022,11 +1022,10 @@ func OptionFamiliesXML(families []model.OptionFamily) string {
 	b.WriteString("<option_families>")
 	for _, family := range families {
 		b.WriteString("<family>")
-		if family.MatDate > 0 {
-			b.WriteString("<mat_date>" + time.Unix(family.MatDate, 0).UTC().Format("02.01.2006") + "</mat_date>")
-		} else {
-			b.WriteString("<mat_date></mat_date>")
-		}
+		// MatDate is the raw R_FAMILY first L; its meaning/format is not
+		// recovered (options.md I), so the element is intentionally empty rather
+		// than formatting a possibly bogus Unix date.
+		b.WriteString("<mat_date></mat_date>")
 		b.WriteString("<lot_size>" + strconv.FormatInt(family.LotSize, 10) + "</lot_size>")
 		b.WriteString("</family>")
 	}
@@ -1053,7 +1052,8 @@ func OptionsFailedXML(end model.EndOfFamily) string {
 }
 
 // NegDealXML renders the D-literal <negdeal> (rps.md): no O capture exists, so
-// the order/attribute details are I.
+// the order/attribute details are I. It is NOT wired into Render: there is no
+// RQ_MAIN record decoder for the PDF 5.7 event yet (I).
 func NegDealXML(deal model.RPSTradeForExecution) string {
 	var b strings.Builder
 	b.WriteString("<negdeal transactionid=" + quoteAttr(strconv.FormatUint(deal.TransactionID, 10)) + ">")
@@ -1073,7 +1073,8 @@ func NegDealXML(deal model.RPSTradeForExecution) string {
 	return b.String()
 }
 
-// ReportXML renders the D-literal <report> (PDF 5.8); O form is I.
+// ReportXML renders the D-literal <report> (PDF 5.8); O form is I and it is NOT
+// wired into Render (no PDF 5.8 record decoder yet).
 func ReportXML(report model.ExecutionReport) string {
 	var b strings.Builder
 	b.WriteString("<report transactionid=" + quoteAttr(strconv.FormatUint(report.TransactionID, 10)) + ">")

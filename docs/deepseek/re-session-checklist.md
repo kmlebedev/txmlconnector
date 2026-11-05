@@ -37,7 +37,7 @@ set +a`; DLL под Wine через `tools/re/run_dll.sh` + `tcproxy`-захва
 
 - `get_option_families` (149; гейта версии нет) — снять C>S payload (W secid) и, если придут
   RQ_MAIN 0x6f/0x71, колбэки `<option_families>/<family>`.
-- `get_family_strikes` (153, нужен `<mat_date>`) и `get_options` (151/150) — работают только при
+- `get_family_strikes` (153 и 151; у 150 гейта нет) — 153/151 работают только при
   версии сервера ≥0x45 (в записанной сессии 68 → DLL отвечает `Unsupported request.`, см.
   `docs/protocol/options.md`). Снять: версию сервера в S-сессии, reply-кадры 149/153/150/151,
   XML `<family_strikes>/<strike>`, `<options_failed>`; S-негатив — если демо опционы не отдаёт.

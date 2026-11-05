@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kmlebedev/txmlconnector/native/model"
@@ -19,7 +20,7 @@ func (c *Client) optionSecID(underlying model.Symbol) (uint16, error) {
 	}
 	sec, _, ok := c.catalog.Lookup(underlying.Board, underlying.SecCode)
 	if !ok {
-		return 0, fmt.Errorf("Инструмент не найден ('seccode'=%s, 'board='%s)", underlying.SecCode, underlying.Board)
+		return 0, fmt.Errorf("Инструмент не найден ('seccode'=%s, 'board'=%s)", underlying.SecCode, underlying.Board)
 	}
 	return sec.SecID, nil
 }
@@ -71,12 +72,12 @@ func (c *Client) Options(ctx context.Context, req model.OptionsRequest) ([]model
 	return nil, nil
 }
 
-// optionsReplyServerError extracts the DLL message text from an options reply.
-func optionsReplyServerError(err error) string {
+// optionsServerMessage extracts the DLL <message> text from an options reply
+// error, unwrapping the session request context ("RQ_OPTION_FAMILIES: ...").
+func optionsServerMessage(err error) (string, bool) {
 	var reply *session.OptionsServerError
-	if e, ok := err.(*session.OptionsServerError); ok {
-		return e.Message
+	if errors.As(err, &reply) {
+		return reply.Message, true
 	}
-	_ = reply
-	return ""
+	return "", false
 }

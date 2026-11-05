@@ -7,10 +7,10 @@ import (
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
-// Option request types (options.md, D+O). The 153/150/151 senders have the
-// server-version gate 0x45 ("Unsupported request."); the field location
-// symbolStore+0x694 is not recovered (I), so the Go client cannot apply the gate
-// up front and relies on the server reply.
+// Option request types (options.md, D+O). The 153 and 151 senders have the
+// server-version gate 0x45 ("Unsupported request."); 150 has no gate (D). The
+// field location symbolStore+0x694 is not recovered (I), so the Go client cannot
+// apply the gate up front and relies on the server reply.
 const (
 	RqOptionFamilies  byte = 149 // RQ_OPTION_FAMILIES
 	RqFamiliyOptions  byte = 150 // RQ_FAMILIY_OPTIONS (DLL spelling)
@@ -54,12 +54,13 @@ func CertainOptionsPayload(optCodes []string) []byte {
 	return w.Bytes()
 }
 
-// OptionsReply decodes the C-string reply (up to 0x200 bytes): an empty string
-// means success, a non-empty one is the DLL <message> error text (O for 149:
-// 00 -> success, "No families" -> error).
+// OptionsReply decodes the C-string reply (up to 0x200 bytes): payload 0x00 is
+// an empty C-string = success; a non-empty one is the DLL <message> text (O for
+// 149: 00 -> success, "No families" -> error). A zero-length reply is the DLL
+// "incorrect buffer" failure, not success.
 func OptionsReply(payload []byte) (string, error) {
 	if len(payload) == 0 {
-		return "", nil
+		return "", fmt.Errorf("incorrect server buffer")
 	}
 	r := wire.NewReader(payload)
 	message, err := readCStringLimit(r, 0x200)
