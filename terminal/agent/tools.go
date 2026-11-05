@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
+	"github.com/kmlebedev/txmlconnector/terminal/backtest/rules"
+	"github.com/kmlebedev/txmlconnector/terminal/bot"
 	"github.com/kmlebedev/txmlconnector/terminal/research"
 )
 
@@ -41,6 +43,14 @@ var toolCatalogNames = []string{
 	toolNameVolEvents,
 	toolNameGetNews,
 	toolNameWalkForward,
+	// Rule-bot runtime tools (plan Task 22).
+	"bot_create_from_backtest",
+	"bot_check",
+	"bot_start",
+	"bot_promote",
+	"bot_stop",
+	"bot_status",
+	"bot_journal",
 }
 
 // buildTools returns the tool catalog with JSON schemas. Research tools
@@ -176,6 +186,7 @@ func buildTools() []ToolInfo {
 		},
 	}
 	tools = append(tools, researchToolCatalog()...)
+	tools = append(tools, botToolCatalog()...)
 	// The recorded-news tool (plan Task 12) is appended from tools_news.go so
 	// its schema and dispatch stay with the md.news implementation.
 	return append(tools, newsToolCatalog()...)
@@ -195,6 +206,11 @@ var mutatingTools = map[string]bool{
 	"cancel_order":   true,
 	"start_autonomy": true,
 	"stop_autonomy":  true,
+	// Bot lifecycle: starting a bot begins live paper trading, stopping it is
+	// the kill-switch. bot_promote only requests a proposal, so it is not gated
+	// itself (the promotion proposal is the gate).
+	"bot_start": true,
+	"bot_stop":  true,
 }
 
 // isMutatingTool reports whether a tool changes state (orders or autonomy).
@@ -451,6 +467,66 @@ func (e *Engine) invokeToolWith(ctx context.Context, inv toolInvocation, name st
 		return e.Status(), nil, nil
 	case "get_backtest_history":
 		return e.Backtests(), nil, nil
+	case "bot_create_from_backtest":
+		res, err := e.toolCreateBot(ctx, args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return res, nil, nil
+	case "bot_check":
+		manager, err := e.requireBotManager()
+		if err != nil {
+			return nil, nil, err
+		}
+		entry, err := manager.Check(ctx, argString(args, "id"))
+		if err != nil {
+			return nil, nil, err
+		}
+		return entry, nil, nil
+	case "bot_start":
+		// Starting a bot begins trading on its paper account: in the confirm
+		// mode the human approves the proposal first, the approved bot_start
+		// call bypasses this gate (R5, plan Task 22).
+		if gate {
+			if result, gated := e.gateMutatingTool("bot_start", args); gated {
+				return result, nil, nil
+			}
+		}
+		res, err := e.toolBotStart(ctx, args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return res, nil, nil
+	case "bot_promote":
+		res, err := e.toolBotPromote(args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return res, nil, nil
+	case "bot_stop":
+		// Documented exception, like stop_autonomy: the kill-switch executes at
+		// once, without a confirmation.
+		manager, err := e.requireBotManager()
+		if err != nil {
+			return nil, nil, err
+		}
+		id := argString(args, "id")
+		if err := manager.Stop(id); err != nil {
+			return nil, nil, err
+		}
+		return e.botStatusPayload(id), nil, nil
+	case "bot_status":
+		res, err := e.toolBotStatus(args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return res, nil, nil
+	case "bot_journal":
+		res, err := e.toolBotJournal(args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return res, nil, nil
 	default:
 		return nil, nil, fmt.Errorf("agent: unknown tool %q", name)
 	}
@@ -776,6 +852,283 @@ func (e *Engine) autonomyConfigFromArgs(args map[string]any) (AutonomyConfig, er
 		DailyLossPct:   argFloat(args, "dailyLossPct", 0),
 		Live:           argBool(args, "live"),
 	}, nil
+}
+
+// --- rule-bot runtime (plan Task 22) --------------------------------------
+
+// SetBotManager attaches (nil clears) the rule-bot runtime of the engine. The
+// runtime is created by cmd/terminal from the feed, the paper broker and the
+// engine itself (as the approval proposer).
+func (e *Engine) SetBotManager(manager *bot.Manager) {
+	e.mu.Lock()
+	e.bots = manager
+	e.mu.Unlock()
+}
+
+// BotManager returns the attached rule-bot runtime, or nil.
+func (e *Engine) BotManager() *bot.Manager {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.bots
+}
+
+// requireBotManager reports the configuration error of the bot_* tools.
+func (e *Engine) requireBotManager() (*bot.Manager, error) {
+	manager := e.BotManager()
+	if manager == nil {
+		return nil, errors.New("agent: rule-bot runtime is not configured")
+	}
+	return manager, nil
+}
+
+// botToolCatalog is the catalog of the rule-bot runtime tools.
+func botToolCatalog() []ToolInfo {
+	rulesSchema := map[string]any{
+		"type":        "object",
+		"description": "Декларативные правила rules.Spec: indicators, entry, exit, filters, side, stopLossPct, takeProfitPct",
+	}
+	return []ToolInfo{
+		{
+			Name:        "bot_create_from_backtest",
+			Title:       "Создать бота из бэктеста",
+			Description: "Создать rule-бота из правил rules.Spec и бэктеста. Стадия check: бот ничего не торгует, сначала выполните bot_check.",
+			Input: objSchema(map[string]any{
+				"symbol":     strProp("Тикер инструмента"),
+				"periodSec":  intProp("Период свечей в секундах"),
+				"rules":      rulesSchema,
+				"qty":        intProp("Количество бумаг на сделку (целое)"),
+				"backtestId": strProp("Необязательно: номер (1..N) rules-бэктеста из get_backtest_history; иначе бэктест выполняется заново"),
+			}, "symbol", "periodSec", "rules", "qty"),
+		},
+		{
+			Name:        "bot_check",
+			Title:       "Проверить бота",
+			Description: "Один расчёт rule-бота по последним закрытым барам: close, индикаторы и сигнал. Без подписки на поток и без чтения счёта.",
+			Input:       objSchema(map[string]any{"id": strProp("ID бота")}, "id"),
+		},
+		{
+			Name:        "bot_start",
+			Title:       "Запустить бота",
+			Description: "Запустить бота на закрытых живых барах: dry_run — только журнал, paper — бумажный счёт. Требует подтверждения человеком.",
+			Input: objSchema(map[string]any{
+				"id":    strProp("ID бота"),
+				"stage": enumProp("Стадия: dry_run или paper", "dry_run", "paper"),
+			}, "id", "stage"),
+		},
+		{
+			Name:        "bot_promote",
+			Title:       "Перевести бота на бумагу",
+			Description: "Запросить перевод бота на бумажный счёт: создаётся предложение; после подтверждения выполняется bot_start со stage=paper. Live запрещён.",
+			Input: objSchema(map[string]any{
+				"id":    strProp("ID бота"),
+				"stage": enumProp("Целевая стадия", "paper", "dry_run"),
+			}, "id", "stage"),
+		},
+		{
+			Name:        "bot_stop",
+			Title:       "Остановить бота",
+			Description: "Kill-switch бота: остановка выполняется сразу, без подтверждения.",
+			Input:       objSchema(map[string]any{"id": strProp("ID бота")}, "id"),
+		},
+		{
+			Name:        "bot_status",
+			Title:       "Статус ботов",
+			Description: "Статус одного бота или список всех ботов терминала (стадия, последние записи журнала, счётчики).",
+			Input:       objSchema(map[string]any{"id": strProp("Необязательный ID бота")}),
+		},
+		{
+			Name:        "bot_journal",
+			Title:       "Журнал бота",
+			Description: "Сжатый журнал бота: последние записи (closed_bar/signal/risk_check/order/fill/reconnect/stage/error) и счётчики по видам.",
+			Input: objSchema(map[string]any{
+				"id":       strProp("ID бота"),
+				"afterSeq": intProp("Вернуть записи с Seq больше указанного"),
+				"limit":    intProp("Сколько последних записей вернуть, максимум 500"),
+			}, "id"),
+		},
+	}
+}
+
+// toolCreateBot implements bot_create_from_backtest.
+func (e *Engine) toolCreateBot(ctx context.Context, args map[string]any) (map[string]any, error) {
+	manager, err := e.requireBotManager()
+	if err != nil {
+		return nil, err
+	}
+	symbol := e.resolveSymbol(argString(args, "symbol"))
+	if symbol == "" {
+		return nil, errors.New("agent: symbol is required")
+	}
+	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+	if err != nil {
+		return nil, err
+	}
+	qty, err := argIntStrict(args, "qty", 0, 1, 1_000_000)
+	if err != nil {
+		return nil, err
+	}
+	spec, err := parseRulesSpec(args["rules"])
+	if err != nil {
+		return nil, err
+	}
+	var result backtest.Result
+	if backtestID := argString(args, "backtestId"); backtestID != "" {
+		result, err = e.findRulesBacktest(backtestID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		period := e.normalizePeriod(int(periodSec))
+		bars, err := e.data.History(ctx, symbol, period, maxBacktestBars)
+		if err != nil {
+			return nil, fmt.Errorf("agent: history for %s: %w", symbol, err)
+		}
+		if len(bars) < 2 {
+			return nil, fmt.Errorf("agent: not enough history for %s (%d bars)", symbol, len(bars))
+		}
+		// The numeric-param backtest path cannot carry a rules.Spec, so the
+		// compiled strategy goes through backtest.RunStrategy.
+		strategy, compileErr := rules.Compile(spec)
+		if compileErr != nil {
+			return nil, fmt.Errorf("agent: %w", compileErr)
+		}
+		result, err = backtest.RunStrategy(backtest.Request{
+			Symbol: symbol, PeriodSec: period, Bars: bars,
+			Strategy:    strategy.ID(),
+			InitialCash: defaultBacktestCash, FeeBps: e.feeBps(), SlippageBps: 1,
+		}, strategy)
+		if err != nil {
+			return nil, fmt.Errorf("agent: backtest %s on %s: %w", rules.ID, symbol, err)
+		}
+		e.recordBacktest(result)
+	}
+	definition, err := manager.CreateFromBacktest(result, spec, qty)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"bot": definition}, nil
+}
+
+// findRulesBacktest resolves a 1-based backtest id of get_backtest_history.
+func (e *Engine) findRulesBacktest(id string) (backtest.Result, error) {
+	results := e.Backtests()
+	index, err := strconv.Atoi(strings.TrimSpace(id))
+	if err != nil || index < 1 || index > len(results) {
+		return backtest.Result{}, fmt.Errorf("agent: backtest %q not found (use 1..%d from get_backtest_history)", id, len(results))
+	}
+	result := results[index-1]
+	if result.Strategy != rules.ID {
+		return backtest.Result{}, fmt.Errorf("agent: backtest %q is %q, a rule bot needs a %q backtest", id, result.Strategy, rules.ID)
+	}
+	return result, nil
+}
+
+// toolBotStart implements bot_start (dry_run|paper).
+func (e *Engine) toolBotStart(ctx context.Context, args map[string]any) (map[string]any, error) {
+	manager, err := e.requireBotManager()
+	if err != nil {
+		return nil, err
+	}
+	id := argString(args, "id")
+	if id == "" {
+		return nil, errors.New("agent: bot id is required")
+	}
+	stage := bot.Stage(strings.ToLower(strings.TrimSpace(argString(args, "stage"))))
+	if stage == "" {
+		stage = bot.StageDryRun
+	}
+	if err := manager.Start(ctx, id, stage); err != nil {
+		return nil, err
+	}
+	return e.botStatusPayload(id), nil
+}
+
+// toolBotPromote implements bot_promote: the paper stage always goes through the
+// human approval proposal (task 7).
+func (e *Engine) toolBotPromote(args map[string]any) (map[string]any, error) {
+	manager, err := e.requireBotManager()
+	if err != nil {
+		return nil, err
+	}
+	id := argString(args, "id")
+	if id == "" {
+		return nil, errors.New("agent: bot id is required")
+	}
+	stage := bot.Stage(strings.ToLower(strings.TrimSpace(argString(args, "stage"))))
+	if stage == "" {
+		stage = bot.StagePaper
+	}
+	proposalID, err := manager.Promote(id, stage)
+	if err != nil {
+		return nil, err
+	}
+	payload := e.botStatusPayload(id)
+	payload["proposalId"] = proposalID
+	return payload, nil
+}
+
+// toolBotStatus implements bot_status for one bot or the whole list.
+func (e *Engine) toolBotStatus(args map[string]any) (map[string]any, error) {
+	manager, err := e.requireBotManager()
+	if err != nil {
+		return nil, err
+	}
+	id := argString(args, "id")
+	if id == "" {
+		return map[string]any{"bots": manager.Bots()}, nil
+	}
+	payload := e.botStatusPayload(id)
+	if message, ok := payload["error"].(string); ok {
+		return nil, errors.New(message)
+	}
+	return payload, nil
+}
+
+// toolBotJournal implements the compact bot_journal response.
+func (e *Engine) toolBotJournal(args map[string]any) (map[string]any, error) {
+	manager, err := e.requireBotManager()
+	if err != nil {
+		return nil, err
+	}
+	id := argString(args, "id")
+	if id == "" {
+		return nil, errors.New("agent: bot id is required")
+	}
+	afterSeq, err := argIntStrict(args, "afterSeq", 0, 0, int64(1)<<62)
+	if err != nil {
+		return nil, err
+	}
+	limit, err := argIntStrict(args, "limit", 20, 1, 500)
+	if err != nil {
+		return nil, err
+	}
+	definition, err := manager.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	entries := manager.Journal(id, uint64(afterSeq), int(limit))
+	return map[string]any{
+		"bot":     definition,
+		"entries": entries,
+		"counts":  manager.JournalCounts(id),
+	}, nil
+}
+
+// botStatusPayload returns one bot with its recent journal.
+func (e *Engine) botStatusPayload(id string) map[string]any {
+	manager := e.BotManager()
+	if manager == nil {
+		return map[string]any{"id": id, "error": "agent: rule-bot runtime is not configured"}
+	}
+	definition, err := manager.Get(id)
+	if err != nil {
+		return map[string]any{"id": id, "error": err.Error()}
+	}
+	return map[string]any{
+		"bot":    definition,
+		"last":   manager.Journal(id, 0, 5),
+		"counts": manager.JournalCounts(id),
+	}
 }
 
 // --- JSON schema helpers ---

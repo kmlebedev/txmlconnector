@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
+	"github.com/kmlebedev/txmlconnector/terminal/bot"
 )
 
 // Defaults frozen by docs/ai-terminal/ARCHITECTURE.md §9.
@@ -43,6 +44,9 @@ type Engine struct {
 	// news is the optional recorded-news source of the get_news tool (md.news);
 	// nil means the recording pipeline is not configured.
 	news NewsStore
+	// bots is the optional rule-bot runtime attached by cmd/terminal (plan
+	// Task 22); nil means the bot_* tools report a configuration error.
+	bots *bot.Manager
 
 	// Seams over the frozen backtest package: production wiring points them at
 	// the real functions, package tests replace them with deterministic fakes.

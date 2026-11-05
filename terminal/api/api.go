@@ -18,6 +18,7 @@ import (
 
 	"github.com/kmlebedev/txmlconnector/terminal/agent"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
+	"github.com/kmlebedev/txmlconnector/terminal/bot"
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
 	"github.com/kmlebedev/txmlconnector/terminal/paper"
 )
@@ -86,6 +87,9 @@ type Deps struct {
 	Paper    PaperAPI
 	Agent    AgentAPI
 	Backtest func(backtest.Request) (backtest.Result, error) // HTTP backtest runner
+	// Bots is the rule-bot runtime (plan Task 22); nil disables /api/bots and
+	// the SSE "bot" events.
+	Bots *bot.Manager
 }
 
 // Server is the HTTP API server. It owns the SSE hub and the background event
@@ -219,6 +223,14 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/agent/proposals", s.handleAgentProposals)
 	mux.HandleFunc("POST /api/agent/proposals/{id}/approve", s.handleApproveProposal)
 	mux.HandleFunc("POST /api/agent/proposals/{id}/reject", s.handleRejectProposal)
+	mux.HandleFunc("GET /api/bots", s.handleBots)
+	mux.HandleFunc("POST /api/bots", s.handleCreateBot)
+	mux.HandleFunc("POST /api/bots/stop-all", s.handleStopAllBots)
+	mux.HandleFunc("POST /api/bots/{id}/check", s.handleCheckBot)
+	mux.HandleFunc("POST /api/bots/{id}/start", s.handleStartBot)
+	mux.HandleFunc("POST /api/bots/{id}/promote", s.handlePromoteBot)
+	mux.HandleFunc("POST /api/bots/{id}/stop", s.handleStopBot)
+	mux.HandleFunc("GET /api/bots/{id}/journal", s.handleBotJournal)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("/api/", s.handleAPINotFound)
 	mux.HandleFunc("/", s.handleSPA)

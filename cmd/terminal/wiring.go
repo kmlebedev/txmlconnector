@@ -11,6 +11,7 @@ import (
 
 	"github.com/kmlebedev/txmlconnector/terminal/agent"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
+	"github.com/kmlebedev/txmlconnector/terminal/bot"
 	"github.com/kmlebedev/txmlconnector/terminal/chstore"
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
 	"github.com/kmlebedev/txmlconnector/terminal/paper"
@@ -41,10 +42,33 @@ type feedAdapter struct {
 	market marketSource
 }
 
+// botDataDirEnv is the environment variable of the bot journal directory: each
+// bot journal is mirrored to <dir>/bots/<id>.jsonl (plan Task 22).
+const botDataDirEnv = "TERMINAL_DATA_DIR"
+
+// newBotRuntime creates the rule-bot runtime of the terminal and attaches it to
+// the agent engine: the feed serves the live closed candles (bot.BarStream), the
+// paper broker executes the bot fills (bot.Broker) and the engine is the human
+// approval proposer (bot.Approver, R5).
+func newBotRuntime(feedSvc *feed.Service, broker *paper.Broker, engine *agent.Engine) (*bot.Manager, error) {
+	manager := bot.NewManager(feedSvc, broker, engine, time.Now)
+	if dir := strings.TrimSpace(os.Getenv(botDataDirEnv)); dir != "" {
+		if err := manager.SetJournalDir(dir); err != nil {
+			return nil, fmt.Errorf("каталог журналов ботов: %w", err)
+		}
+	}
+	engine.SetBotManager(manager)
+	return manager, nil
+}
+
 // Compile-time contract checks.
 var (
 	_ agent.DataSource = (*feedAdapter)(nil)
 	_ agent.Broker     = (*paperAdapter)(nil)
+	// The rule-bot runtime consumes the feed, the paper broker and the engine.
+	_ bot.BarStream = (*feed.Service)(nil)
+	_ bot.Broker    = (*paper.Broker)(nil)
+	_ bot.Approver  = (*agent.Engine)(nil)
 )
 
 // newFeedAdapter wraps the market feed as the agent data source.

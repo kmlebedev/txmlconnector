@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/agent"
+	"github.com/kmlebedev/txmlconnector/terminal/bot"
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
 	"github.com/kmlebedev/txmlconnector/terminal/paper"
 )
@@ -125,7 +126,17 @@ func (s *Server) subscribeBackends() []func() {
 	if s.deps.Agent != nil {
 		cancels = append(cancels, s.deps.Agent.Subscribe(s.onAgentEvent))
 	}
+	if s.deps.Bots != nil {
+		cancels = append(cancels, s.deps.Bots.Subscribe(s.onBotEvent))
+	}
 	return cancels
+}
+
+// onBotEvent forwards one rule-bot journal event as a top-level SSE "bot"
+// event (plan Task 22): {"type":"bot","data":{"botId":...,"entry":{...}}}.
+func (s *Server) onBotEvent(ev bot.BotEvent) {
+	ev.Entry = normalizeBotEntry(ev.Entry)
+	s.hub.publish(event{Type: "bot", Data: ev})
 }
 
 // tickQuotes publishes the current quotes and drives resting paper limit orders
