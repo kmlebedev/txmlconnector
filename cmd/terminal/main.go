@@ -24,6 +24,7 @@ import (
 	"github.com/kmlebedev/txmlconnector/terminal/api"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
+	"github.com/kmlebedev/txmlconnector/terminal/mcp"
 	"github.com/kmlebedev/txmlconnector/terminal/paper"
 )
 
@@ -111,6 +112,12 @@ func run(logger *log.Logger) error {
 		_ = feedSvc.Close()
 		return fmt.Errorf("инициализация AI-агента: %w", err)
 	}
+	bots, err := newBotRuntime(feedSvc, broker, engine)
+	if err != nil {
+		_ = feedSvc.Close()
+		return fmt.Errorf("инициализация рантайма ботов: %w", err)
+	}
+	defer func() { _ = bots.Close() }()
 
 	liveTradingAllowed := *liveTrading && os.Getenv("TERMINAL_LIVE_TRADING") == "1"
 	// The API token and the instance nonce come only from the environment: the
@@ -132,17 +139,25 @@ func run(logger *log.Logger) error {
 		Paper:    broker,
 		Agent:    engine,
 		Backtest: runBacktest,
+		Bots:     bots,
 	})
 	if err != nil {
 		_ = feedSvc.Close()
 		return fmt.Errorf("инициализация HTTP API: %w", err)
 	}
 
+	// MCP endpoint (plan Task 10): external MCP clients call the same Go tools
+	// over the streamable-HTTP JSON-RPC transport, guarded by the same
+	// per-launch token as the local API (X-Terminal-Token).
+	rootMux := http.NewServeMux()
+	rootMux.Handle("/", apiSrv.Handler())
+	rootMux.Handle("/mcp", api.Guard(guardCfg, mcp.NewServer(engine)))
+
 	// No global WriteTimeout: /api/events is a long-lived SSE stream. The API
 	// bounds every SSE write with a per-write deadline instead (see api/sse.go).
 	httpServer := &http.Server{
 		Addr:              *addr,
-		Handler:           apiSrv.Handler(),
+		Handler:           rootMux,
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 		WriteTimeout:      0,
@@ -151,7 +166,7 @@ func run(logger *log.Logger) error {
 		logger.Printf("внимание: сервер слушает не только loopback (%s)", *addr)
 	}
 	if guardCfg.Token == "" {
-		logger.Printf("TERMINAL_API_TOKEN не задан: /api/* без токена (защита — Host/Origin/Content-Type)")
+		logger.Printf("TERMINAL_API_TOKEN не задан: /api/* и /mcp без токена (защита — Host/Origin/Content-Type)")
 	}
 	if liveTradingAllowed {
 		logger.Printf("реальная торговля разрешена флагами, но маршрутизация на биржу в итерации 1 не реализована (paper only)")
@@ -161,7 +176,7 @@ func run(logger *log.Logger) error {
 	go func() {
 		serveErr <- httpServer.ListenAndServe()
 	}()
-	logger.Printf("AI-терминал %s: режим=%s, %s, бумажный счёт %.0f ₽, LLM=%s",
+	logger.Printf("AI-терминал %s: режим=%s, %s (MCP /mcp), бумажный счёт %.0f ₽, LLM=%s",
 		version, mode, "http://"+*addr, *paperCash, llmModeLabel(engine.Status().LLM))
 
 	select {
