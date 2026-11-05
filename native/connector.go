@@ -1195,6 +1195,47 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return transactionFailure(err), nil
 		}
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(txid), 10) + "\"/>", nil
+	case "set_csp":
+		var req struct {
+			CSP *struct {
+				Type *string `xml:"type,attr"`
+			} `xml:"csp"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		if c.currentState() == stateConnected {
+			// O: every set_csp variant returns this CP1251 text while connected.
+			return failure("Данная операция требует отключения от сервера. Необходимо выполнить команду Disconnect."), nil
+		}
+		if req.CSP == nil {
+			return success(), nil // no-op, D+O
+		}
+		if req.CSP.Type == nil || *req.CSP.Type == "" {
+			return failure("You have to specify at least one CSP."), nil
+		}
+		cspTypes := map[string]bool{
+			"NONE": true, "MS": true, "CP": true, "SC": true, "MP": true, "MPSSL": true,
+			"CPBB": true, "CPBB_2012_256": true, "CPBB_2012_512": true,
+		}
+		if !cspTypes[*req.CSP.Type] {
+			return failure("Unsupported CSP type."), nil
+		}
+		// The selected CSP type is stored in DLL connector+0x688; the native
+		// connector has no built-in crypto provider, so only validation is done (I).
+		return success(), nil
+	case "authenticate":
+		var req struct {
+			Pin *string `xml:"pin,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		// D/O: the default bundled provider answers Illegal context for sendpin
+		// both with and without a connection; a configured provider (mode 3 with
+		// the pin attribute and async callbacks) is I and not implemented.
+		_ = req
+		return failure(`Illegal context for "sendpin" command`), nil
 	case "get_forts_positions":
 		var req struct {
 			Client string `xml:"client"`

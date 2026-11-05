@@ -81,11 +81,9 @@ func (e *TransactionError) Error() string {
 	return fmt.Sprintf("transaq: transaction rejected (RSM code %d): %s", e.Code, e.Message)
 }
 
-// transactionMessages maps the known RSM result codes to the DLL texts.
-var transactionMessages = map[byte]string{
-	0: "",
-	1: "Клиент не допущен к торгам.",
-}
+// transactionMessages maps the O-confirmed RQ_TRANSACT server codes 1..6 to the
+// DLL resource texts (errors.md). Codes 7..66 are not recovered (I) and render
+// as Unknown error.
 
 // transactionSeq is the local transaction number source: the DLL assigns the
 // numbers itself (docs/protocol/orders.md), so an unknown outcome still has one.
@@ -112,7 +110,7 @@ func (c *Conn) Transact(ctx context.Context, kind TxKind, body []byte) (model.Tr
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if reply[0] != 0 {
-		message, ok := transactionMessages[reply[0]]
+		message, ok := TransactionErrorText(reply[0])
 		if !ok || message == "" {
 			message = "Unknown error"
 		}
