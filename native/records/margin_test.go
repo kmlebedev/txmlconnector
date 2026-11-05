@@ -86,9 +86,10 @@ func TestParseSecRate(t *testing.T) {
 // 7); the splitter and ParseSecRate must consume it identically.
 func TestSecRateLongPackedL(t *testing.T) {
 	var w wire.Writer
-	w.Int64(1 << 40)
-	if len(w.Bytes()) != 6 { // packed L: 6 bytes for this value
-		t.Fatalf("packed L length = %d, want 6", len(w.Bytes()))
+	// 1<<60 cannot fit the legacy 32-bit reader: the packed L needs >4 bytes.
+	w.Int64(1 << 60)
+	if len(w.Bytes()) <= 4 {
+		t.Fatalf("packed L length = %d, want >4", len(w.Bytes()))
 	}
 	stream := append([]byte{records.TagSecRate, 0x00, 0x1a}, w.Bytes()...)
 	stream = append(stream, 0x18, 0x01) // next record stays aligned
@@ -97,7 +98,7 @@ func TestSecRateLongPackedL(t *testing.T) {
 		t.Fatalf("records = %+v, %v", recs, err)
 	}
 	rate, err := records.ParseSecRate(recs[0].Body)
-	if err != nil || rate.SecID != 26 || rate.Value != 1<<40 {
+	if err != nil || rate.SecID != 26 || rate.Value != 1<<60 {
 		t.Fatalf("rate = %+v, %v", rate, err)
 	}
 }

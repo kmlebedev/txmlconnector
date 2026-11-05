@@ -11,13 +11,28 @@ import (
 // The T23 commands are a LOCAL render: no RQ is sent (margin.md, D/O).
 //
 // maxbuy/maxsell follow the RE task-52 formula: a price P per security comes
-// from R_SEC_RATE (0x0a, cost of the lot in kopecks), the money comes from the
+// from R_SEC_RATE (0x0a, price V in kopecks per unit; lot value V*lotsize),
 // money R_CLIENT_ASSET open_balance and the positions from the security
 // R_CLIENT_ASSET open_balance / lot size. The default rate is the demo 0.1428
 // (I: per-client rates and the P initializer are not recovered yet).
 
 // marginRate is the default credit rate R of the task-52 formula (demo O).
 const marginRate = 0.1428
+
+// crossUnknownRateLocked reports a cross position with a non-zero balance and
+// no known R_SEC_RATE; such a cross term would silently be zero and inflate the
+// short/long result.
+func (c *Client) crossUnknownRateLocked(rawID int64, self uint16) (uint16, bool) {
+	for key, pos := range c.secPositions {
+		if key.client != rawID || key.sym == self || pos.SaldoIn == 0 {
+			continue
+		}
+		if c.marginRates == nil || c.marginRates[key.sym] <= 0 {
+			return key.sym, true
+		}
+	}
+	return 0, false
+}
 
 // marginOther is one cross-security position of the formula.
 type marginOther struct {
@@ -131,6 +146,9 @@ func (c *Client) marginRows(account model.ClientAccount, rawID int64, zero bool,
 			selfPos := 0.0
 			if pos, ok := c.secPositions[positionKey{client: rawID, sym: sec.SecID}]; ok {
 				selfPos = float64(pos.SaldoIn) // open_balance in units
+			}
+			if bad, ok := c.crossUnknownRateLocked(rawID, sec.SecID); ok {
+				return nil, fmt.Errorf("rate is not known for secid %d (I)", bad)
 			}
 			var others []marginOther
 			for key, pos := range c.secPositions {

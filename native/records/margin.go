@@ -128,7 +128,7 @@ func ParseMarginPosListReply(body []byte) ([]int64, error) {
 }
 
 // ParseSecRate decodes R_SEC_RATE (0x0a): W secid then a packed L value, the
-// cost of the lot in kopecks (SBER 291.46*1*100=29146; margin.md, O/D). The
+// price V in kopecks per unit in kopecks (SBER 291.46*1*100=29146; margin.md, O/D). The
 // value is the price P of the max-buy/sell formula (task-52).
 func ParseSecRate(body []byte) (SecRate, error) {
 	var out SecRate

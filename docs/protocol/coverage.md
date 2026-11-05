@@ -91,7 +91,7 @@ get_connector_version. Расхождение плана «45 vs 43» закры
 | get_united_portfolio/equity/go | stub (I) | — | I | `TestPortfolioLayoutsAreExplicitI` | «layout not recovered (I)» |
 | get_max_buy_sell_tplus | done (local) | локальный рендер из сторов | O/D | `TestMarginMatchDLL`, `margin-dll.xml` | MCT -> ошибка; точная формула по R_SEC_RATE 0x0a (a217bc1) |
 | get_max_buy_sell | done (local) | локальный рендер | O/D | `TestMarginMatchDLL`, `TestMarginMCTBehavior` | MCT -> success 0/0; cross/шорт по margin.md (a217bc1) |
-| get_cln_sec_permissions | done (local) | локальный рендер | O/D | `TestClnSecPermissionsMatchDLL` | marketable из 0x0e; права/ставки I (FUN_18001a700) |
+| get_cln_sec_permissions | done (local) | локальный рендер | O/D | `TestClnSecPermissionsStoredFormI` | marketable из 0x0e; права/ставки I (FUN_18001a700) |
 | get_old_news | done | RQ_GETNEWS 73 (mode 1) | O/D | `TestOldNewsPayloadMatchesDLL`, `news-inject.hex` | заголовки — события 0x35/0x36; O-пейлоады 713e913e0201 / 017d217d0201 |
 | get_news_body | done (команда) | RQ_GETNEWS 73 (mode 2) | O/D | `TestGetNewsBodyRequest`, `TestNewsErrors` | payload 217d217d0102; `<news_body>` — I (task-56) |
 | change_pass | done | RQ_CHANGE_PWD 3 | O/D | `TestChangePasswordPayloadMatchesDLL/Command/ReplyErrors/LocalErrors/EmptyReplyFatal` | 56-Б SHA-1 payload; пустой reply фатален/закрывает сессию; S-негатив (живьём не выполнялось) |
@@ -241,7 +241,7 @@ makeordown, moveorder (2 имени; T19 — ждут живую S-серию).
    источник R и начальный V.
 6. **T24**: `news_header`/`news_body` **полностью S-сняты** и реализованы (`204c7ba`/`dbace49`,
    тест `<news_body>` побайтно). **T25**: done O-побайтно (wall-время + bias).
-7. **T26**: change_pass done (payload SHA-1, reply-коды); в работе ревью-P1 — терминальность fatal reply;
+7. **T26**: change_pass done (payload SHA-1, reply-коды); ревью-P1 исправлен: fatal reply терминален (no recover, один connected=false);
    I: политика conn+0x279. **T27**: 149 O, 151 payload D, гейт 153/151, XML D/I (O-форм нет).
    **T28**: 4 O-payload, D-XML I, `newmrepoorder`/`newreport4` — I.
 8. **T29**: native backend/`TC_BACKEND`/`make server` без Wine, матрица 45 имён (43 обработчика, pending
