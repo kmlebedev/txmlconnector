@@ -34,6 +34,7 @@ var toolCatalogNames = []string{
 	"get_agent_status",
 	"get_backtest_history",
 	toolNameBacktestRules,
+	toolNameBatchBacktest,
 }
 
 // buildTools returns the tool catalog with JSON schemas. Research tools

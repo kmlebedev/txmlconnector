@@ -74,6 +74,10 @@ type Request struct {
 	FeeBps      float64            `json:"feeBps,omitempty"`
 	SlippageBps float64            `json:"slippageBps,omitempty"`
 	RiskPct     float64            `json:"riskPct,omitempty"`
+	// ExplicitCosts makes FeeBps and SlippageBps literal: an explicit zero
+	// means "no fee / no slippage" instead of "use the documented default".
+	// Research batch runs set it so their no_costs warning is truthful.
+	ExplicitCosts bool `json:"explicitCosts,omitempty"`
 }
 
 // Trade is one closed round trip.

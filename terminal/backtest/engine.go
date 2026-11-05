@@ -25,11 +25,12 @@ const (
 // runConfig is a normalized Request: zero defaults are resolved and the values
 // are validated.
 type runConfig struct {
-	periodSec   int
-	initialCash float64
-	feeBps      float64
-	slippageBps float64
-	riskPct     float64
+	periodSec     int
+	initialCash   float64
+	feeBps        float64
+	slippageBps   float64
+	riskPct       float64
+	explicitCosts bool
 }
 
 func normalizeRequest(req Request) (runConfig, error) {
@@ -58,11 +59,17 @@ func normalizeRequest(req Request) (runConfig, error) {
 	if cfg.initialCash == 0 {
 		cfg.initialCash = defaultInitialCash
 	}
-	if cfg.feeBps == 0 {
-		cfg.feeBps = defaultFeeBps
-	}
-	if cfg.slippageBps == 0 {
-		cfg.slippageBps = defaultSlippageBps
+	if req.ExplicitCosts {
+		// Literal costs: an explicit zero means a true zero-cost backtest (the
+		// research batch uses this and warns with no_costs).
+		cfg.explicitCosts = true
+	} else {
+		if cfg.feeBps == 0 {
+			cfg.feeBps = defaultFeeBps
+		}
+		if cfg.slippageBps == 0 {
+			cfg.slippageBps = defaultSlippageBps
+		}
 	}
 	if cfg.riskPct == 0 {
 		cfg.riskPct = defaultRiskPct
@@ -255,6 +262,9 @@ func runWithStrategy(req Request, strategy Strategy) (Result, error) {
 	if droppedPartial > 0 {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("незакрытые бары отброшены: %d", droppedPartial))
+	}
+	if warning := NoCostsWarning(cfg.feeBps, cfg.slippageBps, cfg.explicitCosts); warning != "" {
+		result.Warnings = append(result.Warnings, warning)
 	}
 	if n < minBars {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("недостаточно баров: %d (нужно не менее %d)", n, minBars))
