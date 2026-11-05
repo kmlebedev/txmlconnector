@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kmlebedev/txmlconnector/terminal/automation"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest/rules"
 	"github.com/kmlebedev/txmlconnector/terminal/fingerprint"
@@ -92,7 +93,7 @@ var errRulesStrategyNeedsSpec = fmt.Errorf(
 func researchToolCatalog() []ToolInfo {
 	return []ToolInfo{
 		backtestRulesTool, batchBacktestTool, detectExecutionAlgosTool, lobBacktestTool,
-		walkForwardTool, volForecastTool, volEventsTool,
+		walkForwardTool, volForecastTool, volEventsTool, proposeAutomationTool,
 	}
 }
 
@@ -255,6 +256,12 @@ func (e *Engine) invokeResearchTool(ctx context.Context, name string, args map[s
 			return nil, nil, true, err
 		}
 		return res, &Artifact{Kind: "lob_backtest", Payload: ui}, true, nil
+	case toolNameProposeAutomation:
+		res, ui, err := e.toolProposeAutomation(ctx, args)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return res, ui, true, nil
 	}
 	return nil, nil, false, nil
 }
@@ -1449,3 +1456,70 @@ func round2(value float64) float64 { return math.Round(value*100) / 100 }
 
 // round4 rounds a metric to four decimals for the compact payload.
 func round4(value float64) float64 { return math.Round(value*10000) / 10000 }
+
+// toolNameProposeAutomation is the agent tool name of the automation backlog.
+const toolNameProposeAutomation = "propose_automation"
+
+// maxAutomationTasks bounds the task list of one tool answer.
+const maxAutomationTasks = 20
+
+// proposeAutomationTool is the propose_automation tool description.
+var proposeAutomationTool = ToolInfo{
+	Name:  toolNameProposeAutomation,
+	Title: "Задачи на автоматизацию",
+	Description: "Проанализировать повторяющиеся последовательности инструментов по учёту токенов агента " +
+		"и предложить задачи автоматизации: Go-функция, MCP-инструмент, статическая или ML-модель либо расписание. " +
+		"Каждая задача содержит мини-план (Files, Interfaces, тест) и оценку сэкономленных токенов в неделю.",
+	Input: objSchema(map[string]any{
+		"minCalls":     intProp("Минимум повторений последовательности, по умолчанию 2"),
+		"minTokens":    intProp("Порог суммарной стоимости последовательности в токенах, по умолчанию 0"),
+		"limit":        intProp(fmt.Sprintf("Сколько задач вернуть, максимум %d (по умолчанию 10)", maxAutomationTasks)),
+		"writeBacklog": boolProp("Записать задачи в docs/ai-terminal/automation-backlog.md (по умолчанию false)"),
+	}),
+}
+
+// proposeAutomationResult is the tool payload: the repeated hotspots and the
+// proposed automation tasks with their mini-plans.
+type proposeAutomationResult struct {
+	Hotspots int                         `json:"hotspots"`
+	Tasks    []automation.AutomationTask `json:"tasks"`
+	Written  bool                        `json:"written"`
+	Path     string                      `json:"path,omitempty"`
+}
+
+// toolProposeAutomation implements propose_automation: it reads the repeated
+// tool workflows from the token ledger (plan Task 18) and turns them into
+// automation proposals (plan Task 20). The model gets the tasks with their
+// mini-plans; the same payload is returned as the UI artifact.
+func (e *Engine) toolProposeAutomation(ctx context.Context, args map[string]any) (proposeAutomationResult, *Artifact, error) {
+	empty := proposeAutomationResult{}
+	if err := contextErr(ctx); err != nil {
+		return empty, nil, err
+	}
+	minCalls, err := argIntStrict(args, "minCalls", 2, 2, 1000)
+	if err != nil {
+		return empty, nil, err
+	}
+	minTokens, err := argIntStrict(args, "minTokens", 0, 0, maxToolQty)
+	if err != nil {
+		return empty, nil, err
+	}
+	limit, err := argIntStrict(args, "limit", 10, 1, maxAutomationTasks)
+	if err != nil {
+		return empty, nil, err
+	}
+	hotspots := e.AutomationHotspots(int(minCalls))
+	tasks := automation.ProposeFromHotspots(hotspots, int(minTokens))
+	if len(tasks) > int(limit) {
+		tasks = tasks[:limit]
+	}
+	view := proposeAutomationResult{Hotspots: len(hotspots), Tasks: tasks}
+	if argBool(args, "writeBacklog") {
+		if err := automation.WriteBacklog(automation.BacklogPath, tasks); err != nil {
+			return empty, nil, fmt.Errorf("agent: write automation backlog: %w", err)
+		}
+		view.Written = true
+		view.Path = automation.BacklogPath
+	}
+	return view, &Artifact{Kind: "automation_backlog", Payload: view}, nil
+}

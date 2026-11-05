@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kmlebedev/txmlconnector/terminal/automation"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest/rules"
 	"github.com/kmlebedev/txmlconnector/terminal/research"
@@ -577,5 +579,114 @@ func TestCompareStrategiesRanksByOOS(t *testing.T) {
 	}
 	if artifact == nil || artifact.Kind != "backtest" {
 		t.Fatalf("artifact = %+v, want the winner backtest", artifact)
+	}
+}
+
+// resetAutomationLedger gives one test a fresh process-wide token ledger.
+func resetAutomationLedger(t *testing.T) *automation.Ledger {
+	t.Helper()
+	previous := automationLedger
+	ledger := automation.New()
+	automationLedger = ledger
+	t.Cleanup(func() { automationLedger = previous })
+	return ledger
+}
+
+// TestProposeAutomationTool runs propose_automation through the core dispatch
+// with a synthetic token ledger.
+func TestProposeAutomationTool(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	ledger := resetAutomationLedger(t)
+	record := func(conversation string, promptTokens, completionTokens int, names ...string) {
+		for _, name := range names {
+			ledger.Record(conversation, automation.ToolCall{
+				Name: name,
+				Args: map[string]any{"symbol": "TQBR:SBER"},
+			}, promptTokens, completionTokens)
+		}
+	}
+	// The walk_forward workflow is repeated twice and priced far above the
+	// get_quote workflow.
+	record("conv-1", 400, 100, "walk_forward", "get_market_hints")
+	record("conv-2", 400, 100, "walk_forward", "get_market_hints")
+	record("conv-3", 50, 10, "get_quote", "get_portfolio")
+	record("conv-4", 50, 10, "get_quote", "get_portfolio")
+
+	result, artifact, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameProposeAutomation, map[string]any{})
+	if err != nil {
+		t.Fatalf("propose_automation: %v", err)
+	}
+	view, ok := result.(proposeAutomationResult)
+	if !ok {
+		t.Fatalf("result type = %T, want proposeAutomationResult", result)
+	}
+	if len(view.Tasks) != 2 {
+		t.Fatalf("tasks = %d, want 2: %+v", len(view.Tasks), view.Tasks)
+	}
+	if !reflect.DeepEqual(view.Tasks[0].Hotspot.Sequence, []string{"walk_forward", "get_market_hints"}) {
+		t.Fatalf("ranked[0] = %v, want the expensive workflow", view.Tasks[0].Hotspot.Sequence)
+	}
+	if view.Tasks[0].EstTokensSavedPerWeek <= view.Tasks[1].EstTokensSavedPerWeek {
+		t.Fatalf("tasks are not ranked by tokens: %+v", view.Tasks)
+	}
+	if view.Written || view.Path != "" {
+		t.Fatalf("writeBacklog was not requested but the view says written: %+v", view)
+	}
+	if artifact == nil || artifact.Kind != "automation_backlog" {
+		t.Fatalf("artifact = %+v", artifact)
+	}
+	if _, ok := artifact.Payload.(proposeAutomationResult); !ok {
+		t.Fatalf("artifact payload type = %T", artifact.Payload)
+	}
+	raw, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal view: %v", err)
+	}
+	if !strings.Contains(string(raw), "Files:") || !strings.Contains(string(raw), "Interfaces:") {
+		t.Fatalf("model payload lost the mini-plan: %s", raw)
+	}
+	if len(raw) > 8192 {
+		t.Fatalf("model payload = %d bytes, want <= 8192", len(raw))
+	}
+}
+
+// TestProposeAutomationToolEmpty: no repeated workflows means no tasks, not an
+// error.
+func TestProposeAutomationToolEmpty(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	resetAutomationLedger(t)
+	result, artifact, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameProposeAutomation, map[string]any{})
+	if err != nil {
+		t.Fatalf("propose_automation: %v", err)
+	}
+	view := result.(proposeAutomationResult)
+	if view.Hotspots != 0 || len(view.Tasks) != 0 {
+		t.Fatalf("view = %+v, want no hotspots and no tasks", view)
+	}
+	if artifact == nil || artifact.Kind != "automation_backlog" {
+		t.Fatalf("artifact = %+v", artifact)
+	}
+}
+
+// TestProposeAutomationToolValidation checks the argument errors.
+func TestProposeAutomationToolValidation(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	resetAutomationLedger(t)
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"minCalls below two", map[string]any{"minCalls": 1}, "minCalls"},
+		{"negative minTokens", map[string]any{"minTokens": -1}, "minTokens"},
+		{"limit above max", map[string]any{"limit": maxAutomationTasks + 1}, "limit"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameProposeAutomation, tc.args); err == nil ||
+				!strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to mention %q", err, tc.want)
+			}
+		})
 	}
 }
