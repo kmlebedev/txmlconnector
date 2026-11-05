@@ -73,6 +73,9 @@ export class AIDrawer {
     this.onToast = onToast;
     this.onOpenBacktests = onOpenBacktests;
     this.equityCharts = [];
+    // Dialog id of the bounded conversation history kept by the backend. The
+    // first request sends none and stores the id the response returns.
+    this.conversationId = '';
     this.formRendered = false;
     this.mount();
     this.unsubscribe = this.store.on((type, data) => this.onStore(type, data));
@@ -490,12 +493,14 @@ export class AIDrawer {
     this.store.set({ chat, chatBusy: true, agentActivity: '' });
     this.renderChat();
     try {
-      const response = await this.api.agentChat({
+      const payload = {
         message: text,
-        conversationId: 'ui',
         symbol: state.selected,
         periodSec: state.periodSec,
-      });
+      };
+      if (this.conversationId) payload.conversationId = this.conversationId;
+      const response = await this.api.agentChat(payload);
+      if (response && response.conversationId) this.conversationId = response.conversationId;
       const assistant = {
         role: 'assistant',
         text: response.answer || 'Готово.',

@@ -38,6 +38,9 @@ type Engine struct {
 	data   DataSource
 	broker Broker
 
+	// conversations keeps the bounded history of the chat dialogs (§9.2).
+	conversations ConversationStore
+
 	// Seams over the frozen backtest package: production wiring points them at
 	// the real functions, package tests replace them with deterministic fakes.
 	backtestRun   func(backtest.Request) (backtest.Result, error)
@@ -65,6 +68,7 @@ func New(cfg Config, data DataSource, broker Broker) (*Engine, error) {
 		cfg:           cfg,
 		data:          data,
 		broker:        broker,
+		conversations: newMemoryConversations(defaultConversationTurns, defaultConversationBytes),
 		llmHTTPClient: &http.Client{Timeout: cfg.LLM.Timeout},
 		backtestRun:   backtest.Run,
 		newStrategy:   backtest.NewStrategy,

@@ -131,6 +131,17 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 	if err := contextErr(ctx); err != nil {
 		return ChatResponse{}, err
 	}
+	// A dialog without an id gets a generated one, and the response always
+	// carries the id so the UI can continue the same bounded history (R4). An
+	// absurdly long client id is treated as missing instead of becoming an
+	// unbounded map key.
+	conversationID := strings.TrimSpace(req.ConversationID)
+	if len(conversationID) > maxConversationIDLen {
+		conversationID = ""
+	}
+	if conversationID == "" {
+		conversationID = newConversationID()
+	}
 
 	if !e.cfg.LLM.Enabled {
 		resp, err := e.localAnalyst(ctx, message)
@@ -138,11 +149,13 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 			return ChatResponse{}, err
 		}
 		resp.LLM = false
+		resp.ConversationID = conversationID
 		return resp, nil
 	}
 
-	resp, err := e.chatLLM(ctx, message, req.ConversationID)
+	resp, err := e.chatLLM(ctx, message, conversationID)
 	if err == nil {
+		resp.ConversationID = conversationID
 		return resp, nil
 	}
 	if ctxErr := contextErr(ctx); ctxErr != nil {
@@ -154,6 +167,7 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 	if hasMutatingToolCall(resp.ToolCalls) {
 		resp.Partial = true
 		resp.LLM = true
+		resp.ConversationID = conversationID
 		resp.Answer = fmt.Sprintf(
 			"LLM недоступен после выполнения действий (%s). Выполненные действия не повторяются — проверьте их результат в терминале.",
 			llmErrorClass(err))
@@ -165,21 +179,36 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 			llmErrorClass(err), localErr)
 	}
 	local.LLM = false
+	local.ConversationID = conversationID
 	local.Answer = fmt.Sprintf("LLM недоступен (%s). Отвечает локальный аналитик.\n\n%s",
 		llmErrorClass(err), local.Answer)
 	return local, nil
 }
 
 // chatLLM runs the OpenAI-compatible tool loop: up to maxToolIterations model
-// round trips with tools, then one final answer without tools. On failure it
-// returns the calls executed so far together with the error, so Chat can decide
-// whether a local fallback is safe (R3).
+// round trips with tools, then one final answer without tools. The previous
+// turns of the dialog are loaded from the conversation store, and the executed
+// turn is persisted only when the round trip succeeds, so a failed attempt does
+// not pollute the history. On failure it returns the calls executed so far
+// together with the error, so Chat can decide whether a local fallback is safe
+// (R3).
 func (e *Engine) chatLLM(ctx context.Context, message, conversationID string) (ChatResponse, error) {
 	started := e.now()
-	messages := []llmMessage{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: message},
+	// The stored tool results are already compacted (toolMessageContent), so
+	// replaying the dialog to the model keeps the context small.
+	history := e.conversations.Load(conversationID)
+	messages := make([]llmMessage, 0, len(history)+2)
+	turn := make([]llmMessage, 0, 5)
+	if len(history) == 0 {
+		systemMessage := llmMessage{Role: "system", Content: systemPrompt}
+		messages = append(messages, systemMessage)
+		turn = append(turn, systemMessage)
+	} else {
+		messages = append(messages, history...)
 	}
+	userMessage := llmMessage{Role: "user", Content: message}
+	messages = append(messages, userMessage)
+	turn = append(turn, userMessage)
 	tools := e.llmTools()
 	resp := ChatResponse{LLM: true, ToolCalls: []ToolCall{}, Artifacts: []Artifact{}}
 	answer := ""
@@ -205,11 +234,13 @@ func (e *Engine) chatLLM(ctx context.Context, message, conversationID string) (C
 			}
 			return fail(&llmError{Class: "empty_response"})
 		}
-		messages = append(messages, llmMessage{
+		assistantMessage := llmMessage{
 			Role:      "assistant",
 			Content:   msg.Content,
 			ToolCalls: msg.ToolCalls,
-		})
+		}
+		messages = append(messages, assistantMessage)
+		turn = append(turn, assistantMessage)
 		for _, tc := range msg.ToolCalls {
 			name := tc.Function.Name
 			args, parseErr := parseToolArguments(tc.Function.Arguments)
@@ -235,11 +266,13 @@ func (e *Engine) chatLLM(ctx context.Context, message, conversationID string) (C
 			if artifact != nil {
 				resp.Artifacts = append(resp.Artifacts, *artifact)
 			}
-			messages = append(messages, llmMessage{
+			toolMessage := llmMessage{
 				Role:       "tool",
 				ToolCallID: tc.ID,
 				Content:    toolMessageContent(call),
-			})
+			}
+			messages = append(messages, toolMessage)
+			turn = append(turn, toolMessage)
 		}
 	}
 
@@ -255,6 +288,10 @@ func (e *Engine) chatLLM(ctx context.Context, message, conversationID string) (C
 	}
 	resp.Answer = answer
 	resp.ElapsedMs = e.now().Sub(started).Milliseconds()
+	// Persist the completed turn; failed round trips return above and are not
+	// written, so a retry starts from the last consistent history.
+	turn = append(turn, llmMessage{Role: "assistant", Content: answer})
+	e.conversations.Append(conversationID, turn...)
 	e.publish(Event{Type: "message", Data: map[string]any{"answer": answer}})
 	return resp, nil
 }
