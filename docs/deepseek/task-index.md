@@ -722,7 +722,49 @@ T21 oracle `<clientlimits>`, T22 `portfolio_tplus/forts/united` S-формы, T1
 
 **Проверки:** `make verify`/race зелёные на каждом шаге; живой S-план — по
 `docs/deepseek/re-session-checklist.md`; согласие пользователя на минимальный торговый цикл
-`neworder→moveorder→cancelorder` (1 лот SBER, цена далеко от рынка, отмена сразу) зафиксировано.
+`neworder→moveorder→cancelorder` (1 лот SBER, цена далеко от рынка, отмена сразу) зафиксировано
+**только для демо-счёта** (на проде торговый цикл не выполняется).
+
+---
+
+## 15. Живая S-серия на ПРОДЕ (2026-11-05, read-only)
+
+Пользователь открыл прод-сессию и передал доступ через `~/re/prod.env`; согласие на торговый цикл
+распространяется только на демо-счёт, поэтому **торговый цикл `neworder→moveorder→cancelorder` на
+проде не выполнялся** (read-only S-серия и RE-4). Все факты проверены DLL 6.47.2.26.4 под Wine через
+loopback-tcproxy (S), сырьё — только `.re-run/s/` (gitignored), в git — обезличенные фикстуры/доки.
+
+**Снято (S):**
+- **NEWS**: reply `RQ_GETNEWS(73)` **всегда пуст** (len=0) и для заголовков, и для тела; заголовки —
+  RQ_MAIN `0x36 flags=1`, тело — `0x36 flags=2` (id + int32 + zlib, CP1251); `lastId` стора —
+  **минимальный id**; payloads `get_old_news` (L 0, L INT32_MAX, B count, B 1) и `get_news_body`
+  (L id, L id, B 1, B 2). I task-56 закрыт; реализация T14/T24 переработана (см. `204c7ba`,
+  `dbace49`, `2d3da44`, `df8c494`).
+- **TICKS**: `subscribe_ticks` работает в основную сессию (`<security><board/><seccode/><tradeno/>`,
+  board TQBR=75 на проде); тики приходят **RQ_MAIN `0x5a` TICK** (`W secid,W board,G tradeno,
+  L time,L price,L quantity,B period,B buysell,L X,L Y`; tradeno/time накопительные) — гипотеза про
+  `RQ_TICKS(13)` **опровергнута**; `unsubscribe_ticks` → `Unknown command.`; XML `<ticks><tick>`.
+- **LIMITS**: `get_client_limits client=<код>` → success + `<clientlimits>`, C>S `type=43`
+  (payload `d2da8d`), без client — `Client not specified.`
+- **PORTFOLIOS**: `get_portfolio`/`get_united_portfolio`/`get_mc_portfolio` — **local render**
+  (`<portfolio_currency>`/`<united_portfolio>`/`<mc_portfolio>`, без кадров 86/84/85/82);
+  `get_portfolio_mct` → `{8} Неверное значение параметра 'szClient'.`; `get_portfolio_tplus/forts`
+  → `Unknown command.` (в DLL отсутствуют — план расходился с DLL, DLL эталон).
+- Загрузка прода: ~10–12 с, 838 `sec_info_upd`, 61 securities/pits, 5 client, 1 union; server_status
+  sys_ver=650 build=41, TZ Russian Standard Time.
+
+**Не снято/блокеры:**
+- **OPTIONS**: первый прогон оборвался (`connected=false`, RQ_LOGOUT), затем прод перестал
+  устанавливать сессию (`connected=error`, доходят только RQ_LOGIN/RQ_PWD) — похоже на лимит
+  логинов/сессий (I); версия/гейт 0x45 и опционные формы — D/I до следующего окна.
+- **RE-4 на проде**: одиночная попытка (native server без Wine + gRPC sequence) была убита лимитом
+  harness-таймаута, результат inconclusive; один повтор — фоновым прогоном Lead.
+
+**Гигиена:** прод-хост заменён плейсхолдером `transaq.example` в tracked-файлах (`6d6650e`;
+docs/alltrades.md и др.); в истории git значение остаётся (как и UID — решение пользователя не
+переписывать историю). Демо-цикл для T19 (moveorder/makeordown) — отдельно, только `demo.env`,
+после открытия демо 09:50 MSK.
+
 
 
 
