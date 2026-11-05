@@ -3,14 +3,14 @@
 // no LLM is configured, technical "hint" computations and a paper autonomy
 // runner. It never speaks MCP: every tool is a Go call in this process.
 //
-// This file is the frozen contract scaffold created by the Lead; the
-// implementation lives in the package files owned by the agent task.
+// The exported API, the JSON tags and the JSON shapes of this package are
+// frozen by docs/ai-terminal/ARCHITECTURE.md §9. Implementation files:
+// engine.go, tools.go, llm.go, analyst.go, hints.go, autonomy.go, risk.go.
 package agent
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
@@ -246,50 +246,4 @@ type MarketHints struct {
 	Resistance    float64        `json:"resistance"`
 	Breadth       map[string]int `json:"breadth"`
 	Note          string         `json:"note"`
-}
-
-// ErrNotImplemented is returned by the contract scaffold until the agent task
-// fills the implementation.
-var ErrNotImplemented = errors.New("agent: not implemented yet")
-
-// Engine is the in-process AI agent.
-type Engine struct {
-	cfg    Config
-	data   DataSource
-	broker Broker
-}
-
-// New builds the agent engine.
-func New(cfg Config, data DataSource, broker Broker) (*Engine, error) {
-	return &Engine{cfg: cfg, data: data, broker: broker}, nil
-}
-
-// Chat answers a user message, possibly through several tool calls.
-func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
-	return ChatResponse{}, ErrNotImplemented
-}
-
-// Tools returns the tool catalog with JSON schemas.
-func (e *Engine) Tools() []ToolInfo { return nil }
-
-// Status returns the autonomy and LLM status.
-func (e *Engine) Status() Status { return Status{} }
-
-// StartAutonomy starts the paper replay runner.
-func (e *Engine) StartAutonomy(ctx context.Context, cfg AutonomyConfig) error {
-	return ErrNotImplemented
-}
-
-// StopAutonomy stops the paper replay runner.
-func (e *Engine) StopAutonomy() error { return nil }
-
-// Subscribe registers an agent event sink.
-func (e *Engine) Subscribe(fn func(Event)) (cancel func()) { return func() {} }
-
-// Backtests returns the recent backtest results kept for the UI.
-func (e *Engine) Backtests() []backtest.Result { return nil }
-
-// Hints computes technical hints for one instrument.
-func (e *Engine) Hints(ctx context.Context, symbol string, periodSec int) (MarketHints, error) {
-	return MarketHints{}, ErrNotImplemented
 }
