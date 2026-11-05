@@ -82,11 +82,11 @@
 
 | # | Область | Состояние | Уровень |
 |---|---|---|---|
-| 1 | **C ABI** | в репозитории нет; есть только прототип (§4) | L0 |
-| 2 | `InitializeEx`, `GetServiceInfo`, `SetLogLevel` | не реализованы (в прототипе `SetLogLevel` — заглушка) | L0/L1 |
-| 3 | **Логи** (`<дата>_dsp.log`, `_xdf.log`, `_ts.log`, уровни 1–3, `logfile_lifetime`) | нет | L4 |
-| 4 | Строка версии | `get_connector_version` → `6.47.2.26.4-native`, у DLL `6.47.2.26.4` (**S**) | L3 |
-| 5 | Тексты ошибок самой обёртки (`Initialize` дважды, вызов до `Initialize`, `<error>`) | не сняты с DLL (**I**) | L1 |
+| 1 | **C ABI** | **закрыто** (C1, §9): `cmd/connector`, 9 экспортов, ординалы как у эталона | L0 ✓ |
+| 2 | `InitializeEx`, `GetServiceInfo`, `SetLogLevel` | **закрыто** по текстам и кодам (C2, корпус 52/52); `SetLogLevel` уровень не меняет — логов нет (A1) | L1 ✓ |
+| 3 | **Логи** (`<дата>_dsp.log`, `_xdf.log`, `_ts.log`, уровни 1–3, `logfile_lifetime`) | **закрыто** в формате DLL (C6.1, [protocol/logs.md](protocol/logs.md)); не воспроизводятся внутренние строки `Host RAM`, `Snapshot loaded`, статистика `_ts` | L4 ✓ (частично) |
+| 4 | Строка версии | **закрыто**: библиотека отдаёт `6.47.2.26.4` (решение 1) | L3 ✓ |
+| 5 | Тексты ошибок самой обёртки (`Initialize` дважды, вызов до `Initialize`, `<error>`) | **закрыто**: сняты под Wine (**O**) и повторены (C2) | L1 ✓ |
 | 6 | Прокси в `<connect>` (SOCKS4/SOCKS5/HTTP-CONNECT) | DLL поддерживает (**D**), `native` — нет | L2 |
 | 7 | Криптопровайдеры/сертификаты (RQ_HANDSHAKE 106, `authenticate`, `set_csp`) | только встроенный профиль; `authenticate` — частично | L2 |
 | 8 | Права/ставки без шаблона маржи (демо: `regratelong` 14.28) | не воспроизведено | L3 |
@@ -142,7 +142,39 @@ disconnect/UnInitialize success; торговых команд нет. (Тот �
 | macOS arm64/amd64 | `libtxmlconnector.dylib` | Xcode clang | проверено прототипом; для распространения нужна подпись/нотаризация |
 
 
-### 5.1 CI-сборка (C3, 2026-11-05)
+### 5.0 Сборка через Zig (C9, 2026-11-05)
+
+С C9 C-тулчейн для всех целей — **Zig 0.17.1** (`zig cc -target …`), решение владельца 4.
+Скрипт [`tools/cabi/zig_build.sh`](../tools/cabi/zig_build.sh), цель `make cabi-zig` (вывод `bin/zig/<target>/`):
+
+| Цель | `-target` | Где собирается | Особенности |
+|---|---|---|---|
+| linux-amd64 / linux-arm64 | `x86_64-linux-gnu.2.17` / `aarch64-linux-gnu.2.17` | любой хост | `.so` требует glibc ≥ 2.17 (CentOS 7 и новее) |
+| windows-amd64 | `x86_64-windows-gnu` | любой хост | после линковки `tools/cabi/pe-repro` обнуляет метки времени PE и GUID CodeView, `go tool buildid -w` пересчитывает build ID |
+| macos-arm64 / macos-amd64 | `aarch64-macos` / `x86_64-macos` | только macOS | рантайм Go линкует `libresolv` — нужен macOS SDK (`xcrun`/`SDKROOT`) |
+
+Проверено локально (macOS arm64, Go 1.27.2, Zig 0.17.1):
+
+- все 5 целей собираются с одного хоста;
+- **сборки воспроизводимы**: два прогона в разные каталоги дают одинаковый SHA-256 для всех 9 файлов;
+  без `pe-repro` отличалась только Windows-DLL;
+- Windows-DLL: экспорт — 9 имён, ординалы 1–9 как у эталона; subsystem GUI, как у эталона (A7);
+  импорт — `KERNEL32` и UCRT (`api-ms-win-crt-*`);
+- Linux `.so`: максимальная версия glibc в символах — 2.17 (arm64) и ниже (amd64);
+- `abi_test` и конформанс 52/52: `.dylib` arm64 (нативно) и amd64 (Rosetta), Windows-DLL под Wine 11.21;
+- **живая сессия Windows-DLL** под Wine на демо (только чтение): connect → 761 колбэк → `get_securities`
+  → disconnect → `UnInitialize`; журналы совпадают с эталоном так же, как у macOS-сборки.
+
+Не проверено локально: запуск Linux `.so` (нет Linux-хоста) — это делает CI на ubuntu-latest,
+ubuntu-24.04-arm и в контейнере `centos:7`; запуск на настоящем Windows — CI windows-latest.
+
+### 5.1 CI-сборка (C3, 2026-11-05; с C9 — через Zig)
+
+С C9 workflow устроен иначе, чем описано ниже для C3: job `build-cross` (ubuntu) кросс-собирает linux и
+windows через Zig, проверяет воспроизводимость, glibc ≤ 2.17 и экспорт Windows-DLL; job `test` гоняет
+`abi_test` и конформанс на родных раннерах (linux amd64/arm64, **windows — строго, не best-effort**,
+плюс конформанс в `centos:7`); job `macos` собирает и тестирует macOS (amd64 через Rosetta). CI-прогон
+C9 ещё не выполнялся. Ниже — исторический раздел C3.
 
 Workflow [`.github/workflows/compat-release.yml`](../.github/workflows/compat-release.yml) собирает
 артефакты на нативных GitHub Actions runners:
@@ -229,9 +261,11 @@ macOS/Linux); в CI шаг «C ABI conformance» добавлен для linux/m
 | **C1. ABI-слой** | **готово**: `cmd/connector` (cgo, 9 экспортов), `include/txmlconnector.h`, `Makefile`-цели `cabi`/`cabi-so`/`cabi-dylib`/`cabi-test`; C-харнесс dlopen/LoadLibrary | ABI-тесты PASS: macOS arm64/amd64 (локально/CI), linux amd64/arm64 (CI), Windows ABI best-effort |
 | **C2. Жизненный цикл как у DLL** | **готово**: точные O-тексты DLL сняты под Wine и повторены (Initialize/InitializeEx/UnInitialize/SetCallback*/SendCommand/SetLogLevel/GetServiceInfo/FreeMemory); rate-limit 5000мс; один поток колбэков | L1-сверка по `cabi-reference.json` зелёная; C2.1 sync + C5 conformance 52/52 |
 | **C3. Кросс-сборка** | **готово**: `compat-release.yml` — 5 нативных целей (linux amd64/arm64, windows amd64, macos arm64/amd64), per-target архивы + header/VERSION, единый release-job, SHA256SUMS, prerelease для rc | RC2 `compat-v1.0.0-rc2`: все 5 build + release job SUCCESS, `sha256sum -c OK`, арх-проверка (ELF x86-64/aarch64, PE32+, Mach-O arm64/x86-64) |
-| **C4. Живая проверка библиотеки** | **готово для macOS**: live C ABI через `dlopen` на демо (connect → 761 колбэк → get_securities → disconnect → UnInitialize, read-only), `make cabi-live-test`; linux amd64/arm64 ABI+conformance в CI; Windows DLL собран, экспорты 9/9, **живой Windows-прогон — открыт** (нужен mingw/согласие) | macOS live PASS; остальные платформы — CI; Windows live — этап C8/по согласию |
+| **C4. Живая проверка библиотеки** | **готово для macOS**: live C ABI через `dlopen` на демо (connect → 761 колбэк → get_securities → disconnect → UnInitialize, read-only), `make cabi-live-test` (харнесс исправлен при приёмке §9: после C2 `Initialize(NULL)` — ошибка, нужен каталог логов); linux amd64/arm64 ABI+conformance в CI; Windows DLL собран, экспорты 9/9, **живой Windows-прогон — открыт** (нужен mingw/согласие) | macOS live PASS; остальные платформы — CI; Windows live — этап C8/по согласию |
 | **C5. Сверочный корпус** | **готово**: `cabi_scenarios.json` (52 упорядоченных шага из `cabi-reference.json`), C-харнесс `abi_conformance.c` (побайтное UTF-8 сравнение, hex-diff, колбэки/поток/user-data), `make cabi-conformance`, CI strict linux/macos | 52/52 steps passed, 0 failed; `make cabi-test` PASS |
-| **C6. Закрытие §3.2** | прокси, логи, портфели `united_*`, РПС-события, ветка без шаблона маржи | каждый пункт — S/O-сверка |
+| **C6. Закрытие §3.2** | портфели `united_*`, РПС-события, ветка без шаблона маржи; прокси/CSP — документированы как неподдерживаемые | каждый пункт — S/O-сверка |
+| **C6.1. Логи как у DLL** — **готово** (2026-11-05, [protocol/logs.md](protocol/logs.md)) | `Initialize`/`InitializeEx` открывают `<log_path>/<YYYYMMDD>_dsp.log`, `_xdf.log`, `_ts.log` в формате эталона (`HHMMSS.uuuuuu [pid] [thread] <kind> …`, `<cmd> [I]`/`<res> [R]`/`[O]` в `_xdf`); уровни 1–3 и `SetLogLevel` с текстами `Changing log level…`; `logfile_lifetime`; пароль в `connect` маскируется | побайтные тесты `dlllog` по образцам эталона; живая сверка на демо (уровни 2 и 3) с эталоном под Wine — `_dsp`/`_xdf` совпадают построчно, кроме перечисленного в logs.md §4–§5 |
+| **C9. Сборка через Zig** (решение 4) — **готово локально**, CI-прогон не выполнялся | `compat-release.yml` и `Makefile`: `CC="zig cc -target <triple>"` для linux amd64/arm64 (glibc с фиксированной версией), windows amd64, macOS arm64/amd64; один хост может собрать все цели | RC-сборка через Zig: ABI-тест + конформанс 52/52 на каждой цели, экспорты/ординалы 1–9 как у эталона |
 | **C7. Длительная работа** | soak на торговый день на демо и проде (только чтение) | без роста памяти и неизвестных записей |
 | **C8. x86 / arm64** | stdcall-обёртки и `.def` для x86; arm64-сборки | ABI-тест и корпус на каждой |
 
@@ -248,7 +282,19 @@ C2–C4. C6–C8 — по решениям из §8.
 5. **Прокси и криптопровайдеры:** входят в первый релиз или документируются как неподдерживаемые.
 6. **Выгрузка библиотеки:** принять ограничение Go (`FreeLibrary` не освобождает рантайм) или
    выносить коннектор в отдельный процесс (локальный gRPC-сервер уже есть).
-**Ответы владельца (2026-11-05, курс на drop-in для palmshell):**
+**Уточнение владельца при приёмке `cmd/connector` (2026-11-05, заменяет ответы ниже там, где они
+расходятся):**
+
+1. Версия — оригинальная `6.47.2.26.4` (совпадает с прежним ответом).
+2. **Логи — в оригинальном формате DLL** (`<дата>_dsp.log`, `_xdf.log`, `_ts.log`), а не свой формат.
+3. Платформы — основные популярные (текущие пять целей; x86/arm64 Windows — C8).
+4. **Тулчейн — Zig** (`zig cc` как C-компилятор для cgo на всех целях), а не gcc/mingw/clang runners.
+5. Прокси и внешние криптопровайдеры — не входят в релиз (совпадает).
+6. Отдельного процесса не делаем, ограничение выгрузки Go c-shared принимается (совпадает).
+
+Следствия — этапы C6.1 (логи) и C9 (Zig) в §7, итог приёмки — §9.
+
+**Ответы владельца (2026-11-05, курс на drop-in для palmshell, первая редакция):**
 
 1. **Версия — идентичная `6.47.2.26.4`** по умолчанию (drop-in), переопределение через env
    `TXC_VERSION`; настоящая версия/метка сборки — в логах и метаданных артефакта.
@@ -266,3 +312,52 @@ C2–C4. C6–C8 — по решениям из §8.
 
 **Имена артефактов:** `libtxmlconnector.so` (+ совместимый симлинк `libtxmlconnector64.so`),
 `txmlconnector64.dll`, `libtxmlconnector.dylib`; заголовок `txmlconnector.h` — в каждом архиве.
+
+## 9. Приёмка `cmd/connector` (2026-11-05, `main` 8f189aa)
+
+Проверял Claude по `main` после PR #54–#56. Секреты не печатались, прод не использовался, торговых
+команд не было.
+
+### 9.1 Что проверено и прошло
+
+| Проверка | Команда / источник | Результат |
+|---|---|---|
+| Полный набор проверок репозитория | `make verify` (gofmt, vet, build, кроссы linux/darwin, `go test -race ./...`) | exit 0 |
+| Go-тесты обёртки | `go test -race -count=1 ./cmd/connector/...` | ok |
+| C ABI-тест | `make cabi-test` (macOS arm64) | `C ABI conformance OK` |
+| Сверочный корпус C5 | `make cabi-conformance` | 52/52 |
+| То же на реальном Windows | CI `compat-v1.0.0-rc2`, job windows-amd64 | ABI-тест и конформанс 52/52 |
+| Экспорт Windows-DLL | `objdump -p` артефакта RC2 и эталона | 9 имён, ординалы 1–9 **совпадают**, PE32+ x86-64 |
+| Экспорт `.dylib` | `nm -gU` | 9 функций API + служебные символы cgo (`_cgo_*`, `crosscall*`); на API не влияют |
+| Живая сессия через C ABI | `make cabi-live-test` на демо, только чтение | connect → `connected=true` после 761 колбэка → `get_securities` → disconnect → `UnInitialize`, 763 колбэка |
+| Нагрузка и жизненный цикл | C-тест: 50 циклов Initialize/UnInitialize × 8 потоков × 1000 `SendCommand` | 200 000 колбэков из 200 000, maxrss 15 МБ стабильно, после `UnInitialize` колбэков нет |
+| Повторный вход из колбэка | `SendCommand` внутри колбэка | работает (`Cannot process this command without connection.`) |
+| Решения 1, 3, 5, 6 | код и CI | версия `6.47.2.26.4` (env `TXC_VERSION`), 5 целей, прокси/CSP нет, выгрузка — ограничение принято |
+
+### 9.2 Что не прошло или не соответствует решениям
+
+| # | Находка | Серьёзность | Что делать |
+|---|---|---|---|
+| A1 | **Логов нет совсем**: `Initialize` создаёт каталог, но ничего не пишет; `log_level`, `SetLogLevel`, `logfile_lifetime` игнорируются. По решению 2 нужен оригинальный формат | **закрыто** (C6.1) | журналы в формате DLL; заодно: несуществующий `log_path` теперь ошибка «Указанный путь не существует», как у DLL (раньше каталог создавался молча) |
+| A2 | **Сборка не через Zig**: CI использует gcc/mingw/clang (решение 4 — Zig) | **закрыто локально** (C9, §5.0); CI не прогонялся | `tools/cabi/zig_build.sh`, новый `compat-release.yml` |
+| A3 | `make cabi-live-test` падал на `main`: харнесс вызывал `Initialize(NULL, 1)`, что после C2 — ошибка, как у DLL | исправлено в этой ветке | `abi_live.c` передаёт каталог логов (`TXC_LOG_DIR`, по умолчанию `bin/abi-live-logs`) |
+| A4 | `UnInitialize` **из колбэка** подвешивает поток колбэков навсегда (ждёт сам себя), вызов не возвращается. PDF такой вызов запрещает, поведение DLL не снято (I) | P3 | вернуть `<error>` вместо зависания или снять поведение DLL (RE-2) |
+| A5 | `GetServiceInfo` отдаёт `queue_size`/`queue_mem_used` всегда `0`; доставка колбэков идёт через буфер на 1024 сообщения с блокировкой отправителя | P3 | считать реальную очередь (L4) |
+| A6 | Windows-DLL зависит от UCRT (`api-ms-win-crt-*`): Windows 10+ из коробки, на 7/8.1 нужен UCRT. Живая сессия: под Wine — PASS (C9); на настоящем Windows — не запускалась | P3 | указать в README релиза; живой прогон на Windows — C8 |
+| A7 | Поле subsystem у нашей DLL — console, у эталона — GUI; на загрузку DLL не влияет | **закрыто** (C9: с Zig subsystem GUI) | — |
+| A8 | При загрузке `native` не отдаёт `<orders>` с заявками дня в конечных статусах (O: DLL на демо отдаёт 4 снятые заявки одним колбэком). Найдено сверкой журналов | P2 | отдельная задача в `native` (разбор/вывод заявок снапшота) |
+| A9 | Обёртка возвращала результат `disconnect` раньше колбэка `connected="false"` (колбэки шли через промежуточную очередь); у DLL колбэк приходит до возврата | **закрыто** (C6.1) | колбэк вызывается из потока доставки коннектора |
+
+### 9.3 Вердикт
+
+`cmd/connector` **принят по ABI и поведению обёртки** (L0–L1 и живая сессия L2–L3 на macOS; L1 на
+реальном Windows через CI). **Как релиз `1.0.0` не принят** до закрытия A1 (логи в формате DLL) и A2
+(сборка через Zig); A3 исправлен здесь, A4–A7 — не блокируют.
+
+**Обновление 2026-11-05 (C6.1):** A1 и A9 закрыты. Открыты: A2 (Zig) — блокер релиза; A8 (`<orders>` при
+загрузке) — P2.
+
+**Обновление 2026-11-05 (C9):** A2 и A7 закрыты локально (Zig, воспроизводимые сборки 5 целей, Windows-DLL
+проходит тесты и живую сессию под Wine). До релиза: зелёный CI-прогон нового `compat-release.yml`;
+A8 — P2.
+

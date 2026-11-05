@@ -54,6 +54,10 @@ UNINITIALIZED --UnInitialize()-------------------> error «Библиотека 
   `Shutdown...`, `Waiting for callback thread...`, `Shutdown OK`) и `<YYYYMMDD>_xdf.log` (поток
   команд: `<cmd>`, `<res>`, `<bad_cmd>`, `<error>`) — O (имена/строки из живых логов).
 
+Каталог `log_path` должен существовать (O, 2026-11-05): иначе `Initialize`/`InitializeEx` возвращают
+`<error>Не удалось инициализировать библиотеку. Указанный путь не существует</error>`. Журналы и
+их форматы — [logs.md](logs.md).
+
 ## 4. `InitializeEx` (D + O)
 
 XML: `<init log_path="…" log_level="1..3"/>`; необязательные атрибуты `use_minidump` (по умолчанию

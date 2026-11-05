@@ -88,6 +88,10 @@ type Config struct {
 	Version string
 	// Dial opens the TCP connection; net.Dialer if nil (tests replace it).
 	Dial func(ctx context.Context, address string) (net.Conn, error)
+	// Trace, if set, receives the connection-lifecycle steps in the order of
+	// the DLL _dsp.log (TraceEvent). It is called synchronously and must not
+	// call back into the Connector.
+	Trace func(TraceEvent)
 }
 
 // Connector implements connector.Connector over the native protocol.
@@ -107,6 +111,7 @@ type Connector struct {
 	micexRegisters bool // connect <micex_registers>: affects <positions> (task 7)
 	cancel         context.CancelFunc
 	done           chan struct{}
+	traceName      string // DLL state name of the last TraceStateChange
 
 	out     chan message
 	outDone chan struct{}
@@ -1530,6 +1535,7 @@ func (c *Connector) connect(command string) (string, error) {
 	c.done = make(chan struct{})
 	done := c.done
 	c.mu.Unlock()
+	c.traceState(TraceStateConnecting, false)
 
 	// Like the DLL, connect returns at once and reports the outcome with
 	// <server_status>.
@@ -1550,8 +1556,18 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 		delay = max(time.Duration(req.Rqdelay)*time.Millisecond, minRqDelay)
 	}
 
-	client, err := c.open(ctx, req, timeout)
+	c.trace(TraceEvent{Kind: TraceLoginStart, Worker: true})
+	client, err := c.open(ctx, req, timeout, delay)
 	if err != nil {
+		if ctx.Err() == nil {
+			c.mu.Lock()
+			loggedIn := c.traceName != TraceStateConnecting
+			c.mu.Unlock()
+			if !loggedIn {
+				c.trace(TraceEvent{Kind: TraceLoginFailed, Worker: true, Err: err})
+			}
+			c.traceState(TraceStateDisconnected, true)
+		}
 		c.finish(ctx, nil, func() string { return connectErrorXML(err) })
 		return
 	}
@@ -1644,6 +1660,9 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 	if ctx.Err() != nil {
 		return // disconnect cancelled the run; it owns the RQ_LOGOUT
 	}
+	// A lost connection ends the session without a logout (I: the DLL log
+	// lines of this path are not recorded; only the state change is traced).
+	c.traceState(TraceStateDisconnected, true)
 	if reportedDown {
 		// The client already reported the give-up (DLL order: recover status on
 		// the loss, connected="false" when the recovery window expires).
@@ -1657,7 +1676,7 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 // connected="true" (the DLL reports it after the snapshot). Callbacks follow
 // the DLL order: <markets>, <boards>, <candlekinds>, then one <securities>
 // chunk per RQ_MAIN poll that carried new instruments, then <pits>.
-func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time.Duration) (*Client, error) {
+func (c *Connector) open(ctx context.Context, req commands.Connect, timeout, rqDelay time.Duration) (*Client, error) {
 	var (
 		st   *model.Startup
 		mErr error
@@ -1671,7 +1690,18 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 		SessionTimeout: time.Duration(req.SessionTimeout) * time.Second,
 		PushULimits:    time.Duration(req.PushUlimits) * time.Second,
 		PushPosEquity:  time.Duration(req.PushPosEquity) * time.Second,
+		OnLogin: func(info *session.Info, requestTimeout, sessionTTL time.Duration) {
+			c.trace(TraceEvent{Kind: TraceLoggedIn, Worker: true, Info: info,
+				RequestTimeout: requestTimeout, SessionTimeout: sessionTTL})
+			c.traceState(TraceStateLoading, true)
+			c.trace(TraceEvent{Kind: TraceLoadingStatic, Worker: true})
+		},
 		OnDictionaries: func(s *model.Startup) {
+			// The DLL turns READY when the snapshot starts loading (O: "Loading
+			// snapshot...", "State <LOADING> changed to <READY>", "Main thread OK").
+			c.trace(TraceEvent{Kind: TraceLoadingSnapshot, Worker: true})
+			c.traceState(TraceStateReady, true)
+			c.trace(TraceEvent{Kind: TraceReady, Worker: true, RqDelay: rqDelay})
 			st = s
 			for _, v := range []any{xmlcompat.MarketsXML(s), xmlcompat.BoardsXML(s), xmlcompat.CandleKindsXML(s)} {
 				if mErr != nil {
@@ -1879,6 +1909,9 @@ func (c *Connector) finish(ctx context.Context, client *Client, report func() st
 }
 
 func (c *Connector) disconnect(ctx context.Context) (string, error) {
+	// The DLL logs these two lines even without a connection (O).
+	c.trace(TraceEvent{Kind: TraceDisconnecting})
+	defer c.trace(TraceEvent{Kind: TraceDisconnectOK})
 	c.mu.Lock()
 	if c.state == stateDisconnected {
 		c.mu.Unlock()
@@ -1887,18 +1920,23 @@ func (c *Connector) disconnect(ctx context.Context) (string, error) {
 	cancel, done := c.cancel, c.done
 	c.mu.Unlock()
 
+	c.trace(TraceEvent{Kind: TraceShutdown, Worker: true})
 	cancel()
+	c.trace(TraceEvent{Kind: TraceWaitWorker})
 	<-done
+	c.traceState(TraceStateDisconnecting, true)
 	c.mu.Lock()
 	client := c.client
 	status := c.statusLocked(false)
 	c.state, c.client = stateDisconnected, nil
 	c.mu.Unlock()
 	if client != nil {
+		c.trace(TraceEvent{Kind: TraceLoggingOut, Worker: true})
 		logoutCtx, stop := context.WithTimeout(ctx, logoutTimeout)
 		_ = client.Logout(logoutCtx)
 		stop()
 	}
+	c.traceState(TraceStateDisconnected, true)
 	// The DLL reports connected="false" without an overnight line before
 	// disconnect returns (E07 snapshot-tail-live.xml).
 	c.emitSync(status)

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "txmlconnector.h"
 
 #ifdef _WIN32
@@ -70,11 +71,14 @@ int main(int argc, char** argv) {
     expect(SendCommand((BYTE*)"<x/>"), "<error>Only &amp;lt;command&amp;gt; tags could be passed to SendCommand function</error>", "non-command root");
     expect(Initialize(NULL, 1), "<error>Не удалось инициализировать библиотеку. Не указан путь к директории для хранения лог-файлов</error>", "Initialize(NULL)");
     if (!SetCallback(NULL) || !SetCallback(on_message)) { fprintf(stderr, "SetCallback must return true\n"); return 4; }
-    char logs[] = "/tmp/txc-c2-XXXXXX";
+    /* The log directory must exist before Initialize (O). */
 #ifdef _WIN32
-    if (_mktemp(logs) == NULL) return 4;
+    char logs[600], tmp[MAX_PATH];
+    GetTempPathA(sizeof(tmp), tmp);
+    snprintf(logs, sizeof(logs), "%stxc-c2-%lu", tmp, (unsigned long)GetCurrentProcessId());
     CreateDirectoryA(logs, NULL);
 #else
+    char logs[] = "/tmp/txc-c2-XXXXXX";
     if (mkdtemp(logs) == NULL) { perror("mkdtemp"); return 4; }
 #endif
     expect(Initialize(logs, 0), "<error>Не удалось инициализировать библиотеку. Wrong log level.</error>", "Initialize(level0)");
@@ -94,7 +98,12 @@ int main(int argc, char** argv) {
     expect(InitializeEx((const BYTE*)"<init/>"), "<error>Не удалось инициализировать библиотеку. не найден обязательный атрибут &lt;log_path&gt;</error>", "InitializeEx no path");
     expect(InitializeEx((const BYTE*)"<init log_path=\"x\"/>"), "<error>Не удалось инициализировать библиотеку. не найден обязательный атрибут &lt;log_level&gt;</error>", "InitializeEx no level");
     expect(InitializeEx((const BYTE*)"<init log_path=\"x\" log_level=\"4\"/>"), "<error>Не удалось инициализировать библиотеку. Wrong log level.</error>", "InitializeEx bad level");
-    expect_null(InitializeEx((const BYTE*)"<init log_path=\"/tmp/txc-c2-logs\" log_level=\"1\"/>"), "InitializeEx valid");
+    /* The log directory must exist (O: the DLL does not create it). */
+    expect(Initialize((const BYTE*)"/nonexistent-txc-logs", 2), "<error>Не удалось инициализировать библиотеку. Указанный путь не существует</error>", "Initialize missing dir");
+    expect(InitializeEx((const BYTE*)"<init log_path=\"/nonexistent-txc-logs\" log_level=\"2\"/>"), "<error>Не удалось инициализировать библиотеку. Указанный путь не существует</error>", "InitializeEx missing dir");
+    char initex[600];
+    snprintf(initex, sizeof(initex), "<init log_path=\"%s\" log_level=\"1\"/>", logs);
+    expect_null(InitializeEx((const BYTE*)initex), "InitializeEx valid");
     expect_null(UnInitialize(), "UnInitialize after InitEx");
     expect(UnInitialize(), "<error>Библиотека не инициализирована</error>", "UnInitialize again after InitEx");
 
@@ -136,6 +145,30 @@ int main(int argc, char** argv) {
     }
     if (callbacks == 0) { fprintf(stderr, "callback delivered nothing\n"); return 4; }
     expect_null(UnInitialize(), "final UnInitialize");
+
+    /* Log files in the DLL format (docs/protocol/logs.md). */
+    {
+        char path[700], day[16], buf[65536];
+        time_t now = time(NULL);
+        strftime(day, sizeof(day), "%Y%m%d", localtime(&now));
+        const char* need[][2] = {
+            {"_dsp.log", "<info> Open log "},
+            {"_dsp.log", "<info> Waiting for callback thread...\r\n"},
+            {"_dsp.log", "<info> Shutdown OK\r\n"},
+            {"_xdf.log", "<cmd> [V] System version 6.47. TXmlConnector version 2.26.4\r\n"},
+            {"_xdf.log", "<cmd> [I] <command id=\"get_connector_version\"/>\r\n"},
+            {"_xdf.log", "<res> [R] <result success=\"true\"/>\r\n"},
+        };
+        for (size_t i = 0; i < sizeof(need) / sizeof(need[0]); i++) {
+            snprintf(path, sizeof(path), "%s/%s%s", logs, day, need[i][0]);
+            FILE* f = fopen(path, "rb");
+            if (!f) { fprintf(stderr, "log file %s missing\n", path); return 4; }
+            size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+            fclose(f);
+            buf[n] = 0;
+            if (!strstr(buf, need[i][1])) { fprintf(stderr, "%s lacks %s\n", path, need[i][1]); return 4; }
+        }
+    }
     printf("C ABI conformance OK: lifecycle, exact texts, service info, callback, memory\n");
     return 0;
 }

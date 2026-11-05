@@ -92,7 +92,13 @@ int main(int argc, char** argv) {
     fn_free FreeMemory = (fn_free)sym(h, "FreeMemory");
     g_free = FreeMemory;
 
-    BYTE* err = Initialize(NULL, 1);
+    /* The DLL (and our library since C2) refuses Initialize(NULL, ...): pass a
+     * log directory; TXC_LOG_DIR overrides the default under bin/. */
+    const char* log_dir = getenv("TXC_LOG_DIR");
+    if (!log_dir || !*log_dir) log_dir = "bin/abi-live-logs";
+    const char* level_env = getenv("TXC_LOG_LEVEL");
+    int level = level_env && *level_env ? atoi(level_env) : 1;
+    BYTE* err = Initialize((const BYTE*)log_dir, level);
     if (err != NULL) { fprintf(stderr, "Initialize: %s\n", (char*)err); return 3; }
     if (!SetCallback(on_message)) { fprintf(stderr, "SetCallback failed\n"); return 3; }
 
