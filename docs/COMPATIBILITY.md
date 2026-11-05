@@ -108,6 +108,20 @@
 | Вызов из C (arm64; amd64 через Rosetta) | `get_connector_version`, `server_status` и колбэк — как у нативного коннектора |
 | Полный цикл на демо через C ABI | connect → `connected=true` → `get_securities` → disconnect, 764 колбэка, данные освобождаются через `FreeMemory` |
 
+
+### 4.1 Формализованный live C ABI-тест (C4, 2026-11-05)
+
+Прототип перенесён в репозиторий:
+
+- харнесс: [`cmd/connector/testdata/abi_live.c`](../cmd/connector/testdata/abi_live.c) — env-gated
+  (`TC_HOST/TC_PORT/TC_LOGIN/TC_PASSWORD`), read-only: `Initialize` → `SetCallback` → `connect` →
+  ожидание `connected="true"` → `get_securities` → `disconnect` → `UnInitialize`;
+- цель Makefile: `make cabi-live-test` (сначала `source ~/re/demo.env`).
+
+**Evidence (macOS arm64, нативный C harness, dlopen `bin/libtxmlconnector.dylib`):**
+`connected=true after 761 callbacks`, затем `LIVE ABI OK: … callbacks=763` — connect/get_securities/
+disconnect/UnInitialize success; торговых команд нет. (Тот же сценарий ранее вручную повторил Lead.)
+
 Выводы:
 
 - Подход работает: Go-рантайм внутри библиотеки, колбэки из одного закреплённого потока
@@ -126,6 +140,30 @@
 | Windows arm64 | `txmlconnector64.dll` (arm64) | llvm-mingw / zig | у эталона нет arm64-сборки: сравнивать не с чем, только с x64 |
 | Linux amd64/arm64 | `libtxmlconnector.so` | gcc/clang, zig, контейнер | у DLL нет Linux-аналога: «идентичность» — по XML (L3), ABI — тот же набор функций |
 | macOS arm64/amd64 | `libtxmlconnector.dylib` | Xcode clang | проверено прототипом; для распространения нужна подпись/нотаризация |
+
+
+### 5.1 CI-сборка (C3, 2026-11-05)
+
+Workflow [`.github/workflows/compat-release.yml`](../.github/workflows/compat-release.yml) собирает
+артефакты на нативных GitHub Actions runners:
+
+| Job | Runner | Артефакт | ABI-тест |
+|---|---|---|---|
+| linux-amd64 | ubuntu-latest | `libtxmlconnector.so` + `libtxmlconnector64.so` | да |
+| linux-arm64 | ubuntu-24.04-arm | `libtxmlconnector.so` + `libtxmlconnector64.so` | да |
+| windows-amd64 | windows-latest + msys2/mingw | `txmlconnector64.dll` | best-effort |
+| macos-arm64 | macos-14 | `libtxmlconnector.dylib` + `libtxmlconnector64.dylib` | да |
+| macos-amd64 | macos-13 | `libtxmlconnector.dylib` + `libtxmlconnector64.dylib` | да |
+
+Каждый job: `go test ./cmd/connector/...`, `go build -buildmode=c-shared -trimpath -buildvcs=false`,
+C ABI-тест, `SHA256SUMS`, `upload-artifact`. На тег `compat-v*` дополнительно публикуется GitHub
+Release (`softprops/action-gh-release`, `generate_release_notes`). Заголовок `txmlconnector.h`
+кладётся в каждый архив. Локально те же шаги: `make cabi` (текущая ОС), `make cabi-test`.
+
+**Первый CI-прогон (2026-11-05, run 42023156690):** linux-amd64, linux-arm64, macos-arm64,
+windows-amd64 — успешно (включая C ABI-тесты; windows mingw best-effort — success). macos-amd64
+не стартовал: `macos-13` недоступен на public runners, поэтому workflow переведён на cross-сборку
+`GOARCH=amd64 CC="clang -arch x86_64"` на macos-14 + Rosetta best-effort; нужен повторный прогон.
 
 Ограничения Go c-shared, которые надо учесть в дизайне:
 
@@ -151,8 +189,26 @@
    памяти, отсутствие утечек (ASan/Valgrind на Linux).
 4. **Windows вживую:** наша `.dll` подставляется вместо эталона в существующий `server/` (`TC_BACKEND=dll`)
    и в стороннего клиента (например, на C#). Прогоняются RE-4 и soak.
-5. **CI-матрица:** сборка под все цели из §5 + корпус на linux/amd64 и windows/amd64; Wine-сверка с
-   эталоном — отдельный job.
+5. **CI-матрица:** workflow `compat-release.yml` (§5.1) собирает все цели §5 и запускает C ABI-тест
+   на linux/macos; Windows ABI-тест — best-effort до C4. Проверка артефакта: `sha256sum -c SHA256SUMS`
+   внутри архива; заголовок — `txmlconnector.h`. Wine-сверка с эталоном — отдельный job (C5).
+6. **Live C ABI-тест:** `make cabi-live-test` (§4.1) на demo.env — read-only connect → connected=true →
+   get_securities → disconnect; macOS arm64 PASS (761 callback).
+7. **Проверка CI-артефактов (2026-11-05):** скачаны архивы linux-amd64/arm64, macos-arm64,
+   windows-amd64. `sha256sum -c SHA256SUMS` — OK; `file` — ELF x86-64/aarch64, Mach-O arm64,
+   PE32+ DLL x86-64; экспорты: 9/9 в `nm -D` (linux), `nm -gU` (macOS), `objdump -p` (windows).
+   Linux arm64 в CI проверен нативным runner (ABI-тест success).
+
+**C5 conformance-корпус (2026-11-05).** Машиночитаемая часть §6.1–6.2 реализована как
+`cmd/connector/testdata/cabi_scenarios.json` (52 упорядоченных локальных шага: lifecycle, тексты
+обёртки, `GetServiceInfo` коды 0/3/4/5/6 с 5-секундным rate-limit, порядок/поток колбэков) и
+C-харнесс `cmd/connector/testdata/abi_conformance.c`: он загружает нашу `.so`/`.dylib`/`.dll`
+через `dlopen`, проигрывает сценарии и сравнивает возвращаемые UTF-8 строки **побайтно** с текстами
+эталонной DLL из `cabi-reference.json` (C2). Запуск — `make cabi-conformance` (локально
+macOS/Linux); в CI шаг «C ABI conformance» добавлен для linux/macos (strict) и windows (best effort).
+Сценарии только локальные: сеть/сервер не используются, `{LOG_DIR}` нормализует временный путь
+логов. Расхождения печатаются с ожидаемой/фактической строками и hex-дампами и блокируют релиз до
+синхронизации C2.1 (task-73).
 
 Критерий релиза: L0–L3 зелёные на Windows x64 (главная цель) и на каждой заявленной платформе,
 открытых пунктов §3.2 уровня L0–L1 нет, оставшиеся L3–L4 перечислены в release notes.
@@ -161,10 +217,10 @@
 
 | Этап | Результат | Критерий готовности |
 |---|---|---|
-| **C1. ABI-слой** | пакет `cabi/` (cgo, `//export`) с 9 функциями; `Makefile`-цели `dll`/`so`/`dylib` | ABI-тест на C зелёный на macOS и linux/amd64 |
-| **C2. Жизненный цикл как у DLL** | тексты ошибок обёртки сняты с DLL (Wine) и повторены; `InitializeEx`, `GetServiceInfo`, `SetLogLevel`; один поток колбэков | сверка L1 с DLL под Wine побайтно |
-| **C3. Кросс-сборка** | тулчейн (zig или контейнер с mingw-w64) в репозитории; воспроизводимые артефакты под цели §5 | хеши совпадают при повторной сборке |
-| **C4. Windows x64 вживую** | наша DLL в `server/` и стороннем клиенте; RE-4 и soak на демо | как у эталона, без расхождений в корпусе |
+| **C1. ABI-слой** | готово: `cmd/connector` (cgo, 9 экспортов), `include/txmlconnector.h`, `Makefile`-цели `cabi`/`cabi-so`/`cabi-dylib`/`cabi-test` | macOS ABI-тест PASS; linux — CI |
+| **C2. Жизненный цикл как у DLL** | тексты ошибок обёртки сняты с DLL (Wine) и повторены; `InitializeEx`, `GetServiceInfo`, `SetLogLevel`; один поток колбэков | `InitializeEx`/`GetServiceInfo`/`SetLogLevel` пока stubs с TODO RE-2; сверка L1 — в работе |
+| **C3. Кросс-сборка** | готово: `compat-release.yml` (нативные runners §5.1), артефакты + header + SHA256SUMS, release на `compat-v*` | первый CI-прогон после push; локально dylib+ABI PASS |
+| **C4. Живая проверка библиотеки** | macOS arm64 live C ABI PASS (`make cabi-live-test`, 761 callback); Linux amd64/arm64 — CI ABI success; Windows DLL — артефакт/экспорты проверены, живой Windows-прогон остаётся | ABI-тест на каждой платформе; Windows live — отдельный этап (установка тулчейна/согласие) |
 | **C5. Сверочный корпус** | golden-сценарии на все команды и записи, CI-job сверки с эталоном | 0 расхождений, кроме перечисленных в §8 |
 | **C6. Закрытие §3.2** | прокси, логи, портфели `united_*`, РПС-события, ветка без шаблона маржи | каждый пункт — S/O-сверка |
 | **C7. Длительная работа** | soak на торговый день на демо и проде (только чтение) | без роста памяти и неизвестных записей |
@@ -183,3 +239,21 @@ C2–C4. C6–C8 — по решениям из §8.
 5. **Прокси и криптопровайдеры:** входят в первый релиз или документируются как неподдерживаемые.
 6. **Выгрузка библиотеки:** принять ограничение Go (`FreeLibrary` не освобождает рантайм) или
    выносить коннектор в отдельный процесс (локальный gRPC-сервер уже есть).
+**Ответы владельца (2026-11-05, курс на drop-in для palmshell):**
+
+1. **Версия — идентичная `6.47.2.26.4`** по умолчанию (drop-in), переопределение через env
+   `TXC_VERSION`; настоящая версия/метка сборки — в логах и метаданных артефакта.
+2. **Логи:** на первом релизе свой формат (L4), имена файлов при необходимости совместимого вида —
+   отдельным этапом C6; клиент не должен от них зависеть.
+3. **Платформы первого релиза:** **linux amd64+arm64, windows amd64, macOS arm64+amd64**;
+   Windows x86 и Windows arm64 — этап C8.
+4. **Тулчейн:** нативные GitHub Actions runners (ubuntu — gcc, windows — mingw, macOS — clang),
+   локально кросс-компиляторы не скачиваем.
+5. **Прокси и внешние криптопровайдеры:** вне первого релиза — документируются как неподдерживаемые
+   (C6), проверяется на palmshell.
+6. **Выгрузка:** принимаем ограничение Go c-shared: `UnInitialize` останавливает работу и потоки,
+   сама библиотека остаётся в адресном пространстве до выхода процесса; в документации для palmshell
+   это фиксируется.
+
+**Имена артефактов:** `libtxmlconnector.so` (+ совместимый симлинк `libtxmlconnector64.so`),
+`txmlconnector64.dll`, `libtxmlconnector.dylib`; заголовок `txmlconnector.h` — в каждом архиве.

@@ -1,0 +1,198 @@
+name: Compat release
+
+# C3: build the drop-in C ABI library for the first-release platforms.
+# Tag "compat-v*" also publishes a GitHub Release; workflow_dispatch only
+# uploads the artifacts.
+on:
+  push:
+    tags:
+      - "compat-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: compat-${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            os: ubuntu-latest
+            goarch: amd64
+            lib: libtxmlconnector.so
+            extra: libtxmlconnector64.so
+            cc: gcc
+            abi: true
+            libs: -Ldist -ltxmlconnector -ldl
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            goarch: arm64
+            lib: libtxmlconnector.so
+            extra: libtxmlconnector64.so
+            cc: gcc
+            abi: true
+            libs: -Ldist -ltxmlconnector -ldl
+          - name: windows-amd64
+            os: windows-latest
+            goarch: amd64
+            lib: txmlconnector64.dll
+            extra: ""
+            cc: gcc
+            abi: false
+            libs: ""
+          - name: macos-arm64
+            os: macos-14
+            goarch: arm64
+            lib: libtxmlconnector.dylib
+            extra: libtxmlconnector64.dylib
+            cc: clang
+            abi: true
+            libs: -Ldist -ltxmlconnector
+          # macos-13 (Intel) is not available on public GitHub runners as of
+          # 2026-11; build amd64 on the arm64 runner with clang -arch x86_64
+          # (CGO cross works) and run the ABI test through Rosetta (best effort).
+          - name: macos-amd64
+            os: macos-14
+            goarch: amd64
+            lib: libtxmlconnector.dylib
+            extra: libtxmlconnector64.dylib
+            cc: clang
+            abi: true
+            libs: -Ldist -ltxmlconnector
+            cross: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Linux build deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Windows mingw-w64 (msys2)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc
+
+      - name: Add mingw-w64 to PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Go tests (cgo wrapper + parsers)
+        run: go test ./cmd/connector/...
+
+      - name: Build c-shared
+        shell: bash
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=1 CC="${{ matrix.cc }}${{ matrix.cross && ' -arch x86_64' || '' }}" GOARCH="${{ matrix.goarch }}" \
+            go build -buildmode=c-shared -trimpath -buildvcs=false \
+            -ldflags "-s -w -X main.defaultVersion=6.47.2.26.4" \
+            -o "dist/${{ matrix.lib }}" ./cmd/connector
+          cp cmd/connector/include/txmlconnector.h dist/
+
+      - name: Compatibility name (linux/macos)
+        if: matrix.extra != ''
+        shell: bash
+        run: cp "dist/${{ matrix.lib }}" "dist/${{ matrix.extra }}"
+
+      - name: C ABI test (linux/macos)
+        if: matrix.abi && !matrix.cross
+        shell: bash
+        run: |
+          ${{ matrix.cc }} -I cmd/connector/include -o dist/abi_test \
+            cmd/connector/testdata/abi_test.c ${{ matrix.libs }}
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            DYLD_LIBRARY_PATH=dist ./dist/abi_test "dist/${{ matrix.lib }}"
+          else
+            LD_LIBRARY_PATH=dist ./dist/abi_test "dist/${{ matrix.lib }}"
+          fi
+
+      - name: C ABI test (cross macOS via Rosetta, best effort)
+        if: matrix.cross
+        continue-on-error: true
+        shell: bash
+        run: |
+          ${{ matrix.cc }} -arch x86_64 -I cmd/connector/include -o dist/abi_test \
+            cmd/connector/testdata/abi_test.c ${{ matrix.libs }}
+          arch -x86_64 env DYLD_LIBRARY_PATH=dist ./dist/abi_test "dist/${{ matrix.lib }}"
+
+      # Windows/mingw ABI test is best effort for C3: it validates the DLL and the
+      # header, but the final Windows live check is C4.
+      - name: C ABI test (windows, best effort)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: bash
+        run: |
+          gcc -I cmd/connector/include -o dist/abi_test.exe \
+            cmd/connector/testdata/abi_test.c "dist/${{ matrix.lib }}"
+          PATH="$PWD/dist:$PATH" ./dist/abi_test.exe "dist/${{ matrix.lib }}"
+
+      - name: C ABI conformance (DLL reference, linux/macos)
+        if: matrix.abi && !matrix.cross
+        shell: bash
+        run: |
+          ${{ matrix.cc }} -I cmd/connector/include -o dist/abi_conformance \
+            cmd/connector/testdata/abi_conformance.c
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            DYLD_LIBRARY_PATH=dist ./dist/abi_conformance "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
+          else
+            LD_LIBRARY_PATH=dist ./dist/abi_conformance "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
+          fi
+
+      - name: C ABI conformance (cross macOS via Rosetta, best effort)
+        if: matrix.cross
+        continue-on-error: true
+        shell: bash
+        run: |
+          ${{ matrix.cc }} -arch x86_64 -I cmd/connector/include -o dist/abi_conformance \
+            cmd/connector/testdata/abi_conformance.c
+          arch -x86_64 env DYLD_LIBRARY_PATH=dist ./dist/abi_conformance "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
+
+      - name: C ABI conformance (windows, best effort)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: bash
+        run: |
+          gcc -I cmd/connector/include -o dist/abi_conformance.exe \
+            cmd/connector/testdata/abi_conformance.c
+          PATH="$PWD/dist:$PATH" ./dist/abi_conformance.exe "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
+
+      - name: SHA-256 checksums
+        shell: bash
+        run: |
+          rm -f dist/abi_test dist/abi_test.exe dist/abi_conformance dist/abi_conformance.exe
+          cd dist
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum * > SHA256SUMS
+          else
+            shasum -a 256 * > SHA256SUMS
+          fi
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compat-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+      - name: GitHub release (tag only)
+        if: startsWith(github.ref, 'refs/tags/compat-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
