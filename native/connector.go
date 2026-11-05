@@ -1067,14 +1067,23 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		return success(), nil
 	case "newrpsorder", "newrepoorder", "newmrepoorder":
 		var req struct {
-			SecID    int     `xml:"secid"`
-			Client   string  `xml:"client"`
-			Union    string  `xml:"union"`
-			BuySell  *string `xml:"buysell"`
-			Quantity *int64  `xml:"quantity"`
-			Price    *string `xml:"price"`
-			RepoTerm *string `xml:"repoterm"`
-			RepoRate *string `xml:"reporate"`
+			SecID           int     `xml:"secid"`
+			Client          string  `xml:"client"`
+			Union           string  `xml:"union"`
+			BuySell         *string `xml:"buysell"`
+			Quantity        *string `xml:"quantity"`
+			Price           *string `xml:"price"`
+			RepoTerm        *string `xml:"repoterm"`
+			RepoRate        *string `xml:"reporate"`
+			StartDiscount   *string `xml:"startdiscount"`
+			LowerDiscount   *string `xml:"lowerdiscount"`
+			UpperDiscount   *string `xml:"upperdiscount"`
+			BlockSecurities *string `xml:"blocksecurities"`
+			Value           *string `xml:"value"`
+			RefundRate      *string `xml:"refundrate"`
+			MatchRef        *string `xml:"matchref"`
+			Cpfirmid        *string `xml:"cpfirmid"`
+			Settlecode      *string `xml:"settlecode"`
 		}
 		if err := xml.Unmarshal([]byte(command), &req); err != nil {
 			return failure(err.Error()), nil
@@ -1091,6 +1100,9 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		if req.Client == "" && req.Union == "" {
 			return failure("Client not specified."), nil
 		}
+		if id == "newmrepoorder" {
+			return failure("newmrepoorder payload layout is not recovered (I)"), nil
+		}
 		symbol, ok := client.SymbolBySecID(uint16(req.SecID))
 		if !ok {
 			return failure(fmt.Sprintf("unknown secid %d", req.SecID)), nil
@@ -1102,33 +1114,106 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		if len(*req.BuySell) != 1 || (buySell != 'B' && buySell != 'S') {
 			return failure("Buisell can be only 'B' or 'S'."), nil
 		}
-		if req.Quantity == nil {
+		if req.Quantity == nil || *req.Quantity == "" {
 			return failure("Cannot find quantity."), nil
 		}
+		quantity, err := strconv.ParseInt(*req.Quantity, 10, 64)
+		if err != nil {
+			return failure("Quantity have to be a number."), nil
+		}
 		price := model.Decimal{}
-		if req.Price != nil {
+		if req.Price != nil && *req.Price != "" {
 			parsed, err := model.ParseDecimal(*req.Price)
 			if err != nil {
 				return failure(err.Error()), nil
 			}
 			price = parsed
 		}
-		if id == "newmrepoorder" {
-			return failure("newmrepoorder payload layout is not recovered (I)"), nil
-		}
-		var txID model.TransactionID
-		var err error
 		if id == "newrpsorder" {
-			txID, err = client.NewRPSOrder(ctx, model.NewRPSOrder{
+			txID, err := client.NewRPSOrder(ctx, model.NewRPSOrder{
 				Symbol: symbol, Client: req.Client, Union: req.Union, BuySell: buySell,
-				Price: price, Quantity: *req.Quantity,
+				Price: price, Quantity: quantity,
 			})
-		} else {
-			txID, err = client.NewRepoOrder(ctx, model.NewRepoOrder{
-				Symbol: symbol, Client: req.Client, Union: req.Union, BuySell: buySell,
-				Price: price, Quantity: *req.Quantity,
-			})
+			if err != nil {
+				return transactionFailure(err), nil
+			}
+			return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(txID), 10) + "\"/>", nil
 		}
+		// Fields whose payload layout is not recovered (rps.md I): reject an
+		// explicit non-sample value instead of silently sending oracle constants.
+		for _, field := range []struct {
+			name  string
+			value *string
+		}{
+			{"value", req.Value}, {"refundrate", req.RefundRate}, {"matchref", req.MatchRef},
+			{"cpfirmid", req.Cpfirmid}, {"settlecode", req.Settlecode},
+		} {
+			if field.value != nil && *field.value != "" {
+				return failure(fmt.Sprintf("newrepoorder %s layout is not recovered (I)", field.name)), nil
+			}
+		}
+		parseNumber := func(text *string, missing, invalid string) (int64, string) {
+			if text == nil || *text == "" {
+				if missing == "" {
+					return 0, ""
+				}
+				return 0, missing
+			}
+			n, err := strconv.ParseInt(*text, 10, 64)
+			if err != nil {
+				return 0, invalid
+			}
+			return n, ""
+		}
+		repoTerm, msg := parseNumber(req.RepoTerm, "", "Repoterm have to be a number.")
+		if msg != "" {
+			return failure(msg), nil
+		}
+		repoRate := model.Decimal{}
+		if req.RepoRate == nil || *req.RepoRate == "" {
+			return failure("RepoRate not found."), nil
+		}
+		if repoRate, err = model.ParseDecimal(*req.RepoRate); err != nil {
+			return failure("RepoRate have to be a number."), nil
+		}
+		parseDecimal := func(text *string, name string) (model.Decimal, string) {
+			if text == nil || *text == "" {
+				return model.Decimal{}, ""
+			}
+			parsed, err := model.ParseDecimal(*text)
+			if err != nil {
+				return model.Decimal{}, fmt.Sprintf("newrepoorder %s layout is not recovered (I)", name)
+			}
+			return parsed, ""
+		}
+		startDisc, msg := parseDecimal(req.StartDiscount, "startdiscount")
+		if msg != "" {
+			return failure(msg), nil
+		}
+		lowerDisc, msg := parseDecimal(req.LowerDiscount, "lowerdiscount")
+		if msg != "" {
+			return failure(msg), nil
+		}
+		upperDisc, msg := parseDecimal(req.UpperDiscount, "upperdiscount")
+		if msg != "" {
+			return failure(msg), nil
+		}
+		block := byte(0)
+		if req.BlockSecurities != nil && *req.BlockSecurities != "" {
+			switch strings.ToUpper(*req.BlockSecurities) {
+			case "Y":
+				block = 'Y'
+			case "N":
+				block = 'N'
+			default:
+				return failure("newrepoorder blocksecurities layout is not recovered (I)"), nil
+			}
+		}
+		txID, err := client.NewRepoOrder(ctx, model.NewRepoOrder{
+			Symbol: symbol, Client: req.Client, Union: req.Union, BuySell: buySell,
+			Price: price, Quantity: quantity, RepoTerm: repoTerm, RepoRate: repoRate,
+			StartDisc: startDisc, LowerDisc: lowerDisc, UpperDisc: upperDisc, Block: block,
+		})
 		if err != nil {
 			return transactionFailure(err), nil
 		}

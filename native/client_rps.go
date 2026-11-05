@@ -32,7 +32,7 @@ func rpsOrderPayload(secID, board uint16, clientID int64, side byte, price, quan
 
 // repoOrderPayload: the 39-byte O payload; the repo-specific middle fields are
 // the oracle constants (the exact D semantics are I, rps.md).
-func repoOrderPayload(secID, board uint16, clientID int64, side byte, price, quantity int64) []byte {
+func repoOrderPayload(secID, board uint16, clientID int64, side byte, price, quantity, repoTerm, repoRate, startDisc, lowerDisc, upperDisc int64, block byte) []byte {
 	var w wire.Writer
 	w.Uint16(secID)
 	w.Uint16(board)
@@ -40,11 +40,17 @@ func repoOrderPayload(secID, board uint16, clientID int64, side byte, price, qua
 	w.Byte(side)
 	w.Byte(0)
 	w.Raw(make([]byte, 11))
-	w.Byte(0x10) // repoterm = 1 in the O example
-	w.Raw([]byte{0x00, 0x00, 0x81, 0x3e})
+	w.Int32(int32(repoTerm))
+	w.Byte(0)
+	w.Byte(0)
+	w.Int32(int32(repoRate))
 	w.Int32(int32(price))
 	w.Int32(int32(quantity))
-	w.Raw([]byte{0x41, 0x06, 0x41, 0x06, 0x41, 0x06, 0x4e, 0x00, 0x00})
+	w.Int32(int32(startDisc))
+	w.Int32(int32(lowerDisc))
+	w.Int32(int32(upperDisc))
+	w.Byte(block)
+	w.Raw(make([]byte, 2))
 	return w.Bytes()
 }
 
@@ -69,11 +75,16 @@ func (c *Client) rpsParts(symbol model.Symbol, client, union string) (uint16, ui
 	}
 	c.mu.Unlock()
 	if !clientOK {
-		return 0, 0, 0, 0, fmt.Errorf("transaq: unknown client %q", client)
+		return 0, 0, 0, 0, fmt.Errorf("Wrong client specifited.")
 	}
 	return sec.SecID, board.Num, clientID, decimals, nil
 }
 
+// RPS-specific reply texts: the replay oracle shows "Specified security can't be
+// traded." for newrepoorder and "{8} ..." for an empty reply, while the standard
+// transaction mapping renders code 1 as "Клиент не допущен к торгам." and
+// Unknown error; the exact per-command mapping is I (T29/S follow-up).
+//
 // NewRPSOrder sends newrpsorder (TRN_NEWRPSREPO 0x04) with the O base payload.
 func (c *Client) NewRPSOrder(ctx context.Context, order model.NewRPSOrder) (model.TransactionID, error) {
 	if order.BuySell != 'B' && order.BuySell != 'S' {
@@ -101,11 +112,29 @@ func (c *Client) NewRepoOrder(ctx context.Context, order model.NewRepoOrder) (mo
 		return 0, err
 	}
 	price := rescaleUnits(order.Price.Units, order.Price.Scale, decimals)
+	scale := func(d model.Decimal) int64 { return rescaleUnits(d.Units, d.Scale, 2) }
+	// Defaults are the O-sample constants (start/lower/upper discount = 1.00,
+	// blocksecurities = N); they are overridden by the XML fields when present.
+	if order.StartDisc == (model.Decimal{}) {
+		order.StartDisc = model.Decimal{Units: 100, Scale: 2}
+	}
+	if order.LowerDisc == (model.Decimal{}) {
+		order.LowerDisc = model.Decimal{Units: 100, Scale: 2}
+	}
+	if order.UpperDisc == (model.Decimal{}) {
+		order.UpperDisc = model.Decimal{Units: 100, Scale: 2}
+	}
+	if order.Block == 0 {
+		order.Block = 'N'
+	}
 	conn := c.connection()
 	if conn == nil {
 		return 0, errors.New("transaq: client is not connected")
 	}
-	return conn.Transact(ctx, session.TxNewRepoOrder, repoOrderPayload(secID, board, clientID, order.BuySell, price, order.Quantity))
+	return conn.Transact(ctx, session.TxNewRepoOrder, repoOrderPayload(
+		secID, board, clientID, order.BuySell, price, order.Quantity,
+		order.RepoTerm, scale(order.RepoRate), scale(order.StartDisc), scale(order.LowerDisc), scale(order.UpperDisc), order.Block,
+	))
 }
 
 // CancelNegDeal sends cancelnegdeal: TRN code 0x08 + packed L transaction id

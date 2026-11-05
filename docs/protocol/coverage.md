@@ -44,8 +44,8 @@
 | 24 | news/get_old_news/get_news_body | 6 | **partial** | 0x35/0x36 парсеры+splitter, `<news_header>` O-побайтно, RQ_GETNEWS payloads и MIN-id диапазон (7484ffc + fix), битый 0x36 package skip; `<news_body>` — I (task-56) |
 | 25 | messages (R_MSG 0x01) | 6 | **done** | unsized 0x01, batch одного RQ_MAIN, `<messages>` O-побайтно (73a4acc/6cb9697); `<date>` = WALL-время (fix после ревью) |
 | 26 | change_pass | 6 | **done** | RQ_CHANGE_PWD 3, payload/SHA-1, replies, fatal empty reply, local texts (7427b10); живьём не выполнялось (S-негатив) |
-| 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply, 149 O e2e (9b7204f); гейт версии 0x45 — I (поле не восстановлено), 153/150/151 mapping/XML — D/I |
-| 28 | RPS/REPO/отчёты | 8 | **partial** | payloads newrpsorder/newrepoorder/cancel O-побайтно, 6 команд, ошибки, D-literal XML (b9f305a); newmrepoorder/newreport4 и records/XML — I |
+| 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply (empty reply=failure, 00=success), 149 O e2e и exact DLL error text, dedup family callbacks (fix после ревью); гейт 0x45 только 153/151 — I, mapping/XML — D/I |
+| 28 | RPS/REPO/отчёты | 8 | **partial** | payloads newrpsorder/newrepoorder/cancel O-побайтно, 6 команд, ошибки, D-literal XML (b9f305a); newrepoorder known fields (repoterm/reporate/discounts/block) encoded, value/refundrate/matchref/cpfirmid/settlecode — explicit I; newmrepoorder/newreport4, records/XML negdeal/report и RPS-специфичные reply-тексты — I |
 | 29 | XML-коннектор целиком, native backend | 9 | **partial** | `dllCommands` = 45 имён; matrix-тест и pending {moveorder,makeordown} (043d7c9/6aa832f); `server.Backend dll|native` + `TC_BACKEND`, `TC_BACKEND=native make server` без Wine (043d7c9/5aea9d5); TestServerErrorTexts + errors.md сделаны (6aa832f); RE-4 на демо — pending после S |
 | 30 | Матрица покрытия, soak, выпуск | 9 | **in progress** | этот документ; soak/выпуск — после 29 |
 
