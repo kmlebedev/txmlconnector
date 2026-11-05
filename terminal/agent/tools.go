@@ -37,6 +37,8 @@ var toolCatalogNames = []string{
 	toolNameBacktestRules,
 	toolNameBatchBacktest,
 	toolNameDetectExecutionAlgos,
+	toolNameVolForecast,
+	toolNameVolEvents,
 	toolNameGetNews,
 	toolNameWalkForward,
 }

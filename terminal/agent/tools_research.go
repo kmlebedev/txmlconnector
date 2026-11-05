@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/kmlebedev/txmlconnector/terminal/fingerprint"
 	"github.com/kmlebedev/txmlconnector/terminal/lobreplay"
 	"github.com/kmlebedev/txmlconnector/terminal/research"
+	"github.com/kmlebedev/txmlconnector/terminal/vintage"
+	"github.com/kmlebedev/txmlconnector/terminal/volatility"
 )
 
 // This file holds the research/backtest tools of plan phases E–G. They are
@@ -39,6 +42,30 @@ const toolNameBatchBacktest = "batch_backtest"
 // fingerprint analysis.
 const toolNameDetectExecutionAlgos = "detect_execution_algos"
 
+// toolNameVolForecast is the agent tool name of the volatility oracle forecast.
+const toolNameVolForecast = "vol_forecast"
+
+// toolNameVolEvents is the agent tool name of the release calendar / news lookup
+// behind the volatility oracle.
+const toolNameVolEvents = "vol_events"
+
+// maxVolDrivers bounds the driver list of the compact model payload.
+const maxVolDrivers = 6
+
+// maxVolEvents bounds the event markers of the UI artifact.
+const maxVolEvents = 50
+
+// defaultVolPeriodSec is the default bar period of vol_forecast: 15-minute bars
+// give enough complete trading days for the HAR month window within the feed
+// history limit (5000 bars is about 150 trading days).
+const defaultVolPeriodSec = 900
+
+// defaultVolHorizon is the default forecast horizon of vol_forecast.
+const defaultVolHorizon = 8 * time.Hour
+
+// maxVolBars bounds the history request of vol_forecast.
+const maxVolBars = 5000
+
 // toolNameWalkForward is the agent tool name of the walk-forward grid search.
 const toolNameWalkForward = "walk_forward"
 
@@ -59,7 +86,7 @@ var errRulesStrategyNeedsSpec = fmt.Errorf(
 // researchToolCatalog returns the catalog of research tools added by phases
 // E–G, in catalog order.
 func researchToolCatalog() []ToolInfo {
-	return []ToolInfo{backtestRulesTool, batchBacktestTool, detectExecutionAlgosTool, walkForwardTool}
+	return []ToolInfo{backtestRulesTool, batchBacktestTool, detectExecutionAlgosTool, walkForwardTool, volForecastTool, volEventsTool}
 }
 
 // backtestRulesTool is the backtest_rules tool description.
@@ -202,6 +229,18 @@ func (e *Engine) invokeResearchTool(ctx context.Context, name string, args map[s
 			return nil, nil, true, err
 		}
 		return res, ui, true, nil
+	case toolNameVolForecast:
+		res, ui, err := e.toolVolForecast(ctx, args)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return res, &Artifact{Kind: "volatility", Payload: ui}, true, nil
+	case toolNameVolEvents:
+		res, ui, err := e.toolVolEvents(ctx, args)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return res, &Artifact{Kind: "vol_events", Payload: ui}, true, nil
 	}
 	return nil, nil, false, nil
 }
@@ -749,3 +788,345 @@ func (e *Engine) toolWalkForward(ctx context.Context, args map[string]any) (walk
 	}
 	return view, &Artifact{Kind: "walk_forward", Payload: result}, nil
 }
+
+// volForecastTool is the vol_forecast tool description.
+var volForecastTool = ToolInfo{
+	Name:  toolNameVolForecast,
+	Title: "Оракул волатильности",
+	Description: "Спрогнозировать волатильность инструмента на горизонт: HAR-RV по внутридневным барам " +
+		"плюс окна релизов макростатистики и затухающая интенсивность новостей. Возвращает ожидаемое " +
+		"отклонение сигма в процентах, множитель к базовой HAR-волатильности, режим (calm|normal|event|stress) " +
+		"и вклады драйверов. Обучение — только по данным до asOf; качество (QLIKE) считается на последних 30 днях.",
+	Input: objSchema(map[string]any{
+		"symbol":    strProp("Тикер инструмента, например TQBR:SBER или SBER"),
+		"periodSec": intProp("Период внутридневных баров в секундах: 900 по умолчанию, 300/900/3600"),
+		"count":     intProp(fmt.Sprintf("Сколько последних баров использовать, максимум %d", maxVolBars)),
+		"horizon":   strProp("Горизонт прогноза: длительность Go (8h, 90m) или число часов; по умолчанию 8h"),
+		"asOf":      strProp("Момент прогноза, RFC3339 UTC; по умолчанию текущее время. Обучение видит только данные до asOf"),
+	}, "symbol"),
+}
+
+// volEventsTool is the vol_events tool description.
+var volEventsTool = ToolInfo{
+	Name:  toolNameVolEvents,
+	Title: "Календарь релизов и новости",
+	Description: "Релизы макростатистики (заседания ЦБ, FOMC, CPI, NFP и т.д.) и аннотированные новости " +
+		"в окне [from, to]: категории, страна, точность времени (Exact) и тональность новостей. " +
+		"Источник — винтажный слой ClickHouse (vintage.Store); без него инструмент сообщает, что источник не подключён.",
+	Input: objSchema(map[string]any{
+		"from":       strProp("Начало окна, RFC3339 UTC"),
+		"to":         strProp("Конец окна, RFC3339 UTC"),
+		"categories": strArrayProp("Необязательные категории релизов: cbr_rate, ru_cpi, ru_gdp, us_cpi, us_nfp, fomc"),
+	}, "from", "to"),
+}
+
+// VolatilityDataSource is the optional extension of DataSource for the
+// volatility oracle: the point-in-time releases and the annotated news of the
+// vintage layer (terminal/vintage, Task 13). cmd/terminal provides the bar
+// history only, so until the ClickHouse vintage store is wired into the data
+// adapter the volatility tools report a clear configuration error instead of
+// silently fitting on bars alone.
+type VolatilityDataSource interface {
+	Releases(ctx context.Context, from, to time.Time, categories ...string) ([]vintage.Release, error)
+	News(ctx context.Context, from, to time.Time, sources ...string) ([]vintage.NewsItem, error)
+}
+
+// volEvent is one release marker of the volatility artifacts.
+type volEvent struct {
+	At       time.Time `json:"at"`
+	Category string    `json:"category"`
+	Title    string    `json:"title"`
+	Country  string    `json:"country"`
+	Exact    bool      `json:"exact"`
+}
+
+// volForecastResult is the compact model-facing payload of vol_forecast.
+type volForecastResult struct {
+	Symbol     string              `json:"symbol"`
+	At         time.Time           `json:"at"`
+	HorizonSec int64               `json:"horizonSec"`
+	SigmaPct   float64             `json:"sigmaPct"`
+	Multiplier float64             `json:"multiplier"`
+	Regime     string              `json:"regime"`
+	Drivers    []volatility.Driver `json:"drivers"`
+	QLIKE      float64             `json:"qlike,omitempty"`
+	QLIKEDays  int                 `json:"qlikeDays,omitempty"`
+	Warnings   []string            `json:"warnings,omitempty"`
+}
+
+// volForecastArtifact is the UI payload of vol_forecast: the full driver list,
+// the release markers and the horizon geometry for the chart overlay.
+type volForecastArtifact struct {
+	Symbol     string              `json:"symbol"`
+	At         time.Time           `json:"at"`
+	HorizonSec int64               `json:"horizonSec"`
+	SigmaPct   float64             `json:"sigmaPct"`
+	Multiplier float64             `json:"multiplier"`
+	Regime     string              `json:"regime"`
+	Drivers    []volatility.Driver `json:"drivers"`
+	Events     []volEvent          `json:"events,omitempty"`
+	From       time.Time           `json:"from"`
+	To         time.Time           `json:"to"`
+}
+
+// volEventsResult is the compact model-facing payload of vol_events.
+type volEventsResult struct {
+	From     time.Time  `json:"from"`
+	To       time.Time  `json:"to"`
+	Events   []volEvent `json:"events"`
+	News     int        `json:"news"`
+	Positive int        `json:"newsPositive"`
+	Negative int        `json:"newsNegative"`
+	Warnings []string   `json:"warnings,omitempty"`
+}
+
+// volEventsArtifact is the UI payload of vol_events: the release markers.
+type volEventsArtifact struct {
+	From   time.Time  `json:"from"`
+	To     time.Time  `json:"to"`
+	Events []volEvent `json:"events"`
+}
+
+// toolVolForecast implements vol_forecast: it fits the volatility oracle on the
+// instrument's intraday bars plus the point-in-time releases and news of the
+// vintage layer, then forecasts the requested horizon. Only data before asOf is
+// used for training.
+func (e *Engine) toolVolForecast(ctx context.Context, args map[string]any) (volForecastResult, volForecastArtifact, error) {
+	empty := volForecastResult{}
+	emptyArtifact := volForecastArtifact{}
+	if err := contextErr(ctx); err != nil {
+		return empty, emptyArtifact, err
+	}
+	symbol := e.resolveSymbol(argString(args, "symbol"))
+	if symbol == "" {
+		return empty, emptyArtifact, errors.New("agent: symbol is required")
+	}
+	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+	if err != nil {
+		return empty, emptyArtifact, err
+	}
+	period := defaultVolPeriodSec
+	if periodSec > 0 {
+		period = e.normalizePeriod(int(periodSec))
+	}
+	countArg, err := argIntStrict(args, "count", 5000, minToolCount, maxVolBars)
+	if err != nil {
+		return empty, emptyArtifact, err
+	}
+	count := int(countArg)
+	horizon, err := toolHorizonArg(args, "horizon", defaultVolHorizon)
+	if err != nil {
+		return empty, emptyArtifact, err
+	}
+	asOf := e.now().UTC()
+	if _, ok := args["asOf"]; ok {
+		asOf, err = toolTimeArg(args, "asOf")
+		if err != nil {
+			return empty, emptyArtifact, err
+		}
+	}
+	vds, ok := e.data.(VolatilityDataSource)
+	if !ok {
+		return empty, emptyArtifact, errors.New(
+			"agent: винтажный источник (календарь релизов и новости) не подключён: инструменту vol_forecast нужен " +
+				"VolatilityDataSource (vintage.Store из ClickHouse); подключение — отдельной задачей, см. docs/ai-terminal/research.md")
+	}
+	bars, err := e.data.History(ctx, symbol, period, count)
+	if err != nil {
+		return empty, emptyArtifact, fmt.Errorf("agent: history for %s: %w", symbol, err)
+	}
+	if len(bars) == 0 {
+		return empty, emptyArtifact, fmt.Errorf("agent: no history for %s", symbol)
+	}
+	historyFrom := bars[0].Time.UTC()
+	releases, err := vds.Releases(ctx, historyFrom, asOf)
+	if err != nil {
+		return empty, emptyArtifact, fmt.Errorf("agent: releases for %s: %w", symbol, err)
+	}
+	news, err := vds.News(ctx, asOf.AddDate(0, 0, -14), asOf)
+	if err != nil {
+		return empty, emptyArtifact, fmt.Errorf("agent: news: %w", err)
+	}
+	model, err := volatility.Fit(ctx, bars, releases, news, asOf)
+	if err != nil {
+		return empty, emptyArtifact, fmt.Errorf(
+			"agent: oracle fit for %s (period %ds, %d bars): %w; для HAR нужна история не менее ~62 торговых дней "+
+				"внутридневных баров — увеличьте periodSec (900) и count", symbol, period, len(bars), err)
+	}
+	model.Symbol = symbol
+	upcoming, err := vds.Releases(ctx, asOf, asOf.Add(horizon+48*time.Hour))
+	if err != nil {
+		return empty, emptyArtifact, fmt.Errorf("agent: upcoming releases: %w", err)
+	}
+	recentNews, err := vds.News(ctx, asOf.AddDate(0, 0, -2), asOf)
+	if err != nil {
+		return empty, emptyArtifact, fmt.Errorf("agent: recent news: %w", err)
+	}
+	forecast := model.Forecast(asOf, horizon, upcoming, recentNews)
+	qlike, qlikeDays := model.QLIKE(bars, releases, news, asOf.AddDate(0, 0, -30), asOf)
+
+	warnings := make([]string, 0, 2)
+	if forecast.Multiplier >= 2 {
+		warnings = append(warnings, fmt.Sprintf(
+			"ожидается повышенная волатильность: множитель %.2f, режим %s", forecast.Multiplier, forecast.Regime))
+	}
+	if qlikeDays == 0 {
+		warnings = append(warnings, "QLIKE не посчитан: в последних 30 днях нет полных торговых дней")
+	}
+	events := volEventsOf(upcoming)
+	if len(events) > maxVolEvents {
+		warnings = append(warnings, fmt.Sprintf(
+			"маркеров в artifact: первые %d из %d релизов горизонта", maxVolEvents, len(events)))
+		events = events[:maxVolEvents]
+	}
+	drivers := forecast.Drivers
+	if len(drivers) > maxVolDrivers {
+		drivers = drivers[:maxVolDrivers]
+	}
+	result := volForecastResult{
+		Symbol:     symbol,
+		At:         forecast.At,
+		HorizonSec: int64(forecast.Horizon / time.Second),
+		SigmaPct:   round2(forecast.SigmaPct),
+		Multiplier: round2(forecast.Multiplier),
+		Regime:     forecast.Regime,
+		Drivers:    drivers,
+		QLIKE:      round4(qlike),
+		QLIKEDays:  qlikeDays,
+		Warnings:   warnings,
+	}
+	artifact := volForecastArtifact{
+		Symbol:     symbol,
+		At:         forecast.At,
+		HorizonSec: int64(forecast.Horizon / time.Second),
+		SigmaPct:   forecast.SigmaPct,
+		Multiplier: forecast.Multiplier,
+		Regime:     forecast.Regime,
+		Drivers:    forecast.Drivers,
+		Events:     events,
+		From:       historyFrom,
+		To:         asOf,
+	}
+	return result, artifact, nil
+}
+
+// toolVolEvents implements vol_events: the release calendar and the news of the
+// window [from, to] from the vintage layer.
+func (e *Engine) toolVolEvents(ctx context.Context, args map[string]any) (volEventsResult, volEventsArtifact, error) {
+	empty := volEventsResult{}
+	emptyArtifact := volEventsArtifact{}
+	if err := contextErr(ctx); err != nil {
+		return empty, emptyArtifact, err
+	}
+	from, err := toolTimeArg(args, "from")
+	if err != nil {
+		return empty, emptyArtifact, err
+	}
+	to, err := toolTimeArg(args, "to")
+	if err != nil {
+		return empty, emptyArtifact, err
+	}
+	if !to.After(from) {
+		return empty, emptyArtifact, fmt.Errorf("agent: to (%s) must be after from (%s)", to.Format(time.RFC3339), from.Format(time.RFC3339))
+	}
+	vds, ok := e.data.(VolatilityDataSource)
+	if !ok {
+		return empty, emptyArtifact, errors.New(
+			"agent: винтажный источник не подключён: инструменту vol_events нужен VolatilityDataSource " +
+				"(vintage.Store из ClickHouse); подключение — отдельной задачей, см. docs/ai-terminal/research.md")
+	}
+	categories := argStringList(args, "categories")
+	releases, err := vds.Releases(ctx, from, to, categories...)
+	if err != nil {
+		return empty, emptyArtifact, fmt.Errorf("agent: releases: %w", err)
+	}
+	news, err := vds.News(ctx, from, to)
+	if err != nil {
+		return empty, emptyArtifact, fmt.Errorf("agent: news: %w", err)
+	}
+	events := volEventsOf(releases)
+	warnings := make([]string, 0, 2)
+	if len(events) > maxVolEvents {
+		warnings = append(warnings, fmt.Sprintf("в artifact: первые %d из %d релизов", maxVolEvents, len(events)))
+		events = events[:maxVolEvents]
+	}
+	if len(events) == 0 {
+		warnings = append(warnings, "в окне нет релизов календаря")
+	}
+	positive, negative := 0, 0
+	for _, item := range news {
+		switch {
+		case item.Sentiment > 0.05:
+			positive++
+		case item.Sentiment < -0.05:
+			negative++
+		}
+	}
+	result := volEventsResult{
+		From:     from,
+		To:       to,
+		Events:   events,
+		News:     len(news),
+		Positive: positive,
+		Negative: negative,
+		Warnings: warnings,
+	}
+	return result, volEventsArtifact{From: from, To: to, Events: events}, nil
+}
+
+// volEventsOf maps the vintage releases onto the artifact markers.
+func volEventsOf(releases []vintage.Release) []volEvent {
+	out := make([]volEvent, 0, len(releases))
+	for _, release := range releases {
+		out = append(out, volEvent{
+			At:       release.At.UTC(),
+			Category: release.Category,
+			Title:    release.Title,
+			Country:  release.Country,
+			Exact:    release.Exact,
+		})
+	}
+	return out
+}
+
+// toolHorizonArg parses the forecast horizon tool argument: a Go duration
+// ("8h", "90m") or a number of hours.
+func toolHorizonArg(args map[string]any, key string, def time.Duration) (time.Duration, error) {
+	raw, ok := args[key]
+	if !ok || raw == nil {
+		return def, nil
+	}
+	var horizon time.Duration
+	switch value := raw.(type) {
+	case string:
+		parsed, err := time.ParseDuration(strings.TrimSpace(value))
+		if err != nil {
+			return 0, fmt.Errorf("%w: %s=%q: want a Go duration like 8h or a number of hours", errBadArgument, key, value)
+		}
+		horizon = parsed
+	case float64:
+		horizon = time.Duration(value * float64(time.Hour))
+	case int:
+		horizon = time.Duration(value) * time.Hour
+	case int64:
+		horizon = time.Duration(value) * time.Hour
+	case json.Number:
+		hours, err := value.Float64()
+		if err != nil {
+			return 0, fmt.Errorf("%w: %s: %v", errBadArgument, key, err)
+		}
+		horizon = time.Duration(hours * float64(time.Hour))
+	default:
+		return 0, fmt.Errorf("%w: %s has unsupported type %T", errBadArgument, key, raw)
+	}
+	if horizon < time.Minute || horizon > 30*24*time.Hour {
+		return 0, fmt.Errorf("%w: %s=%v is outside 1m..720h", errBadArgument, key, horizon)
+	}
+	return horizon, nil
+}
+
+// round2 rounds a value to two decimals for the compact payload.
+func round2(value float64) float64 { return math.Round(value*100) / 100 }
+
+// round4 rounds a metric to four decimals for the compact payload.
+func round4(value float64) float64 { return math.Round(value*10000) / 10000 }
