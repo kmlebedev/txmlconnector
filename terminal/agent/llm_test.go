@@ -372,3 +372,94 @@ func TestChatContextCancelledAborts(t *testing.T) {
 		t.Fatal("expected the context error")
 	}
 }
+
+// TestChatNoFallbackAfterMutatingTool is the R3 regression test: when the LLM
+// fails after a mutating tool already ran, the local fallback must not replay
+// the action. The response is marked partial and keeps the executed tool calls.
+func TestChatNoFallbackAfterMutatingTool(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		body, _ := io.ReadAll(r.Body)
+		var req llmChatRequest
+		_ = json.Unmarshal(body, &req)
+		if hasToolMessage(req) {
+			// The follow-up model round trip fails after the order ran.
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		writeJSONResponse(w, toolCallPayload("place_order",
+			`{"symbol":"TQBR:SBER","side":"buy","qty":10,"type":"market"}`))
+	}))
+	defer srv.Close()
+
+	e, broker := newLLMEngine(t, srv.URL, 2*time.Second)
+	resp, err := e.Chat(context.Background(), ChatRequest{
+		Message: "купи 10 SBER по рынку", ConversationID: "conv-1",
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	placed := broker.placedOrders()
+	if len(placed) != 1 {
+		t.Fatalf("broker placements = %d, want exactly one order (no fallback replay)", len(placed))
+	}
+	if placed[0].ClientOrderID != "conv-1:call_1" {
+		t.Errorf("ClientOrderID = %q, want the conversation and tool call ids joined", placed[0].ClientOrderID)
+	}
+	if !resp.Partial {
+		t.Error("Partial = false, want true after a mutating tool ran")
+	}
+	if !resp.LLM {
+		t.Error("LLM = false, want the partial response to stay LLM=true")
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "place_order" {
+		t.Fatalf("tool calls = %+v, want the executed place_order", resp.ToolCalls)
+	}
+	if !strings.HasPrefix(resp.Answer, "LLM недоступен после выполнения действий") {
+		t.Errorf("answer = %q, want the partial-action prefix", resp.Answer)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Errorf("provider calls = %d, want 2 (tool round trip, then failure)", got)
+	}
+}
+
+// TestChatFallsBackWhenOnlyReadToolsRan checks that a read-only tool round trip
+// still falls back to the deterministic local analyst after an LLM failure.
+func TestChatFallsBackWhenOnlyReadToolsRan(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req llmChatRequest
+		_ = json.Unmarshal(body, &req)
+		if hasToolMessage(req) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		writeJSONResponse(w, toolCallPayload("get_quote", `{"symbol":"TQBR:SBER"}`))
+	}))
+	defer srv.Close()
+
+	e, broker := newLLMEngine(t, srv.URL, 2*time.Second)
+	resp, err := e.Chat(context.Background(), ChatRequest{
+		Message: "проанализируй SBER 5м", ConversationID: "conv-2",
+	})
+	if err != nil {
+		t.Fatalf("Chat must fall back, got error: %v", err)
+	}
+	if resp.LLM {
+		t.Error("LLM = true, want the local analyst fallback")
+	}
+	if resp.Partial {
+		t.Error("Partial = true, want a complete fallback answer")
+	}
+	if !strings.Contains(resp.Answer, "LLM недоступен (http_503)") ||
+		!strings.Contains(resp.Answer, "локальный аналитик") {
+		t.Errorf("answer = %q, want the local analyst fallback text", resp.Answer)
+	}
+	if len(resp.ToolCalls) == 0 {
+		t.Error("fallback must execute the real read-only tools")
+	}
+	if len(broker.placedOrders()) != 0 {
+		t.Errorf("broker placements = %d, want 0", len(broker.placedOrders()))
+	}
+}

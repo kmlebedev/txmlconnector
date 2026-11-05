@@ -318,3 +318,32 @@ func TestMarketableLimitFillPrice(t *testing.T) {
 		t.Fatalf("resting fill price = %v, want touch ask 89.5", lastTrade.Price)
 	}
 }
+
+// TestDuplicateClientOrderIDRejected is the R3 guard rail of the paper broker:
+// an order that reuses a client order id already processed by the account is
+// rejected instead of being executed a second time.
+func TestDuplicateClientOrderIDRejected(t *testing.T) {
+	b := newTestBroker(100000, 0)
+	q := quote("S", 100, 100, 100)
+	req := OrderRequest{Symbol: "S", Side: Buy, Qty: 1, Type: Market, ClientOrderID: "conv-1:call_1"}
+	if _, err := b.Place(req, q); err != nil {
+		t.Fatalf("first Place: %v", err)
+	}
+	if _, err := b.Place(req, q); !errors.Is(err, ErrDuplicateClientOrderID) {
+		t.Fatalf("duplicate Place err = %v, want ErrDuplicateClientOrderID", err)
+	}
+	snap := b.Snapshot()
+	if len(snap.Orders) != 1 || len(snap.Trades) != 1 || len(snap.Positions) != 1 {
+		t.Fatalf("snapshot after duplicate = %+v, want one order/trade/position", snap)
+	}
+	if snap.Positions[0].Qty != 1 {
+		t.Fatalf("position qty = %d, want 1 (no second fill)", snap.Positions[0].Qty)
+	}
+
+	// Orders without a client order id are never treated as duplicates.
+	for i := 0; i < 2; i++ {
+		if _, err := b.Place(OrderRequest{Symbol: "S", Side: Buy, Qty: 1, Type: Market}, q); err != nil {
+			t.Fatalf("anonymous Place #%d: %v", i+1, err)
+		}
+	}
+}

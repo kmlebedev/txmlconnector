@@ -55,6 +55,10 @@ type OrderRequest struct {
 	Type   OrderType
 	Price  float64
 	Source string // "ui" | "agent" | "autonomy"
+	// ClientOrderID is the optional idempotency key of the request. A request
+	// that reuses an id already processed by this account is rejected with
+	// ErrDuplicateClientOrderID instead of being executed twice.
+	ClientOrderID string
 }
 
 // Order is the state of one paper order.
@@ -136,6 +140,9 @@ var (
 	ErrOrderNotFound = errors.New("заявка не найдена")
 	// ErrOrderNotCancellable is returned by Cancel for a terminal order.
 	ErrOrderNotCancellable = errors.New("заявку нельзя отменить")
+	// ErrDuplicateClientOrderID is returned by Place when a request reuses a
+	// client order id that this account already processed.
+	ErrDuplicateClientOrderID = errors.New("заявка с таким clientOrderId уже обработана")
 )
 
 // Broker is the paper-trading account. All methods are safe for concurrent use.
@@ -154,6 +161,8 @@ type Broker struct {
 	orders     map[string]*Order
 	orderOrder []string
 	trades     []Trade
+	// clientOrderIDs deduplicates agent orders by their idempotency key.
+	clientOrderIDs map[string]struct{}
 
 	orderSeq int64
 	tradeSeq int64
@@ -165,11 +174,12 @@ func New(cfg Config) *Broker {
 		cfg.FeeBps = 5
 	}
 	return &Broker{
-		cfg:       cfg,
-		now:       time.Now,
-		cash:      cfg.InitialCash,
-		positions: map[string]*Position{},
-		orders:    map[string]*Order{},
+		cfg:            cfg,
+		now:            time.Now,
+		cash:           cfg.InitialCash,
+		positions:      map[string]*Position{},
+		orders:         map[string]*Order{},
+		clientOrderIDs: map[string]struct{}{},
 	}
 }
 
@@ -180,6 +190,12 @@ func New(cfg Config) *Broker {
 func (b *Broker) Place(req OrderRequest, q QuoteView) (Order, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if req.ClientOrderID != "" {
+		if _, seen := b.clientOrderIDs[req.ClientOrderID]; seen {
+			return Order{}, fmt.Errorf("%w: %s", ErrDuplicateClientOrderID, req.ClientOrderID)
+		}
+		b.clientOrderIDs[req.ClientOrderID] = struct{}{}
+	}
 	now := b.now()
 	o := &Order{
 		ID:        fmt.Sprintf("ord_%06d", b.nextOrderIDLocked()),

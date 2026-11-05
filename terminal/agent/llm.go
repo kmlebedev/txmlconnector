@@ -106,9 +106,20 @@ func llmErrorClass(err error) string {
 	return "network"
 }
 
+// hasMutatingToolCall reports whether any executed tool call has side effects.
+func hasMutatingToolCall(calls []ToolCall) bool {
+	for _, call := range calls {
+		if isMutatingTool(call.Name) {
+			return true
+		}
+	}
+	return false
+}
+
 // Chat answers a user message. With a configured LLM it runs the tool-calling
-// loop; otherwise (and on any LLM failure) the deterministic local analyst
-// answers with LLM:false.
+// loop; otherwise (and on a read-only LLM failure) the deterministic local
+// analyst answers with LLM:false. A failure after a mutating tool call returns a
+// partial answer instead of replaying the side effect (R3).
 func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -130,12 +141,23 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 		return resp, nil
 	}
 
-	resp, err := e.chatLLM(ctx, message)
+	resp, err := e.chatLLM(ctx, message, req.ConversationID)
 	if err == nil {
 		return resp, nil
 	}
 	if ctxErr := contextErr(ctx); ctxErr != nil {
 		return ChatResponse{}, ctxErr
+	}
+	// Never replay side effects through the local fallback: if the LLM failed
+	// after an order or autonomy action already ran, return what happened as a
+	// partial answer instead of executing the action a second time (R3).
+	if hasMutatingToolCall(resp.ToolCalls) {
+		resp.Partial = true
+		resp.LLM = true
+		resp.Answer = fmt.Sprintf(
+			"LLM недоступен после выполнения действий (%s). Выполненные действия не повторяются — проверьте их результат в терминале.",
+			llmErrorClass(err))
+		return resp, nil
 	}
 	local, localErr := e.localAnalyst(ctx, message)
 	if localErr != nil {
@@ -149,8 +171,10 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 }
 
 // chatLLM runs the OpenAI-compatible tool loop: up to maxToolIterations model
-// round trips with tools, then one final answer without tools.
-func (e *Engine) chatLLM(ctx context.Context, message string) (ChatResponse, error) {
+// round trips with tools, then one final answer without tools. On failure it
+// returns the calls executed so far together with the error, so Chat can decide
+// whether a local fallback is safe (R3).
+func (e *Engine) chatLLM(ctx context.Context, message, conversationID string) (ChatResponse, error) {
 	started := e.now()
 	messages := []llmMessage{
 		{Role: "system", Content: systemPrompt},
@@ -159,21 +183,27 @@ func (e *Engine) chatLLM(ctx context.Context, message string) (ChatResponse, err
 	tools := e.llmTools()
 	resp := ChatResponse{LLM: true, ToolCalls: []ToolCall{}, Artifacts: []Artifact{}}
 	answer := ""
+	// fail returns the partial response (executed calls, artifacts) with the
+	// error that interrupted the loop.
+	fail := func(err error) (ChatResponse, error) {
+		resp.ElapsedMs = e.now().Sub(started).Milliseconds()
+		return resp, err
+	}
 
 	for iteration := 0; iteration < maxToolIterations; iteration++ {
 		if err := contextErr(ctx); err != nil {
-			return ChatResponse{}, err
+			return fail(err)
 		}
 		msg, err := e.llmComplete(ctx, messages, tools)
 		if err != nil {
-			return ChatResponse{}, err
+			return fail(err)
 		}
 		if len(msg.ToolCalls) == 0 {
 			answer = strings.TrimSpace(contentString(msg.Content))
 			if answer != "" {
 				break
 			}
-			return ChatResponse{}, &llmError{Class: "empty_response"}
+			return fail(&llmError{Class: "empty_response"})
 		}
 		messages = append(messages, llmMessage{
 			Role:      "assistant",
@@ -196,7 +226,10 @@ func (e *Engine) chatLLM(ctx context.Context, message string) (ChatResponse, err
 				}
 				e.publish(Event{Type: "tool_result", Data: call})
 			} else {
-				call, artifact = e.executeToolCall(ctx, name, args)
+				call, artifact = e.executeToolCallFor(ctx, toolInvocation{
+					ConversationID: conversationID,
+					ToolCallID:     tc.ID,
+				}, name, args)
 			}
 			resp.ToolCalls = append(resp.ToolCalls, call)
 			if artifact != nil {
@@ -213,7 +246,7 @@ func (e *Engine) chatLLM(ctx context.Context, message string) (ChatResponse, err
 	if answer == "" {
 		msg, err := e.llmComplete(ctx, messages, nil)
 		if err != nil {
-			return ChatResponse{}, err
+			return fail(err)
 		}
 		answer = strings.TrimSpace(contentString(msg.Content))
 	}

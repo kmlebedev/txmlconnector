@@ -132,12 +132,13 @@ func newPaperAdapter(broker brokerSource, market marketSource) *paperAdapter {
 // Place executes one paper order for the agent.
 func (a *paperAdapter) Place(order agent.PlaceOrder) (agent.OrderView, error) {
 	req := paper.OrderRequest{
-		Symbol: order.Symbol,
-		Side:   paper.Side(order.Side),
-		Qty:    order.Qty,
-		Type:   paper.OrderType(order.Type),
-		Price:  order.Price,
-		Source: "agent",
+		Symbol:        order.Symbol,
+		Side:          paper.Side(order.Side),
+		Qty:           order.Qty,
+		Type:          paper.OrderType(order.Type),
+		Price:         order.Price,
+		Source:        "agent",
+		ClientOrderID: order.ClientOrderID,
 	}
 	if req.Type == "" {
 		req.Type = paper.Market
