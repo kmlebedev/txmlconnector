@@ -204,3 +204,13 @@ connection» (повторный snapshot ломает состояние) — �
   `ticks-live-dll.xml` + `ticks-live-repro.md`.
 - Для T14: декодер — RQ_MAIN-запись `0x5a` (не поллинг RQ_TICKS 13); `X`/`Y`-поля записи —
   семантика **I**.
+
+
+## Go-реализация T14 (S, 2026-11-05)
+
+- `records.TagTick` = 0x5a: splitter-unsized walker до `W secid==0xffff`, `ParseTickRecord`
+  (W secid,W board,G tradeno,L time,L price,L quantity,B period,B buysell,L X,L Y) — S/D.
+- `events_ticks.go` регистрирует декодер 0x5a; `<ticks><tick>` рендерит `xmlcompat.TicksXML`
+  (secid/board/seccode/tradeno/tradetime/price/quantity/period/buysell) и эмитится Connector.Run.
+- RQ_TICKS(13) в command path не используется (S: на проде ни одного type=13); `Client.PollTicks`
+  оставлен только как legacy D/I API (не вызывается коннектором).

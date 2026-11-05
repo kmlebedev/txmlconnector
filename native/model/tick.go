@@ -7,6 +7,7 @@ import "time"
 // later RE pass recovers it (I, the field is not in the D layout).
 type Tick struct {
 	Symbol       Symbol
+	Board        string
 	SecID        uint16
 	TradeNo      int64
 	Time         time.Time

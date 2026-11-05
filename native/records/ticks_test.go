@@ -1,6 +1,9 @@
 package records_test
 
 import (
+	"encoding/hex"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,5 +72,35 @@ func TestTicksReplyParsed(t *testing.T) {
 	}
 	if !ev.Time.Equal(time.Unix(29896980, 0).UTC()) {
 		t.Fatalf("event time = %v", ev.Time)
+	}
+}
+
+// TestParseTickRecordS pins the production S 0x5a record.
+func TestParseTickRecordS(t *testing.T) {
+	raw, err := os.ReadFile("testdata/ticks-live-inject.hex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := hex.DecodeString(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recs, err := records.Records(payload)
+	if err != nil || len(recs) != 1 || recs[0].Tag != records.TagTick {
+		t.Fatalf("records = %+v, %v", recs, err)
+	}
+	ticks, err := records.ParseTickRecord(recs[0].Body)
+	if err != nil || len(ticks) != 1 {
+		t.Fatalf("ticks = %+v, %v", ticks, err)
+	}
+	tick := ticks[0]
+	if tick.SecID != 2412 || tick.Board != 75 || tick.TradeNo != 18027673956 {
+		t.Fatalf("tick = %+v", tick)
+	}
+	if tick.Time != 1793865395 || tick.Price != 29045 || tick.Volume != 45 {
+		t.Fatalf("tick = %+v", tick)
+	}
+	if tick.Period != 'N' || tick.BuySell != 'B' {
+		t.Fatalf("tick = %+v", tick)
 	}
 }

@@ -31,7 +31,7 @@
 | 11 | get_securities_info → sec_info | 2 | done | `native/client_secinfo.go`, `native/testdata/secinfo-*`, RQ_SEC_SPEC 15 |
 | 12 | Остальные записи снапшота | 2 | done | `records/records.go` splitter (AmBOOK, SYSPARAMS, wrapper, 0x05), `TestE07TailHasNoUnknownRecords` |
 | 13 | gethistorydata → candles | 3 | done | `client_history.go`, `records/candles.go`, `candles-*`; фиксы 8277d6f |
-| 14 | subscribe_ticks → ticks | 3 | **partial** | `client_ticks.go`, `records/ticks.go`, `session/ticks.go`, команда `subscribe_ticks`; XML `<ticks>`/рендер — нет (ждёт S/O, T14 DoD) |
+| 14 | тики (subscribe_ticks) | 3 | **partial** | RQ_SUBSCRIBE_TICKS 120 + S payload board/secid; тики — RQ_MAIN 0x5a TICK (W secid,W board,G tradeno,L time,L price,L quantity,B period,B buysell,L X,L Y), `<ticks>` S-форма; RQ_TICKS(13) поллинг не используется (S опровергнут); живые S-фикстуры/тест есть |
 | 15 | RQ_TRANSACT 14 | 3 | done | `session/transact.go`, `transact-*`, `TestTransact*/LostReply/EmptyReply` |
 | 16 | neworder/cancelorder, orders | 3 | done | `client_orders.go`, `records/order.go`, `order-*`; фиксы c6a3143 |
 | 17 | trades (R_TRD 0x04) | 3 | done | `records/clienttrade.go`, `trade-*`; фиксы 177879c |
@@ -41,7 +41,7 @@
 | 21 | get_forts_positions/get_client_limits | 4 | **partial** | `client_positions.go`, `records/limits.go`, `session/limits.go`; oracle `<clientlimits>` ждёт; RQ_FORTS_FIRM_MONEY 47 не реализован (формат I) |
 | 22 | portfolio-команды | 4 | **partial** | `client_portfolio.go`, `records/portfolio.go`, `xmlcompat` local render; O-фикстуры `portfolio-currency/mc-dll.xml`; остальные формы/типы — I (5f3ef49, 5bd73dc) |
 | 23 | max buy/sell, cln_sec_permissions, leverage | 5 | **partial** | local render 3 команд + `<marketord>`; точная формула по R_SEC_RATE 0x0a (a217bc1); relogin сбрасывает marginRates, неизвестный rate -> explicit I failure; permissions/rates — I (FUN_18001a700) |
-| 24 | news/get_old_news/get_news_body | 6 | **partial** | 0x35/0x36 парсеры+splitter, `<news_header>` O-побайтно, RQ_GETNEWS payloads и MIN-id диапазон (7484ffc + fix), битый 0x36 package skip; `<news_body>` — I (task-56) |
+| 24 | news/get_old_news/get_news_body | 6 | **done** | 0x35/0x36 парсеры+splitter, S: reply 73 пуст, заголовки/тело RQ_MAIN 0x36, `<news_header>`/`<news_body>` S-формы, NewsBody() шлёт запрос и возвращает success; package_len S-форма supported (I уточнение); `<news_body>` callback |
 | 25 | messages (R_MSG 0x01) | 6 | **done** | unsized 0x01, batch одного RQ_MAIN, `<messages>` O-побайтно (73a4acc/6cb9697); `<date>` = WALL-время (fix после ревью) |
 | 26 | change_pass | 6 | **done** | RQ_CHANGE_PWD 3, payload/SHA-1, strict replies, fatal reply терминален (no recover, один connected=false), local texts; живьём не выполнялось (S-негатив) |
 | 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply (empty reply=failure, 00=success), 149 O e2e и exact DLL error text, dedup family callbacks (fix после ревью); гейт 0x45 только 153/151 — I, mapping/XML — D/I |

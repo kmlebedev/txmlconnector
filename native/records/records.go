@@ -115,6 +115,13 @@ func Records(p []byte) ([]Record, error) {
 				return out, err
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagTick:
+			// 0x5a TICK: unsized loop of tick records until 0xffff (S/D).
+			start := len(p) - r.Len()
+			if err := SkipTickRecord(r); err != nil {
+				return out, err
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagMessage:
 			// 0x01 R_MSG is unsized with variable C-strings (messages.md).
 			start := len(p) - r.Len()
