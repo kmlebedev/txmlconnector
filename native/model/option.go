@@ -51,7 +51,8 @@ type Option struct {
 	OptCode string
 }
 
-// OptionsError is the PDF 4.40 <options_failed> error.
+// OptionsError is the PDF 4.40 <options_failed> error. It is not wired into the
+// command path yet: the XML trigger/fields are D-only (options.md I).
 type OptionsError struct {
 	Code    int
 	Message string

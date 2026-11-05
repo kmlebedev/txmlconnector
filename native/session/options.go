@@ -107,7 +107,8 @@ func (c *Conn) FamilyStrikes(ctx context.Context, secID uint16, familyID int64) 
 	return optionsReplyError(reply)
 }
 
-// FamilyOptions sends RQ_FAMILIY_OPTIONS (150, gate 0x45).
+// FamilyOptions sends RQ_FAMILIY_OPTIONS (150, no 0x45 gate). The connector
+// command for 150 is not wired yet (options.md I).
 func (c *Conn) FamilyOptions(ctx context.Context, secID uint16, text string, first, second int64) error {
 	reply, err := c.Request(ctx, RqFamiliyOptions, FamilyOptionsPayload(secID, text, first, second))
 	if err != nil {

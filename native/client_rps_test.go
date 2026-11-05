@@ -95,7 +95,8 @@ func TestRPSPayloads(t *testing.T) {
 			t.Fatalf("%s payload\n got %x\nwant %x", tc.name, captured, want)
 		}
 	}
-	// cancelnegdeal / cancelreport4 share the O payload 08 10.
+	// cancelnegdeal / cancelreport4 share the O payload 08 10 (only three .hex
+	// fixtures for four payloads: the cancel pair is one file).
 	for _, cmd := range []string{
 		"<command id=" + quote + "cancelnegdeal" + quote + "><transactionid>1</transactionid></command>",
 		"<command id=" + quote + "cancelreport4" + quote + "><reportid>1</reportid></command>",
