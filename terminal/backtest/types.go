@@ -7,7 +7,6 @@
 package backtest
 
 import (
-	"errors"
 	"time"
 )
 
@@ -125,17 +124,5 @@ type Result struct {
 	Warnings  []string           `json:"warnings"`
 }
 
-// ErrNotImplemented is returned by the contract scaffold until the backtest
-// task fills the implementation.
-var ErrNotImplemented = errors.New("backtest: not implemented yet")
-
-// Strategies returns the strategy catalog.
-func Strategies() []StrategyInfo { return nil }
-
-// NewStrategy validates params and builds an incremental strategy.
-func NewStrategy(id string, params map[string]float64) (Strategy, error) {
-	return nil, ErrNotImplemented
-}
-
-// Run replays bars through the strategy and returns the result.
-func Run(req Request) (Result, error) { return Result{}, ErrNotImplemented }
+// The implementation of the engine and the strategy catalog lives in
+// strategies.go, strategy_*.go, engine.go and metrics.go.
