@@ -1,8 +1,8 @@
 name: Compat release
 
-# C3: build the drop-in C ABI library for the first-release platforms.
-# Tag "compat-v*" also publishes a GitHub Release; workflow_dispatch only
-# uploads the artifacts.
+# C3/C3.1: build the drop-in C ABI library for the first-release platforms.
+# Each target uploads one canonical archive; a single release job publishes all
+# five archives plus SHA256SUMS on a compat-v* tag (no matrix race).
 on:
   push:
     tags:
@@ -25,6 +25,8 @@ jobs:
             goarch: amd64
             lib: libtxmlconnector.so
             extra: libtxmlconnector64.so
+            archive: txmlconnector-linux-amd64.tar.gz
+            package_files: libtxmlconnector.so libtxmlconnector64.so txmlconnector.h VERSION.txt README.md
             cc: gcc
             abi: true
             libs: -Ldist -ltxmlconnector -ldl
@@ -33,6 +35,8 @@ jobs:
             goarch: arm64
             lib: libtxmlconnector.so
             extra: libtxmlconnector64.so
+            archive: txmlconnector-linux-arm64.tar.gz
+            package_files: libtxmlconnector.so libtxmlconnector64.so txmlconnector.h VERSION.txt README.md
             cc: gcc
             abi: true
             libs: -Ldist -ltxmlconnector -ldl
@@ -41,25 +45,31 @@ jobs:
             goarch: amd64
             lib: txmlconnector64.dll
             extra: ""
+            archive: txmlconnector-windows-amd64.zip
+            package_files: txmlconnector64.dll txmlconnector.h VERSION.txt README.md
             cc: gcc
             abi: false
             libs: ""
+          # macos-13 (Intel) is not available on public runners as of 2026-11;
+          # build amd64 on the arm64 runner with clang -arch x86_64 and run the
+          # ABI/conformance tests through Rosetta (best effort).
           - name: macos-arm64
             os: macos-14
             goarch: arm64
             lib: libtxmlconnector.dylib
             extra: libtxmlconnector64.dylib
+            archive: txmlconnector-macos-arm64.tar.gz
+            package_files: libtxmlconnector.dylib libtxmlconnector64.dylib txmlconnector.h VERSION.txt README.md
             cc: clang
             abi: true
             libs: -Ldist -ltxmlconnector
-          # macos-13 (Intel) is not available on public GitHub runners as of
-          # 2026-11; build amd64 on the arm64 runner with clang -arch x86_64
-          # (CGO cross works) and run the ABI test through Rosetta (best effort).
           - name: macos-amd64
             os: macos-14
             goarch: amd64
             lib: libtxmlconnector.dylib
             extra: libtxmlconnector64.dylib
+            archive: txmlconnector-macos-amd64.tar.gz
+            package_files: libtxmlconnector.dylib libtxmlconnector64.dylib txmlconnector.h VERSION.txt README.md
             cc: clang
             abi: true
             libs: -Ldist -ltxmlconnector
@@ -109,6 +119,19 @@ jobs:
         shell: bash
         run: cp "dist/${{ matrix.lib }}" "dist/${{ matrix.extra }}"
 
+      - name: VERSION and README
+        shell: bash
+        run: |
+          {
+            echo "version: 6.47.2.26.4"
+            echo "commit: $GITHUB_SHA"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "target: ${{ matrix.name }}"
+            echo "goarch: ${{ matrix.goarch }}"
+            echo "abi: txmlconnector64.dll-compatible C ABI (9 exports)"
+          } > dist/VERSION.txt
+          cp README.md dist/README.md
+
       - name: C ABI test (linux/macos)
         if: matrix.abi && !matrix.cross
         shell: bash
@@ -130,8 +153,8 @@ jobs:
             cmd/connector/testdata/abi_test.c ${{ matrix.libs }}
           arch -x86_64 env DYLD_LIBRARY_PATH=dist ./dist/abi_test "dist/${{ matrix.lib }}"
 
-      # Windows/mingw ABI test is best effort for C3: it validates the DLL and the
-      # header, but the final Windows live check is C4.
+      # Windows/mingw ABI test is best effort for C3: it validates the DLL and
+      # the header; the final Windows live check is C4.
       - name: C ABI test (windows, best effort)
         if: runner.os == 'Windows'
         continue-on-error: true
@@ -141,7 +164,7 @@ jobs:
             cmd/connector/testdata/abi_test.c "dist/${{ matrix.lib }}"
           PATH="$PWD/dist:$PATH" ./dist/abi_test.exe "dist/${{ matrix.lib }}"
 
-      - name: C ABI conformance (DLL reference, linux/macos)
+      - name: C ABI conformance (linux/macos)
         if: matrix.abi && !matrix.cross
         shell: bash
         run: |
@@ -171,28 +194,54 @@ jobs:
             cmd/connector/testdata/abi_conformance.c
           PATH="$PWD/dist:$PATH" ./dist/abi_conformance.exe "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
 
-      - name: SHA-256 checksums
+      - name: C5 conformance summaries
+        shell: bash
+        run: ls -la dist
+
+      - name: Package archive (tar.gz)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
-          rm -f dist/abi_test dist/abi_test.exe dist/abi_conformance dist/abi_conformance.exe
           cd dist
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum * > SHA256SUMS
-          else
-            shasum -a 256 * > SHA256SUMS
-          fi
-          cat SHA256SUMS
+          tar -czf "${{ matrix.archive }}" ${{ matrix.package_files }}
+          ls -l "${{ matrix.archive }}"
+
+      - name: Package archive (zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/txmlconnector64.dll,dist/txmlconnector.h,dist/VERSION.txt,dist/README.md -DestinationPath "dist/${{ matrix.archive }}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: compat-${{ matrix.name }}
-          path: dist/*
+          path: dist/${{ matrix.archive }}
           if-no-files-found: error
 
-      - name: GitHub release (tag only)
-        if: startsWith(github.ref, 'refs/tags/compat-v')
+  release:
+    name: release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/compat-v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: compat-*
+          path: release
+          merge-multiple: true
+
+      - name: SHA-256 over release archives
+        shell: bash
+        run: |
+          cd release
+          sha256sum *.tar.gz *.zip > SHA256SUMS
+          cat SHA256SUMS
+          ls -l
+
+      - name: Publish one GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: release/*
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'rc') }}
           fail_on_unmatched_files: true
