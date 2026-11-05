@@ -105,6 +105,18 @@ export function createInitialState() {
 
 const JSON_HEADERS = { 'Content-Type': 'application/json', Accept: 'application/json' };
 
+// The SPA can be served standalone at the origin root (Go backend) or mounted
+// under a path by an embedding host (the DSH plugin proxies it at
+// /ai-terminal/). Calls below are absolute (/api/...) for the standalone
+// server, so the mount prefix is prepended when the page is not at the root.
+export function apiBaseFromLocation(location = globalThis.location) {
+  const override = globalThis.__AI_TERMINAL_BASE__;
+  if (typeof override === 'string') return override;
+  const path = location && typeof location.pathname === 'string' ? location.pathname : '/';
+  if (path === '/ai-terminal' || path.startsWith('/ai-terminal/')) return '/ai-terminal';
+  return '';
+}
+
 export class ApiClient {
   constructor({ base = '', store = null } = {}) {
     this.base = base;
@@ -350,5 +362,5 @@ export async function createApi({ store } = {}) {
     await api.ready;
     return api;
   }
-  return new ApiClient({ store });
+  return new ApiClient({ store, base: apiBaseFromLocation() });
 }

@@ -1,0 +1,11 @@
+- insert:
+    - id: ai-terminal
+      name: '@local/dsh-ai-terminal'
+      # mode: offline | live | auto (live reads TRANSAQ_* / TC_* from the dsh env)
+      # port: local address of the embedded Go terminal backend
+      # repoDir / binaryPath: overrides; by default the checkout containing this
+      # package and its bin/terminal are used (built with `make terminal`).
+      config:
+        mode: offline
+        port: 18090
+        autoStart: true

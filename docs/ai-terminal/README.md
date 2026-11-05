@@ -89,6 +89,18 @@ TERMINAL_LLM_BASE_URL=http://127.0.0.1:8099/v1 TERMINAL_LLM_API_KEY=stub \
   панель автономии (стратегия, параметры, бюджет, риск-лимиты, скорость, старт/стоп, PnL, лог).
 - `?mock=1` — режим моков для разработки интерфейса без бэкенда.
 
+## Встраивание в DeepSeek Harness (плагин)
+
+Терминал встраивается в Web UI Harness как **основная панель**: плагин
+[`dsh-ai-terminal`](../../dsh-ai-terminal/README.md) добавляет иконку «AI-терминал» в левую панель,
+поднимает Go-бэкенд (по умолчанию `bin/terminal`) и проксирует его SPA/API/SSE под origin Harness
+(`/ai-terminal/`), поэтому отдельный порт в браузере и CORS не нужны. Панель оформлена токенами
+темы Harness (en/ru/zh), показывает статус бэкенда и кнопки «Обновить / Перезапустить / Открыть в
+браузере». Установка — `plugin_manager install_bundle` с `target = <repo>/dsh-ai-terminal`;
+конфигурация (`mode`, `port`, `repoDir`, `binaryPath`, `autoStart`) описана в README плагина.
+После изменения `terminal/web/**` нужно пересобрать `bin/terminal` (`make terminal`), потому что
+SPA вшивается в Go-бинарь.
+
 ## HTTP API
 
 REST + SSE, контракт — [ARCHITECTURE §10](ARCHITECTURE.md#10-пакет-terminalapi-httpjson-sse).
