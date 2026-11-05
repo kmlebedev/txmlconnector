@@ -57,8 +57,10 @@ origin Harness (`/ai-terminal/`).
 
 `cmd/terminal` — самодостаточный биржевой терминал-аналог Finam поверх `native.Client`:
 список инструментов, свечной график, стакан, портфель/заявки, тикет, а также встроенный AI-агент,
-который **без MCP** вызывает инструменты терминала (реальный бэктест на истории котировок,
-технические подсказки, бумажные заявки) и умеет автономно вести стратегию на бумажном счёте.
+который вызывает инструменты терминала (бэктест, декларативные правила, walk-forward с deflated
+Sharpe/PBO, оракул волатильности, новости, бумажные заявки) и умеет автономно вести стратегию и
+rule-ботов на бумажном счёте. Внешние агенты получают те же инструменты по MCP (`POST /mcp`,
+streamable HTTP, токен `X-Terminal-Token`).
 
 ```bash
 make terminal && ./bin/terminal -mode offline   # http://127.0.0.1:8090, без сети и ключей
@@ -67,7 +69,9 @@ make terminal && ./bin/terminal -mode offline   # http://127.0.0.1:8090, без 
 Офлайн-режим работает на встроенном снапшоте реальных данных демо-сервера TRANSAQ; live-режим
 подключается к TranSAQ/Finam через native-клиент (`TRANSAQ_ADDR/TRANSAQ_LOGIN/TRANSAQ_PASSWORD`).
 Подробности, скриншоты, LLM-настройка и ограничения — [docs/ai-terminal/README.md](docs/ai-terminal/README.md),
-контракты — [docs/ai-terminal/ARCHITECTURE.md](docs/ai-terminal/ARCHITECTURE.md).
+контракты — [docs/ai-terminal/ARCHITECTURE.md](docs/ai-terminal/ARCHITECTURE.md), прогресс фаз —
+[docs/ai-terminal/PROGRESS.md](docs/ai-terminal/PROGRESS.md), исследования —
+[docs/ai-terminal/research.md](docs/ai-terminal/research.md).
 
 `Run` сам опрашивает RQ_MAIN, восстанавливает соединение после обрыва
 (`connected="true" recover="true"`) и отдаёт `model.UnknownRecord`, если

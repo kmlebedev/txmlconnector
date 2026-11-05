@@ -10,10 +10,13 @@
 # из репозитория GitHub
 npx skills add github.com/kmlebedev/txmlconnector --skill trading-terminal
 npx skills add github.com/kmlebedev/txmlconnector --skill trading-pattern-author
+npx skills add github.com/kmlebedev/txmlconnector --skill trading-automation-author
 ```
 
-Навык `trading-automation-author` появится вместе с задачей 20 фазы F. Локальная проверка перед
-публикацией:
+Ручная проверка установки в чистом Claude Code/Cursor (Step 5 задачи 25) **не выполнялась** —
+статус **I**: автоматически проверяются только frontmatter, исполняемость скрипта и README
+(`go test ./skills`) плюс smoke `trading-terminal/scripts/terminal.sh` против заглушки бэкенда.
+Локальная установка перед публикацией:
 
 ```bash
 npx skills add /path/to/txmlconnector --skill trading-terminal
@@ -25,6 +28,7 @@ npx skills add /path/to/txmlconnector --skill trading-terminal
 |---|---|---|
 | `trading-terminal` | котировка/свечи/стакан/бэктест/новости/прогноз волатильности из любого агента | формат `rules.Spec`, инструменты бэктеста, стоимость и размер выборки, closed-bar правило, REST-скрипт и MCP |
 | `trading-pattern-author` | оформить найденный паттерн из walk-forward/LOB/оракула с доказательствами | Evidence (OOS, deflated Sharpe, PBO, data hash), promotion policy, red lines |
+| `trading-automation-author` | повторяющаяся последовательность инструментов агента должна стать автоматизацией (Go-функция, MCP-инструмент, модель, расписание) | ledger токенов/hotspots, mini-plan задачи (Files/Interfaces/тест), бэклог `docs/ai-terminal/automation-backlog.md` |
 
 ## Настройка окружения
 

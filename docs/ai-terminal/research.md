@@ -115,8 +115,9 @@ make verify
 - Метрики агрегата walk-forward дублируют формулы движка (популяционная дисперсия, годовая
   аннуализация Sharpe, capped profit factor) — это осознанное дублирование: движок не отдаёт
   готовую сшитую кривую.
-- Выбор параметров идёт по in-sample Sharpe; сравнение стратегий в агенте должно ранжировать по
-  OOS (review finding R6) — инструменты агента подключаются после задач 9/17.
+- Выбор параметров идёт по in-sample Sharpe; сравнение стратегий в агенте ранжирует по OOS:
+  инструменты подключены давно — tool-bridge T9/T10, walk-forward и batch с T15/T24, компактные
+  ответы и `artifactId` с T18; контракт — `GET /api/agent/tools` (§8).
 - Живых прогонов на истории TRANSAQ в этой задаче не было: тесты синтетические и на фикстурах
   (`I`), ручная проверка промптом в DSH — после появления tool-bridge (задача 9).
 - Fingerprint-исследование (задача 17) документируется отдельно в `docs/ai-terminal/fingerprint.md`.
@@ -171,12 +172,17 @@ func (m *Model) QLIKE(bars []backtest.Bar, rel []vintage.Release, news []vintage
 
 ### 7.3 Инструменты агента и график
 
-- `vol_forecast(symbol, periodSec?, count?, horizon?, asOf?)` — обучает модель на истории
-  (по умолчанию 15-минутные бары, до 5000 баров), берёт релизы и новости из `vintage.Store`,
-  возвращает компактную сводку (σ, множитель, режим, ≤6 драйверов, QLIKE за последние 30 дней) и
-  `Artifact{Kind:"volatility"}` для UI.
-- `vol_events(from, to, categories?)` — релизы календаря и аннотированные новости окна
-  (`Artifact{Kind:"vol_events"}` — маркеры релизов).
+- `vol_forecast(symbol, periodSec?, count?, horizon?, asOf)` — обучает модель на истории
+  (по умолчанию 15-минутные бары — `periodSec=900`, допустимы 300/900/3600, до 5000 баров),
+  берёт релизы и новости из `vintage.Store`, возвращает компактную сводку (σ, множитель, режим,
+  ≤6 драйверов, QLIKE за последние 30 дней) и `Artifact{Kind:"volatility"}` для UI.
+  **`asOf` обязателен** (T18): без него — ошибка аргумента, обучение видит только данные до `asOf`;
+  `horizon` по умолчанию 8h. С окном `since` относительно `asOf` работает `get_news` (события
+  позже `asOf` не видны).
+- `vol_events(from, to, categories?, asOf)` — релизы календаря и аннотированные новости окна
+  `[from, to]`; **`asOf` обязателен** и не может быть раньше `to` (point-in-time: релизы/новости
+  позже `asOf` не возвращаются). Ответ компактный, полный календарь — в
+  `Artifact{Kind:"vol_events"}`, на который ссылается `artifactId`.
 - Винтажный источник подключается необязательным интерфейсом `VolatilityDataSource`
   (реализация `vintage.Store` в адаптере данных). Пока адаптер не связан с ClickHouse, инструменты
   возвращают понятную ошибку «источник не подключён».
@@ -207,4 +213,29 @@ make verify
 
 Ключевые тесты: `TestOracleRaisesSigmaBeforeKeyRateDecision`, `TestOracleFitUsesOnlyDataBeforeAsOf`,
 `TestQLIKEBeatsHARonSynthetic`.
+
+
+## 8. Компактные ответы и point-in-time (задача 18)
+
+Все research-инструменты агента (`walk_forward`, `vol_forecast`, `vol_events`,
+`detect_execution_algos`, `lob_backtest`, `get_news`) с T18 работают по одному контракту:
+
+- **`asOf` обязателен** — момент, на который известны данные (point-in-time); без него инструмент
+  возвращает ошибку аргумента с подсказкой. У research-запроса нет неявного «сейчас», иначе ответ
+  зависел бы от часов. `get_news` фильтрует по `first_seen <= asOf`, а окно `since` отсчитывается
+  от `asOf`, а не от текущего времени.
+- **Компактный ответ модели + `artifactId`** — в ход LLM попадает сжатая сводка (не более 2 КБ,
+  `TestToolResultCompactUnder2KB`): счётчики и первые несколько строк, а полный результат
+  (equity/fills/отпечатки/календарь) хранится в bounded in-process store (64 артефакта) под
+  `artifactId`. UI получает полный payload отдельным `Artifact`-ом.
+- Артефакты: `walk_forward`, `volatility`, `vol_events`, `execution_algos`, `lob_backtest`,
+  `news`; их `Kind` и поля — контракт UI/графика.
+- Времена `asOf`/`from`/`to` — RFC3339 UTC; ошибки аргументов — `errBadArgument` (модель получает
+  подсказку, а не 500).
+
+Проверки T18:
+
+```bash
+go test -race ./terminal/agent -run 'ResearchTools|ToolResultCompact|PointInTime'
+```
 
