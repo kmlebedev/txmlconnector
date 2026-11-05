@@ -1,6 +1,7 @@
 package records_test
 
 import (
+	"bytes"
 	"compress/gzip"
 	"encoding/hex"
 	"errors"
@@ -132,22 +133,32 @@ func TestFullLiveSessionHasNoUnknownRecords(t *testing.T) {
 	}
 }
 
-// TestSizedMiscRecords checks the sized task 12 records (R_BOARD 0x34 and
-// ReadICA 0x7c): the splitter yields them and stays aligned.
+// TestSizedMiscRecords: ReadICA 0x7c has a one-byte size (D: FUN_1803983e0
+// FUN_1801bdf00(r,0,1); S: production load 2026-11-05, nested in R_WRAPPER as
+// 7c 14 <20 bytes> and 7c 08 <8 bytes>) and R_BOARD 0x34 is unsized (D:
+// FUN_180395b40 with param_3=0: W id, B, Z7, Z30, W, B, Z8, B, B).
 func TestSizedMiscRecords(t *testing.T) {
-	payload := []byte{
-		records.TagBoard, 0, 5, 1, 2, 3, 4, 5,
-		records.TagReadICA, 0, 3, 7, 8, 9,
-	}
+	ica, _ := hex.DecodeString("5f00167c1400295323573f2c3d2b2d243b45485f4a405a54005f000a7c0801285323572d4000")
+	board := []byte{records.TagBoard, 0, 7, 1}
+	board = append(board, "TQBR\x00"...)
+	board = append(board, "Board name\x00"...)
+	board = append(board, 0, 1, 2)
+	board = append(board, "CODE\x00"...)
+	board = append(board, 3, 4)
+	payload := append(append(append([]byte{}, ica...), board...), 0x3d, 0x10)
 	recs, err := records.Records(payload)
 	if err != nil {
 		t.Fatalf("Records: %v", err)
 	}
-	if len(recs) != 2 || recs[0].Tag != records.TagBoard || recs[1].Tag != records.TagReadICA {
-		t.Fatalf("records = %+v", recs)
+	var tags []byte
+	for _, r := range recs {
+		tags = append(tags, r.Tag)
 	}
-	if len(recs[0].Body) != 5 || len(recs[1].Body) != 3 {
-		t.Fatalf("bodies = %d/%d", len(recs[0].Body), len(recs[1].Body))
+	if want := []byte{records.TagReadICA, records.TagReadICA, records.TagBoard, 0x3d}; !bytes.Equal(tags, want) {
+		t.Fatalf("tags = %x, want %x", tags, want)
+	}
+	if len(recs[0].Body) != 20 || len(recs[1].Body) != 8 || len(recs[2].Body) != len(board)-1 {
+		t.Fatalf("bodies = %d/%d/%d", len(recs[0].Body), len(recs[1].Body), len(recs[2].Body))
 	}
 }
 
@@ -320,5 +331,18 @@ func TestSoakMaskedSliceLoads(t *testing.T) {
 	}
 	if seen == 0 {
 		t.Skip("no masked soak capture")
+	}
+}
+
+// TestFortsSessionOptionalByte: R_FORTS_SESSION inside R_WRAPPER carries the
+// optional trailing B (S: production load, 5f 0005 6b 42e001 04).
+func TestFortsSessionOptionalByte(t *testing.T) {
+	payload, _ := hex.DecodeString("5f00056b42e001045f00056b42e00105")
+	recs, err := records.Records(payload)
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+	if len(recs) != 2 || recs[0].Tag != records.TagFortsSession || len(recs[0].Body) != 4 {
+		t.Fatalf("records = %+v", recs)
 	}
 }
