@@ -124,20 +124,21 @@ makeordown, moveorder (2 имени; T19 — ждут живую S-серию).
 | 0x07 | R_QUOTES | splitter | decodeQuotes → Quotes | `<quotes>` | O | `quote-live*`, `quotes-dll.xml` |
 | 0x08 | R_ALLTRADE (sized) | sizedTags | decodeAllTrade → Trade | `<alltrades>` | O | `alltrades-*` |
 | 0x09 | R_HISTORY | special (unsized) | decodeCandles → Candles | `<candles>` | O | `candles-*` |
-| 0x0a | R_SEC_RATE | special (W+L) | decodeSecRate → Client.marginRates (V, копейки) | — (только state) | D/O | `TestParseSecRate`, `TestMarginSnapshotIncludesRate`, `TestMarginMatchDLL` |
+| 0x0a | R_SEC_RATE | special (W+L) | decodeSecRate → Client.marginRates (V, копейки) + event SecRate | — (event без XML) | D/O/S | `TestParseSecRate`, `TestMarginSnapshotIncludesRate`, `TestMarginMatchDLL` |
 | 0x0b–0x0d | R_SEC_ZALOG/OBLIG/ONOFF | attrTags 3 Б | state-only (нет события) | — | D | `TestRecordsAttributeUpdates` |
 | 0x0e | R_SEC_MKT_PERMIT | attrTags 3 Б | decodeSecMktPermit → MarketOrd + флаг бумаги | `<marketord>` | O/D | `marketord-inject.hex`, `TestMarketOrdEvent/UnknownSecID/EveryRecord/DuringLoad` |
 | 0x10 | R_ORD_MODIFY (sized) | sizedTags | decodeOrderModify → Order (все mask-ветки) | `<orders>` (один финальный) | O | `order-modify-*`, `TestOrderModifyBatchOneCallback` |
 | 0x18 | R_OVERNIGHT | 1 байт | decodeOvernight → Overnight | `<overnight>` | O | `TestOvernightRecordReachesStatus` |
 | 0x28 | R_SEC_NEW (sized) | sizedTags | нет декодера (каталог из RQ_STARTUP) | — | D/I | `TestParseSecNewSnapshot` (records) |
 | 0x34 | R_BOARD (sized) | sizedTags | нет декодера (каталог из RQ_STARTUP) | — | D/I | — |
-| 0x35 | R_NEWS | unsized walker (C-строки) | decodeNewsHeader → NewsHeader + store | `<news_header>` | O | `news-inject.hex`, `TestNewsHeadersMatchDLL` |
-| 0x36 | R_NEWS_UPLOAD | unsized walker (C-строки) | decodeNewsUpload → NewsHeader + zlib body в стор | `<news_header>` | O | `news-inject.hex`; `<news_body>` I (task-56) |
+| 0x35 | R_NEWS | unsized walker (C-строки) | decodeNewsHeader → NewsHeader + store | `<news_header>` | O/S | `news-inject.hex`, `news-header-live-inject.hex`, `TestNewsMatchDLL/TestNewsHeaderMatchDLL` |
+| 0x36 | R_NEWS_UPLOAD | unsized walker (C-строки) | decodeNewsUpload → NewsHeader/NewsBody (CP1251→UTF-8) | `<news_header>`/`<news_body>` | O/S | `news-inject.hex`, `news-{header,body}-live-inject.hex`, `TestNews*` |
 | 0x3a | R_ORD_RENEW (sized) | sizedTags | нет декодера | — | D/I | — |
 | 0x3b | R_CLIENT_ASSET (sized) | sizedTags | decodeClientAsset → MoneyPosition/SecPosition/Forts* | `<positions>/<sec_positions>/<forts_positions>` | O | `position-*`, `snapshot-tail*` |
 | 0x3d | R_DATE | special (L) | state-only | — | D | `TestParseEndOfLoadRecords` |
 | 0x54 | R_STOP (sized) | sizedTags | decodeStopOrder → StopOrder (фильтры client/secid) | `<stoporders>` (mask-aware) | O | `stoporder-*`, `TestStopOrdersMatchDLL` |
 | 0x5b | R_SYSPARAMS | L size + blob | state-only (blob I) | — | D/I | `sysparams-inject.hex`, `TestSizedMiscRecords` |
+| 0x5a | R_TICK | unsized walker до 0xffff | decodeTick → Ticks batch, накопление tradeno/time | `<ticks>` | S | `ticks-live-inject.hex`, `TestTickMatchDLL/TestTickAccumulationBatch` |
 | 0x5c | AmBOOK | splitter по flags | state-only (нет события) | — | D | `misc-live*`, `TestMiscLiveRecords` |
 | 0x5e | R_SEC_PARAM (sized) | sizedTags | decodeSecParam → SecInfoUpdate | `<sec_info_upd>` | O | `secparam-live*`, `TestSecInfoUpdMatchesDLL` |
 | 0x5f | R_WRAPPER (sized) | sizedTags → nested | вложенные записи (0x6e skip) | — | O/D | `TestE07TailHasNoUnknownRecords` |
@@ -167,11 +168,11 @@ makeordown, moveorder (2 имени; T19 — ждут живую S-серию).
 | RQ_STARTUP | 9 | Conn.Startup | `records.ParseStartup` | O | `startup-demo.hex`, `TestStartupMatchesDLLCallbacks` |
 | RQ_SUBSCRIBE | 10 | Conn.Subscribe | — | O | `TestSubscribePayloadMatchesDLL` |
 | RQ_HISTORY | 11 | Conn.HistoryExt (RQ_HISTORY_EXT 148) | `records.ParseCandles` | O | `candles-*`, `TestConnectorHistory*` |
-| RQ_TICKS | 13 | Conn.PollTicks | `records.ParseTicks` | S/O | `session/ticks_test.go` |
+| RQ_TICKS | 13 | legacy Conn.PollTicks (не используется коннектором) | `records.ParseTicksReply` | S-негатив/D | `session/ticks_test.go`; тики S — RQ_MAIN 0x5a |
 | RQ_TRANSACT | 14 | Conn.Transact | reply XML (success/error/empty) | O | `transact-*-reply.hex`, `transact-*-dll.xml` |
 | RQ_SEC_SPEC | 15 | Conn.SecSpec | `records.ParseSecInfo` | O | `secspec-request.hex`, `native/testdata/secinfo-*` |
 | RQ_CLIENT_HOLDINGS | 42 | используется positions/securities | `records.ParseClientHoldings/ParseSecNew` | O | `position-sec/forts-*` |
-| RQ_CLIENT_LIMITS | 43 | Conn.ClientLimits | `records.ParseClientLimits` | D (+oracle pending) | `TestClientLimits*` |
+| RQ_CLIENT_LIMITS | 43 | Conn.ClientLimits | `records.ParseClientLimits` | S/D | `TestClientLimits*`, `limits.md` S |
 | RQ_PWD | 46 | login/recover key | layout — `docs/protocol/connect.md` | O/D | `TestPwdPayloadLayout` |
 | RQ_TIME | 50 | Conn.Time | `ServerTime` | O | `TestServerTimeDifference` |
 | RQ_RELOGIN | 63 | Conn.Relogin (recover short) | `records.ParseReloginReply` | O | `session/testdata/recover-short-live*` |
@@ -205,14 +206,27 @@ makeordown, moveorder (2 имени; T19 — ждут живую S-серию).
 | `<server_status>`/`<connector_version>`/`<current_server>` | ServerStatus/константы | `StatusXML`, строки connector | `service-dll.xml` | O/S |
 | `<portfolio_currency>`/`<mc_portfolio>` | MoneyPosition (local) | `PortfolioCurrencyXML`/`MCPortfolioXML` | `portfolio-*-dll.xml` | O |
 | `<marketord>` | MarketOrd | `MarketOrdXML` | `marketord-dll.xml` | O |
-| `<portfolio_tplus>`/`<portfolio_forts>`/`<united_portfolio>`/`<portfolio_mct>` | — | только литеральные скелеты, не в Render | — | I (T22 remaining) |
+| `<portfolio_tplus>`/`<portfolio_forts>`/`<united_portfolio>`/`<portfolio_mct>` | — | только литеральные скелеты, не в Render | — | DLL: tplus/forts = Unknown command (S); typed API I |
 | `<ticks>` | Tick/Ticks | `TicksXML` | `ticks-live-dll.xml` | S |
 | `<news_header>` | NewsHeader | `NewsHeaderXML` | `news-dll.xml` | O |
 | `<news_body>` | NewsBody | `NewsBodyXML` | `news-body-live-dll.xml` | S |
 | `<messages>` | Messages batch | `MessagesXML` | `message-dll.xml` | O |
-| `<option_families>`/`<family_strikes>`/`<options_failed>` | OptionFamily/OptionStrikes/EndOfFamily | `OptionFamiliesXML`/`FamilyStrikesXML`/`OptionsFailedXML` | нет O | I (D-литералы) |
-| `<negdeal>` | RPSTradeForExecution | `NegDealXML` | нет O | I (D-литералы) |
-| `<report>` | ExecutionReport | `ReportXML` | нет O | I (D-литералы) |
+| `<option_families>`/`<family_strikes>`/`<options_failed>` | OptionFamily/OptionStrikes/EndOfFamily | `OptionFamiliesXML`/`FamilyStrikesXML`/`OptionsFailedXML` | нет O | I (D-литералы); S опций — негатив по доступу (гейт 0x45) |
+| `<negdeal>` | RPSTradeForExecution | `NegDealXML` (не в Render) | нет O | I (D-литералы) |
+| `<report>` | ExecutionReport | `ReportXML` (не в Render) | нет O | I (D-литералы) |
+| `<authentication>` | — | не эмитится | — | I: authenticate default provider отвечает Illegal context (D/O), async-форма не снята |
+
+## 5.1 Разделы 3/4/5 PDF: непокрытое с причиной
+
+| PDF/команда/сообщение | Go | Статус | Причина |
+|---|---|---|---|
+| `get_leverage_control` | нет | отсутствует | нет в таблице DLL 6.47 (45 имён) |
+| `moveorder`/`makeordown` | нет (pending) | blocked | payload/поддержка только по живой демо-заявке (T19) |
+| `portfolio_tplus`/`portfolio_forts` | нет | Unknown command в DLL | DLL эталон: имён нет в таблице 43/45; S-подтверждено |
+| options 149/150/151/153 | частично | S-негатив | гейт версии 0x45/доступ на проде; O-формы 149 есть, XML 150/151/153 — D/I |
+| RQ_HANDSHAKE (106) и криптопровайдер | нет | вне профиля | внешние CSP; authenticate даёт Illegal context (I) |
+| RPS/REPO RQ_MAIN records, `<negdeal>`/`<report>` | литералы | I | нет декодера записей/фикстур (rps.md) |
+| `<authentication>` async | нет | I | форма успеха/ошибки не снята (authenticate D) |
 
 ## 6. Тесты и фикстуры по подсистемам
 
