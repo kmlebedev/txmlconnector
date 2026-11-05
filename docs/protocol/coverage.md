@@ -40,9 +40,9 @@
 | 20 | positions: деньги/бумаги/FORTS | 4 | done | `client_positions.go`, `records/positions.go`, `position-*` |
 | 21 | get_forts_positions/get_client_limits | 4 | **partial** | `client_positions.go`, `records/limits.go`, `session/limits.go`; oracle `<clientlimits>` ждёт; RQ_FORTS_FIRM_MONEY 47 не реализован (формат I) |
 | 22 | portfolio-команды | 4 | **partial** | `client_portfolio.go`, `records/portfolio.go`, `xmlcompat` local render; O-фикстуры `portfolio-currency/mc-dll.xml`; остальные формы/типы — I (5f3ef49, 5bd73dc) |
-| 23 | max buy/sell, cln_sec_permissions, leverage | 5 | **stub** | каркас 6a57f75: `model/margin.go`, `client_margin.go`, I-ошибки; ждёт RE-2 |
-| 24 | news/get_old_news/get_news_body | 6 | **partial** | 0x35/0x36 парсеры+splitter, `<news_header>` O-побайтно, RQ_GETNEWS payloads (7484ffc); `<news_body>` — I (reply-механика, task-56) |
-| 25 | messages (R_MSG 0x01) | 6 | **done** | unsized 0x01, batch одного RQ_MAIN, `<messages>` O-побайтно (73a4acc/6cb9697) |
+| 23 | max buy/sell, cln_sec_permissions, leverage | 5 | **partial** | local render 3 команд + `<marketord>` (b29b757/6867d83); точная формула maxbuy/maxsell по R_SEC_RATE 0x0a (a217bc1); permissions/rates — I (FUN_18001a700) |
+| 24 | news/get_old_news/get_news_body | 6 | **partial** | 0x35/0x36 парсеры+splitter, `<news_header>` O-побайтно, RQ_GETNEWS payloads и MIN-id диапазон (7484ffc + fix), битый 0x36 package skip; `<news_body>` — I (task-56) |
+| 25 | messages (R_MSG 0x01) | 6 | **done** | unsized 0x01, batch одного RQ_MAIN, `<messages>` O-побайтно (73a4acc/6cb9697); `<date>` = WALL-время (fix после ревью) |
 | 26 | change_pass | 6 | **done** | RQ_CHANGE_PWD 3, payload/SHA-1, replies, fatal empty reply, local texts (7427b10); живьём не выполнялось (S-негатив) |
 | 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply, 149 O e2e (9b7204f); гейт версии 0x45 — I (поле не восстановлено), 153/150/151 mapping/XML — D/I |
 | 28 | RPS/REPO/отчёты | 8 | **partial** | payloads newrpsorder/newrepoorder/cancel O-побайтно, 6 команд, ошибки, D-literal XML (b9f305a); newmrepoorder/newreport4 и records/XML — I |
