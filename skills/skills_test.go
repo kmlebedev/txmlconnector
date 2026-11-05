@@ -23,6 +23,38 @@ var (
 	scriptRefRE = regexp.MustCompile("(?:[A-Za-z0-9_.-]+/)*scripts/[A-Za-z0-9_.-]+")
 )
 
+// tokenLikeFindings returns the token-like strings of a SKILL.md body. Long
+// snake_case identifiers (a lowercase/digit/'_' run with an underscore) are
+// vocabulary: tool names such as terminal_bot_create_from_backtest are longer
+// than a token but are not secrets, so they are skipped. Hex/base64 secrets keep
+// mixed case or digits without underscores and are still reported.
+func tokenLikeFindings(content string) []string {
+	findings := make([]string, 0, 1)
+	for _, token := range tokenLikeRE.FindAllString(content, -1) {
+		if isSnakeCaseIdentifier(token) {
+			continue
+		}
+		findings = append(findings, token)
+	}
+	return findings
+}
+
+// isSnakeCaseIdentifier reports whether token is a lowercase snake_case word
+// (letters, digits and underscores, at least one underscore).
+func isSnakeCaseIdentifier(token string) bool {
+	if !strings.Contains(token, "_") {
+		return false
+	}
+	for _, r := range token {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // maxDescription is the frozen frontmatter limit of the plan.
 const maxDescription = 1024
 
@@ -60,8 +92,8 @@ func TestSkillsFrontmatterValid(t *testing.T) {
 		if len(description) >= maxDescription {
 			t.Errorf("%s: description is %d chars, want < %d", path, len(description), maxDescription)
 		}
-		if token := tokenLikeRE.FindString(content); token != "" {
-			t.Errorf("%s: token-like string %q (secrets belong in .env, never in a SKILL)", path, token)
+		if findings := tokenLikeFindings(content); len(findings) > 0 {
+			t.Errorf("%s: token-like string %q (secrets belong in .env, never in a SKILL)", path, findings[0])
 		}
 		for _, reference := range scriptRefRE.FindAllString(content, -1) {
 			scriptPath := filepath.Join(dir, reference)
@@ -148,4 +180,33 @@ func unquoteScalar(value string) string {
 		}
 	}
 	return value
+}
+
+// TestTokenLikeFindingsDistinguishesSecretsFromToolNames is the regression for
+// the token-like scan: long snake_case tool names are vocabulary, while mixed
+// hex/base64 runs are still reported as possible secrets.
+func TestTokenLikeFindingsDistinguishesSecretsFromToolNames(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{name: "tool name", content: "вызови terminal_bot_create_from_backtest с id бота", want: false},
+		{name: "tool names in a list", content: "terminal_bot_promote, terminal_bot_create_from_backtest", want: false},
+		{name: "hex secret", content: "token: 9f8e7d6c5b4a39281706f5e4d3c2b1a09988776655443322", want: true},
+		{name: "base64 secret", content: "key=Q2hhbmdlTWVQbGVhc2VUaGlzSXNBU2VjcmV0MTIzNDU2Nzg5MA", want: true},
+		{name: "mixed base64 secret", content: "Zx9Qw8Er7Ty6Ui5Op4As3Df2Gh1Jk0Lm", want: true},
+		{name: "underscore secret with uppercase", content: "AbCdEfGhIjKlMnOpQrStUvWxYz012345_6789", want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			findings := tokenLikeFindings(tc.content)
+			if tc.want && len(findings) == 0 {
+				t.Fatalf("tokenLikeFindings(%q) = none, want a secret", tc.content)
+			}
+			if !tc.want && len(findings) != 0 {
+				t.Fatalf("tokenLikeFindings(%q) = %v, want none", tc.content, findings)
+			}
+		})
+	}
 }
