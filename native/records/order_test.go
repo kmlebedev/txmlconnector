@@ -51,6 +51,9 @@ func TestOrdersMatchDLL(t *testing.T) {
 	if board, ok := catalog.Board(parsed.BoardID); ok {
 		order.Board = board.Code
 	}
+	// The DLL renders <client> from the client store by the numeric id, not
+	// from the Z12 string (O: mutating the string changes nothing).
+	order.Client = "TESTCLIEN"
 	got := xmlcompat.OrdersXML([]model.Order{order})
 	want := strings.TrimSpace(string(loadPlainText(t, "order-new-dll.xml")))
 	if got != want {
@@ -76,6 +79,7 @@ func TestOrdersMatchDLL(t *testing.T) {
 	if board, ok := catalog.Board(modNew.BoardID); ok {
 		updated.Board = board.Code
 	}
+	updated.Client = "TESTCLIEN" // from the client store, as above
 	mod, err := records.ParseOrderModify(modRecs[1].Body)
 	if err != nil {
 		t.Fatalf("ParseOrderModify: %v", err)
@@ -133,8 +137,9 @@ func TestOrderParseShortBodies(t *testing.T) {
 	}
 }
 
-// TestOrderShortCancelledLive: status=6 (cancelled) bodies are shorter than the
-// linear 52-read scheme; ParseOrderNew returns Short (load must not fail).
+// TestOrderShortCancelledLive: the cancelled live body (status 9, mask 0x116)
+// used to be skipped as Short by the linear 52-read parser; the mask-driven
+// D layout reads it completely (TestOrderFinalCancelledLiveMatchesDLL).
 func TestOrderShortCancelledLive(t *testing.T) {
 	raw, err := os.ReadFile("testdata/order-short-cancelled-live.hex")
 	if err != nil {
@@ -148,7 +153,59 @@ func TestOrderShortCancelledLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseOrderNew short: %v", err)
 	}
-	if !out.Short {
-		t.Fatalf("short order = %+v", out)
+	if out.Short || out.Order.Status != 9 {
+		t.Fatalf("cancelled order = %+v", out)
+	}
+}
+
+// TestOrderFinalCancelledLiveMatchesDLL: a cancelled order of the load
+// snapshot (S: demo, 2026-11-05) is a full R_ORD_NEW body whose W mask (0x116)
+// selects value/settlecode (2), withdrawtime (4), the 0x10 pair and the 0x100
+// words (D: ReadOrderBody FUN_18039b390). The DLL renders it as
+// order-final-cancelled-dll.xml (S: the same order on the same session).
+func TestOrderFinalCancelledLiveMatchesDLL(t *testing.T) {
+	catalog := oracle.LoadCatalog(t, "main1-demo.hex.gz")
+	body, err := hex.DecodeString(strings.TrimSpace(string(loadPlainText(t, "order-short-cancelled-live.hex"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := records.ParseOrderNew(body)
+	if err != nil {
+		t.Fatalf("ParseOrderNew: %v", err)
+	}
+	if parsed.Short {
+		t.Fatal("cancelled order body must parse fully")
+	}
+	o := parsed.Order
+	if o.Status != 9 || o.OrderNo != 9480158 || o.Quantity != 1 || o.Balance != 1 ||
+		o.Value != (model.Decimal{Units: 28462, Scale: 2}) || o.SettleCode != "Y1" || o.BrokerRef != "" ||
+		o.Time != 1793873559 || o.WithdrawTime != 1793873564 || o.Condition != 0 || parsed.ClientID != 4096 {
+		t.Fatalf("order = %+v client id %d", o, parsed.ClientID)
+	}
+	if sec, ok := catalog.Security(o.SecID); ok {
+		o.SecCode = sec.SecCode
+	}
+	if board, ok := catalog.Board(parsed.BoardID); ok {
+		o.Board = board.Code
+	}
+	o.Client, o.Union = "TESTCLIENT", "TESTUNION" // the DLL takes them from the client store (O)
+	got := xmlcompat.OrdersXML([]model.Order{o})
+	want := strings.TrimSpace(string(loadPlainText(t, "order-final-cancelled-dll.xml")))
+	if got != want {
+		t.Fatalf("cancelled order\n got %s\nwant %s", got, want)
+	}
+}
+
+// TestOrderStatusNames: the DLL status enum (O: oracle injection of statuses
+// 0..15 into the cancelled live body, 2026-11-05).
+func TestOrderStatusNames(t *testing.T) {
+	want := map[int]string{0: "none", 1: "watching", 2: "disabled", 3: "expired", 5: "forwarding",
+		7: "failed", 8: "active", 9: "cancelled", 10: "removed", 11: "matched", 12: "refused",
+		13: "wait", 14: "inactive", 15: "erorr: unknown status"}
+	for status, name := range want {
+		got := xmlcompat.OrderXML(model.Order{Status: status})
+		if !strings.Contains(got, "<status>"+name+"</status>") {
+			t.Errorf("status %d: %s", status, got)
+		}
 	}
 }

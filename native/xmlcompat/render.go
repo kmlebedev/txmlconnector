@@ -487,11 +487,15 @@ func OrdersXML(orders []model.Order) string {
 	return b.String()
 }
 
-// OrderXML renders one <order transactionid> element.
+// OrderXML renders one <order transactionid> element. The conditional block
+// (accepttime, conditionvalue, validafter, validbefore) is present only for a
+// conditional order (O: order-new-dll.xml with Bid has it, the live cancelled
+// order with condition None has none of it).
 func OrderXML(order model.Order) string {
 	timeOfDay := func(sec int32) string {
 		return fmt.Sprintf("%02d:%02d:%02d", sec/3600, (sec%3600)/60, sec%60)
 	}
+	conditional := order.Condition != 0
 	var b strings.Builder
 	b.WriteString("<order transactionid=" + quoteAttr(strconv.FormatUint(order.TransactionID, 10)) + ">")
 	b.WriteString("<orderno>" + strconv.FormatUint(order.OrderNo, 10) + "</orderno>")
@@ -502,21 +506,30 @@ func OrderXML(order model.Order) string {
 	b.WriteString("<client>" + escape(order.Client) + "</client>")
 	b.WriteString("<status>" + orderStatusName(order.Status) + "</status>")
 	b.WriteString("<buysell>" + escape(string(order.BuySell)) + "</buysell>")
-	b.WriteString("<time>" + timeOfDay(order.Time) + "</time>")
-	b.WriteString("<accepttime>" + timeOfDay(order.AcceptTime) + "</accepttime>")
+	b.WriteString("<time>" + orderTime(order.Time) + "</time>")
+	if conditional {
+		b.WriteString("<accepttime>" + timeOfDay(order.AcceptTime) + "</accepttime>")
+	}
 	b.WriteString("<brokerref>" + escape(order.BrokerRef) + "</brokerref>")
-	b.WriteString("<value>0.0</value><accruedint>0.0</accruedint><settlecode></settlecode>")
+	b.WriteString("<value>" + orderAmount(order.Value) + "</value><accruedint>0.0</accruedint>")
+	b.WriteString("<settlecode>" + escape(order.SettleCode) + "</settlecode>")
 	b.WriteString("<balance>" + strconv.FormatInt(order.Balance, 10) + "</balance>")
 	b.WriteString("<price>" + orderAmount(order.Price) + "</price>")
 	b.WriteString("<quantity>" + strconv.FormatInt(order.Quantity, 10) + "</quantity>")
 	b.WriteString("<hidden>0</hidden>")
 	b.WriteString("<yield>" + orderAmount(order.Yield) + "</yield>")
-	b.WriteString("<withdrawtime>0</withdrawtime>")
+	withdraw := "0"
+	if order.WithdrawTime != 0 {
+		withdraw = orderTime(order.WithdrawTime)
+	}
+	b.WriteString("<withdrawtime>" + withdraw + "</withdrawtime>")
 	b.WriteString("<condition>" + orderConditionName(order.Condition) + "</condition>")
-	b.WriteString("<conditionvalue>" + orderAmount(order.ConditionValue) + "</conditionvalue>")
-	b.WriteString("<validafter>" + timeOfDay(order.ValidAfter) + "</validafter>")
-	b.WriteString("<validbefore>" + timeOfDay(order.ValidBefore) + "</validbefore>")
-	b.WriteString("<maxcomission>0.0</maxcomission><within_pos>true</within_pos>")
+	if conditional {
+		b.WriteString("<conditionvalue>" + orderAmount(order.ConditionValue) + "</conditionvalue>")
+		b.WriteString("<validafter>" + timeOfDay(order.ValidAfter) + "</validafter>")
+		b.WriteString("<validbefore>" + timeOfDay(order.ValidBefore) + "</validbefore>")
+	}
+	b.WriteString("<maxcomission>0.0</maxcomission><within_pos>" + strconv.FormatBool(order.WithinPos) + "</within_pos>")
 	b.WriteString("<result>" + escape(order.Result) + "</result>")
 	b.WriteString("</order>")
 	return b.String()
@@ -532,18 +545,32 @@ func orderAmount(d model.Decimal) string {
 	return text
 }
 
-// orderStatusName maps the DLL order status enum (only 1/2 are oracle-proven).
-func orderStatusName(status int) string {
-	switch status {
-	case 0:
-		return "none"
-	case 1:
-		return "watching"
-	case 2:
-		return "disabled"
-	default:
-		return strconv.Itoa(status)
+// orderTime renders an order time: server-local seconds since the epoch as
+// "dd.mm.yyyy hh:mm:ss" (S/O: live orders), seconds of the day as "hh:mm:ss"
+// (O: 11 -> 00:00:11, 7016 -> 01:56:56). The one-day boundary is I.
+func orderTime(sec int32) string {
+	if sec >= 86400 {
+		return time.Unix(int64(sec), 0).UTC().Format("02.01.2006 15:04:05")
 	}
+	return fmt.Sprintf("%02d:%02d:%02d", sec/3600, (sec%3600)/60, sec%60)
+}
+
+// orderStatusNames is the DLL order status enum (O: oracle injection of
+// statuses 0..15, docs/protocol/orders.md). 4 and 6 (denied/rejected by the D
+// branch names) carry extra fields and were not rendered by the oracle body.
+var orderStatusNames = map[int]string{
+	0: "none", 1: "watching", 2: "disabled", 3: "expired", 4: "denied", 5: "forwarding",
+	6: "rejected", 7: "failed", 8: "active", 9: "cancelled", 10: "removed", 11: "matched",
+	12: "refused", 13: "wait", 14: "inactive",
+}
+
+// orderStatusName maps the status; the DLL text for any other value keeps its
+// typo (O: status 15).
+func orderStatusName(status int) string {
+	if name, ok := orderStatusNames[status]; ok {
+		return name
+	}
+	return "erorr: unknown status"
 }
 
 // orderConditionName maps the condition enum (Bid is oracle-confirmed).
@@ -554,7 +581,7 @@ func orderConditionName(condition int) string {
 	case 3:
 		return "Ask"
 	case 0:
-		return ""
+		return "None" // O: the live cancelled order
 	default:
 		return strconv.Itoa(condition)
 	}

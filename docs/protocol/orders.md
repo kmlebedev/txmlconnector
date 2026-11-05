@@ -97,49 +97,55 @@ TESTCLIENT). Сырые дампы/логи — только в `.re-run/`.
 **Правило:** payload содержит числовой id клиента (секрет) — в фикстурах он заменён dummy-значением
 той же packed-длины; тест должен собирать payload из своего каталога, а не из фикстуры байт-в-байт.
 
-## R_ORD_NEW (0x03\*) — D + O
+## R_ORD_NEW (0x03\*) — D + O + S
 
 Размерная запись; обработчик `FUN_1803c1b20` (лог `ReadOneOrder: …`). Тело: `L order_id`
-(→ `<order transactionid="…">`), затем тело заявки — `FUN_18039b390` (`ReadOrderBody`), 52 чтения
-в порядке (D): `W,W,G,B,B,L,W,L,L,Z20,B,L,L,L,B,L,G,Z12,L,G,B,L,L,Z12,L,B,Z12,L,L,L,B,L,G,B,
-Z512,L,B,B,B,B,B,L,L,L,G,G,G,B,B,W,W`. Часть чтений условная (по статусу: ветки
-`OS_DENIED`/`OS_REJECTED` читают дополнительные поля — D).
+(→ `<order transactionid="…">`), затем `ReadOrderBody` (`FUN_18039b390`). **Чтения зависят от
+`W mask` после цены, от байта условия и от статуса** (D, разобрано 2026-11-05 для A8; прежняя
+«линейная 52-чтения» схема была неверна и совпадала с O-фикстурой только случайно):
 
-**Oracle (O):** инъекция сконструированной записи 0x03 через `replay-server` даёт колбэк
-`<orders><order transactionid="…">…</order></orders>`; форма и порядок элементов сняты с DLL
-(см. `order-new-dll.xml`). Заявка отдаётся только если её числовой client id (третье `G` тела)
-совпадает с клиентом сессии — иначе DLL молча отбрасывает запись (O). **Точная таблица полей тела 0x03 (D+O; номера — после `L order_id`):**
+```
+W secid, W board, G client_id, B buysell, B (+0xd, не в XML), L price, W mask,
+[mask&1: L yield], L quantity, Z20 brokerref, B condition,
+[condition≠0: L conditionvalue, L validafter, L validbefore, B within_pos(I), L (+0x13c; читается при PRO# ≥ 0x3f)],
+[mask&2: G value], Z12 client, L accepttime, G orderno, B status, L time, L balance,
+Z12 (+0x1e5), L (+0x3c), [mask&2: B, Z12 settlecode], [mask&4: L withdrawtime],
+[mask&8: L], [mask&0x10: L, B], [mask&0x20: L, G],
+[status 4 (OS_DENIED): B + блок GetResume — не восстановлен; status 6 (OS_REJECTED): Z512 → result],
+[mask&0x40: L], [mask&0x80: B], B, B, B, B, B(+0x21a), [B(+0x21a)=='R': L, L, L, G, G, G], B, B,
+[mask&0x100: W, W]
+```
 
-| № | Тип | Смещение | XML-элемент (O) |
-|---|---|---|---|
-| 1 | W | +0x2 | `<secid>` |
-| 2 | W | +0x4 | `<board>` |
-| 3 | G | +0x8 | служебный id |
-| 4 | B | +0xc | `<buysell>` |
-| 5 | B | +0xd | `<status>` (1 → watching; в 0x10 — новый статус) |
-| 6 | L | +0x24 | `<price>` = v/100 (10000 → 100.0) |
-| 7 | W | локальная | не в XML |
-| 8 | L | +0x28 | `<yield>` = v/100 (555 → 5.55) |
-| 9 | L | +0x30 | `<quantity>` (333) |
-| 10 | Z20 | +0xe | `<seccode>` (из справочника) |
-| 11–17 | B/L/G | +0x12a, +0x12c, +0x130, +0x134, +0x138, +0x13c, +0xf8 | `<conditionvalue>` (12: v/100 → 0.07), `<validafter>` (13: сек, 8 → 00:00:08), `<validbefore>` (14: 9 → 00:00:09), остальное — I |
-| 18 | Z12 | +0x1d8 | `<client>` |
-| 19 | L | +0x1ac | `<accepttime>` (сек: 999 → 00:16:39) |
-| 20 | G | +0x1a0 | `<orderno>` (4242) |
-| 21 | B | +0x1a8 | — |
-| **22** | **L** | **+0x1c0** | **`<time>` (сек: 11 → 00:00:11)** |
-| **23** | **L** | локальная (`local_3b0`) | **`<balance>` (1)** |
-| 24 | Z12 | +0x1e5 | `<brokerref>`/`<settlecode>` |
-| 25–52 | … | +0x3c, +0x41, +0x62, +0x1c4, +0x1b4, +0x14c, +0x150, +0x154, +0x1b8, +0x1f2, Z512 лок., +0x38, +0x161, +0x215…+0x21a, +0xc4, +0xa4, +0xa0, +0x90, +0x98, +0x220, +0x228, +0x229, +0x22a, +0x22c | остальные (I) |
+| Поле XML | Источник | Статус |
+|---|---|---|
+| `orderno`, `status`, `time`, `balance`, `withdrawtime`, `value`, `settlecode`, `price`, `quantity`, `buysell` | поля выше | O (мутационный оракул: каждое поле живой записи меняли по одному, 2026-11-05) |
+| `client`, `union` | из хранилища клиентов по `G client_id`; строка Z12 в XML не идёт | O (мутация Z12 не меняет `<client>`) |
+| `brokerref` | `Z20` (+0xe) | O (обе фикстуры) |
+| `time`/`withdrawtime` | секунды: ≥ суток → `дд.мм.гггг чч:мм:сс` (секунды эпохи по серверному времени), иначе `чч:мм:сс`; `withdrawtime` = 0 → `0` | O; граница «сутки» — I |
+| блок условия (`accepttime`, `conditionvalue`, `validafter`, `validbefore`) | выводится только при condition ≠ 0 | O (Bid — есть, None — нет) |
+| `condition` | 0 → `None`, 1 → `Bid`, 3 → `Ask` | O для None/Bid |
+| `within_pos` | B (+0x138) блока условия; без условия — `false` | I (согласуется с обеими O-формами) |
+| `accruedint`, `hidden`, `maxcomission`, `yield` без mask&1 | `0.0`/`0`/`0.0`/`0.0` | O (константы в обеих формах) |
 
-**O-проверка:** один 0x03-рекорд (байты `order-new-inject.hex`) даёт у DLL `time=00:00:11`,
-`balance=1`; запись 0x03+0x10(mask=1) меняет **только** `<status>` (watching → disabled) и
-`<result>` («{37} Заявка отменена»), time/balance не трогает. Пара `order-new-inject.hex`/
-`order-new-dll.xml` была несогласована (XML снят с другой инъекции: time=1/balance=11) — **XML
-исправлен**; пара `order-modify-*` верна.
+**Статусы (O, инъекция статусов 0–15 в живое тело):** 0 none, 1 watching, 2 disabled, 3 expired,
+5 forwarding, 7 failed, 8 active, 9 cancelled, 10 removed, 11 matched, 12 refused, 13 wait,
+14 inactive; прочие — `erorr: unknown status` (опечатка DLL). 4 и 6 — ветки OS_DENIED/OS_REJECTED
+с дополнительными полями: тело без них DLL отбрасывает; имена denied/rejected — I. Заявка со
+статусом 4 у `native` помечается `Short` и пропускается (блок GetResume не восстановлен).
 
-**Фикстуры:** `order-new-inject.hex` (124 Б, обезличено: client-строки → `TESTCLIEN`, числовой
-client id/orderno → синтетические) + `order-new-dll.xml` (ожидаемый XML; снят с DLL до маскирования).
+**Загрузка (S, демо, A8):** заявки дня в конечных статусах приходят в снапшоте полными 0x03 (mask
+0x116); DLL отдаёт их **одним** `<orders>` сразу после `<client>` и до `<positions>`. Раньше
+`native` их пропускал (`Short`) — исправлено; колбэк нашей библиотеки на живой загрузке совпадает с
+DLL побайтно. Фильтр по клиенту прежний: заявка чужого `client_id` отбрасывается (O).
+
+**Оракул (O):** инъекция `order-new-inject.hex` даёт `order-new-dll.xml`; инъекция живой снятой
+заявки — `order-final-cancelled-dll.xml`.
+
+**Фикстуры:** `order-new-inject.hex` (обезличено: client-строки → `TESTCLIEN`, числовой client id →
+4096). При обезличивании 2026-11-05 исправлено: первые три байта строки клиента Z12 (12 символов,
+без нуля внутри) прежде были заменены на `020001` (с нулём) — теперь `TST`; то же в
+`order-modify-inject.hex`. `order-short-cancelled-live.hex` — живая снятая заявка (S, client id → 4096,
+логин → `TESTLOGI`), `order-final-cancelled-dll.xml` — её XML у DLL (client/union обезличены).
 
 ## R_TRD (0x04\*) — D + O
 
