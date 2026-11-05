@@ -37,7 +37,7 @@ const (
 // tableNameRE accepts "table" and "database.table" SQL identifiers only: the
 // table name is interpolated into the INSERT statement, so it must not be able
 // to carry SQL.
-var tableNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(.[A-Za-z_][A-Za-z0-9_]*)?$`)
+var tableNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`)
 
 // Client is a ClickHouse HTTP endpoint. It is safe for concurrent use.
 type Client struct {
