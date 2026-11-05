@@ -46,7 +46,7 @@
 | 26 | change_pass | 6 | **done** | RQ_CHANGE_PWD 3, payload/SHA-1, replies, fatal empty reply, local texts (7427b10); живьём не выполнялось (S-негатив) |
 | 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply, 149 O e2e (9b7204f); гейт версии 0x45 — I (поле не восстановлено), 153/150/151 mapping/XML — D/I |
 | 28 | RPS/REPO/отчёты | 8 | **partial** | payloads newrpsorder/newrepoorder/cancel O-побайтно, 6 команд, ошибки, D-literal XML (b9f305a); newmrepoorder/newreport4 и records/XML — I |
-| 29 | XML-коннектор целиком, native backend | 9 | **partial** | `dllCommands` = 45 имён (T28); matrix-тест и pending {moveorder,makeordown,set_csp,authenticate} (043d7c9); `server.Backend dll|native` + `TC_BACKEND`, `TC_BACKEND=native make server` без Wine (043d7c9/5aea9d5); RE-4/errors.md — pending |
+| 29 | XML-коннектор целиком, native backend | 9 | **partial** | `dllCommands` = 45 имён; matrix-тест и pending {moveorder,makeordown} (043d7c9/6aa832f); `server.Backend dll|native` + `TC_BACKEND`, `TC_BACKEND=native make server` без Wine (043d7c9/5aea9d5); TestServerErrorTexts + errors.md сделаны (6aa832f); RE-4 на демо — pending после S |
 | 30 | Матрица покрытия, soak, выпуск | 9 | **in progress** | этот документ; soak/выпуск — после 29 |
 
 Фазы 0–2 закрыты по AGENTS.md (коммиты в истории ветки, PR #47/#48 — в main).
@@ -98,6 +98,8 @@
 | get_option_families | done | RQ_OPTION_FAMILIES 149 | O/D | `TestConnectorOptionFamilies`, `option-families-request/reply-*.hex` | payload 001a; пустой/непустой C-string reply (O); XML — D/I |
 | get_family_strikes | partial (I) | RQ_FAMILY_STRIKES 153 | D/I | `TestConnectorFamilyStrikesErrors` | mat_date ошибки D+O; family mapping и гейт 0x45 — I, запрос не отправляется |
 | get_options | partial (I) | RQ_CERTAIN_OPTIONS 151 | D/I | `TestConnectorGetOptions` | Z25 payload и local «No seccodes found»; XML/данные I |
+| set_csp | done | — (local) | D/O | `TestCommandDispatch`, matrix | `<csp type>`: NONE/MS/CP/SC/MP/MPSSL/CPBB/CPBB_2012_*; без csp — success; при соединении — CP1251 disconnect-текст; CSP не устанавливается (I, вне T29) |
+| authenticate | partial (I) | — (local) | D/O | `TestCommandDispatch`, matrix | по умолчанию «Illegal context for "sendpin" command»; настроенный провайдер/pin/async-колбэки — I |
 | newrpsorder | done | RQ_TRANSACT 14 (TRN 0x04) | O/D | `TestRPSPayloads`, `rps-transact-newrpsorder.hex` | 30-Б payload побайтно; repoterm/reporate offsets I |
 | newrepoorder | done | RQ_TRANSACT 14 (TRN 0x0e) | O/D | `TestRPSPayloads`, `rps-transact-newrepoorder.hex` | 39-Б payload побайтно; repo-поля I |
 | newmrepoorder | partial (I) | RQ_TRANSACT 14 | D/I | `TestRPSErrors` | payload не восстановлен -> explicit I |
@@ -107,7 +109,7 @@
 
 ### 2.3 Не реализовано в Connector (default → message not implemented)
 
-authenticate, set_csp (внешние криптопровайдеры; T29), makeordown, moveorder (4 имени).\nСоответствие задачам: T19 (moveorder/makeordown). Расхождение 45 vs 43 имён закрыто: T28 добавил `newreport4`/`cancelreport4`.
+makeordown, moveorder (2 имени; T19 — ждут живую S-серию).
 
 ## 3. Записи RQ_MAIN (splitter `records.Records` + декодеры `native/events*`)
 
