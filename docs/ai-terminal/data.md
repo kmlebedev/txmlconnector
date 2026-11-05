@@ -226,10 +226,10 @@ go run ./cmd/md-recorder
 
 ```bash
 export GOCACHE="$PWD/.cache/go-build"
-go test -race ./terminal/chstore ./terminal/recorder ./terminal/feed
+go test -race ./terminal/chstore ./terminal/recorder ./terminal/feed ./terminal/vintage
 go test -race ./terminal/agent -run 'News'
 go build ./cmd/md-recorder
-gofmt -l terminal/chstore terminal/recorder terminal/feed terminal/agent/tools_news.go cmd/md-recorder
+gofmt -l terminal/chstore terminal/recorder terminal/feed terminal/vintage terminal/agent/tools_news.go cmd/md-recorder
 go vet ./... && go build ./...
 make verify
 ```
@@ -253,3 +253,66 @@ make verify
   [news.md](../protocol/news.md) (**S/D/O**), а семантика `first_seen` — контракт рекордера (**I**).
   `get_news` против реального ClickHouse не гонялся: SQL и разбор ответа проверены на
   `httptest`-заглушке.
+
+## 7. Винтажные (point-in-time) данные: макро, календарь, новости
+
+Пакет [`terminal/vintage`](../../terminal/vintage/vintage.go) — слой доступа исследовательских задач
+(фазы E–F) к **read-only** витринам проекта `clickhouse-import-rosstat` через `terminal/chstore`.
+Никаких новых зависимостей: только `net/http`; все моменты времени — UTC.
+
+```go
+type Store interface {
+    AsOf(ctx context.Context, series string, asOf time.Time) ([]Point, error)
+    Releases(ctx context.Context, from, to time.Time, categories ...string) ([]Release, error)
+    News(ctx context.Context, from, to time.Time, sources ...string) ([]NewsItem, error)
+}
+type Point struct { Series string; Ref time.Time; Value float64; PublishedAt time.Time; Vintage string }
+type Release struct { At time.Time; Category, Title string; Country string; Exact bool }
+type NewsItem struct { At time.Time; Source, Title string; Sentiment float64; Tags []string }
+```
+
+- **Правило as-of — строгое:** `AsOf` возвращает версию, опубликованную **до** `asOf`
+  (`published_at < asOf`); значение, опубликованное ровно в `asOf`, в срез не входит. Три пути
+  (в порядке приоритета, [`vintage.go`](../../terminal/vintage/vintage.go)):
+  1. параметризованная витрина `v_point_in_time_asof(as_of='YYYY-MM-DD')` — винтажные релизы
+     `cbr_dip_bulletin` (например `unemployment_sa`): внутри витрины `argMax(value, (published_at,
+     vintage))` по каждому отчётному периоду. Аргумент витрины — SQL-литерал, поэтому дата
+     форматируется кодом и никогда не приходит из пользовательского текста; серия связывается
+     через `{series:String}`;
+  2. join `macro_series × series_publication` — ряды с публикационными датами
+     (`published_at DateTime('Europe/Moscow')`, конвертируется в UTC в SQL); граница строгая;
+  3. `macro_series` без винтажного слоя — последние известные значения, помеченные
+     `Vintage = vintage.VintageLatestOnly`; это **не** as-of срез, потребитель обязан выдать
+     `vintage.LatestOnlyWarning(series)` и может отказаться от ряда (Review Focus 1/14).
+- **`Point.Ref`** — отчётный период значения (UTC-полночь даты источника), `PublishedAt` — момент,
+  когда версия стала публичной (UTC), `Vintage` — id версии источника (или `latest-only`).
+- **`Releases`** читает `v_events_calendar` (триггеры FOMC/CPI/NFP/ЦБ/EIA/…) и
+  `v_cbr_publication_calendar` (план публикаций ЦБ). Время в источниках — **местное МСК**:
+  `At` нормализуется в UTC (13:30 МСК → 10:30 UTC); строка только с датой получает `Exact=false`
+  и полночь МСК. Категории приводятся к контракту (`cbr`→`cbr_rate`, `cpi`→`us_cpi`,
+  `nfp`→`us_nfp`, `fomc`→`fomc`; публикации ЦБ — по теме/заголовку: ключевая ставка→`cbr_rate`,
+  инфляция→`ru_cpi`, ВВП→`ru_gdp`), `Country` — `RU`/`US`, фильтр `categories` применяется
+  после маппинга; окно `[from, to]` — по UTC-инстантам.
+- **`News`** читает `v_news_events` (витрина уже join'ит `news_annotation`): `At` из UTC-нормализованного
+  `date`, `Sentiment` — LLM-тональность −1..1 (0 = разметки нет, NULL в источнике), `Tags` —
+  `"dimension:tag:direction"` из `Array(Tuple)`. Окно — `[from, to]` UTC, `sources` — фильтр
+  по ленте (`interfax`, `rbc`, …) через `param_srcN`-биндинги.
+- **Wiring:** `cmd/terminal/wiring.go` читает read-only ClickHouse из `CLICKHOUSE_URL`
+  (`MD_CLICKHOUSE_URL` важнее; креды `CLICKHOUSE_USER/PASSWORD` / `MD_CLICKHOUSE_*`) и отдаёт
+  `vintageStoreFromEnv() vintage.Store` (nil без endpoint: терминал работает, исследовательские
+  данные недоступны). Тот же `chstoreFromEnv()` создаёт клиента для `get_news` (md.news).
+- **Тесты** (httptest-заглушка ClickHouse, без сети): `TestVintageAsOfExcludesLaterRevision`
+  (Review Focus 1: два релиза `unemployment_sa` за месяц — на дату между релизами первая версия,
+  на позднюю — ревизия, на дату публикации — пусто из-за строгой границы),
+  `TestVintageSeriesPublicationPath`, `TestVintageLatestOnlyFlagged`,
+  `TestReleasesNormalizedToUTC` (13:30 МСК → 10:30 UTC, date-only → полночь МСК и `Exact=false`),
+  `TestReleasesReadsEventsCalendar`, `TestNewsFiltersAndDecodes`; `TestVintageStoreFromEnv` в
+  `cmd/terminal`.
+
+**Не проверено (I):** живого ClickHouse нет (нет согласия пользователя на подъём/запись), поэтому
+SQL и его аргументы проверены только на httptest-заглушках; схемы витрин
+(`v_point_in_time_asof`, `series_publication`, `v_events_calendar`, `cbr_publication_calendar`,
+`v_news_events`, `news_annotation`) взяты из соседнего проекта `clickhouse-import-rosstat`
+(код + ARCHITECTURE §6), а не из живого сервера — расхождение с фактической базой возможно и
+выяснится при первом живом прогоне. Имена рядов/категорий в реальных данных не сверялись.
+

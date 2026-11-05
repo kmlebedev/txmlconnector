@@ -283,6 +283,30 @@ func TestNewsStoreFromEnv(t *testing.T) {
 	}
 }
 
+// TestVintageStoreFromEnv checks the point-in-time store wiring: enabled only
+// with a ClickHouse endpoint (the MD_* recorder variables win over the generic
+// CLICKHOUSE_* ones), nil otherwise so the terminal still starts offline.
+func TestVintageStoreFromEnv(t *testing.T) {
+	t.Setenv("MD_CLICKHOUSE_URL", "")
+	t.Setenv("CLICKHOUSE_URL", "")
+	if store := vintageStoreFromEnv(); store != nil {
+		t.Fatalf("vintageStoreFromEnv without a URL = %T, want nil", store)
+	}
+	t.Setenv("CLICKHOUSE_URL", "http://127.0.0.1:8123")
+	if store := vintageStoreFromEnv(); store == nil {
+		t.Fatal("vintageStoreFromEnv with CLICKHOUSE_URL = nil, want the vintage store")
+	}
+	t.Setenv("MD_CLICKHOUSE_URL", "http://127.0.0.2:8123")
+	t.Setenv("MD_CLICKHOUSE_USER", "reader")
+	t.Setenv("MD_CLICKHOUSE_PASSWORD", "test-secret")
+	if store := vintageStoreFromEnv(); store == nil {
+		t.Fatal("vintageStoreFromEnv with MD_CLICKHOUSE_URL = nil")
+	}
+	if client := chstoreFromEnv(); client == nil {
+		t.Fatal("chstoreFromEnv = nil, want the shared read-only client")
+	}
+}
+
 // TestIsLoopbackAddr checks the bind-address warning helper.
 func TestIsLoopbackAddr(t *testing.T) {
 	cases := map[string]bool{
