@@ -68,7 +68,8 @@ make cabi-conformance  # C5: сценарии lifecycle/текстов прот�
 (в `bin/` копируется как `txmlconnector.h`). Релизы под linux amd64/arm64, windows amd64,
 macOS arm64/amd64 собирает GitHub Actions workflow
 [`.github/workflows/compat-release.yml`](.github/workflows/compat-release.yml): на тег `compat-v*`
-публикуется Release с библиотеками, заголовком и `SHA256SUMS`. Версия drop-in — `6.47.2.26.4`
+публикуется один Release с пятью архивами `txmlconnector-<target>.{tar.gz,zip}` (канонические
+библиотеки + header + VERSION.txt + README) и `SHA256SUMS`. Версия drop-in — `6.47.2.26.4`
 (override `TXC_VERSION`); точные тексты `InitializeEx`/`GetServiceInfo`/`SetLogLevel` ещё
 снимаются с DLL (RE-2), до этого — явные заглушки с TODO.
 
