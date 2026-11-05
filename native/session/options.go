@@ -75,6 +75,9 @@ func OptionsReply(payload []byte) (string, error) {
 }
 
 func optionsReplyError(payload []byte) error {
+	if len(payload) == 0 {
+		return nil // S: 151 answered with an empty payload, DLL success
+	}
 	message, err := OptionsReply(payload)
 	if err != nil {
 		return err

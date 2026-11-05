@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
@@ -179,5 +180,31 @@ func TestMessageTextCDATA(t *testing.T) {
 	want := "<messages><message><date>23:46:40</date><urgent>N</urgent><from>A</from><text><![CDATA[a]]]]><![CDATA[>b]]></text></message></messages>"
 	if got := xmlcompat.MessagesXML([]model.Message{item}); got != want {
 		t.Fatalf("MessagesXML = %s, want %s", got, want)
+	}
+}
+
+// TestMessageCP1251Text: R_MSG strings are CP1251 on the wire (S: production
+// 2026-11-05, a TradeServer notice); the callback must be UTF-8 or the gRPC
+// server cannot send it ("string field contains invalid UTF-8").
+func TestMessageCP1251Text(t *testing.T) {
+	srv := newRunServer(t)
+	messageRqTime(t, srv, 1762300000, -180)
+	var w wire.Writer
+	w.Byte(records.TagMessage)
+	w.Byte(1)
+	w.String("TradeServer", 20)
+	w.Int32(43755)
+	w.Raw([]byte{0xc2, 0xf0, 0xe5, 0xec, 0xff, 0}) // "Время"
+	srv.Snapshot = append(clientSnapshot(t), w.Bytes()...)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	got := rec.next(t, "<messages")
+	if !strings.Contains(got, "<![CDATA[Время]]>") || !utf8.ValidString(got) {
+		t.Fatalf("messages = %q", got)
 	}
 }

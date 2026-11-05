@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -71,7 +72,7 @@ func re4Sequence(client *tcClient.TCClient) error {
 	}
 	if err := client.SendCommand(tcCommands.Command{
 		Id:        "subscribe",
-		AllTrades: tcCommands.SubAllTrades{Items: []int{26}},
+		AllTrades: tcCommands.SubAllTrades{Items: []int{re4SecID()}},
 	}); err != nil {
 		return fmt.Errorf("subscribe: %w", err)
 	}
@@ -79,6 +80,15 @@ func re4Sequence(client *tcClient.TCClient) error {
 		return fmt.Errorf("disconnect: %w", err)
 	}
 	return nil
+}
+
+// re4SecID is the alltrades secid of the RE-4 subscribe step (TC_RE4_SECID;
+// secids differ per server, 26 is SBER on the demo server).
+func re4SecID() int {
+	if v, err := strconv.Atoi(os.Getenv("TC_RE4_SECID")); err == nil && v > 0 {
+		return v
+	}
+	return 26
 }
 
 // real4ConnectTimeout bounds the asynchronous connect of the RE-4 sequence.

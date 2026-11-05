@@ -1068,14 +1068,10 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		return success(), nil
 	case "get_option_families":
 		var req struct {
-			SecID    int    `xml:"secid,attr"`
-			Board    string `xml:"board,attr"`
-			SecCode  string `xml:"seccode,attr"`
-			Security *struct {
-				SecID   int    `xml:"secid"`
-				Board   string `xml:"board"`
-				SecCode string `xml:"seccode"`
-			} `xml:"security"`
+			SecID    int                 `xml:"secid,attr"`
+			Board    string              `xml:"board,attr"`
+			SecCode  string              `xml:"seccode,attr"`
+			Security *optionSecurityElem `xml:"security"`
 		}
 		if err := xml.Unmarshal([]byte(command), &req); err != nil {
 			return failure(err.Error()), nil
@@ -1086,23 +1082,10 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		if client == nil {
 			return failure(msgNeedsConnection), nil
 		}
-		secID, symbol, ok := 0, model.Symbol{}, false
-		if req.Security != nil {
-			switch {
-			case req.Security.SecID > 0:
-				symbol, ok = client.SymbolBySecID(uint16(req.Security.SecID))
-			case req.Security.Board != "":
-				symbol, ok = client.SymbolByBoard(req.Security.Board, req.Security.SecCode)
-			}
-		} else if req.SecID > 0 {
-			symbol, ok = client.SymbolBySecID(uint16(req.SecID))
-		} else if req.Board != "" {
-			symbol, ok = client.SymbolByBoard(req.Board, req.SecCode)
-		}
+		symbol, ok := optionUnderlying(client, req.SecID, req.Board, req.SecCode, req.Security)
 		if !ok {
 			return failure("unknown security"), nil
 		}
-		_ = secID
 		if _, err := client.OptionFamilies(ctx, symbol); err != nil {
 			if message, ok := optionsServerMessage(err); ok {
 				return failure(message), nil
@@ -1115,7 +1098,11 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		return success(), nil
 	case "get_family_strikes":
 		var req struct {
-			MatDate *string `xml:"mat_date"`
+			SecID    int                 `xml:"secid,attr"`
+			Board    string              `xml:"board,attr"`
+			SecCode  string              `xml:"seccode,attr"`
+			Security *optionSecurityElem `xml:"security"`
+			MatDate  *string             `xml:"mat_date"`
 		}
 		if err := xml.Unmarshal([]byte(command), &req); err != nil {
 			return failure(err.Error()), nil
@@ -1129,13 +1116,19 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		if req.MatDate == nil || *req.MatDate == "" {
 			return failure("No mat_date found"), nil
 		}
-		if _, err := time.Parse("02.01.2006", *req.MatDate); err != nil {
+		matDate, err := time.Parse("02.01.2006", *req.MatDate)
+		if err != nil {
 			return failure(fmt.Sprintf("Failed to parse mat_date=%s", *req.MatDate)), nil
 		}
-		// Below the protocol gate the DLL refuses locally (D+S); above it the
-		// family-name -> (secid, family_id) mapping is not recovered (D:
-		// internal family store, options.md I), so no guessed request is sent.
-		if _, err := client.FamilyStrikes(ctx, ""); err != nil {
+		symbol, ok := optionUnderlying(client, req.SecID, req.Board, req.SecCode, req.Security)
+		if !ok {
+			return failure("unknown security"), nil
+		}
+		// The strikes arrive as R_STRIKES and render as <family_strikes> (S).
+		if err := client.FamilyStrikes(ctx, symbol, matDate); err != nil {
+			if message, ok := optionsServerMessage(err); ok {
+				return failure(message), nil
+			}
 			return failure(err.Error()), nil
 		}
 		return success(), nil
@@ -1611,8 +1604,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.TicksXML([]model.Tick{*e}))
 			case *model.Ticks:
 				c.emit(xmlcompat.TicksXML(e.Items))
-			case *model.OptionFamily:
-				c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{*e}))
+			case *model.OptionFamilies:
+				c.emit(xmlcompat.OptionFamiliesXML(*e))
 			case *model.OptionStrikes:
 				c.emit(xmlcompat.FamilyStrikesXML(*e))
 			case *model.EndOfFamily:
@@ -1727,8 +1720,8 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 				if ticks, ok := ev.(*model.Ticks); ok {
 					c.emit(xmlcompat.TicksXML(ticks.Items))
 				}
-				if family, ok := ev.(*model.OptionFamily); ok {
-					c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{*family}))
+				if families, ok := ev.(*model.OptionFamilies); ok {
+					c.emit(xmlcompat.OptionFamiliesXML(*families))
 				}
 				if strikes, ok := ev.(*model.OptionStrikes); ok {
 					c.emit(xmlcompat.FamilyStrikesXML(*strikes))
@@ -1819,7 +1812,9 @@ func (c *Connector) subscribe(ctx context.Context, command string, on bool) (str
 			p, hasPit := sec.DefaultPit()
 			board, hasBoard := client.Catalog().Board(p.Board)
 			if !ok || !hasPit || !hasBoard {
-				return nil, fmt.Errorf("unknown secid %d", id)
+				// S: the DLL accepts an unknown <alltrades> secid with
+				// success="true"; what it sends for it is I, so it is skipped.
+				continue
 			}
 			symbols = append(symbols, model.Symbol{Board: board.Code, SecCode: sec.SecCode})
 		}
@@ -1977,6 +1972,28 @@ func (c *Connector) statusLocked(connected bool) string {
 	return b.String()
 }
 
+// optionSecurityElem is the <security> element of the option commands.
+type optionSecurityElem struct {
+	SecID   int    `xml:"secid"`
+	Board   string `xml:"board"`
+	SecCode string `xml:"seccode"`
+}
+
+// optionUnderlying resolves the underlying of an option command: the
+// <security> element, else the command attributes (FUN_1800c0720).
+func optionUnderlying(client *Client, secID int, board, secCode string, sec *optionSecurityElem) (model.Symbol, bool) {
+	if sec != nil {
+		secID, board, secCode = sec.SecID, sec.Board, sec.SecCode
+	}
+	switch {
+	case secID > 0:
+		return client.SymbolBySecID(uint16(secID))
+	case board != "":
+		return client.SymbolByBoard(board, secCode)
+	}
+	return model.Symbol{}, false
+}
+
 // connectErrorXML reports a failed connect as the DLL does: connected="error"
 // with the server's login message, or a generic text.
 func connectErrorXML(err error) string {
@@ -2016,7 +2033,8 @@ func failure(message string) string {
 func escapeText(s string) string {
 	var b strings.Builder
 	_ = xml.EscapeText(&b, []byte(s))
-	return b.String()
+	// The DLL writes &quot; (S: get_max_buy_sell error text on production).
+	return strings.ReplaceAll(b.String(), "&#34;", "&quot;")
 }
 
 // firstFeed returns the first <feedName> child of the command in XML document

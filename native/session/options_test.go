@@ -81,3 +81,12 @@ func TestOptionsPayloadsD(t *testing.T) {
 		t.Fatalf("151 payload = %x", got)
 	}
 }
+
+// An empty RQ_CERTAIN_OPTIONS reply is success: S (production 2026-11-05) the
+// server answered 151 with len=0 and the DLL returned success="true"; the option
+// itself arrives as an R_SEC_NEW record (<securities>).
+func TestOptionsEmptyReplyIsSuccess(t *testing.T) {
+	if err := optionsReplyError(nil); err != nil {
+		t.Fatalf("empty reply: %v", err)
+	}
+}

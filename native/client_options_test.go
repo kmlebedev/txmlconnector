@@ -1,8 +1,10 @@
 package native
 
 import (
+	"bytes"
 	"encoding/hex"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -132,80 +134,12 @@ func TestConnectorFamilyStrikesErrors(t *testing.T) {
 	}{
 		{"no mat_date", "<command id=" + quote + "get_family_strikes" + quote + "/>", "No mat_date found"},
 		{"bad mat_date", "<command id=" + quote + "get_family_strikes" + quote + "><mat_date>2026-02-01</mat_date></command>", "Failed to parse mat_date=2026-02-01"},
-		{"valid mat_date below the version gate", "<command id=" + quote + "get_family_strikes" + quote + "><mat_date>01.02.2026</mat_date></command>", "<message>Unsupported request.</message>"},
+		{"valid mat_date below the version gate", "<command id=" + quote + "get_family_strikes" + quote + "><security><board>TQBR</board><seccode>SBER</seccode></security><mat_date>01.02.2026</mat_date></command>", "<message>Unsupported request.</message>"},
 	}
 	for _, tc := range cases {
 		if got := send(t, c, tc.cmd); !strings.Contains(got, tc.want) {
 			t.Fatalf("%s: %s, want %q", tc.name, got, tc.want)
 		}
-	}
-}
-
-// TestOptionFamilyEvent: 0x6f R_FAMILY from RQ_MAIN renders the D literal
-// <option_families> (form is I until the S series).
-func TestOptionFamilyEvent(t *testing.T) {
-	srv := newRunServer(t)
-	srv.Snapshot = clientSnapshot(t)
-	c := New(Config{Dial: srv.Dial})
-	rec := newRecorder()
-	if err := c.Start(rec.handle); err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	send(t, c, connectCommand())
-	rec.next(t, "<server_status")
-	var w wire.Writer
-	w.Uint16(26)
-	w.String("SBER", 6)
-	w.Int32(0)
-	w.Int32(1)
-	srv.QueueMain(append([]byte{records.TagFamily}, w.Bytes()...))
-	got := rec.next(t, "<option_families")
-	if !strings.Contains(got, "<lot_size>1</lot_size>") || !strings.Contains(got, "<mat_date></mat_date>") {
-		t.Fatalf("option_families = %s", got)
-	}
-	_ = model.OptionFamily{}
-}
-
-// TestOptionFamiliesNoDuplicate: the command must not re-emit the family store;
-// only the run/OnLoad event stream renders <option_families> (no O form exists
-// for a command-side replay, so this is a dedup fix with I scope).
-func TestOptionFamiliesNoDuplicate(t *testing.T) {
-	srv := newRunServer(t)
-	var family wire.Writer
-	family.Uint16(26)
-	family.String("SBER", 6)
-	family.Int32(0)
-	family.Int32(1)
-	srv.Snapshot = append(clientSnapshot(t), append([]byte{records.TagFamily}, family.Bytes()...)...)
-	srv.Handle(session.RqOptionFamilies, func([]byte) (byte, []byte) {
-		return wire.KindReply | wire.FlagPlain, optionFixture(t, "option-families-reply-ok.hex")
-	})
-	c := New(Config{Dial: srv.Dial})
-	rec := newRecorder()
-	if err := c.Start(rec.handle); err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	send(t, c, connectCommand())
-	rec.next(t, "<option_families")
-	rec.next(t, "<server_status")
-	cmd := "<command id=" + quote + "get_option_families" + quote + "><security><board>TQBR</board><seccode>SBER</seccode></security></command>"
-	if got := send(t, c, cmd); got != "<result success="+quote+"true"+quote+"/>" {
-		t.Fatalf("get_option_families = %s", got)
-	}
-	send(t, c, "<command id="+quote+"server_status"+quote+"/>")
-	rec.next(t, "<server_status")
-	rec.mu.Lock()
-	count := 0
-	for _, msg := range rec.msgs {
-		if strings.HasPrefix(msg, "<option_families") {
-			count++
-		}
-	}
-	rec.mu.Unlock()
-	if count != 1 {
-		t.Fatalf("<option_families> callbacks = %d, want 1 (no command-side duplicate)", count)
 	}
 }
 
@@ -225,7 +159,7 @@ func TestConnectorOptionsVersionGate(t *testing.T) {
 	defer c.Close()
 	send(t, c, connectCommand())
 	rec.next(t, "<server_status")
-	strikes := "<command id=" + quote + "get_family_strikes" + quote + "><mat_date>17.12.2026</mat_date></command>"
+	strikes := "<command id=" + quote + "get_family_strikes" + quote + "><security><board>TQBR</board><seccode>SBER</seccode></security><mat_date>17.12.2026</mat_date></command>"
 	if got, want := send(t, c, strikes), "<result success="+quote+"false"+quote+"><message>Unsupported request.</message></result>"; got != want {
 		t.Fatalf("get_family_strikes = %s, want %s", got, want)
 	}
@@ -235,5 +169,80 @@ func TestConnectorOptionsVersionGate(t *testing.T) {
 	}
 	if n := countRequests(srv, session.RqCertainOptions) + countRequests(srv, session.RqFamilyStrikes); n != 0 {
 		t.Fatalf("%d gated requests reached the server", n)
+	}
+}
+
+// TestConnectorOptionLiveForms replays the production option records (S,
+// 2026-11-05: R_FAMILY x5 + R_END_OF_FAMILIES, then one R_STRIKES with 156
+// strikes) and compares the callbacks with the DLL's XML byte for byte. The
+// production secid of SiZ6 (0x395c) is rewritten to a security of the test
+// catalog (the form does not depend on the security type), and the expected XML follows it.
+func TestConnectorOptionLiveForms(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Protocol = 78 // production PRO#
+	var strikesReq []byte
+	srv.Handle(session.RqOptionFamilies, func([]byte) (byte, []byte) {
+		return wire.KindReply | wire.FlagPlain, []byte{0}
+	})
+	srv.Handle(session.RqFamilyStrikes, func(payload []byte) (byte, []byte) {
+		strikesReq = append([]byte(nil), payload...)
+		return wire.KindReply | wire.FlagPlain, []byte{0}
+	})
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+	sym := model.Symbol{Board: "TQBR", SecCode: "SBER"}
+	sec, _, ok := client.Catalog().Lookup(sym.Board, sym.SecCode)
+	if !ok {
+		t.Fatal("SBER is not in the test catalog")
+	}
+	secID := sec.SecID
+	patch := func(p []byte) []byte {
+		out := append([]byte(nil), p...)
+		for i := 0; i+2 < len(out); i++ {
+			if (out[i] == records.TagFamily || out[i] == records.TagEndOfFamilies || out[i] == records.TagStrikes) &&
+				out[i+1] == 0x39 && out[i+2] == 0x5c {
+				out[i+1], out[i+2] = byte(secID>>8), byte(secID)
+			}
+		}
+		return out
+	}
+	expected := func(name string) string {
+		raw, err := os.ReadFile("records/testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Replace(strings.TrimSpace(string(raw)),
+			`seccode="SiZ6" board="FUT" secid="14684"`,
+			`seccode="`+sym.SecCode+`" board="`+sym.Board+`" secid="`+strconv.Itoa(int(secID))+`"`, 1)
+	}
+	security := "<security><board>" + sym.Board + "</board><seccode>" + sym.SecCode + "</seccode></security>"
+
+	if got := send(t, c, "<command id="+quote+"get_option_families"+quote+">"+security+"</command>"); !strings.Contains(got, "true") {
+		t.Fatalf("get_option_families = %s", got)
+	}
+	srv.QueueMain(patch(optionFixture(t, "option-families-live.hex")[:44])) // 5x 0x6f + 0x70
+	if got, want := rec.next(t, "<option_families"), expected("option-families-dll.xml"); got != want {
+		t.Fatalf("option_families\n got %s\nwant %s", got, want)
+	}
+
+	if got := send(t, c, "<command id="+quote+"get_family_strikes"+quote+">"+security+"<mat_date>17.12.2026</mat_date></command>"); !strings.Contains(got, "true") {
+		t.Fatalf("get_family_strikes = %s", got)
+	}
+	if want := []byte{byte(secID >> 8), byte(secID), 0x42, 0x14, 0x05}; !bytes.Equal(strikesReq, want) {
+		t.Fatalf("153 payload = %x, want %x (S: 395c421405)", strikesReq, want)
+	}
+	srv.QueueMain(patch(optionFixture(t, "option-strikes-live.hex")[33:])) // the R_STRIKES record
+	if got, want := rec.next(t, "<family_strikes"), expected("family-strikes-dll.xml"); got != want {
+		t.Fatalf("family_strikes\n got %.300s\nwant %.300s", got, want)
 	}
 }
