@@ -20,6 +20,11 @@ func decodeOrderNew(c *Client, body []byte) ([]model.Event, error) {
 	if err != nil {
 		return nil, err
 	}
+	if parsed.Short {
+		// Cancelled/removed/denied/rejected short bodies are skipped safely (I);
+		// the status-dependent D branches are not recovered yet.
+		return nil, nil
+	}
 	_, known, match := c.orderClientMatchLocked(parsed.ClientID)
 	if !known {
 		c.pendingOrders = append(c.pendingOrders, parsed)
@@ -37,6 +42,9 @@ func decodeOrderModify(c *Client, body []byte) ([]model.Event, error) {
 	mod, err := records.ParseOrderModify(body)
 	if err != nil {
 		return nil, err
+	}
+	if mod.Short {
+		return nil, nil
 	}
 	order := c.applyOrderModifyLocked(mod)
 	if order == nil {

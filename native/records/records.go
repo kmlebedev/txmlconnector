@@ -122,6 +122,29 @@ func Records(p []byte) ([]Record, error) {
 				return out, err
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagServerMessage:
+			// R_RES 0x0f: B trn_type, B trr_status, Z512 CP1251 text up to NUL,
+			// packed-L transactionid (RE-2 task-68). Observed types 1/2 end here;
+			// any other type/status=4 tail is not recovered (I) -> UnknownRecord.
+			start := len(p) - r.Len()
+			trnType, err := r.Byte()
+			if err != nil {
+				return out, fmt.Errorf("R_RES type: %w", err)
+			}
+			trrStatus, err := r.Byte()
+			if err != nil {
+				return out, fmt.Errorf("R_RES status: %w", err)
+			}
+			if _, err := readCString(r, 512); err != nil {
+				return out, fmt.Errorf("R_RES text: %w", err)
+			}
+			if _, err := r.Int64(); err != nil {
+				return out, fmt.Errorf("R_RES transactionid: %w", err)
+			}
+			if (trnType != 1 && trnType != 2) || trrStatus == 4 {
+				return out, &UnknownRecordError{Tag: tag, Offset: start}
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagMessage:
 			// 0x01 R_MSG is unsized with variable C-strings (messages.md).
 			start := len(p) - r.Len()
