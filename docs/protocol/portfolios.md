@@ -116,3 +116,15 @@ input-фикстуры (reply/hex) пока не применимы: commands lo
 - **Утро (S):** команды неторговые — портфели снимаются в S-серии после тиков/лимитов по
   docs/deepseek/re-session-checklist.md; input-фикстуры RE не снимает (go-engineer синтезирует
   0x02/0x3b через testserver и сверяет с нашими XML-фикстурами).
+
+## S: прогон на проде (2026-11-05, read-only)
+
+- `get_portfolio` → `<result success="true"/>`, локальный рендер, колбэк `<portfolio_currency>`
+  (**S**); C>S кадров 86/84/85/82 нет — подтверждено живьём.
+- `get_united_portfolio` → success, колбэк `<united_portfolio>` (**S**).
+- `get_mc_portfolio client="<код>" union="<код>"` → success, колбэк `<mc_portfolio>` (**S**).
+- `get_portfolio_mct client="<код>"` → `{8} Неверное значение параметра 'szClient'.` (**S**) —
+  формат клиента для mct остаётся **I**.
+- `get_portfolio_tplus` / `get_portfolio_forts` → `Unknown command.` (**S**; имена не входят в
+  таблицу 43/45 команд).
+- Прод-клиентский код в фикстуры не попадает: обезличивание — TESTCLIENT/TESTUNION.

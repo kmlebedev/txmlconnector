@@ -87,3 +87,11 @@ T20 — см. `positions.md` (client/union/markets/market=4/blocked/varmargin/cu
 и `FUN_180355d50(...,0x2b,"RQ_CLIENT_LIMITS")`. Фактический payload (живой/реплейный захват):
 `22 69 1a` = **`L client_id`** (packed 32-bit, 108178 → 3 байта). Т.е. запрос = один packed-L
 с числовым id клиента (код клиента резолвится DLL из стора до отправки). Ответ — см. раздел выше.
+
+## S: прогон на проде (2026-11-05, read-only)
+
+- `<command id="get_client_limits" client="<код клиента>"/>` → `<result success="true"/>`;
+  C>S `type=43` (RQ_CLIENT_LIMITS, payload `d2da8d` = packed-коды клиента/юниона), S>C `type=43`
+  len=1; колбэк `<clientlimits>` (**S**). Без `client` — `Client not specified.` (**S**).
+- Числовой `client-id`/юнион в S-прогоне не использовались; клиентский код в фикстуры не попадает
+  (обезличивание — TESTCLIENT) — см. `native/records/testdata/server-error-texts.md`.

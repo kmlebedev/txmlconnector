@@ -162,6 +162,26 @@ lot_volume, isin, regnumber, buybackprice, buybackdate, currencyid`; пусты�
 - Для матрицы: `authenticate` не «not implemented»; конкретный успешный сценарий требует
   настроенного криптопровайдера (I, вне T29).
 
+
+## S-серия на проде (2026-11-05, read-only): подтверждено
+
+| Команда | Ответ DLL (S) | Колбэк (S) |
+|---|---|---|
+| `get_old_news count="5"` | `<result success="true"/>` | 5 × `<news_header>` (RQ_MAIN `0x36 flags=1`) |
+| `get_news_body news_id="N"` | `<result success="true"/>` | `<news_body>` (RQ_MAIN `0x36 flags=2`) |
+| `subscribe_ticks` (board/seccode/tradeno) | `<result success="true"/>` | `<ticks><tick>…` (RQ_MAIN `0x5a`) |
+| `get_client_limits client="<код>"` | `<result success="true"/>`; C>S `type=43` (RQ_CLIENT_LIMITS), reply `type=43` | `<clientlimits>` |
+| `get_portfolio` | `<result success="true"/>` (локальный рендер) | `<portfolio_currency>` |
+| `get_united_portfolio` | `<result success="true"/>` (локальный рендер) | `<united_portfolio>` |
+| `get_mc_portfolio client="<код>" union="<код>"` | `<result success="true"/>` | `<mc_portfolio>` |
+| `get_portfolio_mct client="<код>"` | `{8} Неверное значение параметра 'szClient'.` | — |
+| `get_portfolio_tplus` / `get_portfolio_forts` | `Unknown command.` | — |
+| `unsubscribe_ticks` | `Unknown command.` | — |
+
+Прочее (S): `connect` на проде — `<result success="true"/>`, загрузка ~10–12 с (838 `sec_info_upd`,
+61 `securities`, 61 `pits`, 5 `<client>`, `<union>`); `server_status` после загрузки — success и
+`<server_status …>`. Ответ `get_client_limits` без `client`: `Client not specified.`.
+
 ## Нативная реализация
 
 - `connect` разбирает `commands.Connect` (`host`, `port`, `login`, `password`, `rqdelay`, `request_timeout`) и сразу возвращает успех. Дальше в фоне идут логин, RQ_TIME, RQ_STARTUP, колбэки `<markets>`, `<boards>`, `<candlekinds>` (побайтно как у DLL), выборка снапшота RQ_MAIN с колбэками `<securities>` на каждый опрос с новыми инструментами, `<pits>`, затем `server_status connected="true"`. После этого RQ_MAIN опрашивается каждые `rqdelay` (по умолчанию 100 мс, не меньше 10 мс), как в DLL, и это держит сессию.

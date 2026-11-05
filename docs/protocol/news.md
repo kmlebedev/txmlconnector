@@ -198,3 +198,28 @@ B  flags
 D: `tools/re/ghidra/XrefDecomp.java` по `txmlconnector64-6.47.2.26.4.dll`; функции и адреса — выше.
 O: `tools/replay-server` + `tools/tcproxy` + DLL под Wine 11.21, dump `.re-run/r14/decode-full.txt`
 (вне git), инъекция RQ_MAIN после RQ_HISTORY_EXT (148); команды воспроизведения — `news-repro.md`.
+
+## S: живая сессия на проде (2026-11-05, read-only)
+
+- **Reply RQ_GETNEWS (73) всегда пустой** (len=0) — и для `get_old_news`, и для `get_news_body`;
+  заголовки/тело приходят записями RQ_MAIN и колбэками `<news_header>`/`<news_body>` (**S**).
+- `get_old_news count=5` → C>S `L from=0, L to=2147483647, B count=5, B 1` (payload
+  `00 f4ffffff 07 05 01`); после первого ответа стор знает заголовки, и второй вызов count=1
+  шлёт `L from=15979126 (МИНИМАЛЬНЫЙ id), L to=15979127, B 1, B 1` — **S**-подтверждение
+  D-находки `lastId = MIN` (task-56).
+- `get_news_body news_id=N` → C>S `L N, L N, B 1, B 2` (payload `b3273d0f b3273d0f 01 02` для
+  N=15979131); **S**.
+- Заголовки пришли записью RQ_MAIN `0x36 flags=1` (в этом захвате; `0x35` не встречался — **I**):
+  `L id, L timestamp, Z16 source, Z128 title, B flag`; flag (последний байт) = 0x80; source/title —
+  C-строки CP1251 (**S**).
+- Тело — запись RQ_MAIN `0x36 flags=2`: `L id`, затем `package` = `int32 uncompressed_size +
+  zlib` (**S**: uncompressed=1658, поток `78 da`; полный текст пришёл в `<news_body>`; точное
+  декодирование `package_len` между id и package — **I**).
+- Коды ошибок: `Header with id = N not found` — если заголовок не запрашивался в этой же сессии
+  (стор новостей не персистентный, **S**); указанный в `get_news_body` id должен быть получен
+  `get_old_news` в **той же** сессии.
+- Время `<timestamp>` — Unix-секунды, печатается как серверное локальное время (**S**:
+  1793820519 → `04.11.2026 19:28:39`).
+
+Фикстуры: `native/records/testdata/news-{header,body}-live-inject.hex` + `*-live-dll.xml` +
+`news-getnews-{headers,body}-request.hex`; происхождение — `news-live-repro.md`.
