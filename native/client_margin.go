@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
 )
 
 // The T23 commands are a LOCAL render: no RQ is sent (margin.md, D/O).
@@ -234,18 +235,44 @@ func (c *Client) ClientSecPermissions(ctx context.Context, client string, sym mo
 	if !ok {
 		return model.SecPermissions{}, fmt.Errorf("Инструмент не найден ('seccode'=%s, 'board='%s)", sym.SecCode, sym.Board)
 	}
-	marketable := false
-	if mut, ok := c.catalog.Security(sec.SecID); ok {
-		marketable = mut.Flags&4 != 0
+	// The DLL prints only the client attribute for a <client> request (S).
+	perm := model.SecPermissions{
+		Client: account.ID,
+		SecID:  sec.SecID, SecCode: sec.SecCode, Market: int(sec.Market), Board: board.Code,
 	}
-	return model.SecPermissions{
-		Client: account.ID, Union: account.Union,
-		SecID: sec.SecID, SecCode: sec.SecCode, Market: int(sec.Market), Board: board.Code,
-		Marketable: marketable,
-		// I: the permission mask and rates of FUN_18001a700 are not in RQ_MAIN.
-		RegRateLong:  model.Decimal{Units: 0, Scale: 2},
-		RegRateShort: model.Decimal{Units: 0, Scale: 2},
-	}, nil
+	if t := c.marginTemplateLocked(account.Union); t != nil {
+		// RQ_INQUIRE_UT template (S, production): instrument -> class ->
+		// market -> template (D: FUN_18001a700), rendered in the risk form.
+		class := xmlcompat.Security(c.catalog.Startup(), sec).InstrClass
+		r := t.Rule(sec.SecCode, class, int(sec.Market))
+		perm.Tradeable, perm.Longable, perm.Shortable, perm.Marketable = r.Tradeable, r.Longable, r.Shortable, r.Marketable
+		perm.RiskRateLong, perm.ReserateLong = &r.Long, &r.RLong
+		perm.RiskRateShort, perm.ReserateShort = &r.Short, &r.RShort
+		return perm, nil
+	}
+	if mut, ok := c.catalog.Security(sec.SecID); ok {
+		perm.Marketable = mut.Flags&4 != 0
+	}
+	// I: without a template (demo) the DLL's default rights and rates
+	// (FUN_18001a700 step 7) are not reproduced.
+	perm.RegRateLong = model.Decimal{Units: 0, Scale: 2}
+	perm.RegRateShort = model.Decimal{Units: 0, Scale: 2}
+	return perm, nil
+}
+
+// marginTemplateLocked returns the template of a union's category. With no
+// union category it falls back to the only loaded template (I: how the DLL
+// maps such a client is not recovered; production has one union).
+func (c *Client) marginTemplateLocked(union string) *model.MarginTemplate {
+	if cat, ok := c.unionCategories[union]; ok {
+		return c.marginTemplates[cat]
+	}
+	if len(c.marginTemplates) == 1 {
+		for _, t := range c.marginTemplates {
+			return t
+		}
+	}
+	return nil
 }
 
 // ClientSecPermissionsUnion resolves a union to its first account and renders

@@ -62,3 +62,47 @@ type SecRate struct {
 }
 
 func (*SecRate) isEvent() {}
+
+// MarginRule is one level of a margin template (RQ_INQUIRE_UT): permissions
+// and rates in percent as the template states them (S: SBER long="15.00").
+type MarginRule struct {
+	Tradeable, Longable, Shortable, Marketable bool
+	Long, Short, RLong, RShort                 Decimal
+}
+
+// MarginTemplate is the XML document of RQ_INQUIRE_UT (152) for one union
+// category (S, production 2026-11-05). The DLL looks a security up in this
+// order (D: FUN_18001a700): instrument (seccode, market), instrument class
+// (letter, market), market, then the template itself.
+type MarginTemplate struct {
+	ID          int
+	Name        string
+	Default     MarginRule
+	Markets     map[int]MarginRule
+	Classes     map[MarginClassKey]MarginRule
+	Instruments map[MarginInstrumentKey]MarginRule
+}
+
+type MarginClassKey struct {
+	Letter string
+	Market int
+}
+
+type MarginInstrumentKey struct {
+	SecCode string
+	Market  int
+}
+
+// Rule returns the rule that applies to a security.
+func (t *MarginTemplate) Rule(secCode, class string, market int) MarginRule {
+	if r, ok := t.Instruments[MarginInstrumentKey{secCode, market}]; ok {
+		return r
+	}
+	if r, ok := t.Classes[MarginClassKey{class, market}]; ok {
+		return r
+	}
+	if r, ok := t.Markets[market]; ok {
+		return r
+	}
+	return t.Default
+}

@@ -62,5 +62,6 @@ func AllTradesXML(trades []model.Trade, withMillis bool) string {
 func escape(s string) string {
 	var b strings.Builder
 	_ = xml.EscapeText(&b, []byte(s))
-	return b.String()
+	// The DLL writes &quot; (S: get_max_buy_sell error text on production).
+	return strings.ReplaceAll(b.String(), "&#34;", "&quot;")
 }

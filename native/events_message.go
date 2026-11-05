@@ -26,9 +26,10 @@ func decodeMessage(c *Client, body []byte) ([]model.Event, error) {
 		Time:     instant,
 		WallTime: wall,
 		Urgent:   parsed.Flags&1 != 0 || parsed.Flags&8 != 0,
-		From:     parsed.From,
-		Text:     parsed.Text,
-		Flags:    parsed.Flags,
+		// CP1251 on the wire (S: production TradeServer notice).
+		From:  records.DecodeCP1251(parsed.From),
+		Text:  records.DecodeCP1251(parsed.Text),
+		Flags: parsed.Flags,
 	}
 	return []model.Event{&message}, nil
 }

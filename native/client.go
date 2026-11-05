@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"sync"
 	"time"
 
@@ -113,12 +114,14 @@ type Client struct {
 	// newsBodies keeps the unpacked UTF-8 0x36 body when the header is known;
 	// S: the <news_body> callback is emitted for the requested header.
 	newsBodies map[int64]string
-	// Options state (task 27): families/strikes end-of-family records are D-only;
-	// the XML forms are I until the S series.
-	optionFamilies map[uint16][]model.OptionFamily
-	// optionStrikes is kept for the D-only R_STRIKES state; it is not rendered by
-	// a confirmed XML form yet (I).
-	optionStrikes map[[2]int64]model.OptionStrikes
+	// Options state (task 27, S): R_FAMILY records by underlying and family
+	// id, and R_STRIKES lists collected until their final byte.
+	optionFamilies map[uint16]map[int32]model.OptionFamily
+	optionStrikes  map[[2]int64]*model.OptionStrikes
+	// unionCategories maps a union to its margin template category (R_UNION
+	// unicat); marginTemplates holds the RQ_INQUIRE_UT documents by category.
+	unionCategories map[string]byte
+	marginTemplates map[byte]*model.MarginTemplate
 }
 
 // Dial logs in, loads the dictionaries and the initial snapshot (RQ_TIME,
@@ -162,7 +165,43 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 		conn.Close()
 		return nil, err
 	}
+	c.loadMarginTemplates(ctx)
 	return c, nil
+}
+
+// loadMarginTemplates requests the margin template of every union category
+// after the load, as the DLL does once R_UNION arrives (S: one RQ_INQUIRE_UT
+// for category 18 on production; none on the demo, which has no union). A
+// failure leaves the permissions on the template-less path, like a missing
+// template in the DLL.
+func (c *Client) loadMarginTemplates(ctx context.Context) {
+	c.mu.Lock()
+	var cats []byte
+	seen := map[byte]bool{}
+	for _, cat := range c.unionCategories {
+		if !seen[cat] {
+			seen[cat] = true
+			cats = append(cats, cat)
+		}
+	}
+	c.mu.Unlock()
+	sort.Slice(cats, func(i, j int) bool { return cats[i] < cats[j] })
+	for _, cat := range cats {
+		doc, err := c.conn.InquireUT(ctx, cat)
+		if err != nil {
+			continue
+		}
+		t, err := records.ParseMarginTemplate(doc)
+		if err != nil {
+			continue
+		}
+		c.mu.Lock()
+		if c.marginTemplates == nil {
+			c.marginTemplates = map[byte]*model.MarginTemplate{}
+		}
+		c.marginTemplates[cat] = t
+		c.mu.Unlock()
+	}
 }
 
 // load consumes the RQ_STARTUP dictionaries and the initial RQ_MAIN snapshot.

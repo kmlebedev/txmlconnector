@@ -1,7 +1,11 @@
 package native
 
 import (
+	"bytes"
+	"compress/zlib"
 	"context"
+	"encoding/hex"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -479,5 +483,70 @@ func TestCrossUnknownRateFails(t *testing.T) {
 	c.marginRates = map[uint16]int64{27: 100}
 	if bad, ok := c.crossUnknownRateLocked(1, 26); ok {
 		t.Fatalf("known cross rate reported as unknown %d", bad)
+	}
+}
+
+// TestClnSecPermissionsFromMarginTemplate: with a union category the client
+// fetches the RQ_INQUIRE_UT template after the load and answers in the DLL's
+// risk form (S, production 2026-11-05: SBER riskrate 15.00, all rights true,
+// reserate 0.00, no union attribute for a <client> request).
+func TestClnSecPermissionsFromMarginTemplate(t *testing.T) {
+	srv := newRunServer(t)
+	var union wire.Writer
+	union.Byte(records.TagUnion)
+	union.Int64(42)
+	union.String("TESTUNION", 20)
+	union.String("TESTCAT", 32)
+	union.Byte(0x12)
+	srv.Snapshot = append(marginSnapshot(t), union.Bytes()...)
+	var doc bytes.Buffer
+	zw := zlib.NewWriter(&doc)
+	zw.Write([]byte(`<template id="18" name="TEST" short="100" long="100" shortable="0" longable="1" marketable="0" tradeable="1"><instruments>` +
+		`<instr seccode="SBER" W="100" mkt="1" tradeable="1" longable="1" shortable="1" marketable="1" long="15.00" short="15.00" BA="SBER"/>` +
+		`</instruments></template>`))
+	zw.Close()
+	full := 0
+	{
+		zr, _ := zlib.NewReader(bytes.NewReader(doc.Bytes()))
+		b, _ := io.ReadAll(zr)
+		full = len(b)
+	}
+	var asked []string
+	var mu sync.Mutex
+	srv.Handle(session.RqInquireUT, func(payload []byte) (byte, []byte) {
+		mu.Lock()
+		asked = append(asked, hex.EncodeToString(payload))
+		mu.Unlock()
+		var w wire.Writer
+		w.Byte(0x0f)
+		w.Int32(int32(full))
+		w.Int32(int32(doc.Len()))
+		w.Int32(int32(doc.Len()))
+		w.Raw(doc.Bytes())
+		return wire.KindReply | wire.FlagPlain, w.Bytes()
+	})
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	mu.Lock()
+	if len(asked) != 1 || asked[0] != "1200" {
+		t.Fatalf("RQ_INQUIRE_UT requests = %v, want [1200]", asked)
+	}
+	mu.Unlock()
+	cmd := "<command id=" + quote + "get_cln_sec_permissions" + quote + ">"
+	cmd += "<security><seccode>SBER</seccode><market>1</market><board>TQBR</board></security><client>TESTCLIEN</client></command>"
+	if got := send(t, c, cmd); got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("get_cln_sec_permissions = %s", got)
+	}
+	want := `<cln_sec_permissions client="TESTCLIEN" secid="26"><security><seccode>SBER</seccode><market>1</market><board>TQBR</board></security>` +
+		`<tradeable>true</tradeable><marketable>true</marketable><longable>true</longable><shortable>true</shortable>` +
+		`<riskrate_long>15.00</riskrate_long><reserate_long>0.00</reserate_long><riskrate_short>15.00</riskrate_short><reserate_short>0.00</reserate_short></cln_sec_permissions>`
+	if got := rec.next(t, "<cln_sec_permissions"); got != want {
+		t.Fatalf("permissions\n got %s\nwant %s", got, want)
 	}
 }

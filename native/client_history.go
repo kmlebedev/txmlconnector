@@ -141,6 +141,10 @@ func (c *Client) StartHistory(ctx context.Context, req HistoryRequest, onDone fu
 	if recovering {
 		return errors.New("transaq: connection is being recovered")
 	}
+	// The command context ends when the XML command returns (gRPC cancels it
+	// right after <result success="true"/>), long before the candles: keep its
+	// values only. Close and relogin end the wait (failHistoryParts).
+	ctx = context.WithoutCancel(ctx)
 	go func() {
 		candles, err := c.History(ctx, req)
 		if onDone != nil {

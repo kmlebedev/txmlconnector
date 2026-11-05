@@ -64,8 +64,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return TicksXML([]model.Tick{*e}), true
 	case *model.Ticks:
 		return TicksXML(e.Items), true
-	case *model.OptionFamily:
-		return OptionFamiliesXML([]model.OptionFamily{*e}), true
+	case *model.OptionFamilies:
+		return OptionFamiliesXML(*e), true
 	case *model.OptionStrikes:
 		return FamilyStrikesXML(*e), true
 	case *model.EndOfFamily:
@@ -1020,33 +1020,38 @@ func MessagesXML(messages []model.Message) string {
 	return b.String()
 }
 
-// The option XML forms are D literals only (options.md): no O fixture exists,
-// so the element meaning/order is I. MatDate is the R_FAMILY first L (semantics
-// I; rendered empty when 0), LotSize is the second L (I).
-func OptionFamiliesXML(families []model.OptionFamily) string {
+// optionSecurityXML is the <security .../> element of the option callbacks.
+func optionSecurityXML(sym model.Symbol, secID uint16) string {
+	return "<security seccode=" + quoteAttr(sym.SecCode) + " board=" + quoteAttr(sym.Board) +
+		" secid=" + quoteAttr(strconv.Itoa(int(secID))) + "/>"
+}
+
+// OptionFamiliesXML renders <option_families> as the DLL does (S, production
+// 2026-11-05, option-families-dll.xml): the underlying, then one <family>
+// (lot_size, mat_date) per expiration by date.
+func OptionFamiliesXML(f model.OptionFamilies) string {
 	var b strings.Builder
-	b.WriteString("<option_families>")
-	for _, family := range families {
-		b.WriteString("<family>")
-		// MatDate is the raw R_FAMILY first L; its meaning/format is not
-		// recovered (options.md I), so the element is intentionally empty rather
-		// than formatting a possibly bogus Unix date.
-		b.WriteString("<mat_date></mat_date>")
-		b.WriteString("<lot_size>" + strconv.FormatInt(family.LotSize, 10) + "</lot_size>")
-		b.WriteString("</family>")
+	b.WriteString("<option_families>" + optionSecurityXML(f.Underlying, f.SecID))
+	for _, family := range f.Families {
+		b.WriteString("<family><lot_size>" + strconv.FormatInt(family.LotSize, 10) + "</lot_size>")
+		b.WriteString("<mat_date>" + family.MatDate.Format("02.01.2006") + "</mat_date></family>")
 	}
 	b.WriteString("</option_families>")
 	return b.String()
 }
 
-// FamilyStrikesXML renders the D literal <family_strikes> (order/attrs are I).
-func FamilyStrikesXML(strikes model.OptionStrikes) string {
+// FamilyStrikesXML renders <family_strikes> as the DLL does (S,
+// family-strikes-dll.xml): underlying, mat_date, then cp/price/opt_code per
+// strike. The price is the raw R_STRIKES L (integer strikes on Si; the scale of
+// fractional strikes is I).
+func FamilyStrikesXML(s model.OptionStrikes) string {
 	var b strings.Builder
-	b.WriteString("<family_strikes>")
-	for _, strike := range strikes.Items {
-		b.WriteString("<strike><opt_code>" + escape(strike.OptCode) + "</opt_code>")
+	b.WriteString("<family_strikes>" + optionSecurityXML(s.Underlying, s.SecID))
+	b.WriteString("<mat_date>" + s.MatDate.Format("02.01.2006") + "</mat_date>")
+	for _, strike := range s.Items {
+		b.WriteString("<strike><cp>" + escape(string([]byte{strike.CP})) + "</cp>")
 		b.WriteString("<price>" + strconv.FormatInt(strike.Price, 10) + "</price>")
-		b.WriteString("<cp>" + escape(string([]byte{strike.CP})) + "</cp></strike>")
+		b.WriteString("<opt_code>" + escape(strike.OptCode) + "</opt_code></strike>")
 	}
 	b.WriteString("</family_strikes>")
 	return b.String()

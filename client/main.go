@@ -171,6 +171,20 @@ func (tc *TCClient) waitForStreamHeader(stream grpc.ServerStreamingClient[pb.Dat
 	}
 }
 
+// MaxResponseSize bounds one connector callback received over gRPC. The DLL
+// (and the native backend) sends <securities> as a single callback of ~9.5 MB
+// on the demo server, above gRPC's default 4 MB receive limit.
+const MaxResponseSize = 256 << 20
+
+// DialOptions are the gRPC options NewTCClient dials with: plaintext transport
+// and a receive limit of MaxResponseSize.
+func DialOptions() []grpc.DialOption {
+	return []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(MaxResponseSize)),
+	}
+}
+
 func NewTCClient() (*TCClient, error) {
 	return NewTCClientWithOptions(Options{})
 }
@@ -189,10 +203,7 @@ func NewTCClientWithOptions(opts Options) (*TCClient, error) {
 	// Do not wait for readiness inside the factory: RunWithReconnect owns the
 	// retry loop, and an unavailable server must surface as an error instead of
 	// blocking the supervisor forever.
-	conn, err := grpc.NewClient(
-		target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	conn, err := grpc.NewClient(target, DialOptions()...)
 	if err != nil {
 		return nil, fmt.Errorf("create gRPC client for %s: %w", target, err)
 	}

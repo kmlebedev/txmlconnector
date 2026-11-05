@@ -335,3 +335,42 @@ func TestConnectorHistoryCloseDuringWait(t *testing.T) {
 		t.Fatal("Close hung while a history collection was waiting")
 	}
 }
+
+// The gRPC server and the harness cancel the command context as soon as
+// SendCommand returns, and gethistorydata returns before the candles. The
+// collection must outlive that context (oracle 2026-11-05: the cancelled
+// RQ_HISTORY_EXT wait left its reply for RQ_MAIN and the session dropped).
+func TestConnectorHistoryOutlivesCommandContext(t *testing.T) {
+	srv := newRunServer(t)
+	srv.MainDelay = 30 * time.Millisecond
+	srv.HistoryParts = [][]byte{
+		readHistoryPart(t, "candles-part1-inject.hex"),
+		readHistoryPart(t, "candles-part2-inject.hex"),
+	}
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	cmd := "<command id=" + quote + "gethistorydata" + quote + " secid=" + quote + "26" + quote
+	cmd += " period=" + quote + "1" + quote + " count=" + quote + "2" + quote + " reset=" + quote + "true" + quote + "/>"
+	ctx, cancel := context.WithCancel(context.Background())
+	got, err := c.SendCommand(ctx, cmd)
+	cancel() // what a finished gRPC call does
+	if err != nil || got != "<result success="+quote+"true"+quote+"/>" {
+		t.Fatalf("gethistorydata = %s, %v", got, err)
+	}
+	want, err := os.ReadFile("records/testdata/candles-multipart-dll.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.next(t, "<candles"); got != strings.TrimSpace(string(want)) {
+		t.Fatalf("candles = %s", got)
+	}
+	if got := send(t, c, `<command id="server_status"/>`); !strings.Contains(got, `success="true"`) {
+		t.Fatalf("session after history = %s", got)
+	}
+}

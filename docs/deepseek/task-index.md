@@ -843,3 +843,44 @@ Full-day soak (10:00–23:50) в этой сессии не выполнялся
 
 **Проверки на `eb4d126`:** `make verify`/race, `server_build`/`queues_build` — зелёные;
 `check_env.sh --full` — окружение пригодно; независимые ревью (3 итерации) — P1/P2 исправлены.
+
+---
+
+## 18. Разбор блокеров и общая приёмка (2026-11-05, ветка `fix/acceptance-blockers`)
+
+**«connected=error / duplicate login» — не внешний блокер, а занятая сессия + ошибки клиента:**
+- Сервер на RQ_PWD отвечает BYE с байтом причины; `04` = «Пользователь с таким идентификатором уже
+  подключен к серверу» (S на проде: занят терминалом пользователя; DLL даёт тот же текст). Таблица
+  кодов DLL — `connect.md`. Клиент теперь отдаёт текст DLL вместо «Ошибка подключения» (`866d714`).
+- RE-4 на демо падал из-за двух ошибок gRPC-клиента: пример ждал только `ServerStatusChan`, а загрузка
+  забивала типизированные каналы; `<securities>` (9,5 МБ одним колбэком — так же делает DLL) не
+  пролезал в лимит 4 МБ (`1b8c0fb`). **RE-4 на демо PASS**: native gRPC без Wine,
+  connect → connected=true → get_securities → subscribe → disconnect, exit 0, сессия освобождается.
+- Найдено оракулом: `gethistorydata` через gRPC/harness обрывал ожидание свечей отменой контекста
+  команды и рассинхронизировал поток ответов (`incorrect server response: type 0x94`) — исправлено
+  (`6c4f364`).
+
+**Закрытые I:** опционный гейт = `PRO# < 0x45` из RQ_PWD (D) + S-ответы демо (`be7ae08`);
+`makeordown` → RQ_MAKE_COND_OWN 112 `L txid` (D+O, `0697dac`); цепочка источников прав/ставок
+`FUN_18001a700` (D, `margin.md`).
+
+**Остаётся открытым:** формы XML опционов (на демо нет сервиса, нужен прод с PRO# ≥ 0x45);
+источник деревьев ставок и нативные права `get_cln_sec_permissions` (расхождение с DLL записано);
+RPS `<negdeal>/<report>` (нет O), typed portfolio API, RQ_FORTS_FIRM_MONEY 47; прод-проверки — пока
+логин занят терминалом пользователя; full-day soak.
+
+**Приёмка на ветке:** `make verify` (gofmt/vet/build/кроссы/race) PASS, `server_build`/`queues_build`
+PASS, linux/arm64 PASS, `check_env.sh` 15 PASS; live soak демо 3 мин, 6 бумаг: Polls 1298,
+Trades 3860, Duplicates 0, UnknownRecords 0, RSS 30 MiB.
+
+**Прод, read-only (2026-11-05, после закрытия терминала пользователем):**
+- Нативная загрузка прода падала на `ReadICA` (размер 1 байт, а не W), `R_BOARD` без размера и
+  необязательном байте `R_FORTS_SESSION`. Исправлено; колбэки загрузки совпадают с DLL.
+- Опционы: формы `<option_families>`/`<family_strikes>` сняты и совпадают с DLL побайтно (кроме
+  сессионного `secid`); `family_id` = дни от 1970; `get_options` — пустой ответ = успех.
+- Права и ставки: источник — шаблон `RQ_INQUIRE_UT (152)` по `unicat` юниона; `get_cln_sec_permissions`
+  совпал с DLL для SBER/GAZP/SiZ6; `&quot;` как в DLL; без лишнего `union`.
+- `<messages>` в CP1251 ломали gRPC (invalid UTF-8) — исправлено; `subscribe` с неизвестным `secid` —
+  `success` как в DLL.
+- **RE-4 на проде PASS** (нативный gRPC без Wine, `TC_RE4_SECID`); soak прода 2,5 мин: Polls 1151,
+  Trades 1883, Duplicates 0, UnknownRecords 0.
