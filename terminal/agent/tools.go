@@ -35,6 +35,7 @@ var toolCatalogNames = []string{
 	"get_backtest_history",
 	toolNameBacktestRules,
 	toolNameBatchBacktest,
+	toolNameDetectExecutionAlgos,
 	toolNameGetNews,
 }
 

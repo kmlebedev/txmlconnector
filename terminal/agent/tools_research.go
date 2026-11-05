@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest/rules"
+	"github.com/kmlebedev/txmlconnector/terminal/fingerprint"
+	"github.com/kmlebedev/txmlconnector/terminal/lobreplay"
 	"github.com/kmlebedev/txmlconnector/terminal/research"
 )
 
@@ -32,9 +35,17 @@ const toolNameBacktestRules = "backtest_rules"
 // toolNameBatchBacktest is the agent tool name of the multi-symbol comparison.
 const toolNameBatchBacktest = "batch_backtest"
 
+// toolNameDetectExecutionAlgos is the agent tool name of the order-book
+// fingerprint analysis.
+const toolNameDetectExecutionAlgos = "detect_execution_algos"
+
 // maxBatchSymbols bounds one batch comparison so a single tool call cannot fan
 // out unbounded history requests.
 const maxBatchSymbols = 20
+
+// maxExecutionFootprints bounds the footprint count of the compact model
+// payload; the full list is in the UI artifact.
+const maxExecutionFootprints = 20
 
 // errRulesStrategyNeedsSpec is the run_backtest guard: the "rules" catalog
 // strategy cannot be built from numeric params, it needs a rules.Spec.
@@ -45,7 +56,7 @@ var errRulesStrategyNeedsSpec = fmt.Errorf(
 // researchToolCatalog returns the catalog of research tools added by phases
 // E–G, in catalog order.
 func researchToolCatalog() []ToolInfo {
-	return []ToolInfo{backtestRulesTool, batchBacktestTool}
+	return []ToolInfo{backtestRulesTool, batchBacktestTool, detectExecutionAlgosTool}
 }
 
 // backtestRulesTool is the backtest_rules tool description.
@@ -95,6 +106,31 @@ var batchBacktestTool = ToolInfo{
 		"feeBps":      numProp("Комиссия в базисных пунктах (0 — явно без комиссии)"),
 		"slippageBps": numProp("Проскальзывание в базисных пунктах (0 — явно без проскальзывания)"),
 	}, "symbols"),
+}
+
+// detectExecutionAlgosTool is the detect_execution_algos tool description.
+var detectExecutionAlgosTool = ToolInfo{
+	Name:  toolNameDetectExecutionAlgos,
+	Title: "Отпечатки исполняющих роботов",
+	Description: "Найти на записанной ленте стакана признаки исполняющих алгоритмов: TWAP/VWAP/POV " +
+		"(периодичность клипов, темп против профиля объёма, доля рынка), айсберг (пополнение уровня " +
+		"после съедания), маржин-колл (серия растущих продаж в окне) и кластеры неизвестных паттернов. " +
+		"Атрибуция вероятностная: у каждой находки есть Confidence и Evidence; обвинительных формулировок нет.",
+	Input: objSchema(map[string]any{
+		"symbol":            strProp("Тикер инструмента, например TQBR:SBER"),
+		"from":              strProp("Начало записанной ленты, RFC3339 (UTC), например 2026-11-05T07:00:00Z"),
+		"to":                strProp("Конец записанной ленты, RFC3339 (UTC)"),
+		"marginCallWindows": strArrayProp("Окна маржин-коллов МСК \"HH:MM-HH:MM\"; по умолчанию 14:00-14:30 и 18:00-18:30"),
+	}, "symbol", "from", "to"),
+}
+
+// LOBDataSource is the optional extension of DataSource for the order-book
+// research tools: the recorded md.book_events/md.trades tape of one instrument.
+// cmd/terminal currently provides the bar history only, so until the recorder
+// pipeline is wired into the terminal the LOB tools report a clear configuration
+// error instead of silently analysing nothing.
+type LOBDataSource interface {
+	LOBEvents(ctx context.Context, symbol string, from, to time.Time) ([]lobreplay.Event, error)
 }
 
 // strArrayProp declares a JSON array of strings argument.
@@ -151,6 +187,12 @@ func (e *Engine) invokeResearchTool(ctx context.Context, name string, args map[s
 			return nil, nil, true, err
 		}
 		return res, &Artifact{Kind: "batch_backtest", Payload: ui}, true, nil
+	case toolNameDetectExecutionAlgos:
+		res, ui, err := e.toolDetectExecutionAlgos(ctx, args)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return res, &Artifact{Kind: "execution_algos", Payload: ui}, true, nil
 	}
 	return nil, nil, false, nil
 }
@@ -284,6 +326,120 @@ func (e *Engine) toolBatchBacktest(ctx context.Context, args map[string]any) (ba
 	}
 	out.Best, ui.Best = best, best
 	return out, ui, nil
+}
+
+// executionAlgosResult is the compact model-facing payload of
+// detect_execution_algos: the model gets the footprints with their evidence and
+// warnings, the chart/UI payload is the artifact.
+type executionAlgosResult struct {
+	Symbol     string                  `json:"symbol"`
+	From       time.Time               `json:"from"`
+	To         time.Time               `json:"to"`
+	Footprints []fingerprint.Footprint `json:"footprints"`
+	Warnings   []string                `json:"warnings,omitempty"`
+}
+
+// executionAlgosArtifact is the UI payload of detect_execution_algos: the full
+// footprint list, including the ones trimmed from the model payload.
+type executionAlgosArtifact struct {
+	Symbol     string                  `json:"symbol"`
+	From       time.Time               `json:"from"`
+	To         time.Time               `json:"to"`
+	Footprints []fingerprint.Footprint `json:"footprints"`
+}
+
+// toolDetectExecutionAlgos implements detect_execution_algos: it reads the
+// recorded LOB tape through the optional LOBDataSource and runs the fingerprint
+// detectors. The attribution is probabilistic by construction; the tool never
+// turns a footprint into an accusation.
+func (e *Engine) toolDetectExecutionAlgos(ctx context.Context, args map[string]any) (executionAlgosResult, executionAlgosArtifact, error) {
+	empty := executionAlgosResult{}
+	emptyArtifact := executionAlgosArtifact{}
+	if err := contextErr(ctx); err != nil {
+		return empty, emptyArtifact, err
+	}
+	symbol := e.resolveSymbol(argString(args, "symbol"))
+	if symbol == "" {
+		return empty, emptyArtifact, errors.New("agent: symbol is required")
+	}
+	from, err := toolTimeArg(args, "from")
+	if err != nil {
+		return empty, emptyArtifact, err
+	}
+	to, err := toolTimeArg(args, "to")
+	if err != nil {
+		return empty, emptyArtifact, err
+	}
+	if !to.After(from) {
+		return empty, emptyArtifact, fmt.Errorf("agent: to (%s) must be after from (%s)", to.Format(time.RFC3339), from.Format(time.RFC3339))
+	}
+	lob, ok := e.data.(LOBDataSource)
+	if !ok {
+		return empty, emptyArtifact, errors.New(
+			"agent: источник ленты стакана не подключён: инструменту нужен LOBDataSource " +
+				"(md.book_events/md.trades); запись рынка подключается отдельной задачей, см. docs/ai-terminal/fingerprint.md")
+	}
+	events, err := lob.LOBEvents(ctx, symbol, from, to)
+	if err != nil {
+		return empty, emptyArtifact, fmt.Errorf("agent: LOB events for %s: %w", symbol, err)
+	}
+	cfg := fingerprint.DefaultConfig()
+	cfg.Symbol = symbol
+	if windows := argStringList(args, "marginCallWindows"); windows != nil {
+		cfg.MarginCallWindows = windows
+	}
+	footprints := fingerprint.Detect(ctx, events, cfg)
+	warnings := make([]string, 0, 2)
+	if len(footprints) == 0 {
+		warnings = append(warnings,
+			"отпечатков не найдено: лента короткая или паттерны ниже порога уверенности")
+	}
+	artifact := executionAlgosArtifact{Symbol: symbol, From: from, To: to, Footprints: footprints}
+	if len(footprints) > maxExecutionFootprints {
+		warnings = append(warnings, fmt.Sprintf(
+			"в ответ модели попали первые %d отпечатков, полный список — в artifact", maxExecutionFootprints))
+		footprints = footprints[:maxExecutionFootprints]
+	}
+	return executionAlgosResult{
+		Symbol: symbol, From: from, To: to, Footprints: footprints, Warnings: warnings,
+	}, artifact, nil
+}
+
+// toolTimeArg parses a tool timestamp: RFC3339 text (the documented tool
+// argument form), a "YYYY-MM-DD HH:MM:SS"/date text, or Unix seconds as a JSON
+// number. It returns a UTC time.
+func toolTimeArg(args map[string]any, key string) (time.Time, error) {
+	raw, ok := args[key]
+	if !ok || raw == nil {
+		return time.Time{}, fmt.Errorf("agent: %s is required: pass an RFC3339 time", key)
+	}
+	switch value := raw.(type) {
+	case string:
+		text := strings.TrimSpace(value)
+		if text == "" {
+			return time.Time{}, fmt.Errorf("agent: %s is empty: pass an RFC3339 time", key)
+		}
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
+			if parsed, err := time.ParseInLocation(layout, text, time.UTC); err == nil {
+				return parsed.UTC(), nil
+			}
+		}
+		return time.Time{}, fmt.Errorf("agent: %s %q is not an RFC3339 time", key, text)
+	case float64:
+		return time.Unix(int64(value), 0).UTC(), nil
+	case int64:
+		return time.Unix(value, 0).UTC(), nil
+	case int:
+		return time.Unix(int64(value), 0).UTC(), nil
+	case json.Number:
+		seconds, err := value.Int64()
+		if err != nil {
+			return time.Time{}, fmt.Errorf("agent: %s is not a Unix time: %w", key, err)
+		}
+		return time.Unix(seconds, 0).UTC(), nil
+	default:
+		return time.Time{}, fmt.Errorf("agent: %s has unsupported type %T", key, raw)
+	}
 }
 
 // toolBacktestRules implements backtest_rules: the JSON Spec is compiled into a
