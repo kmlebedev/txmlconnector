@@ -14,6 +14,7 @@ import (
 	"github.com/kmlebedev/txmlconnector/terminal/chstore"
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
 	"github.com/kmlebedev/txmlconnector/terminal/paper"
+	"github.com/kmlebedev/txmlconnector/terminal/vintage"
 )
 
 // marketSource is the market-data view the adapters need (implemented by
@@ -363,19 +364,43 @@ func resolveMode(flagMode string, cfg exchangeConfig) (feed.Mode, error) {
 	}
 }
 
-// newsStoreFromEnv builds the optional recorded-news source of the agent: the
-// md.news table written by cmd/md-recorder. The ClickHouse endpoint comes from
-// MD_CLICKHOUSE_URL or CLICKHOUSE_URL (the MD_* variables win); without an
-// endpoint the get_news tool reports that the recording pipeline is off
-// instead of failing the whole terminal.
-func newsStoreFromEnv() agent.NewsStore {
+// chstoreFromEnv builds the read-only ClickHouse client of the research data
+// (the md.news recording and the point-in-time vintage views). The endpoint
+// comes from MD_CLICKHOUSE_URL or CLICKHOUSE_URL (the MD_* variables win, they
+// are the recorder naming); a nil client means "no ClickHouse configured": the
+// terminal keeps working offline and only the research data is unavailable.
+func chstoreFromEnv() *chstore.Client {
 	rawURL := firstNonEmpty(os.Getenv("MD_CLICKHOUSE_URL"), os.Getenv("CLICKHOUSE_URL"))
 	if rawURL == "" {
 		return nil
 	}
 	user := firstNonEmpty(os.Getenv("MD_CLICKHOUSE_USER"), os.Getenv("CLICKHOUSE_USER"))
 	password := firstNonEmpty(os.Getenv("MD_CLICKHOUSE_PASSWORD"), os.Getenv("CLICKHOUSE_PASSWORD"))
-	return agent.NewClickHouseNewsStore(chstore.New(rawURL, user, password, nil))
+	return chstore.New(rawURL, user, password, nil)
+}
+
+// newsStoreFromEnv builds the optional recorded-news source of the agent: the
+// md.news table written by cmd/md-recorder. Without an endpoint the get_news
+// tool reports that the recording pipeline is off instead of failing the whole
+// terminal.
+func newsStoreFromEnv() agent.NewsStore {
+	client := chstoreFromEnv()
+	if client == nil {
+		return nil
+	}
+	return agent.NewClickHouseNewsStore(client)
+}
+
+// vintageStoreFromEnv builds the point-in-time store of the research tasks
+// (macro vintages, release calendar and annotated news) over the same read-only
+// ClickHouse client. It is consumed by the research tasks of plan phases E–F;
+// the command wires the configuration here so the env is read in one place.
+func vintageStoreFromEnv() vintage.Store {
+	client := chstoreFromEnv()
+	if client == nil {
+		return nil
+	}
+	return vintage.New(client)
 }
 
 // llmConfigFromEnv builds the OpenAI-compatible LLM config from TERMINAL_LLM_*.
