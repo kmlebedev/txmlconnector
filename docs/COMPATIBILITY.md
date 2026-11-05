@@ -226,11 +226,11 @@ macOS/Linux); в CI шаг «C ABI conformance» добавлен для linux/m
 
 | Этап | Результат | Критерий готовности |
 |---|---|---|
-| **C1. ABI-слой** | готово: `cmd/connector` (cgo, 9 экспортов), `include/txmlconnector.h`, `Makefile`-цели `cabi`/`cabi-so`/`cabi-dylib`/`cabi-test` | macOS ABI-тест PASS; linux — CI |
-| **C2. Жизненный цикл как у DLL** | тексты ошибок обёртки сняты с DLL (Wine) и повторены; `InitializeEx`, `GetServiceInfo`, `SetLogLevel`; один поток колбэков | `InitializeEx`/`GetServiceInfo`/`SetLogLevel` пока stubs с TODO RE-2; сверка L1 — в работе |
-| **C3. Кросс-сборка** | готово: `compat-release.yml` (нативные runners §5.1), артефакты + header + SHA256SUMS, release на `compat-v*` | первый CI-прогон после push; локально dylib+ABI PASS |
-| **C4. Живая проверка библиотеки** | macOS arm64 live C ABI PASS (`make cabi-live-test`, 761 callback); Linux amd64/arm64 — CI ABI success; Windows DLL — артефакт/экспорты проверены, живой Windows-прогон остаётся | ABI-тест на каждой платформе; Windows live — отдельный этап (установка тулчейна/согласие) |
-| **C5. Сверочный корпус** | golden-сценарии на все команды и записи, CI-job сверки с эталоном | 0 расхождений, кроме перечисленных в §8 |
+| **C1. ABI-слой** | **готово**: `cmd/connector` (cgo, 9 экспортов), `include/txmlconnector.h`, `Makefile`-цели `cabi`/`cabi-so`/`cabi-dylib`/`cabi-test`; C-харнесс dlopen/LoadLibrary | ABI-тесты PASS: macOS arm64/amd64 (локально/CI), linux amd64/arm64 (CI), Windows ABI best-effort |
+| **C2. Жизненный цикл как у DLL** | **готово**: точные O-тексты DLL сняты под Wine и повторены (Initialize/InitializeEx/UnInitialize/SetCallback*/SendCommand/SetLogLevel/GetServiceInfo/FreeMemory); rate-limit 5000мс; один поток колбэков | L1-сверка по `cabi-reference.json` зелёная; C2.1 sync + C5 conformance 52/52 |
+| **C3. Кросс-сборка** | **готово**: `compat-release.yml` — 5 нативных целей (linux amd64/arm64, windows amd64, macos arm64/amd64), per-target архивы + header/VERSION, единый release-job, SHA256SUMS, prerelease для rc | RC2 `compat-v1.0.0-rc2`: все 5 build + release job SUCCESS, `sha256sum -c OK`, арх-проверка (ELF x86-64/aarch64, PE32+, Mach-O arm64/x86-64) |
+| **C4. Живая проверка библиотеки** | **готово для macOS**: live C ABI через `dlopen` на демо (connect → 761 колбэк → get_securities → disconnect → UnInitialize, read-only), `make cabi-live-test`; linux amd64/arm64 ABI+conformance в CI; Windows DLL собран, экспорты 9/9, **живой Windows-прогон — открыт** (нужен mingw/согласие) | macOS live PASS; остальные платформы — CI; Windows live — этап C8/по согласию |
+| **C5. Сверочный корпус** | **готово**: `cabi_scenarios.json` (52 упорядоченных шага из `cabi-reference.json`), C-харнесс `abi_conformance.c` (побайтное UTF-8 сравнение, hex-diff, колбэки/поток/user-data), `make cabi-conformance`, CI strict linux/macos | 52/52 steps passed, 0 failed; `make cabi-test` PASS |
 | **C6. Закрытие §3.2** | прокси, логи, портфели `united_*`, РПС-события, ветка без шаблона маржи | каждый пункт — S/O-сверка |
 | **C7. Длительная работа** | soak на торговый день на демо и проде (только чтение) | без роста памяти и неизвестных записей |
 | **C8. x86 / arm64** | stdcall-обёртки и `.def` для x86; arm64-сборки | ABI-тест и корпус на каждой |
