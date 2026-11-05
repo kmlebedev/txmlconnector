@@ -153,8 +153,10 @@ func (s *Service) loadOffline(seed *seedFile) error {
 		inst := instrumentFromSeed(si)
 		s.instruments[inst.Symbol] = inst
 
-		// The quote of the offline feed is the last 1m bar of the snapshot.
-		update := inst.UpdatedAt
+		// The quote of the offline feed is the last 1m bar of the snapshot; an
+		// instrument without a 1m series falls back to the snapshot timestamp
+		// instead of a zero (year 0001) time in the UI.
+		update := seed.GeneratedAt
 		if bars := si.Candles["60"]; len(bars) > 0 {
 			last := bars[len(bars)-1]
 			if inst.Last == 0 {

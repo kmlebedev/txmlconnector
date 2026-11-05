@@ -43,6 +43,47 @@ const (
 	liveTradeRing = 500
 )
 
+// stableSessionDuration is how long a live session must survive to count as
+// stable and reset the reconnect backoff.
+const stableSessionDuration = 30 * time.Second
+
+// backoffSchedule escalates the reconnect wait (min -> max) while sessions keep
+// failing; only a stable session resets it, so a flapping server is not retried
+// every two seconds forever.
+type backoffSchedule struct {
+	min, max time.Duration
+	current  time.Duration
+}
+
+// newBackoffSchedule builds the retry schedule.
+func newBackoffSchedule(min, max time.Duration) backoffSchedule {
+	if min <= 0 {
+		min = 2 * time.Second
+	}
+	if max < min {
+		max = min
+	}
+	return backoffSchedule{min: min, max: max, current: min}
+}
+
+// observeSession resets the escalation when the session lasted at least stable.
+func (b *backoffSchedule) observeSession(d, stable time.Duration) {
+	if stable > 0 && d >= stable {
+		b.current = b.min
+	}
+}
+
+// next returns the wait before the next dial attempt and escalates.
+func (b *backoffSchedule) next() time.Duration {
+	wait := b.current
+	next := b.current * 2
+	if next > b.max {
+		next = b.max
+	}
+	b.current = next
+	return wait
+}
+
 // clientConfig builds the native session config from the feed config.
 func (s *Service) clientConfig() native.ClientConfig {
 	return native.ClientConfig{
@@ -54,33 +95,32 @@ func (s *Service) clientConfig() native.ClientConfig {
 }
 
 // runLoop owns the live session: subscribe, poll, and reconnect with an
-// exponential backoff (2s -> 30s) keeping the last known data.
+// exponential backoff (2s -> 30s) keeping the last known data. The backoff
+// escalates while sessions keep failing and resets only after a stable one.
 func (s *Service) runLoop(client marketClient) {
 	defer s.wg.Done()
-	backoff := s.backoffMin
-	if backoff <= 0 {
-		backoff = 2 * time.Second
+	schedule := newBackoffSchedule(s.backoffMin, s.backoffMax)
+	stableThreshold := s.stableSession
+	if stableThreshold <= 0 {
+		stableThreshold = stableSessionDuration
 	}
 	for {
 		if s.ctx.Err() != nil {
 			return
 		}
+		sessionStart := time.Now()
 		err := s.runOnce(client)
 		if s.ctx.Err() != nil {
 			return
 		}
 		s.setSessionState(false, reconnectMessage(err))
+		schedule.observeSession(time.Since(sessionStart), stableThreshold)
 		for {
 			select {
 			case <-s.ctx.Done():
 				return
-			case <-time.After(backoff):
+			case <-time.After(schedule.next()):
 			}
-			next := backoff * 2
-			if max := s.backoffMax; max > 0 && next > max {
-				next = max
-			}
-			backoff = next
 			s.setSessionState(false, "переподключение к серверу биржи")
 			newClient, dialErr := s.dialWithTimeout()
 			if dialErr != nil {
@@ -102,10 +142,6 @@ func (s *Service) runLoop(client marketClient) {
 			}
 			s.applyCatalog(client)
 			s.refreshServerTime(s.ctx, client)
-			backoff = s.backoffMin
-			if backoff <= 0 {
-				backoff = 2 * time.Second
-			}
 			break
 		}
 	}
@@ -425,16 +461,64 @@ func (s *Service) currentClient() marketClient {
 	return s.client
 }
 
-// liveCandles serves a candle series from native.Client with a TTL cache.
+// historyFlight is one in-flight live history request shared by every waiter of
+// the same symbol+period. native.Client rejects a second concurrent History for
+// the same series ("history request is already in flight"), so the feed must
+// deduplicate: the graph and a backtest/agent call often ask concurrently.
+type historyFlight struct {
+	done    chan struct{}
+	history History
+	count   int
+	err     error
+}
+
+// liveCandles serves a candle series from native.Client with a TTL cache and
+// single-flight deduplication of concurrent requests.
 func (s *Service) liveCandles(ctx context.Context, symbol string, periodSec, count int) (History, error) {
 	if _, ok := s.Instrument(symbol); !ok {
 		return History{}, notFound(symbol)
 	}
-	client := s.currentClient()
-	if client == nil {
-		return History{}, &Error{Code: CodeUnavailable, Message: "нет соединения с сервером биржи"}
-	}
 	key := symbol + "|" + strconv.Itoa(periodSec)
+	for {
+		if history, ok := s.cachedHistory(key, count); ok {
+			return history, nil
+		}
+		client := s.currentClient()
+		if client == nil {
+			return History{}, &Error{Code: CodeUnavailable, Message: "нет соединения с сервером биржи"}
+		}
+		flight, leader := s.beginHistoryFlight(key)
+		if !leader {
+			select {
+			case <-flight.done:
+			case <-ctx.Done():
+				return History{}, &Error{Code: CodeUnavailable, Message: "история: превышено время ожидания ответа биржи"}
+			}
+			if flight.err != nil {
+				return History{}, flight.err
+			}
+			if flight.count >= count {
+				return trimHistory(flight.history, count), nil
+			}
+			// The shared fetch is shorter than this caller needs: retry as the
+			// next leader with the larger count.
+			continue
+		}
+		history, err := s.fetchHistory(ctx, client, symbol, periodSec, count)
+		if err != nil {
+			s.endHistoryFlight(key, flight, History{}, 0, err)
+			return History{}, err
+		}
+		s.mu.Lock()
+		s.historyCache[key] = &historyEntry{history: history, expireAt: time.Now().Add(s.cfg.HistoryTTL), count: count}
+		s.mu.Unlock()
+		s.endHistoryFlight(key, flight, history, count, nil)
+		return trimHistory(history, count), nil
+	}
+}
+
+// cachedHistory returns a cached series that satisfies count.
+func (s *Service) cachedHistory(key string, count int) (History, bool) {
 	now := time.Now()
 	s.mu.RLock()
 	entry := s.historyCache[key]
@@ -443,8 +527,13 @@ func (s *Service) liveCandles(ctx context.Context, symbol string, periodSec, cou
 	// a larger request must re-fetch, otherwise the backtest would silently get
 	// the short series of an earlier endpoint call.
 	if entry != nil && now.Before(entry.expireAt) && count <= entry.count {
-		return trimHistory(entry.history, count), nil
+		return trimHistory(entry.history, count), true
 	}
+	return History{}, false
+}
+
+// fetchHistory requests one candle series from the exchange.
+func (s *Service) fetchHistory(ctx context.Context, client marketClient, symbol string, periodSec, count int) (History, error) {
 	s.mu.RLock()
 	kind, ok := s.candleKinds[periodSec]
 	s.mu.RUnlock()
@@ -465,11 +554,32 @@ func (s *Service) liveCandles(ctx context.Context, symbol string, periodSec, cou
 	if err != nil {
 		return History{}, &Error{Code: CodeUnavailable, Message: "не удалось получить историю с сервера биржи: " + err.Error()}
 	}
-	history := historyFromCandles(candles, symbol, periodSec, "с сервера биржи")
-	s.mu.Lock()
-	s.historyCache[key] = &historyEntry{history: history, expireAt: now.Add(s.cfg.HistoryTTL), count: count}
-	s.mu.Unlock()
-	return trimHistory(history, count), nil
+	return historyFromCandles(candles, symbol, periodSec, "с сервера биржи"), nil
+}
+
+// beginHistoryFlight joins the in-flight request of a series or becomes its
+// leader.
+func (s *Service) beginHistoryFlight(key string) (*historyFlight, bool) {
+	s.flightMu.Lock()
+	defer s.flightMu.Unlock()
+	if s.flights == nil {
+		s.flights = map[string]*historyFlight{}
+	}
+	if flight, ok := s.flights[key]; ok {
+		return flight, false
+	}
+	flight := &historyFlight{done: make(chan struct{})}
+	s.flights[key] = flight
+	return flight, true
+}
+
+// endHistoryFlight publishes the shared result and wakes every waiter.
+func (s *Service) endHistoryFlight(key string, flight *historyFlight, history History, count int, err error) {
+	s.flightMu.Lock()
+	defer s.flightMu.Unlock()
+	flight.history, flight.count, flight.err = history, count, err
+	delete(s.flights, key)
+	close(flight.done)
 }
 
 // liveOrderBook serves the cached price ladder of a live instrument.

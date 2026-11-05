@@ -391,7 +391,10 @@ func marketPrice(side Side, q QuoteView) float64 {
 }
 
 // marketablePrice reports whether a limit order crosses the current quote and
-// the price it fills at (the limit price).
+// the price it fills at: the touch price (ask for a buy, bid for a sell), which
+// is always on the right side of the limit because of the cross check. Filling
+// at the limit price instead would add imaginary slippage, contradicting the
+// zero-slippage rule of ARCHITECTURE §7.
 func marketablePrice(req OrderRequest, q QuoteView) (float64, bool) {
 	if req.Price <= 0 {
 		return 0, false
@@ -399,11 +402,11 @@ func marketablePrice(req OrderRequest, q QuoteView) (float64, bool) {
 	switch req.Side {
 	case Buy:
 		if q.Ask > 0 && q.Ask <= req.Price {
-			return req.Price, true
+			return q.Ask, true
 		}
 	case Sell:
 		if q.Bid > 0 && q.Bid >= req.Price {
-			return req.Price, true
+			return q.Bid, true
 		}
 	}
 	return 0, false

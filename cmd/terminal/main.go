@@ -127,11 +127,14 @@ func run(logger *log.Logger) error {
 		return fmt.Errorf("инициализация HTTP API: %w", err)
 	}
 
+	// No global WriteTimeout: /api/events is a long-lived SSE stream. The API
+	// bounds every SSE write with a per-write deadline instead (see api/sse.go).
 	httpServer := &http.Server{
 		Addr:              *addr,
 		Handler:           apiSrv.Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
+		WriteTimeout:      0,
 	}
 	if !isLoopbackAddr(*addr) {
 		logger.Printf("внимание: сервер слушает не только loopback (%s); API без аутентификации", *addr)
@@ -185,14 +188,15 @@ func llmModeLabel(status agent.LLMStatus) string {
 	return "локальный аналитик"
 }
 
-// isLoopbackAddr reports whether addr binds loopback only.
+// isLoopbackAddr reports whether addr binds loopback only. An empty host
+// (":8090"), "0.0.0.0" or "::" means all interfaces: the API has no
+// authentication in iteration 1, so these must warn like any public bind.
 func isLoopbackAddr(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false
 	}
-	switch host {
-	case "127.0.0.1", "::1", "localhost", "":
+	if host == "localhost" {
 		return true
 	}
 	ip := net.ParseIP(host)

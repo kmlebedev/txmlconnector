@@ -91,6 +91,8 @@ type Server struct {
 	quoteInterval     time.Duration
 	statusInterval    time.Duration
 	heartbeatInterval time.Duration
+	// writeDeadline bounds every SSE write (overridable in tests).
+	writeDeadline time.Duration
 }
 
 // Event-loop defaults (docs/ai-terminal/ARCHITECTURE.md §10.3).
@@ -108,7 +110,13 @@ const (
 	defaultRequestTimeout  = 15 * time.Second
 	backtestRequestTimeout = 60 * time.Second
 	agentRequestTimeout    = 120 * time.Second
-	maxBodyBytes           = 1 << 20
+	// candlesRequestTimeout must exceed the feed's 25s live history timeout
+	// (ARCHITECTURE §6), otherwise a slow exchange reply is cancelled early.
+	candlesRequestTimeout = 30 * time.Second
+	// sseWriteTimeout bounds one SSE write; a client that stopped reading is
+	// disconnected instead of leaking a goroutine and a connection.
+	sseWriteTimeout = 10 * time.Second
+	maxBodyBytes    = 1 << 20
 )
 
 // Error codes of the API (docs/ai-terminal/ARCHITECTURE.md §10).
@@ -137,6 +145,7 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		quoteInterval:     defaultQuoteInterval,
 		statusInterval:    defaultStatusInterval,
 		heartbeatInterval: defaultHeartbeatInterval,
+		writeDeadline:     sseWriteTimeout,
 	}
 	s.mux = s.routes()
 	return s, nil

@@ -268,3 +268,53 @@ func floatEq(a, b float64) bool {
 	}
 	return d < 1e-9
 }
+
+// TestMarketableLimitFillPrice checks the P2 regression: a crossing limit fills
+// at the touch price (ask for a buy, bid for a sell), not at its own limit
+// price, so AvgFillPrice/cash/PnL follow the zero-slippage rule of §7.
+func TestMarketableLimitFillPrice(t *testing.T) {
+	b := newTestBroker(100000, 0)
+	// Buy limit 102 crosses ask 101: fill at 101, not 102.
+	buy, err := b.Place(OrderRequest{Symbol: "S", Side: Buy, Qty: 10, Type: Limit, Price: 102}, quote("S", 100, 100, 101))
+	if err != nil {
+		t.Fatalf("Place: %v", err)
+	}
+	if buy.AvgFillPrice != 101 {
+		t.Fatalf("buy fill = %v, want touch ask 101", buy.AvgFillPrice)
+	}
+	snap := b.Snapshot()
+	wantCash := 100000.0 - 101.0*10 - 101.0*10*5/10000 // 5 bps default commission
+	if !floatEq(snap.Cash, wantCash) {
+		t.Fatalf("cash = %v, want %v", snap.Cash, wantCash)
+	}
+	if !floatEq(snap.Positions[0].AvgPrice, 101) {
+		t.Fatalf("position avg = %v, want 101", snap.Positions[0].AvgPrice)
+	}
+	// Sell limit 95 crosses bid 99: fill at 99, not 95, and realize (99-101)*10.
+	sell, err := b.Place(OrderRequest{Symbol: "S", Side: Sell, Qty: 10, Type: Limit, Price: 95}, quote("S", 100, 99, 100))
+	if err != nil {
+		t.Fatalf("sell: %v", err)
+	}
+	if sell.AvgFillPrice != 99 {
+		t.Fatalf("sell fill = %v, want touch bid 99", sell.AvgFillPrice)
+	}
+	snap = b.Snapshot()
+	if !floatEq(snap.RealizedPnL, (99-101)*10) {
+		t.Fatalf("realized = %v, want %v", snap.RealizedPnL, (99-101)*10)
+	}
+	if len(snap.Positions) != 0 {
+		t.Fatalf("positions = %+v, want flat", snap.Positions)
+	}
+	// A resting limit that becomes marketable later also fills at the touch.
+	if _, err := b.Place(OrderRequest{Symbol: "S", Side: Buy, Qty: 1, Type: Limit, Price: 90}, quote("S", 100, 99, 100)); err != nil {
+		t.Fatalf("resting place: %v", err)
+	}
+	if ev := b.OnQuote(quote("S", 90, 89, 89.5)); len(ev) == 0 {
+		t.Fatal("no fill event")
+	}
+	snap = b.Snapshot()
+	lastTrade := snap.Trades[len(snap.Trades)-1]
+	if lastTrade.Price != 89.5 {
+		t.Fatalf("resting fill price = %v, want touch ask 89.5", lastTrade.Price)
+	}
+}

@@ -422,3 +422,57 @@ func TestNewLiveRequiresCredentials(t *testing.T) {
 		t.Fatal("want missing credentials error")
 	}
 }
+
+// TestOfflineInstrumentWithoutShortSeries is the P3 regression: an instrument
+// without a 1m candle series still gets non-zero timestamps (the snapshot
+// timestamp) in Instrument.UpdatedAt, Quote.Time and OrderBook.Time instead of
+// year 0001 in the UI.
+func TestOfflineInstrumentWithoutShortSeries(t *testing.T) {
+	generated := time.Date(2026, 11, 5, 16, 21, 36, 0, time.UTC)
+	seed := &seedFile{
+		Schema:      1,
+		GeneratedAt: generated,
+		Source:      "test",
+		ExchangeTZ:  "Europe/Moscow",
+		Universe:    []string{"TQBR:SBER"},
+		Instruments: []seedInstrument{{
+			Symbol: "TQBR:SBER", Board: "TQBR", SecCode: "SBER",
+			Name: "Сбербанк", ShortName: "Сбербанк", Currency: "RUB",
+			Decimals: 2, LotSize: 1, MinStep: 0.01,
+			Last: 101, Bid: 100.9, Ask: 101.1,
+			Candles: map[string][]seedCandle{
+				"300": {{T: generated.Unix() - 300, O: 100, H: 101, L: 99, C: 100, V: 5}},
+			},
+		}},
+	}
+	svc, err := New(Config{Mode: ModeOffline, SeedDir: writeSeedGzip(t, seed)})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer svc.Close()
+	inst, ok := svc.Instrument("TQBR:SBER")
+	if !ok {
+		t.Fatal("instrument missing")
+	}
+	if !inst.UpdatedAt.Equal(generated) {
+		t.Fatalf("instrument UpdatedAt = %v, want snapshot %v", inst.UpdatedAt, generated)
+	}
+	quote, ok := svc.Quote("TQBR:SBER")
+	if !ok {
+		t.Fatal("quote missing")
+	}
+	if !quote.Time.Equal(generated) {
+		t.Fatalf("quote Time = %v, want snapshot %v", quote.Time, generated)
+	}
+	book, err := svc.OrderBook(context.Background(), "TQBR:SBER")
+	if err != nil {
+		t.Fatalf("OrderBook: %v", err)
+	}
+	if !book.Time.Equal(generated) {
+		t.Fatalf("order book Time = %v, want snapshot %v", book.Time, generated)
+	}
+	// No 1m series and no snapshot tape: the synthesized tape stays empty.
+	if trades, err := svc.Trades(context.Background(), "TQBR:SBER", 10); err != nil || len(trades) != 0 {
+		t.Fatalf("trades = %+v, err %v", trades, err)
+	}
+}
