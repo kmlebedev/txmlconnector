@@ -164,3 +164,26 @@ O: `tools/replay-server` + `tools/tcproxy` + DLL под Wine 11.21, dump `.re-ru
 - Go: `session.OptionsMinProtocol`, `session.ErrUnsupportedRequest`; `native.Connector` отвечает теми же
   тремя строками (проверено живьём на демо), текст ошибки 149 перекодируется из CP1251.
   Фикстура `option-families-reply-231-live.hex` — **S**.
+
+
+## S на проде (2026-11-05, read-only) — формы данных сняты
+
+Прод: `PRO#=78` (≥ 0x45), сервис опционов есть. DLL и `native.Connector` прогнаны по одному сценарию
+(`FUT:SiZ6`, `17.12.2026`, `Si76000BL6`); колбэки совпали побайтно, кроме `secid` — он свой в каждой
+сессии.
+
+- **`family_id` = дата экспирации в днях от 1970-01-01** (S): 20804 = 17.12.2026, 20776 = 19.11.2026.
+  RQ_FAMILY_STRIKES (153) = `W secid, L family_id` (S: `395c 421405`); хранилище для расчёта не нужно.
+- **0x6f R_FAMILY** = `W secid, Z6 "" , L family_id, L lot_size` (S, совпадает с D).
+- **0x70 R_END_OF_FAMILIES** (D `FUN_180396720`, раньше не описана) = `W secid, Z512 text`; по ней DLL
+  отдаёт **один** `<option_families>`, семейства отсортированы по дате:
+  `<option_families><security seccode=".." board=".." secid=".."/><family><lot_size>1</lot_size><mat_date>05.11.2026</mat_date></family>…</option_families>`.
+- **0x78 R_STRIKES** (S, совпадает с D): после `final=1` DLL отдаёт `<family_strikes>` со страйками,
+  **отсортированными по цене, затем C раньше P** (156 из 156 совпали):
+  `<family_strikes><security …/><mat_date>17.12.2026</mat_date><strike><cp>C</cp><price>65000</price><opt_code>Si65000BL6</opt_code></strike>…</family_strikes>`.
+- **`get_options` (151)**: ответ сервера пустой (len=0) → `success="true"`; данные опциона приходят
+  записью `R_SEC_NEW` (`<securities>`), отдельного `<option>` колбэка нет (S).
+- Фикстуры **S**: `option-families-live.hex`, `option-strikes-live.hex`, `option-families-dll.xml`,
+  `family-strikes-dll.xml`; тест `TestConnectorOptionLiveForms` сравнивает побайтно.
+- Остаётся **I**: непустой текст `R_END_OF_FAMILIES`, `R_END_OF_FAMILY 0x71`/`<options_failed>`,
+  масштаб дробных страйков, `final=0` (в живых данных не встречались).

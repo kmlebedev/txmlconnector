@@ -369,3 +369,25 @@ DLL 6.47.2.26.4, dump `.re-run/r14/decode-full.txt` (вне git), инъекци
 сессии отдаёт `true/true/true/true` и `14.28` (O, `margin-dll.xml`). Следующий шаг: права по п. 1/7
 (`shortable` — `flags & 8`, `longable` — `flags & 0x100`, `tradeable` — `FUN_1801dc810`), сверка
 оракулом; ставки — после того, как найден источник деревьев.
+
+
+## RQ_INQUIRE_UT (152): маржинальный шаблон — S (прод, 2026-11-05)
+
+- **Когда:** DLL шлёт 152 после загрузки для категории юниона — поле `unicat` записи `R_UNION 0x68`
+  (S: `0x12` = 18). На демо юниона нет — нет и запроса (S).
+- **Запрос:** `B категория, L смещение` (S: `1200`, затем `1282fd0f` = смещение 65496).
+- **Ответ:** `B (0x0f), L размер после распаковки, L сжатый размер, L размер куска, кусок`; куски
+  запрашиваются по смещению, пока не собран весь сжатый документ; затем zlib (S: 65496 + 40186 байт →
+  991 306 байт XML в CP1251).
+- **Документ:** `<template id name … tradeable longable shortable marketable long short Rlong Rshort>`,
+  `<market-defaults><market id …/>`, `<instrclass-defaults><class letter mkt …/>`,
+  `<instruments><instr seccode mkt … long short/>`, а также `<curr-rates>`, `<underlying-assets>`.
+  Это и есть деревья `FUN_18001a700`: бумага (seccode, рынок) → класс (буква, рынок) → рынок → шаблон.
+- **XML DLL с шаблоном** — вторая ветка: `<riskrate_long>`=`long`, `<reserate_long>`=`Rlong` (нет — 0.00),
+  `<riskrate_short>`=`short`, `<reserate_short>`=`Rshort`; права — флаги строки (S: SBER 15.00, GAZP
+  17.00, SiZ6 12.00, все `true`). При запросе с `<client>` атрибута `union` нет (S).
+- **Go:** `session.InquireUT`, `records.ParseMarginTemplate`, `model.MarginTemplate.Rule`; на проде
+  `get_cln_sec_permissions` для трёх бумаг совпал с DLL побайтно (S). Клиент без категории юниона
+  берёт единственный загруженный шаблон — **I**. Ветка без шаблона (демо: `regratelong` 14.28) по-прежнему
+  не воспроизведена — **I**.
+- Экранирование: DLL пишет `&quot;` (S, также `authenticate` под Wine), нативный код теперь тоже.

@@ -275,7 +275,7 @@ func TestCommandDispatch(t *testing.T) {
 		{`not xml`, `<result success="false"><message>Unknown command.</message></result>`},
 		{`<command id="get_securities"/>`, `<result success="false"><message>Cannot process this command without connection.</message></result>`},
 		{`<command id="set_csp"/>`, `<result success="true"/>`},
-		{`<command id="authenticate"/>`, `<result success="false"><message>Illegal context for &#34;sendpin&#34; command</message></result>`},
+		{`<command id="authenticate"/>`, `<result success="false"><message>Illegal context for &quot;sendpin&quot; command</message></result>`},
 		{`<command id="get_connector_version"/>`, `<result success="true"/>`},
 	}
 	for _, tc := range cases {
@@ -597,6 +597,9 @@ func TestUnionRecordReachesLoadEnd(t *testing.T) {
 	w.String("TESTCAT", 32)
 	w.Byte(1)
 	srv.Snapshot = w.Bytes()
+	// The union category makes the client ask RQ_INQUIRE_UT after the load; an
+	// empty reply leaves it without a template, which does not break the load.
+	srv.Handle(session.RqInquireUT, func([]byte) (byte, []byte) { return wire.KindReply | wire.FlagPlain, nil })
 	c := New(Config{Dial: srv.Dial})
 	rec := newRecorder()
 	if err := c.Start(rec.handle); err != nil {

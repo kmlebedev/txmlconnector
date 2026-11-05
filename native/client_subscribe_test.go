@@ -310,3 +310,23 @@ func TestConnectorQuotesFirstElementOnly(t *testing.T) {
 		t.Fatalf("RQ_SUBSCRIBE = %s, want only the first block 001a002502", got)
 	}
 }
+
+// TestSubscribeUnknownSecIDIsAccepted: S (production 2026-11-05) the DLL
+// answers subscribe <alltrades><secid> for a secid it does not know with
+// success="true", like for a known one.
+func TestSubscribeUnknownSecIDIsAccepted(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = clientSnapshot(t)
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	cmd := `<command id="subscribe"><alltrades><secid>65000</secid></alltrades></command>`
+	if got := send(t, c, cmd); got != `<result success="true"/>` {
+		t.Fatalf("subscribe unknown secid = %s", got)
+	}
+}

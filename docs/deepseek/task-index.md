@@ -872,3 +872,15 @@ RPS `<negdeal>/<report>` (нет O), typed portfolio API, RQ_FORTS_FIRM_MONEY 47
 **Приёмка на ветке:** `make verify` (gofmt/vet/build/кроссы/race) PASS, `server_build`/`queues_build`
 PASS, linux/arm64 PASS, `check_env.sh` 15 PASS; live soak демо 3 мин, 6 бумаг: Polls 1298,
 Trades 3860, Duplicates 0, UnknownRecords 0, RSS 30 MiB.
+
+**Прод, read-only (2026-11-05, после закрытия терминала пользователем):**
+- Нативная загрузка прода падала на `ReadICA` (размер 1 байт, а не W), `R_BOARD` без размера и
+  необязательном байте `R_FORTS_SESSION`. Исправлено; колбэки загрузки совпадают с DLL.
+- Опционы: формы `<option_families>`/`<family_strikes>` сняты и совпадают с DLL побайтно (кроме
+  сессионного `secid`); `family_id` = дни от 1970; `get_options` — пустой ответ = успех.
+- Права и ставки: источник — шаблон `RQ_INQUIRE_UT (152)` по `unicat` юниона; `get_cln_sec_permissions`
+  совпал с DLL для SBER/GAZP/SiZ6; `&quot;` как в DLL; без лишнего `union`.
+- `<messages>` в CP1251 ломали gRPC (invalid UTF-8) — исправлено; `subscribe` с неизвестным `secid` —
+  `success` как в DLL.
+- **RE-4 на проде PASS** (нативный gRPC без Wine, `TC_RE4_SECID`); soak прода 2,5 мин: Polls 1151,
+  Trades 1883, Duplicates 0, UnknownRecords 0.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
@@ -42,21 +43,26 @@ func (c *Client) OptionFamilies(ctx context.Context, underlying model.Symbol) ([
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := append([]model.OptionFamily(nil), c.optionFamilies[secID]...)
-	return out, nil
+	return c.sortedFamiliesLocked(secID), nil
 }
 
-// FamilyStrikes is get_family_strikes: the family-name -> (secid, family_id)
-// mapping is not recovered (the DLL derives it from its internal family store,
-// options.md I), so this returns the explicit I error instead of sending a
-// guessed request.
-func (c *Client) FamilyStrikes(ctx context.Context, family string) ([]model.Strike, error) {
-	_ = ctx
-	_ = family
+// FamilyStrikes is get_family_strikes: RQ_FAMILY_STRIKES (153) with the
+// underlying secid and the family id, which is the expiration date in days
+// (S: 395c 421405 for SiZ6, 17.12.2026). The strikes arrive as R_STRIKES and
+// are delivered as a model.OptionStrikes event.
+func (c *Client) FamilyStrikes(ctx context.Context, underlying model.Symbol, matDate time.Time) error {
 	if !c.optionsSupported() {
-		return nil, session.ErrUnsupportedRequest
+		return session.ErrUnsupportedRequest
 	}
-	return nil, fmt.Errorf("family id mapping is not recovered (I)")
+	secID, err := c.optionSecID(underlying)
+	if err != nil {
+		return err
+	}
+	conn := c.connection()
+	if conn == nil {
+		return fmt.Errorf("transaq: client is not connected")
+	}
+	return conn.FamilyStrikes(ctx, secID, int64(model.FamilyID(matDate)))
 }
 
 // optionsSupported reports whether the server protocol passes the DLL gate of
