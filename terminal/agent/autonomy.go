@@ -207,6 +207,10 @@ func (e *Engine) runAutonomy(run *autonomyRun, bars []backtest.Bar, strategy bac
 	var trades int
 	tradeTimes := make([]time.Time, 0, 8)
 	lastPrice := bars[0].Close
+	// lastProcessedTime is the time of the last bar whose open/close the
+	// replay actually handled: SSE ticks and barTime must never point at a
+	// future bar after an early kill-switch/autostop.
+	lastProcessedTime := bars[0].Time
 	pending := backtest.Hold
 
 	stopKind := "stop"
@@ -240,6 +244,7 @@ replay:
 		}
 		pending = backtest.Hold
 		lastPrice = bar.Close
+		lastProcessedTime = bar.Time
 
 		// Strategy decision on the bar close, overridden by risk exits.
 		action := strategy.OnBar(bars, i)
@@ -292,18 +297,31 @@ replay:
 		}})
 
 		// Automatic kill-switch on the daily loss limit (from the initial
-		// equity, as frozen by §9.4).
+		// equity, as frozen by §9.4). The decision is taken on the close of
+		// bar i, so the position is closed at open[i+1] like every other
+		// replay action; the last bar falls back to its close explicitly.
 		if pnlPct <= -cfg.DailyLossPct {
 			e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block",
 				Message: fmt.Sprintf("автостоп: убыток %.2f%% достиг лимита %.2f%%", pnlPct, cfg.DailyLossPct),
 				Data:    map[string]any{"equity": equity}})
 			if position > 0 {
-				cash, _ = e.autonomySell(run, cash, position, entryPrice, entryFee, bar.Close, cfg, bar.Time)
+				if i+1 < len(bars) {
+					fillPrice := bars[i+1].Open
+					fillTime := bars[i+1].Time
+					cash, _ = e.autonomySell(run, cash, position, entryPrice, entryFee, fillPrice, cfg, fillTime)
+					lastPrice = fillPrice
+					lastProcessedTime = fillTime
+				} else {
+					e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block",
+						Message: fmt.Sprintf("нет следующего бара — закрытие позиции по close последнего бара %.2f ₽", bar.Close)})
+					cash, _ = e.autonomySell(run, cash, position, entryPrice, entryFee, bar.Close, cfg, bar.Time)
+					lastPrice = bar.Close
+					lastProcessedTime = bar.Time
+				}
 				position = 0
 				trades++
-				tradeTimes = append(tradeTimes, bar.Time)
+				tradeTimes = append(tradeTimes, lastProcessedTime)
 			}
-			lastPrice = bar.Close
 			stopKind = "stopped_by_risk"
 			stopMessage = fmt.Sprintf("остановлено по дневному убытку %.2f%%", pnlPct)
 			break replay
@@ -321,15 +339,23 @@ replay:
 		}
 	}
 
-	// Force-close an open position at the last known price so the final PnL of
-	// a finished or interrupted run is fully realized.
-	if position > 0 && lastPrice > 0 {
-		cash, _ = e.autonomySell(run, cash, position, entryPrice, entryFee, lastPrice, cfg, bars[len(bars)-1].Time)
-		position = 0
-		trades++
+	// An open position at the end of a finished/interrupted replay is valued
+	// mark-to-market: §9.4 and the backtest engine keep open positions open, so
+	// there is no fictitious closing trade and no extra commission. Trades
+	// counts only closed round trips.
+	var unrealized float64
+	if position > 0 {
+		unrealized = (lastPrice-entryPrice)*float64(position) - entryFee
+		e.logAutonomy(run, LogEntry{
+			Time: e.now(),
+			Kind: "mark_to_market",
+			Message: fmt.Sprintf("позиция %d шт оценена mark-to-market по %.2f ₽: нереализованный PnL %+.2f ₽",
+				position, lastPrice, unrealized),
+			Data: map[string]any{"qty": position, "price": lastPrice, "unrealizedPnl": unrealized, "barTime": lastProcessedTime},
+		})
 	}
 
-	finalEquity := cash
+	finalEquity := cash + float64(position)*lastPrice
 	pnl := finalEquity - initial
 	pnlPct := pnl / initial * 100
 	run.update(func(st *AutonomyStatus) {
@@ -342,12 +368,15 @@ replay:
 		st.LastActionAt = e.now()
 	})
 	e.logAutonomy(run, LogEntry{Time: e.now(), Kind: stopKind, Message: stopMessage,
-		Data: map[string]any{"pnl": pnl, "pnlPct": pnlPct, "trades": trades, "cash": finalEquity}})
+		Data: map[string]any{
+			"pnl": pnl, "pnlPct": pnlPct, "trades": trades, "cash": cash,
+			"position": position, "unrealizedPnl": unrealized, "equity": finalEquity,
+		}})
 	e.publish(Event{Type: "autonomy", Data: autonomyTick{
 		Running:   false,
 		Symbol:    cfg.Symbol,
 		PeriodSec: cfg.PeriodSec,
-		Time:      bars[len(bars)-1].Time,
+		Time:      lastProcessedTime,
 		Price:     lastPrice,
 		Position:  position,
 		Trades:    trades,

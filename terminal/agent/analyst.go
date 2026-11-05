@@ -32,9 +32,14 @@ func (e *Engine) localAnalyst(ctx context.Context, message string) (ChatResponse
 	if err != nil {
 		return ChatResponse{}, err
 	}
-	resp := ChatResponse{LLM: false}
+	resp := ChatResponse{LLM: false, ToolCalls: []ToolCall{}, Artifacts: []Artifact{}}
 
 	if intent.Stop {
+		if !e.Status().Autonomy.Running {
+			resp.Answer = "Автономия сейчас не запущена — останавливать нечего."
+			resp.ElapsedMs = e.now().Sub(started).Milliseconds()
+			return resp, nil
+		}
 		call, artifact := e.executeToolCall(ctx, "stop_autonomy", map[string]any{})
 		resp.ToolCalls = append(resp.ToolCalls, call)
 		if artifact != nil {
@@ -200,32 +205,73 @@ func (e *Engine) parseIntent(message string) (analystIntent, error) {
 	}
 	intent.Strategy = parseStrategy(text)
 
-	// Autonomy is started only on an explicit imperative ("запусти",
-	// "запускай", "стартуй", "включи автоторговлю", "торгуй", ...). Questions
-	// ("стоит ли запускать", "запускать?"), negations ("не запускай") and
-	// hypotheticals must never start a real paper runner.
-	stopIntent := hasAny(text, "останов", "выключи", "stop auto", "stop_autonomy", "halt", "стоп авто")
-	if hasAny(text, "не останов", "не выключай", "не стоп") {
-		stopIntent = false
-	}
+	// Autonomy is started/stopped only on an explicit imperative. Negations,
+	// modal/permission constructions, hypotheticals and any question (even
+	// without a "?") must never start or stop a real paper runner.
+	stopIntent := parseStopIntent(text)
 	startIntent := hasAny(text,
 		"запусти", "запускай", "стартуй", "стартани", "стартуем",
 		"включи автоторг", "включай автоторг", "включи торговлю",
 		"торгуй", "начни торговать", "начинай торговать",
 		"start trading", "start autonomy", "start auto", "run autonomy",
 	)
-	noStart := hasAny(text,
-		"не запускай", "не запускать", "не надо запускать", "не стоит запускать",
-		"не включай", "не включать", "не стартуй", "не начинай", "не торгуй",
-		"стоит ли", "запускать ли", "ли запускать", "запускать?",
-		"можно ли", "нужно ли", "надо ли", "should i", "should we",
-	) || strings.Contains(text, "?")
-	if noStart {
+	if hasNoStartMarker(text) {
 		startIntent = false
 	}
 	intent.Stop = stopIntent
 	intent.Start = !stopIntent && startIntent
 	return intent, nil
+}
+
+// hasNoStartMarker reports a negation, modal/permission construction,
+// hypothetical clause or question form that vetoes starting the paper runner.
+func hasNoStartMarker(text string) bool {
+	if strings.Contains(text, "?") {
+		return true
+	}
+	return hasAny(text,
+		// Negations / prohibitions.
+		"не запускай", "не запускать", "не запусти", "не включай", "не включать",
+		"не стартуй", "не стартани", "не начинай", "не начни", "не торгуй",
+		"нельзя", "запрещено", "запрещен", "не надо", "не стоит",
+		// Modal / permission / obligation.
+		"можно", "разрешено", "стоит ли", "запускать ли", "ли запускать",
+		"надо ли", "нужно ли", "должен ли", "должна ли", "следует ли",
+		"хотел бы", "хотелось бы", "планирую", "собираюсь",
+		// Hypothetical / conditional.
+		"что будет", "что если", "если запустить", "если запустим",
+		"если включить", "если старт", "в случае если", "при условии",
+		"представь", "допустим", "как будто",
+		// Interrogatives without "?".
+		"как запустить", "как включить", "как стартовать", "почему", "зачем", "сколько",
+		// English modal / hypothetical.
+		"should i", "should we", "can i", "could i", "would i", "may i",
+		"is it possible", "what if", "if i start", "allowed to",
+	)
+}
+
+// parseStopIntent accepts only an explicit stop imperative ("останови",
+// "стоп", "stop", "выключи автоторговлю"); questions and modality are not
+// actions.
+func parseStopIntent(text string) bool {
+	stopIntent := hasAny(text, "останови", "остановите", "выключи", "выключай", "halt", "stop_autonomy")
+	if hasAny(text, "стоп") && !hasAny(text, "стоп-лосс", "стоп лосс", "стоплосс") {
+		stopIntent = true
+	}
+	if hasAny(text, "stop") && !hasAny(text, "stop loss", "stop-loss") {
+		stopIntent = true
+	}
+	if strings.Contains(text, "?") || hasAny(text,
+		"не останавливай", "не останавливать", "не надо останавливать", "не стоит останавливать",
+		"не выключай", "не отключай", "нельзя остановить",
+		"можно остановить", "можно ли остановить", "стоит ли остановить",
+		"надо ли остановить", "нужно ли остановить", "должен ли остановить",
+		"что будет если остановить", "если остановить", "как остановить",
+		"should i stop", "should we stop", "can i stop",
+	) {
+		stopIntent = false
+	}
+	return stopIntent
 }
 
 // matchInstrument finds the instrument mentioned in the message (ticker,

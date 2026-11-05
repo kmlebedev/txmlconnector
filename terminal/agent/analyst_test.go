@@ -133,6 +133,7 @@ func TestLocalAnalystStartAutonomy(t *testing.T) {
 func TestLocalAnalystStopAutonomy(t *testing.T) {
 	e, _, _ := newTestEngine(t)
 	e.newStrategy = strategyScript(map[int]backtest.Action{})
+	e.stepDelay = func(float64) time.Duration { return 20 * time.Millisecond }
 	if err := e.StartAutonomy(context.Background(), AutonomyConfig{
 		Symbol: "TQBR:SBER", PeriodSec: 300, Strategy: "sma_cross",
 	}); err != nil {
@@ -196,6 +197,19 @@ func TestParseIntent(t *testing.T) {
 		{message: "Запусти автоторговлю?", symbol: "TQBR:SBER", period: 300},
 		{message: "не запускай автоторговлю", symbol: "TQBR:SBER", period: 300},
 		{message: "не надо запускать автоторговлю", symbol: "TQBR:SBER", period: 300},
+		// Modal / permission / hypothetical constructions without "?".
+		{message: "нельзя запустить автоторговлю на SBER", symbol: "TQBR:SBER", period: 300},
+		{message: "можно запустить автоторговлю на SBER", symbol: "TQBR:SBER", period: 300},
+		{message: "можно ли запустить автоторговлю на SBER", symbol: "TQBR:SBER", period: 300},
+		{message: "что будет если запустить автоторговлю на SBER", symbol: "TQBR:SBER", period: 300},
+		{message: "если запустить автоторговлю на SBER, что будет", symbol: "TQBR:SBER", period: 300},
+		{message: "хотел бы запустить автоторговлю на SBER", symbol: "TQBR:SBER", period: 300},
+		{message: "должен ли я запустить автоторговлю на SBER", symbol: "TQBR:SBER", period: 300},
+		{message: "не стоит запускать автоторговлю на SBER", symbol: "TQBR:SBER", period: 300},
+		{message: "запрещено ли запускать автоторговлю на SBER", symbol: "TQBR:SBER", period: 300},
+		{message: "разрешено ли запустить автоторговлю на SBER", symbol: "TQBR:SBER", period: 300},
+		{message: "как запустить автоторговлю на SBER", symbol: "TQBR:SBER", period: 300},
+		{message: "почему запускать автоторговлю на SBER", symbol: "TQBR:SBER", period: 300},
 	}
 	for _, tc := range cases {
 		intent, err := e.parseIntent(tc.message)
@@ -521,6 +535,96 @@ func TestLocalAnalystExplicitStrategyRecommendation(t *testing.T) {
 	}
 	if e.Status().Autonomy.Running {
 		t.Fatal("autonomy was started for a losing strategy")
+	}
+}
+
+// TestLocalAnalystModalDoesNotStartAutonomy is the P2 regression test: modal
+// and hypothetical constructions without a "?" must not start the runner.
+func TestLocalAnalystModalDoesNotStartAutonomy(t *testing.T) {
+	messages := []string{
+		"нельзя запустить автоторговлю на SBER",
+		"можно запустить автоторговлю на SBER",
+		"что будет если запустить автоторговлю на SBER",
+	}
+	for _, message := range messages {
+		e, _, _ := newTestEngine(t)
+		resp, err := e.Chat(context.Background(), ChatRequest{Message: message})
+		if err != nil {
+			t.Fatalf("%q: Chat: %v", message, err)
+		}
+		if _, ok := findToolCall(resp.ToolCalls, "start_autonomy"); ok {
+			t.Errorf("%q: start_autonomy called; tools = %v", message, toolNames(resp.ToolCalls))
+		}
+		if e.Status().Autonomy.Running {
+			t.Errorf("%q: autonomy started by a modal message", message)
+		}
+		if resp.Answer == "" {
+			t.Errorf("%q: empty answer", message)
+		}
+	}
+}
+
+// TestLocalAnalystStopGuards is the P3 regression test: only an explicit stop
+// imperative stops the runner, and stopping an inactive runner is reported
+// honestly instead of faking a stopped state.
+func TestLocalAnalystStopGuards(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	e.stepDelay = func(float64) time.Duration { return 20 * time.Millisecond }
+
+	// No runner: a question does not stop anything, and the answer is honest.
+	resp, err := e.Chat(context.Background(), ChatRequest{Message: "можно остановить автоторговлю?"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if _, ok := findToolCall(resp.ToolCalls, "stop_autonomy"); ok {
+		t.Fatalf("question must not call stop_autonomy; tools = %v", toolNames(resp.ToolCalls))
+	}
+	if e.Status().Autonomy.Running {
+		t.Fatal("autonomy unexpectedly running")
+	}
+
+	// No runner: an imperative gets an honest "not running" answer.
+	resp, err = e.Chat(context.Background(), ChatRequest{Message: "останови автоторговлю"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if !strings.Contains(resp.Answer, "не запущена") {
+		t.Errorf("answer must say the runner is not active: %q", resp.Answer)
+	}
+	if _, ok := findToolCall(resp.ToolCalls, "stop_autonomy"); ok {
+		t.Errorf("stop_autonomy called for an inactive runner; tools = %v", toolNames(resp.ToolCalls))
+	}
+
+	// Active runner: a modal question leaves it running...
+	if err := e.StartAutonomy(context.Background(), AutonomyConfig{
+		Symbol: "TQBR:SBER", PeriodSec: 300, Strategy: "sma_cross",
+	}); err != nil {
+		t.Fatalf("StartAutonomy: %v", err)
+	}
+	resp, err = e.Chat(context.Background(), ChatRequest{Message: "можно остановить автоторговлю?"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if _, ok := findToolCall(resp.ToolCalls, "stop_autonomy"); ok {
+		t.Errorf("modal question stopped a running runner; tools = %v", toolNames(resp.ToolCalls))
+	}
+	if !e.Status().Autonomy.Running {
+		t.Fatal("modal question stopped the running runner")
+	}
+
+	// ...while an explicit imperative really stops it.
+	resp, err = e.Chat(context.Background(), ChatRequest{Message: "останови автоторговлю"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if _, ok := findToolCall(resp.ToolCalls, "stop_autonomy"); !ok {
+		t.Fatalf("explicit stop imperative must call stop_autonomy; tools = %v", toolNames(resp.ToolCalls))
+	}
+	if !strings.Contains(resp.Answer, "остановлена") {
+		t.Errorf("answer = %q", resp.Answer)
+	}
+	if e.Status().Autonomy.Running {
+		t.Fatal("autonomy still running after the stop imperative")
 	}
 }
 
