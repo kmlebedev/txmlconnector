@@ -257,6 +257,19 @@ func SetLogLevel(level C.int) *C.uchar {
 
 //export GetServiceInfo
 func GetServiceInfo(request *C.uchar, response **C.uchar) C.int {
+	// The DLL checks the 5000 ms rate limit first, before the parameter checks
+	// (docs/protocol/cabi.md §9; cabi_scenarios svc_* order).
+	serviceMu.Lock()
+	now := time.Now()
+	if !lastServiceCall.IsZero() && now.Sub(lastServiceCall) < serviceInfoRateLimit {
+		serviceMu.Unlock()
+		if response != nil {
+			*response = nil
+		}
+		return 6
+	}
+	lastServiceCall = now
+	serviceMu.Unlock()
 	if response == nil {
 		return 5
 	}
@@ -268,14 +281,6 @@ func GetServiceInfo(request *C.uchar, response **C.uchar) C.int {
 	if strings.TrimSpace(text) == "" {
 		return 4
 	}
-	serviceMu.Lock()
-	now := time.Now()
-	if !lastServiceCall.IsZero() && now.Sub(lastServiceCall) < serviceInfoRateLimit {
-		serviceMu.Unlock()
-		return 6
-	}
-	lastServiceCall = now
-	serviceMu.Unlock()
 	body, code := serviceInfoResponse(text, versionString())
 	if code != 0 {
 		*response = errString(body)
