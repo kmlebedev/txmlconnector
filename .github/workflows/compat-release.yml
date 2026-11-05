@@ -1,8 +1,11 @@
 name: Compat release
 
-# C3/C3.1: build the drop-in C ABI library for the first-release platforms.
-# Each target uploads one canonical archive; a single release job publishes all
-# five archives plus SHA256SUMS on a compat-v* tag (no matrix race).
+# C3/C9: build the drop-in C ABI library with Zig as the C toolchain for every
+# target (docs/COMPATIBILITY.md). Linux and Windows are cross-built on one
+# Linux host; macOS needs the macOS SDK and is built on a macOS runner. Every
+# target is tested on its native runner, and the builds are reproducible
+# (tools/cabi/zig_build.sh). A compat-v* tag publishes one release with all
+# archives plus SHA256SUMS.
 on:
   push:
     tags:
@@ -12,9 +15,73 @@ on:
 permissions:
   contents: write
 
+env:
+  ZIG_VERSION: "0.17.1"
+  TXC_VERSION: "6.47.2.26.4"
+
 jobs:
-  build:
-    name: compat-${{ matrix.name }}
+  build-cross:
+    name: build linux+windows (zig)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Go tests (cgo wrapper, logs, PE normalizer)
+        env:
+          CGO_ENABLED: "1"
+          CC: zig cc
+        run: go test ./cmd/connector/... ./tools/cabi/...
+
+      - name: Build linux-amd64, linux-arm64, windows-amd64
+        run: tools/cabi/zig_build.sh dist linux-amd64 linux-arm64 windows-amd64
+
+      - name: Reproducible (second build is byte-identical)
+        run: |
+          tools/cabi/zig_build.sh dist2 linux-amd64 linux-arm64 windows-amd64
+          (cd dist && sha256sum */*.so */*.dll) > repro.sum
+          (cd dist2 && sha256sum -c ../repro.sum)
+
+      - name: Linux needs glibc <= 2.17
+        run: |
+          for t in linux-amd64 linux-arm64; do
+            max=$(objdump -T "dist/$t/libtxmlconnector.so" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)
+            echo "$t: max GLIBC_$max"
+            [ "$(printf '%s\n2.17\n' "$max" | sort -V | tail -1)" = "2.17" ]
+          done
+
+      - name: Windows exports match the reference DLL (names and ordinals 1-9)
+        run: |
+          objdump -p dist/windows-amd64/txmlconnector64.dll | sed -n '/Ordinal      RVA/,/^$/p' | awk 'NF==3 {print $1, $3}' > exports.txt
+          cat exports.txt
+          printf '%s\n' "1 FreeMemory" "2 GetServiceInfo" "3 Initialize" "4 InitializeEx" "5 SendCommand" \
+            "6 SetCallback" "7 SetCallbackEx" "8 SetLogLevel" "9 UnInitialize" | diff - exports.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-linux-amd64
+          path: dist/linux-amd64
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-linux-arm64
+          path: dist/linux-arm64
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-windows-amd64
+          path: dist/windows-amd64
+          if-no-files-found: error
+
+  test:
+    name: test ${{ matrix.name }}
+    needs: build-cross
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -22,205 +89,144 @@ jobs:
         include:
           - name: linux-amd64
             os: ubuntu-latest
-            goarch: amd64
             lib: libtxmlconnector.so
-            extra: libtxmlconnector64.so
+            triple: x86_64-linux-gnu.2.17
             archive: txmlconnector-linux-amd64.tar.gz
-            package_files: libtxmlconnector.so libtxmlconnector64.so txmlconnector.h VERSION.txt README.md
-            cc: gcc
-            abi: true
-            libs: -Ldist -ltxmlconnector -ldl
           - name: linux-arm64
             os: ubuntu-24.04-arm
-            goarch: arm64
             lib: libtxmlconnector.so
-            extra: libtxmlconnector64.so
+            triple: aarch64-linux-gnu.2.17
             archive: txmlconnector-linux-arm64.tar.gz
-            package_files: libtxmlconnector.so libtxmlconnector64.so txmlconnector.h VERSION.txt README.md
-            cc: gcc
-            abi: true
-            libs: -Ldist -ltxmlconnector -ldl
           - name: windows-amd64
             os: windows-latest
-            goarch: amd64
             lib: txmlconnector64.dll
-            extra: ""
+            triple: x86_64-windows-gnu
             archive: txmlconnector-windows-amd64.zip
-            package_files: txmlconnector64.dll txmlconnector.h VERSION.txt README.md
-            cc: gcc
-            abi: false
-            libs: ""
-          # macos-13 (Intel) is not available on public runners as of 2026-11;
-          # build amd64 on the arm64 runner with clang -arch x86_64 and run the
-          # ABI/conformance tests through Rosetta (best effort).
-          - name: macos-arm64
-            os: macos-14
-            goarch: arm64
-            lib: libtxmlconnector.dylib
-            extra: libtxmlconnector64.dylib
-            archive: txmlconnector-macos-arm64.tar.gz
-            package_files: libtxmlconnector.dylib libtxmlconnector64.dylib txmlconnector.h VERSION.txt README.md
-            cc: clang
-            abi: true
-            libs: -Ldist -ltxmlconnector
-          - name: macos-amd64
-            os: macos-14
-            goarch: amd64
-            lib: libtxmlconnector.dylib
-            extra: libtxmlconnector64.dylib
-            archive: txmlconnector-macos-amd64.tar.gz
-            package_files: libtxmlconnector.dylib libtxmlconnector64.dylib txmlconnector.h VERSION.txt README.md
-            cc: clang
-            abi: true
-            libs: -Ldist -ltxmlconnector
-            cross: true
-
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
+      - uses: mlugg/setup-zig@v2
         with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Linux build deps
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y build-essential
-
-      - name: Windows mingw-w64 (msys2)
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
+          version: ${{ env.ZIG_VERSION }}
+      - uses: actions/download-artifact@v4
         with:
-          msystem: MINGW64
-          update: true
-          install: mingw-w64-x86_64-gcc
+          name: bin-${{ matrix.name }}
+          path: dist
 
-      - name: Add mingw-w64 to PATH
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Go tests (cgo wrapper + parsers)
-        run: go test ./cmd/connector/...
-
-      - name: Build c-shared
+      - name: C ABI test and C5 conformance
         shell: bash
         run: |
-          mkdir -p dist
-          CGO_ENABLED=1 CC="${{ matrix.cc }}${{ matrix.cross && ' -arch x86_64' || '' }}" GOARCH="${{ matrix.goarch }}" \
-            go build -buildmode=c-shared -trimpath -buildvcs=false \
-            -ldflags "-s -w -X main.defaultVersion=6.47.2.26.4" \
-            -o "dist/${{ matrix.lib }}" ./cmd/connector
-          cp cmd/connector/include/txmlconnector.h dist/
-
-      - name: Compatibility name (linux/macos)
-        if: matrix.extra != ''
-        shell: bash
-        run: cp "dist/${{ matrix.lib }}" "dist/${{ matrix.extra }}"
-
-      - name: VERSION and README
-        shell: bash
-        run: |
-          {
-            echo "version: 6.47.2.26.4"
-            echo "commit: $GITHUB_SHA"
-            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "target: ${{ matrix.name }}"
-            echo "goarch: ${{ matrix.goarch }}"
-            echo "abi: txmlconnector64.dll-compatible C ABI (9 exports)"
-          } > dist/VERSION.txt
-          cp README.md dist/README.md
-
-      - name: C ABI test (linux/macos)
-        if: matrix.abi && !matrix.cross
-        shell: bash
-        run: |
-          ${{ matrix.cc }} -I cmd/connector/include -o dist/abi_test \
-            cmd/connector/testdata/abi_test.c ${{ matrix.libs }}
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            DYLD_LIBRARY_PATH=dist ./dist/abi_test "dist/${{ matrix.lib }}"
+          if [ "$RUNNER_OS" = Windows ]; then
+            zig cc -target ${{ matrix.triple }} -I cmd/connector/include -o dist/abi_test.exe \
+              cmd/connector/testdata/abi_test.c dist/${{ matrix.lib }}
+            zig cc -target ${{ matrix.triple }} -I cmd/connector/include -o dist/abi_conformance.exe \
+              cmd/connector/testdata/abi_conformance.c
+            PATH="$PWD/dist:$PATH" ./dist/abi_test.exe "dist/${{ matrix.lib }}"
+            PATH="$PWD/dist:$PATH" ./dist/abi_conformance.exe "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
           else
+            zig cc -target ${{ matrix.triple }} -I cmd/connector/include -o dist/abi_test \
+              cmd/connector/testdata/abi_test.c -Ldist -ltxmlconnector -ldl
+            zig cc -target ${{ matrix.triple }} -I cmd/connector/include -o dist/abi_conformance \
+              cmd/connector/testdata/abi_conformance.c -ldl
             LD_LIBRARY_PATH=dist ./dist/abi_test "dist/${{ matrix.lib }}"
-          fi
-
-      - name: C ABI test (cross macOS via Rosetta, best effort)
-        if: matrix.cross
-        continue-on-error: true
-        shell: bash
-        run: |
-          ${{ matrix.cc }} -arch x86_64 -I cmd/connector/include -o dist/abi_test \
-            cmd/connector/testdata/abi_test.c ${{ matrix.libs }}
-          arch -x86_64 env DYLD_LIBRARY_PATH=dist ./dist/abi_test "dist/${{ matrix.lib }}"
-
-      # Windows/mingw ABI test is best effort for C3: it validates the DLL and
-      # the header; the final Windows live check is C4.
-      - name: C ABI test (windows, best effort)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: bash
-        run: |
-          gcc -I cmd/connector/include -o dist/abi_test.exe \
-            cmd/connector/testdata/abi_test.c "dist/${{ matrix.lib }}"
-          PATH="$PWD/dist:$PATH" ./dist/abi_test.exe "dist/${{ matrix.lib }}"
-
-      - name: C ABI conformance (linux/macos)
-        if: matrix.abi && !matrix.cross
-        shell: bash
-        run: |
-          ${{ matrix.cc }} -I cmd/connector/include -o dist/abi_conformance \
-            cmd/connector/testdata/abi_conformance.c
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            DYLD_LIBRARY_PATH=dist ./dist/abi_conformance "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
-          else
             LD_LIBRARY_PATH=dist ./dist/abi_conformance "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
           fi
 
-      - name: C ABI conformance (cross macOS via Rosetta, best effort)
-        if: matrix.cross
-        continue-on-error: true
-        shell: bash
+      - name: Old glibc (CentOS 7, glibc 2.17)
+        if: matrix.name == 'linux-amd64'
         run: |
-          ${{ matrix.cc }} -arch x86_64 -I cmd/connector/include -o dist/abi_conformance \
-            cmd/connector/testdata/abi_conformance.c
-          arch -x86_64 env DYLD_LIBRARY_PATH=dist ./dist/abi_conformance "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
+          docker run --rm -v "$PWD:/w" -w /w centos:7 \
+            env LD_LIBRARY_PATH=dist ./dist/abi_conformance "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
 
-      - name: C ABI conformance (windows, best effort)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: bash
-        run: |
-          gcc -I cmd/connector/include -o dist/abi_conformance.exe \
-            cmd/connector/testdata/abi_conformance.c
-          PATH="$PWD/dist:$PATH" ./dist/abi_conformance.exe "dist/${{ matrix.lib }}" cmd/connector/testdata/cabi_scenarios.json
-
-      - name: C5 conformance summaries
-        shell: bash
-        run: ls -la dist
-
-      - name: Package archive (tar.gz)
-        if: runner.os != 'Windows'
+      - name: Package archive
         shell: bash
         run: |
           cd dist
-          tar -czf "${{ matrix.archive }}" ${{ matrix.package_files }}
-          ls -l "${{ matrix.archive }}"
-
-      - name: Package archive (zip)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Compress-Archive -Path dist/txmlconnector64.dll,dist/txmlconnector.h,dist/VERSION.txt,dist/README.md -DestinationPath "dist/${{ matrix.archive }}"
-
+          {
+            echo "version: $TXC_VERSION"
+            echo "commit: $GITHUB_SHA"
+            echo "target: ${{ matrix.name }}"
+            echo "toolchain: go $(grep '^go ' ../go.mod | cut -d' ' -f2), zig $ZIG_VERSION (${{ matrix.triple }})"
+            echo "abi: txmlconnector64.dll-compatible C ABI (9 exports)"
+          } > VERSION.txt
+          cp ../README.md README.md
+          sha256sum ${{ matrix.lib }} > SHA256SUMS.lib
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a "${{ matrix.archive }}" txmlconnector64.dll txmlconnector.h VERSION.txt README.md SHA256SUMS.lib
+          else
+            tar -czf "${{ matrix.archive }}" libtxmlconnector.so libtxmlconnector64.so txmlconnector.h VERSION.txt README.md SHA256SUMS.lib
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: compat-${{ matrix.name }}
           path: dist/${{ matrix.archive }}
           if-no-files-found: error
 
+  macos:
+    name: build+test macos (zig)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Build macos-arm64, macos-amd64 (zig + macOS SDK)
+        run: |
+          tools/cabi/zig_build.sh dist macos-arm64 macos-amd64
+          tools/cabi/zig_build.sh dist2 macos-arm64 macos-amd64
+          (cd dist && shasum -a 256 */*.dylib) > repro.sum
+          (cd dist2 && shasum -a 256 -c ../repro.sum)
+
+      - name: C ABI test and C5 conformance (arm64)
+        run: |
+          d=dist/macos-arm64
+          clang -I cmd/connector/include -o $d/abi_test cmd/connector/testdata/abi_test.c -L$d -ltxmlconnector
+          clang -I cmd/connector/include -o $d/abi_conformance cmd/connector/testdata/abi_conformance.c
+          DYLD_LIBRARY_PATH=$d $d/abi_test $d/libtxmlconnector.dylib
+          DYLD_LIBRARY_PATH=$d $d/abi_conformance $d/libtxmlconnector.dylib cmd/connector/testdata/cabi_scenarios.json
+
+      - name: C ABI test and C5 conformance (amd64 via Rosetta)
+        run: |
+          softwareupdate --install-rosetta --agree-to-license >/dev/null 2>&1 || true
+          d=dist/macos-amd64
+          clang -arch x86_64 -I cmd/connector/include -o $d/abi_test cmd/connector/testdata/abi_test.c -L$d -ltxmlconnector
+          clang -arch x86_64 -I cmd/connector/include -o $d/abi_conformance cmd/connector/testdata/abi_conformance.c
+          arch -x86_64 env DYLD_LIBRARY_PATH=$d $d/abi_test $d/libtxmlconnector.dylib
+          arch -x86_64 env DYLD_LIBRARY_PATH=$d $d/abi_conformance $d/libtxmlconnector.dylib cmd/connector/testdata/cabi_scenarios.json
+
+      - name: Package archives
+        run: |
+          for t in macos-arm64 macos-amd64; do
+            d=dist/$t
+            {
+              echo "version: $TXC_VERSION"
+              echo "commit: $GITHUB_SHA"
+              echo "target: $t"
+              echo "toolchain: go $(grep '^go ' go.mod | cut -d' ' -f2), zig $ZIG_VERSION + macOS SDK"
+              echo "abi: txmlconnector64.dll-compatible C ABI (9 exports)"
+            } > $d/VERSION.txt
+            cp README.md $d/README.md
+            (cd $d && shasum -a 256 libtxmlconnector.dylib > SHA256SUMS.lib &&
+              tar -czf ../txmlconnector-$t.tar.gz libtxmlconnector.dylib libtxmlconnector64.dylib txmlconnector.h VERSION.txt README.md SHA256SUMS.lib)
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compat-macos-arm64
+          path: dist/txmlconnector-macos-arm64.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compat-macos-amd64
+          path: dist/txmlconnector-macos-amd64.tar.gz
+          if-no-files-found: error
+
   release:
     name: release
-    needs: build
+    needs: [test, macos]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/compat-v')
     steps:
