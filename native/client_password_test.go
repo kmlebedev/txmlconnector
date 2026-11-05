@@ -181,4 +181,45 @@ func TestChangePasswordConnectorFatal(t *testing.T) {
 	if got := rec.next(t, "<server_status"); !strings.Contains(got, "connected="+quote+"false"+quote) {
 		t.Fatalf("fatal status = %s, want connected=false", got)
 	}
+	// Fatal must be terminal: exactly one connected=false, no recover=true and
+	// no subsequent connected=true.
+	time.Sleep(300 * time.Millisecond)
+	rec.mu.Lock()
+	falseCount, recoverCount, trueCount := 0, 0, 0
+	for _, msg := range rec.msgs {
+		switch {
+		case strings.Contains(msg, "recover="+quote+"true"+quote):
+			recoverCount++
+		case strings.Contains(msg, "connected="+quote+"false"+quote):
+			falseCount++
+		case strings.Contains(msg, "connected="+quote+"true"+quote):
+			trueCount++
+		}
+	}
+	rec.mu.Unlock()
+	if falseCount != 1 {
+		t.Fatalf("connected=false callbacks = %d, want exactly 1", falseCount)
+	}
+	if recoverCount != 0 {
+		t.Fatalf("recover=true callbacks = %d, want 0 for fatal change_pass", recoverCount)
+	}
+	// The initial connected=true before the command is expected; no new true after
+	// the false status. Count true statuses before the first false.
+	rec.mu.Lock()
+	afterFalse := false
+	lateTrue := 0
+	for _, msg := range rec.msgs {
+		if strings.Contains(msg, "connected="+quote+"false"+quote) {
+			afterFalse = true
+			continue
+		}
+		if afterFalse && strings.Contains(msg, "connected="+quote+"true"+quote) {
+			lateTrue++
+		}
+	}
+	rec.mu.Unlock()
+	if lateTrue != 0 {
+		t.Fatalf("connected=true after false = %d, want 0", lateTrue)
+	}
+	_ = trueCount
 }

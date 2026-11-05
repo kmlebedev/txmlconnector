@@ -965,9 +965,8 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		if err := client.ChangePassword(ctx, oldPassword, newPassword); err != nil {
 			if errors.Is(err, session.ErrChangePasswordFatal) {
-				// DLL: the bad reply closes the connection and reports
-				// connected="false" (changepass.md O/D).
-				c.emit(c.statusXML(false))
+				// The fatal reply closed the session; Client.Run is terminal and
+				// will report connected="false" once (no recover), like the DLL.
 				return failure("RQ_CHANGE_PWD incorrect server buffer"), nil
 			}
 			return failure(err.Error()), nil

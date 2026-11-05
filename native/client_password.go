@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/kmlebedev/txmlconnector/native/session"
 )
 
 // DLL local validation texts of change_pass (changepass.md D+O, verbatim).
@@ -42,8 +44,11 @@ func (c *Client) ChangePassword(ctx context.Context, oldPassword, newPassword st
 	}
 	reply, err := conn.ChangePassword(ctx, oldPassword, newPassword)
 	if err != nil {
-		// The fatal empty-reply path already closed the session connection; the
-		// Connector reports connected="false" like the DLL.
+		if errors.Is(err, session.ErrChangePasswordFatal) {
+			// Terminal: Run must stop without the recover=true/connected=true
+			// sequence and report connected="false" exactly once.
+			c.markFatal(err)
+		}
 		return err
 	}
 	switch reply.Status {

@@ -59,3 +59,23 @@ func TestChangePasswordEmptyReplyFatal(t *testing.T) {
 		t.Fatalf("empty reply err = %v, want fatal", err)
 	}
 }
+
+// TestChangePasswordStrictReply: only 0/1 single-byte and 2 + non-empty C-string
+// are valid; everything else is the fatal DLL path.
+func TestChangePasswordStrictReply(t *testing.T) {
+	valid := [][]byte{{0}, {1}, {2, 'h', 'i', 0}}
+	for _, payload := range valid {
+		if _, err := ParseChangePasswordReply(payload); err != nil {
+			t.Fatalf("valid %x: %v", payload, err)
+		}
+	}
+	invalid := [][]byte{
+		{}, {2}, {2, 0}, {2, 'h', 'i'}, {2, 'h', 'i', 0, 0},
+		{0, 0}, {1, 0}, {3}, {0xff},
+	}
+	for _, payload := range invalid {
+		if _, err := ParseChangePasswordReply(payload); !errors.Is(err, ErrChangePasswordFatal) {
+			t.Fatalf("invalid %x: err=%v, want fatal", payload, err)
+		}
+	}
+}
