@@ -13,6 +13,9 @@ func TestStrategiesCatalog(t *testing.T) {
 		"rsi_reversion":     {"period": 14, "oversold": 30, "overbought": 55},
 		"donchian_breakout": {"period": 20},
 		"momentum":          {"lookback": 20, "thresholdPct": 1.0},
+		// The rule strategy is built from a rules.Spec, not from numeric
+		// params, so its catalog entry carries no tunable parameters.
+		"rules": {},
 	}
 	infos := Strategies()
 	if len(infos) != len(wantDefaults) {

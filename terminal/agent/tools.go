@@ -33,11 +33,14 @@ var toolCatalogNames = []string{
 	"stop_autonomy",
 	"get_agent_status",
 	"get_backtest_history",
+	toolNameBacktestRules,
 }
 
-// buildTools returns the tool catalog with JSON schemas.
+// buildTools returns the tool catalog with JSON schemas. Research tools
+// (phases E–G) are appended from tools_research.go so the shared catalog body
+// stays small.
 func buildTools() []ToolInfo {
-	return []ToolInfo{
+	tools := []ToolInfo{
 		{
 			Name:        "list_instruments",
 			Title:       "Инструменты",
@@ -165,6 +168,7 @@ func buildTools() []ToolInfo {
 			Input:       objSchema(map[string]any{}),
 		},
 	}
+	return append(tools, researchToolCatalog()...)
 }
 
 // Tools returns the tool catalog with JSON schemas.
@@ -253,6 +257,11 @@ func (e *Engine) invokeTool(ctx context.Context, inv toolInvocation, name string
 	}()
 	if err := contextErr(ctx); err != nil {
 		return nil, nil, err
+	}
+	// Research tools (declarative rules, walk-forward, batch backtests, …) are
+	// dispatched from tools_research.go; handled=false falls through.
+	if result, artifact, handled, err := e.invokeResearchTool(ctx, name, args); handled {
+		return result, artifact, err
 	}
 	switch name {
 	case "list_instruments":
@@ -439,6 +448,10 @@ func (e *Engine) toolRunBacktest(ctx context.Context, args map[string]any) (back
 	strategy := argString(args, "strategy")
 	if strategy == "" {
 		return backtest.Result{}, errors.New("agent: strategy is required")
+	}
+	if strategy == backtest.StrategyRules {
+		// The rule strategy is defined by a rules.Spec, not by numeric params.
+		return backtest.Result{}, errRulesStrategyNeedsSpec
 	}
 	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
 	if err != nil {
