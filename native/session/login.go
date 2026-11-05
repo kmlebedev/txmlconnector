@@ -204,6 +204,10 @@ type Conn struct {
 	// lastType is the type of the last ordinary request; the RQ_RECOVER reply
 	// may carry it instead of type 64.
 	lastType byte
+	// abandoned lists the types of requests that were written but whose wait
+	// was cancelled: the server still replies, in order, so the next exchange
+	// skips those replies before reading its own.
+	abandoned []byte
 }
 
 // Dial connects to addr and performs the login sequence.
@@ -487,8 +491,12 @@ func (c *Conn) exchange(ctx context.Context, typ byte, payload []byte, wait bool
 	if !wait {
 		return wire.Frame{}, nil
 	}
-	f, err := c.keys.Decode(wire.ServerToClient, nc)
+	f, err := c.readReply(nc)
 	if err != nil {
+		if ctx.Err() != nil {
+			// Written but not answered yet: the reply will still come.
+			c.abandoned = append(c.abandoned, typ)
+		}
 		return wire.Frame{}, ctxErr(ctx, err)
 	}
 	switch {
@@ -498,6 +506,27 @@ func (c *Conn) exchange(ctx context.Context, typ byte, payload []byte, wait bool
 		return wire.Frame{}, fmt.Errorf("incorrect server response: flags %#x type %#x", f.Flags, f.Type)
 	}
 	return f, nil
+}
+
+// readReply reads the next frame, first skipping the replies of abandoned
+// requests (replies come in request order). A frame of another type means the
+// abandoned reply will not come, so the list is dropped and the frame kept.
+func (c *Conn) readReply(nc net.Conn) (wire.Frame, error) {
+	for {
+		f, err := c.keys.Decode(wire.ServerToClient, nc)
+		if err != nil {
+			return f, err
+		}
+		if len(c.abandoned) == 0 || f.Kind() != wire.KindReply {
+			return f, nil
+		}
+		if f.Type == c.abandoned[0] {
+			c.abandoned = c.abandoned[1:]
+			continue
+		}
+		c.abandoned = nil
+		return f, nil
+	}
 }
 
 func ctxErr(ctx context.Context, err error) error {
