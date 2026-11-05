@@ -195,6 +195,9 @@ go run ./tools/tcproxy -listen 127.0.0.1:39100 -upstream tr1-demo5.finam.ru:3939
 # RE-3: проигрыватель вместо py/replay_server.py
 TC_PASSWORD=... go run ./tools/replay-server -dump ~/re/cap/session.dump -listen 127.0.0.1:39170 \
   -inject /tmp/inject.hex -after 10
+# Инъекция прямого reply-кадра (RQ_TICKS 13 / RQ_TRANSACT 14):
+TC_PASSWORD=... go run ./tools/replay-server -dump ~/re/cap/session.dump -listen 127.0.0.1:39170 \
+  -inject /tmp/ticks-reply.hex -reply-to 13 -reply-type 13
 ```
 
 - `tcproxy` — логирующий TCP-прокси без разбора протокола (`native/wire` ему не нужен).

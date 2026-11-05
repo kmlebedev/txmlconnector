@@ -111,6 +111,19 @@ write-scope с карточками и фактические файлы с пл
   рабочим) или отдельный субагент на `deepseek-flash`. В отчёте писать, какой моделью ревьюили.
 - Ревью не заменяет проверки: сначала `make verify`, потом модель. P1/P2 — блокеры закрытия карточки.
 
+## Сборка и запуск сервера (Task 29 / RE-4)
+
+- `make server_build` — Windows-адаптер `bin/server.exe` (vendor DLL); `make server` по умолчанию
+  запускает его под Wine (прежнее поведение).
+- `TC_BACKEND=native make server` — pure-Go backend **без Wine и без Windows-сборки**: цель делает
+  `go run .`, слушает `TC_LISTEN_ADDR` (по умолчанию `:50051`). На macOS/Linux это основной
+  способ поднять gRPC-сервер без DLL.
+- `TC_BACKEND=dll make server` — явно Win32 DLL под Wine (нужен Windows amd64/Wine).
+- RE-4 сценарий без Wine: терминал 1 — `TC_BACKEND=native make server`; терминал 2 — клиент
+  `TC_TARGET=localhost:50051 TC_RE4_SEQUENCE=1 go run ./examples/grpc-client` (connect выполняет сам клиент, затем get_securities -> subscribe -> disconnect);
+  дальнейшие команды (`get_securities`, `subscribe`, `disconnect`) отправляются gRPC-клиентом
+  из UI/скрипта. Живой демо-сервер — только с согласия пользователя (утренняя S-серия).
+
 ## Worktree-режим (DSH) и GoLand MCP
 
 Проверено 2026-11-04 в этом рабочем пространстве.

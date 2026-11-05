@@ -681,4 +681,134 @@ T8/T9/T10/T11/T12 — P1/P2 исправлены в задачах (`b05c648`, `
 Следующее — **Фаза 3 (задачи 13–14)**: история/тики; T13 (gethistorydata) уже реализован/на ревью,
 T14 (subscribe_ticks) — D-каркас, живые S-фикстуры в основной сессии 5 ноября после 10:00 МСК.
 
+---
 
+## 14. Фазы 3–8: сводка ночной/утренней работы (2026-11-05, перед S-серией)
+
+За ночь 4→5 ноября (и утро 5-го) закрыты все задачи Фаз 3–8, которые не требуют живой сессии.
+
+**Закрытые задачи и ключевые коммиты:**
+- T13 gethistorydata: `8cd482b` + ревью-фиксы `8277d6f` (порядок свечей, time bias UTC/wall,
+  гонка каталога, non-blocking `<result>`, валидация period/count, диагностика 0x09).
+- T15 RQ_TRANSACT: `bf4b770` (`OutcomeError`/`ErrOutcomeUnknown`, `TransactionsInProgress` 156).
+- T16 neworder/cancelorder/<orders>: `0feb95e`, `54cca56`, `8be0293` + ревью-фиксы `c6a3143`
+  (scale цены, фильтр client id, mask-ветки 0x10, коалесинг батча, загрузочные заявки, RSM-тексты).
+- T17 <trades>: `a455d21` + `177879c` (mask≠0 не роняет Run, AccruedInt, Union).
+- T18 stop/cond: `d656679`, `e501f11`, `47ea593` + ревью-фиксы `64e7f8b` (leg-флаги 27/26/35 Б,
+  cond_type, DLL-тексты, filters, mask-render, non-fatal 0x80).
+- T20 <positions>: `e493ea5` (sec_position из R_ASSET, forts через reply 42, money из T7 без дублей).
+- T23 margin: `a26e862`, `8705b26`, `b29b757`, `6867d83` + точная формула `a217bc1`
+  (`R_SEC_RATE 0x0a` -> V, maxbuy/maxsell по open_balance/lots/0.1428, побайтно 13210/15210).
+- T24 news: `7484ffc` (+ `ae44889` C-string/регрессии; `<news_body>` — I до S: `task-56`).
+- T25 messages: `73a4acc`/`6cb9697` (R_MSG 0x01 unsized, batch один <messages>, urgent/bias).
+- T26 change_pass: `7427b10` (SHA1-payload, reply-коды, empty-reply fatal, без живой смены пароля).
+- T27 options: `9b7204f` (RQ 149/153/150/151, гейт версии 0x45, records 0x6f/0x71/0x78, D-XML I).
+- T28 RPS/REPO: `b9f305a` (6 команд, 4 O-payload-фикстуры, DLL-тексты, D-XML; dllCommands -> 45).
+- T29 (частично): `043d7c9` server.Backend dll|native + TC_BACKEND + native gRPC backend на
+  testserver без DLL/Wine; `5aea9d5` Makefile `TC_BACKEND=native make server` (go run, без wine64);
+  матрица 45 команд с pending-списком {moveorder, makeordown}.
+
+**RE-материалы (все карточки 49–52, 56–59 закрыты):** margin.md (local render, dead 84/85, marketord,
+точная формула maxbuy), news.md (RQ_GETNEWS, 0x35/0x36, news_body I), messages.md (R_MSG), changepass.md,
+options.md (версионный гейт), rps.md (payloads/ошибки/литералы), errors/фикстуры.
+
+**Coverage (docs/protocol/coverage.md):** 43/45 XML-команд; не реализованы `moveorder`, `makeordown`
+(T19 — живые payload'ы).
+
+**Осталось только live-зависимое (S-серия 5 ноября, основная сессия):** T14 `<ticks>` XML,
+T21 oracle `<clientlimits>`, T22 `portfolio_tplus/forts/united` S-формы, T19 `moveorder`/
+`makeordown` payload'ы, T24 `<news_body>` (RQ_GETNEWS reply), RE-4 native gRPC на демо,
+полный matrix без pending, `docs/protocol/errors.md` (task-64) -> TestServerErrorTexts.
+
+**Проверки:** `make verify`/race зелёные на каждом шаге; живой S-план — по
+`docs/deepseek/re-session-checklist.md`; согласие пользователя на минимальный торговый цикл
+`neworder→moveorder→cancelorder` (1 лот SBER, цена далеко от рынка, отмена сразу) зафиксировано
+**только для демо-счёта** (на проде торговый цикл не выполняется).
+
+---
+
+## 16. Демо-торговый цикл и live-фиксы (2026-11-05, demo.env)
+
+По согласию пользователя (только демо-счёт, 1 лот SBER, цена далеко от рынка, немедленная отмена)
+выполнен минимальный цикл; прод не использовался, активных заявок не осталось (все cancelled,
+`saldo=300000.0`).
+
+**S-факты (payloads RQ_TRANSACT type=14, закоммичены в `native/records/testdata/transact-*-live.hex`):**
+- `neworder` 24 Б: `B01,B00,W secid=26,W board=37,G client,B 'B',B00,L price(×100),L qty,нули`;
+  reply `00 <txid> <time> 00`. **Ценовой коридор:** цена 1 отклоняется (`(579)…не меньше 284.62`),
+  поэтому использована минимально-далёкая допустимая (285.50), заявка не исполнялась.
+- `cancelorder` 5 Б: `B02,B00,L txid,B00`; reply `00`; колбэк `<order status="cancelled">
+  <result>{42} Заявка снята.</result></order>`; работает и в новой сессии.
+- `moveorder` payload 5 Б: `B02,B01,L txid,B00` (снят для уже отменённых заявок); успешный сценарий
+  для активной заявки — **I**: DLL отвечает `{32} Недопустимое значение параметра 'TransactionID'…`
+  (D-валидации восстановлены: transactionid/price/moveflag 0..3/quantity для 1–2).
+- `makeordown`: transactionid — **атрибут**; `RQ_MAKE_COND_OWN(112)` payload — I,
+  O-текст `Cannot make specified transaction_id an own conditional order`.
+- Сообщения сервера после транзакций приходят RQ_MAIN **tag `0x0f`** (CP1251-тексты вида
+  `(160)…`, `(210)…`) — сплиттер их не знал.
+
+**Live-фиксы (в работе):**
+- `ParseOrderNew` для status=6 (cancelled)/removed/denied/rejected: тело короче линейной 52-чтение-схемы
+  -> short buffer при загрузке снапшота (7 записей демо); нужны статус-зависимые ветки/безопасный skip.
+- `records.Records`: поддержка tag `0x0f` (не падать на серверных текстовых сообщениях).
+- RE-4 native backend: direct `Client.Dial` на demo.env OK, raw backend+connect XML даёт
+  `connected="true"`, но `TCClient`-стрим закрывается сразу после статуса (EOF) — гонка
+  stream/dispatcher/Close, фикс в работе (прод-RE-4 остаётся внешне заблокирован `connected=error`).
+
+
+---
+
+## 15. Живая S-серия на ПРОДЕ (2026-11-05, read-only)
+
+Пользователь открыл прод-сессию и передал доступ через `~/re/prod.env`; согласие на торговый цикл
+распространяется только на демо-счёт, поэтому **торговый цикл `neworder→moveorder→cancelorder` на
+проде не выполнялся** (read-only S-серия и RE-4). Все факты проверены DLL 6.47.2.26.4 под Wine через
+loopback-tcproxy (S), сырьё — только `.re-run/s/` (gitignored), в git — обезличенные фикстуры/доки.
+
+**Снято (S):**
+- **NEWS**: reply `RQ_GETNEWS(73)` **всегда пуст** (len=0) и для заголовков, и для тела; заголовки —
+  RQ_MAIN `0x36 flags=1`, тело — `0x36 flags=2` (id + int32 + zlib, CP1251); `lastId` стора —
+  **минимальный id**; payloads `get_old_news` (L 0, L INT32_MAX, B count, B 1) и `get_news_body`
+  (L id, L id, B 1, B 2). I task-56 закрыт; реализация T14/T24 переработана (см. `204c7ba`,
+  `dbace49`, `2d3da44`, `df8c494`).
+- **TICKS**: `subscribe_ticks` работает в основную сессию (`<security><board/><seccode/><tradeno/>`,
+  board TQBR=75 на проде); тики приходят **RQ_MAIN `0x5a` TICK** (`W secid,W board,G tradeno,
+  L time,L price,L quantity,B period,B buysell,L X,L Y`; tradeno/time накопительные) — гипотеза про
+  `RQ_TICKS(13)` **опровергнута**; `unsubscribe_ticks` → `Unknown command.`; XML `<ticks><tick>`.
+- **LIMITS**: `get_client_limits client=<код>` → success + `<clientlimits>`, C>S `type=43`
+  (payload `d2da8d`), без client — `Client not specified.`
+- **PORTFOLIOS**: `get_portfolio`/`get_united_portfolio`/`get_mc_portfolio` — **local render**
+  (`<portfolio_currency>`/`<united_portfolio>`/`<mc_portfolio>`, без кадров 86/84/85/82);
+  `get_portfolio_mct` → `{8} Неверное значение параметра 'szClient'.`; `get_portfolio_tplus/forts`
+  → `Unknown command.` (в DLL отсутствуют — план расходился с DLL, DLL эталон).
+- Загрузка прода: ~10–12 с, 838 `sec_info_upd`, 61 securities/pits, 5 client, 1 union; server_status
+  sys_ver=650 build=41, TZ Russian Standard Time.
+
+**Не снято/блокеры:**
+- **OPTIONS**: первый прогон оборвался (`connected=false`, RQ_LOGOUT), затем прод перестал
+  устанавливать сессию (`connected=error`, доходят только RQ_LOGIN/RQ_PWD) — похоже на лимит
+  логинов/сессий (I); версия/гейт 0x45 и опционные формы — D/I до следующего окна.
+- **RE-4 на проде**: native server без Wine поднимается и слушает, но прод-соединение отдаёт
+  `connected="error": Ошибка подключения` (вероятно, тот же лимит сессий/логинов после S-серии).
+  После фикса `TC_RE4_SEQUENCE` (ожидание `connected=true`, `986b94a`) повторная попытка дала тот же
+  внешний блокер; RE-4 перенесён на демо (после открытия 09:50 MSK) — native gRPC backend +
+  `connect→get_securities→subscribe→disconnect` без Windows/Wine.
+
+**Гигиена:** прод-хост заменён плейсхолдером `transaq.example` в tracked-файлах (`6d6650e`;
+docs/alltrades.md и др.); в истории git значение остаётся (как и UID — решение пользователя не
+переписывать историю). Демо-цикл для T19 (moveorder/makeordown) — отдельно, только `demo.env`,
+после открытия демо 09:50 MSK.
+
+
+
+
+
+**RE-4 (native gRPC без Wine):** интеграционный тест `TCClient` на native backend (testserver) проходит
+(`2799fe7`); direct `native.Client.Dial` на demo.env — OK; raw backend + connect XML даёт
+`connected="true"`. Но 3 попытки RE-4 на живом демо (после cooldown) дали `connected=error`/таймаут 60с —
+серверная занятость demo-сессии (single-session/duplicate login, I) — **внешний блокер**, не код;
+зафиксировано как partial для T29. Прод-RE-4 остаётся заблокированным (`connected=error`).
+
+**T30 soak:** short live-run на demo.env PASS (`UnknownRecords=0`, `Duplicates=0`, `recoveries=0`,
+RSS 30 MiB, `maxGap` 662 мс, 5 мин, 2222–2393 polls, 5946–7523 trades; exit 0) — `820df86`.
+Full-day soak (10:00–23:50) в этой сессии не выполнялся — ограничение, зафиксировано.

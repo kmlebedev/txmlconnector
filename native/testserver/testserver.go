@@ -66,6 +66,9 @@ type Server struct {
 	// SID is the server id reported in RQ_PWD (and used by RQ_RELOGIN when
 	// ReloginSID is 0); New sets it to defaultSID.
 	SID int
+	// TicksReply is the RQ_TICKS reply payload (synthetic until the live
+	// capture lands; the format is D/I).
+	TicksReply []byte
 	// HistoryParts are queued as RQ_MAIN payloads in reply to RQ_HISTORY_EXT
 	// (the gethistorydata candle records of the tests).
 	HistoryParts [][]byte
@@ -154,6 +157,14 @@ func (s *Server) SetMainDelay(d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.delay = d
+}
+
+// QueueMain appends payload to the next RQ_MAIN reply (the tests use it to
+// deliver order updates after a transaction reply).
+func (s *Server) QueueMain(payload []byte) {
+	s.mu.Lock()
+	s.pending = append(s.pending, payload...)
+	s.mu.Unlock()
 }
 
 // Handle sets a custom reply for a request type; fn gets the request payload
@@ -266,6 +277,13 @@ func (s *Server) serve(nc net.Conn) {
 			if err = reply(wire.KindReply, f.Type, w.Bytes()); err == nil {
 				keys, err = wire.NewKeys(sessionKey, sessionSync)
 			}
+		case session.RqSubscribeTicks:
+			err = reply(wire.KindReply, f.Type, nil)
+		case session.RqTicks:
+			s.mu.Lock()
+			payload := s.TicksReply
+			s.mu.Unlock()
+			err = reply(wire.KindReply, f.Type, payload)
 		case session.RqHistoryExt, session.RqHistory:
 			s.mu.Lock()
 			s.historyQueue = append(s.historyQueue, s.HistoryParts...)

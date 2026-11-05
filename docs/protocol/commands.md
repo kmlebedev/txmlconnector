@@ -6,7 +6,7 @@
 
 ## Как DLL обрабатывает команды
 
-- Экспорт `SendCommand` (`0x179ec0`) вызывает диспетчер `FUN_1800a5030`. Он ищет команду по `id` в таблице, которую заполняет `FUN_1801774b0` (43 имени), — **D**.
+- Экспорт `SendCommand` (`0x179ec0`) вызывает диспетчер `FUN_1800a5030`. Он ищет команду по `id` в таблице, которую заполняет `FUN_1801774b0` (43 D-имени; нативный `dllCommands` — **45** имён: T28 добавил `newreport4` и `cancelreport4`, RPS/REPO payloads в [rps.md](rps.md)), — **D**.
 - Неизвестный `id` даёт `<result success="false"><message>Unknown command.</message></result>` — **D**, **S**.
 - У каждой команды есть флаг «нужно соединение». Без соединения ответ — `Cannot process this command without connection.` — **D**, **S**. «Соединение» означает завершённую загрузку: во время логина и снапшота DLL отвечает так же — **S**.
 - Обработчик возвращает признак успеха и необязательные атрибуты. Успех — `<result success="true"%1%/>`, ошибка — `<result success="false"><message>…</message></result>` — **D**.
@@ -129,15 +129,68 @@ lot_volume, isin, regnumber, buybackprice, buybackdate, currencyid`; пусты�
   RQ_SUBSCRIBE_TICKS: `B filter; {W secid, W board, G tradeno}*`. В вечерней сессии демо тиков не
   было (ни RQ_TICKS 13, ни `<ticks>`) — **S-негатив**; для сверки нужен прогон в основную сессию.
 
+
+## `set_csp` и `authenticate` (T29, D + O)
+
+Обе команды **обрабатываются DLL и без соединения, и с соединением** — в матрице 45 команд они не
+«not implemented»; после `connect` они отвечают своими предметными ошибками (O, replay loopback
+2026-11-05, `.re-run/t49/auth1`). Сетевых запросов не делают.
+
+### `set_csp` — D: `FUN_180197d60` → `FUN_180109170`
+
+- Вход: `<command id="set_csp"><csp type="…"/></command>`; элемент `csp` и его атрибут `type`
+  (D: `FUN_18040c140`/`FUN_18040cf20`). Допустимые значения `type` (D, строки
+  `0x180835a90`/`0x180835a44`…): `NONE` (0), `MS` (1), `CP` (2), `SC` (3), `MPSSL`? (`MP` 4,
+  `MPSSL` 5), `CPBB` (6), `CPBB_2012_256` (7), `CPBB_2012_512` (8); тип сохраняется в
+  `connector+0x688`.
+- Нет элемента `csp` → **успех** (no-op, D: ветка `local_d0 == 0 → return 1`; O: пустая команда
+  `<command id="set_csp"/>` → `<result success="true"/>`).
+- Элемент есть, атрибута `type` нет → `You have to specify at least one CSP.` (D).
+- Неизвестный `type` → `Unsupported CSP type.` (D).
+- **Соединение установлено** → `Данная операция требует отключения от сервера. Необходимо выполнить
+  команду Disconnect.` (D: CP1251-строка `0x180835aa0`; O: то же после `connect` — все варианты
+  `set_csp` вернули эту ошибку).
+
+### `authenticate` — D: `FUN_180197da0` → `FUN_1800d8850`
+
+- Поведение зависит от криптопровайдера (`connector+0x678`, режим `+0x10`): при режиме 3 требуется
+  атрибут `pin` (D: ошибка `attribute "pin" not found`), дальше — асинхронная аутентификация с
+  колбэком `<authentication status="error">Authentication request failed</authentication>` (D) или
+  успешным колбэком (форма не снята — **I**).
+- O (обе команды до и после `connect`, провайдер по умолчанию): `<result success="false"><message>Illegal
+  context for "sendpin" command</message></result>`; атрибут `pin` на результат не влияет.
+- Для матрицы: `authenticate` не «not implemented»; конкретный успешный сценарий требует
+  настроенного криптопровайдера (I, вне T29).
+
+
+## S-серия на проде (2026-11-05, read-only): подтверждено
+
+| Команда | Ответ DLL (S) | Колбэк (S) |
+|---|---|---|
+| `get_old_news count="5"` | `<result success="true"/>` | 5 × `<news_header>` (RQ_MAIN `0x36 flags=1`) |
+| `get_news_body news_id="N"` | `<result success="true"/>` | `<news_body>` (RQ_MAIN `0x36 flags=2`) |
+| `subscribe_ticks` (board/seccode/tradeno) | `<result success="true"/>` | `<ticks><tick>…` (RQ_MAIN `0x5a`) |
+| `get_client_limits client="<код>"` | `<result success="true"/>`; C>S `type=43` (RQ_CLIENT_LIMITS), reply `type=43` | `<clientlimits>` |
+| `get_portfolio` | `<result success="true"/>` (локальный рендер) | `<portfolio_currency>` |
+| `get_united_portfolio` | `<result success="true"/>` (локальный рендер) | `<united_portfolio>` |
+| `get_mc_portfolio client="<код>" union="<код>"` | `<result success="true"/>` | `<mc_portfolio>` |
+| `get_portfolio_mct client="<код>"` | `{8} Неверное значение параметра 'szClient'.` | — |
+| `get_portfolio_tplus` / `get_portfolio_forts` | `Unknown command.` | — |
+| `unsubscribe_ticks` | `Unknown command.` | — |
+
+Прочее (S): `connect` на проде — `<result success="true"/>`, загрузка ~10–12 с (838 `sec_info_upd`,
+61 `securities`, 61 `pits`, 5 `<client>`, `<union>`); `server_status` после загрузки — success и
+`<server_status …>`. Ответ `get_client_limits` без `client`: `Client not specified.`.
+
 ## Нативная реализация
 
 - `connect` разбирает `commands.Connect` (`host`, `port`, `login`, `password`, `rqdelay`, `request_timeout`) и сразу возвращает успех. Дальше в фоне идут логин, RQ_TIME, RQ_STARTUP, колбэки `<markets>`, `<boards>`, `<candlekinds>` (побайтно как у DLL), выборка снапшота RQ_MAIN с колбэками `<securities>` на каждый опрос с новыми инструментами, `<pits>`, затем `server_status connected="true"`. После этого RQ_MAIN опрашивается каждые `rqdelay` (по умолчанию 100 мс, не меньше 10 мс), как в DLL, и это держит сессию.
 - Потеря связи: колбэк `server_status connected="true" recover="true"` в момент обрыва; короткое восстановление (`RQ_RELOGIN`/`RQ_RECOVER`) сохраняет сессию и каталог, иначе — `connected="false"` и новый `connect` (см. [connect.md](connect.md)).
 - `disconnect` останавливает опрос, даже если запрос RQ_MAIN уже в полёте. Затем отправляет `RQ_LOGOUT` (без ответа, таймаут 4 с) и отдаёт колбэк `connected="false"` до возврата.
-- `subscribe`/`unsubscribe` поддерживают `<alltrades>`; `<quotations>` и `<quotes>` отвечают «not implemented».
+- `subscribe`/`unsubscribe` поддерживают `<alltrades>`, `<quotations>` и `<quotes>` (фаза 2; первые блоки, см. раздел подписок).
 - `get_securities` отдаёт `<result success="true"/>` и колбэк `<securities>` со всем каталогом, элемент в элемент как DLL (`FUN_18011f4a0`, см. [dictionaries.md](dictionaries.md)).
 - `get_server_id`, `get_servtime_difference` и `get_markets` реализованы по R6 (`native/testdata/service-dll.xml`): SID и рынки из кэша без сети, разница времени — через RQ_TIME, ответ с атрибутом `diff` (см. ниже).
-- Остальные 33 команды из таблицы DLL (всего их 43) отвечают `Command is not implemented by the native connector.`, а если требуют соединения и его нет — сообщением DLL.
+- В `dllCommands` 45 имён; реализовано 45, pending пуст. `moveorder` — S-payload/валидации, успешный активный сценарий I; `makeordown` обрабатывается (transactionid — атрибут), но RQ_MAKE_COND_OWN payload не восстановлен — explicit I error.
 - `get_connector_version` возвращает `6.47.2.26.4-native`: версию DLL, поведение которой воспроизводится, с пометкой реализации.
 - Колбэки доставляются по порядку из одной горутины, как из потока колбэков DLL.
 

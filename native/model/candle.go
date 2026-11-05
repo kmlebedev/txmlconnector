@@ -21,6 +21,10 @@ type Candles struct {
 	Period int
 	Status int
 	Items  []Candle
+	// ZoneBias is the server time-zone bias (UTC = wall + bias). The items keep
+	// the UTC instants; the DLL renders the wall clock, so the renderer adds
+	// -ZoneBias to the date string.
+	ZoneBias time.Duration
 }
 
 func (*Candles) isEvent() {}

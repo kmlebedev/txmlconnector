@@ -272,7 +272,8 @@ func TestCommandDispatch(t *testing.T) {
 		{`<command id="bogus"/>`, `<result success="false"><message>Unknown command.</message></result>`},
 		{`not xml`, `<result success="false"><message>Unknown command.</message></result>`},
 		{`<command id="get_securities"/>`, `<result success="false"><message>Cannot process this command without connection.</message></result>`},
-		{`<command id="set_csp"/>`, `<result success="false"><message>Command is not implemented by the native connector.</message></result>`},
+		{`<command id="set_csp"/>`, `<result success="true"/>`},
+		{`<command id="authenticate"/>`, `<result success="false"><message>Illegal context for &#34;sendpin&#34; command</message></result>`},
 		{`<command id="get_connector_version"/>`, `<result success="true"/>`},
 	}
 	for _, tc := range cases {

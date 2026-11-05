@@ -109,12 +109,65 @@ func Records(p []byte) ([]Record, error) {
 				return out, fmt.Errorf("R_DATE: %w", err)
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagFamily || tag == TagEndOfFamily || tag == TagStrikes:
+			start := len(p) - r.Len()
+			if err := SkipOptionRecord(tag, r); err != nil {
+				return out, err
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagTick:
+			// 0x5a TICK: unsized loop of tick records until 0xffff (S/D).
+			start := len(p) - r.Len()
+			if err := SkipTickRecord(r); err != nil {
+				return out, err
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagServerMessage:
+			// R_RES 0x0f: B trn_type, B trr_status, Z512 CP1251 text up to NUL,
+			// packed-L transactionid (RE-2 task-68). Observed types 1/2 end here;
+			// any other type/status=4 tail is not recovered (I) -> UnknownRecord.
+			start := len(p) - r.Len()
+			trnType, err := r.Byte()
+			if err != nil {
+				return out, fmt.Errorf("R_RES type: %w", err)
+			}
+			trrStatus, err := r.Byte()
+			if err != nil {
+				return out, fmt.Errorf("R_RES status: %w", err)
+			}
+			if _, err := readCString(r, 512); err != nil {
+				return out, fmt.Errorf("R_RES text: %w", err)
+			}
+			if _, err := r.Int64(); err != nil {
+				return out, fmt.Errorf("R_RES transactionid: %w", err)
+			}
+			if (trnType != 1 && trnType != 2) || trrStatus == 4 {
+				return out, &UnknownRecordError{Tag: tag, Offset: start}
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagMessage:
+			// 0x01 R_MSG is unsized with variable C-strings (messages.md).
+			start := len(p) - r.Len()
+			if err := SkipMessage(r); err != nil {
+				return out, err
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagNews || tag == TagNewsUpload:
+			// 0x35/0x36 are unsized with variable C-strings: walk the fields to
+			// find the record end (news.md, D/O).
+			start := len(p) - r.Len()
+			if err := SkipNews(tag, r); err != nil {
+				return out, err
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagSecRate:
 			start := len(p) - r.Len()
 			if _, err := r.Uint16(); err != nil {
 				return out, fmt.Errorf("R_SEC_RATE: %w", err)
 			}
-			if _, err := r.Int32(); err != nil {
+			// The value is a packed L that can need the full 8-byte wide form
+			// (count 7); read it with Int64 exactly like ParseSecRate.
+			if _, err := r.Int64(); err != nil {
 				return out, fmt.Errorf("R_SEC_RATE: %w", err)
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
@@ -162,13 +215,17 @@ func Records(p []byte) ([]Record, error) {
 			for c.Len() > 0 {
 				if c.Len() <= 5 {
 					if _, err := c.Int32(); err != nil {
-						return out, fmt.Errorf("R_HISTORY status: %w", err)
+						return out, fmt.Errorf("R_HISTORY: unexpected data after the record status (unsized record): %w", err)
 					}
 					break
 				}
 				for i := 0; i < 7; i++ {
 					if _, err := c.Int32(); err != nil {
-						return out, fmt.Errorf("R_HISTORY candle: %w", err)
+						// The record is unsized: data after its status cannot be
+						// split from the next record, so make it an explicit
+						// diagnostic (docs/protocol/history.md; the DLL sends
+						// every part in its own reply).
+						return out, fmt.Errorf("R_HISTORY: unexpected data after the record status (unsized record): %w", err)
 					}
 				}
 				if flag != 0 {
@@ -178,7 +235,16 @@ func Records(p []byte) ([]Record, error) {
 				}
 			}
 			n := len(p[start:]) - c.Len()
-			r.Raw(n)
+			if _, err := r.Raw(n); err != nil {
+				return out, fmt.Errorf("R_HISTORY body: %w", err)
+			}
+			if r.Len() > 0 {
+				// R_HISTORY is not length-delimited: silent consumption of the
+				// bytes after the status would hide a second record or a
+				// desynchronised stream, so report it instead (I; the DLL sends
+				// every history part in its own reply).
+				return out, fmt.Errorf("R_HISTORY: %d trailing bytes after the status: an unsized record cannot be split", r.Len())
+			}
 			out = append(out, Record{Tag: tag, Body: p[start : start+n]})
 		case tag == TagUnion:
 			start := len(p) - r.Len()

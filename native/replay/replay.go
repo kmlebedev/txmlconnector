@@ -44,6 +44,14 @@ type Injection struct {
 	// records, as stored in the .hex fixtures. The first RQ_MAIN request after
 	// AfterRequest gets it, later ones get an empty reply.
 	Payload []byte
+	// ReplyTo switches the injection to a direct reply frame: when the client
+	// sends a request of this type, the server answers with ReplyType (0 means
+	// the request type itself) and Payload instead of the recorded reply. This
+	// is needed for the polls that are not RQ_MAIN records, e.g. RQ_TICKS (13)
+	// and RQ_TRANSACT (14). Zero keeps the historical RQ_MAIN behaviour.
+	ReplyTo byte
+	// ReplyType is the frame type of the injected reply; zero means ReplyTo.
+	ReplyType byte
 }
 
 // reply is one recorded server reply.
@@ -203,6 +211,25 @@ func (s *Session) Serve(nc net.Conn, inject Injection) error {
 		}
 		if req.Type == session.RqLogout {
 			return nil
+		}
+		// Direct reply-frame injection (RQ_TICKS/RQ_TRANSACT oracle): every
+		// matching request gets the crafted reply payload. It never consumes the
+		// recorded replies, so the rest of the recording keeps working.
+		if inject.ReplyTo != 0 && req.Type == inject.ReplyTo {
+			replyType := inject.ReplyType
+			if replyType == 0 {
+				replyType = req.Type
+			}
+			out, err := keys.Encode(wire.ServerToClient, wire.Frame{
+				Flags: wire.KindReply | wire.FlagPlain, Type: replyType, Payload: inject.Payload,
+			})
+			if err != nil {
+				return err
+			}
+			if _, err := nc.Write(out); err != nil {
+				return err
+			}
+			continue
 		}
 		if inject.AfterRequest != 0 && req.Type == inject.AfterRequest {
 			armed = true

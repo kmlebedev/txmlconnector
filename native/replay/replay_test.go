@@ -285,3 +285,76 @@ func TestReplayCutsRecordedMainAfterTrigger(t *testing.T) {
 		}
 	})
 }
+
+// TestReplayInjectsReplyFrame checks the direct reply-frame injection: a client
+// RQ_TICKS (13) request gets the -inject payload as a type-13 reply (the
+// historical RQ_MAIN injection stays covered by the tests above).
+func TestReplayInjectsReplyFrame(t *testing.T) {
+	pwd, err := wire.DefaultKeys().Decode(wire.ServerToClient, bytes.NewReader(unhex(t, stubPwdReply)))
+	if err != nil {
+		t.Fatalf("decode recorded RQ_PWD reply: %v", err)
+	}
+	var dump bytes.Buffer
+	dumpLine(&dump, 1, session.RqLogin, wire.KindReply, unhex(t, "00080102030405060708"))
+	dumpLine(&dump, 2, session.RqPwd, wire.KindReply, pwd.Payload)
+	dumpLine(&dump, 3, session.RqTime, wire.KindReply, unhex(t, "74c0a4ae064cff0000c4ff00000000000000000000"))
+	dumpLine(&dump, 4, session.RqStartup, wire.KindReply, readFixture(t, "startup-demo.hex"))
+	dumpLine(&dump, 5, session.RqMain, wire.KindReply, readFixture(t, "main1-demo.hex.gz"))
+	sess, err := Load(&dump, testPassword)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	var w wire.Writer
+	w.Uint16(26) // SBER
+	w.Uint16(37) // TQBR
+	w.Int64(0)
+	w.Int32(29896980)
+	w.Int32(291420)
+	w.Byte(1)
+	w.Int32(10)
+	w.Uint16(26)
+	w.Uint16(37)
+	w.Int64(1)
+	w.Int32(1)
+	w.Int32(10)
+	w.Byte(1)
+	w.Int32(20)
+	w.Uint16(0xffff)
+	reply := w.Bytes()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	errc := make(chan error, 1)
+	go func() {
+		nc, err := ln.Accept()
+		if err != nil {
+			errc <- err
+			return
+		}
+		errc <- sess.Serve(nc, Injection{ReplyTo: session.RqTicks, ReplyType: session.RqTicks, Payload: reply})
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, err := native.Dial(ctx, native.ClientConfig{
+		Address: ln.Addr().String(), Login: testLogin, Password: testPassword,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	ticks, err := c.PollTicks(ctx, true, native.TickRequest{Symbol: model.Symbol{Board: "TQBR", SecCode: "SBER"}})
+	if err != nil {
+		t.Fatalf("PollTicks: %v", err)
+	}
+	if len(ticks) != 2 {
+		t.Fatalf("ticks = %d, want 2", len(ticks))
+	}
+	if ticks[1].TradeNo != 1 || ticks[1].Price.Units != 291430 {
+		t.Fatalf("tick1 = %+v", ticks[1])
+	}
+	cancel()
+	c.Close()
+	<-errc
+}

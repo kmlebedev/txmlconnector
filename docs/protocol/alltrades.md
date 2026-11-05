@@ -173,7 +173,7 @@ S (вечерняя сессия/демо). Подписка SBER quotes-only с
 
 ```sh
 TC_LOGIN=... TC_PASSWORD=... go run ./tools/native-trades \
-  -addr tr1.finam.ru:3900 -nats nats://127.0.0.1:4222 -sec TQBR:SBER,FUT:SiZ6
+  -addr transaq.example:3900 -nats nats://127.0.0.1:4222 -sec TQBR:SBER,FUT:SiZ6
 ```
 
 | Поле | Тип | Значение |
