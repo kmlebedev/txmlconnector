@@ -681,4 +681,48 @@ T8/T9/T10/T11/T12 — P1/P2 исправлены в задачах (`b05c648`, `
 Следующее — **Фаза 3 (задачи 13–14)**: история/тики; T13 (gethistorydata) уже реализован/на ревью,
 T14 (subscribe_ticks) — D-каркас, живые S-фикстуры в основной сессии 5 ноября после 10:00 МСК.
 
+---
+
+## 14. Фазы 3–8: сводка ночной/утренней работы (2026-11-05, перед S-серией)
+
+За ночь 4→5 ноября (и утро 5-го) закрыты все задачи Фаз 3–8, которые не требуют живой сессии.
+
+**Закрытые задачи и ключевые коммиты:**
+- T13 gethistorydata: `8cd482b` + ревью-фиксы `8277d6f` (порядок свечей, time bias UTC/wall,
+  гонка каталога, non-blocking `<result>`, валидация period/count, диагностика 0x09).
+- T15 RQ_TRANSACT: `bf4b770` (`OutcomeError`/`ErrOutcomeUnknown`, `TransactionsInProgress` 156).
+- T16 neworder/cancelorder/<orders>: `0feb95e`, `54cca56`, `8be0293` + ревью-фиксы `c6a3143`
+  (scale цены, фильтр client id, mask-ветки 0x10, коалесинг батча, загрузочные заявки, RSM-тексты).
+- T17 <trades>: `a455d21` + `177879c` (mask≠0 не роняет Run, AccruedInt, Union).
+- T18 stop/cond: `d656679`, `e501f11`, `47ea593` + ревью-фиксы `64e7f8b` (leg-флаги 27/26/35 Б,
+  cond_type, DLL-тексты, filters, mask-render, non-fatal 0x80).
+- T20 <positions>: `e493ea5` (sec_position из R_ASSET, forts через reply 42, money из T7 без дублей).
+- T23 margin: `a26e862`, `8705b26`, `b29b757`, `6867d83` + точная формула `a217bc1`
+  (`R_SEC_RATE 0x0a` -> V, maxbuy/maxsell по open_balance/lots/0.1428, побайтно 13210/15210).
+- T24 news: `7484ffc` (+ `ae44889` C-string/регрессии; `<news_body>` — I до S: `task-56`).
+- T25 messages: `73a4acc`/`6cb9697` (R_MSG 0x01 unsized, batch один <messages>, urgent/bias).
+- T26 change_pass: `7427b10` (SHA1-payload, reply-коды, empty-reply fatal, без живой смены пароля).
+- T27 options: `9b7204f` (RQ 149/153/150/151, гейт версии 0x45, records 0x6f/0x71/0x78, D-XML I).
+- T28 RPS/REPO: `b9f305a` (6 команд, 4 O-payload-фикстуры, DLL-тексты, D-XML; dllCommands -> 45).
+- T29 (частично): `043d7c9` server.Backend dll|native + TC_BACKEND + native gRPC backend на
+  testserver без DLL/Wine; `5aea9d5` Makefile `TC_BACKEND=native make server` (go run, без wine64);
+  матрица 45 команд с pending-списком {moveorder, makeordown, set_csp, authenticate}.
+
+**RE-материалы (все карточки 49–52, 56–59 закрыты):** margin.md (local render, dead 84/85, marketord,
+точная формула maxbuy), news.md (RQ_GETNEWS, 0x35/0x36, news_body I), messages.md (R_MSG), changepass.md,
+options.md (версионный гейт), rps.md (payloads/ошибки/литералы), errors/фикстуры.
+
+**Coverage (docs/protocol/coverage.md):** 41/45 XML-команд; не реализованы `authenticate`,
+`set_csp` (T29/RE-63), `moveorder`, `makeordown` (T19 — живые payload'ы).
+
+**Осталось только live-зависимое (S-серия 5 ноября, основная сессия):** T14 `<ticks>` XML,
+T21 oracle `<clientlimits>`, T22 `portfolio_tplus/forts/united` S-формы, T19 `moveorder`/
+`makeordown` payload'ы, T24 `<news_body>` (RQ_GETNEWS reply), RE-4 native gRPC на демо,
+полный matrix без pending, `docs/protocol/errors.md` (task-64) -> TestServerErrorTexts.
+
+**Проверки:** `make verify`/race зелёные на каждом шаге; живой S-план — по
+`docs/deepseek/re-session-checklist.md`; согласие пользователя на минимальный торговый цикл
+`neworder→moveorder→cancelorder` (1 лот SBER, цена далеко от рынка, отмена сразу) зафиксировано.
+
+
 
