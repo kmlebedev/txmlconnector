@@ -524,9 +524,10 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		return "<result success=\"true\" transactionid=\"" + strconv.FormatInt(txID, 10) + "\"/>", nil
 	case "makeordown":
+		// transactionid is read only as an attribute and any missing, zero or
+		// non-numeric value ends in the same refusal (D: FUN_1800efda0).
 		var req struct {
-			TransactionID     *string `xml:"transactionid,attr"`
-			TransactionIDElem *string `xml:"transactionid"`
+			TransactionID string `xml:"transactionid,attr"`
 		}
 		if err := xml.Unmarshal([]byte(command), &req); err != nil {
 			return failure(err.Error()), nil
@@ -537,20 +538,17 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		if client == nil {
 			return failure(msgNeedsConnection), nil
 		}
-		txText := req.TransactionID
-		if txText == nil || *txText == "" {
-			txText = req.TransactionIDElem
+		txID, _ := strconv.ParseUint(req.TransactionID, 10, 64)
+		if err := client.MakeOrdOwn(ctx, txID); err != nil {
+			var text *session.ServerTextError
+			if errors.As(err, &text) {
+				// A non-empty server reply; the DLL copies it into the error
+				// buffer (D), the exact <result> form is I.
+				return failure(records.DecodeCP1251(text.Message)), nil
+			}
+			return failure(err.Error()), nil
 		}
-		if txText == nil || *txText == "" {
-			return failure("Cannot find transactionid."), nil
-		}
-		if _, err := strconv.ParseInt(*txText, 10, 64); err != nil {
-			return failure("Wrong transactionid value."), nil
-		}
-		// DLL supports the command but the RQ_MAKE_COND_OWN (112) payload is not
-		// recovered (D/O/S, orders.md T19): fail explicitly instead of sending a
-		// fabricated transaction.
-		return failure("RQ_MAKE_COND_OWN payload is not recovered (I)"), nil
+		return success(), nil
 	case "cancelorder":
 		var req struct {
 			TransactionID uint64 `xml:"transactionid"`
