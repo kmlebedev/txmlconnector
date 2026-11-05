@@ -255,7 +255,7 @@ def split_records(payload):
 def read_dump(path):
     """Read `tools/wire-decode -payload -1` output: list of dicts in wire order."""
     frames = []
-    for line in open(path):
+    for line in open(path, encoding="utf-8", errors="replace"):  # text columns may hold CP1251
         cols = line.split()
         if len(cols) < 7 or cols[0].startswith("#"):
             continue

@@ -10,13 +10,13 @@ import (
 // (docs/protocol/records.md, RE-1): they only update dictionaries/counters, so
 // the splitter reads them (to stay aligned) and yields no events.
 const (
-	TagBoard        byte = 0x34 // R_BOARD, sized
+	TagBoard        byte = 0x34 // R_BOARD, unsized (FUN_180395b40)
 	TagFortsSession byte = 0x6b // R_FORTS_SESSION
 	TagEdpRate      byte = 0x6e // R_EDP_RATE (also nested inside R_WRAPPER)
 	TagAmBook       byte = 0x5c // AmBOOK
 	TagSysParams    byte = 0x5b // R_SYSPARAMS: L size + size-byte blob
 	TagState        byte = 0x05 // empty state record (dispatcher case 4)
-	TagReadICA      byte = 0x7c // ReadICA, sized
+	TagReadICA      byte = 0x7c // ReadICA, one-byte size
 )
 
 // EdpRate is the R_EDP_RATE body: Z4 currency pair part, Z25 name, B, L rate.

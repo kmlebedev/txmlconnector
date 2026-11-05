@@ -27,7 +27,6 @@ const (
 // (FUN_1801bdf00), so they can be skipped without decoding.
 var sizedTags = map[byte]string{
 	0x02: "R_CLN_NEW", 0x03: "R_ORD_NEW", 0x04: "R_TRD", 0x08: "R_ALLTRADE",
-	0x34: "R_BOARD", 0x7c: "ReadICA",
 	0x10: "R_ORD_MODIFY", 0x28: "R_SEC_NEW", 0x3a: "R_ORD_RENEW", 0x3b: "R_CLIENT_ASSET",
 	0x54: "R_STOP", 0x5e: "R_SEC_PARAM", 0x5f: "R_WRAPPER", 0x66: "R_DOUBLELEG",
 }
@@ -63,7 +62,11 @@ func (e *UnknownRecordError) Is(target error) bool { return target == ErrUnknown
 // skipped: their nested records (0x6e R_EDP_RATE) belong to task 12 and are not
 // yielded yet. On a record whose layout is not implemented it returns the
 // records before it and an error wrapping ErrUnknownRecord.
-func Records(p []byte) ([]Record, error) {
+func Records(p []byte) ([]Record, error) { return records(p, false) }
+
+// records splits p; bounded is set for an R_WRAPPER body, whose known end lets
+// records read their optional trailing fields like the DLL (FUN_1801be120).
+func records(p []byte, bounded bool) ([]Record, error) {
 	var out []Record
 	r := wire.NewReader(p)
 	for r.Len() > 0 {
@@ -84,7 +87,7 @@ func Records(p []byte) ([]Record, error) {
 				// so a nested record without a recovered layout is skipped up to
 				// the wrapper end and surfaced as its own Record instead of
 				// being swallowed silently; the outer stream stays aligned.
-				nested, err := Records(body)
+				nested, err := records(body, true)
 				if err == nil {
 					out = append(out, nested...)
 					continue
@@ -109,7 +112,7 @@ func Records(p []byte) ([]Record, error) {
 				return out, fmt.Errorf("R_DATE: %w", err)
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
-		case tag == TagFamily || tag == TagEndOfFamily || tag == TagStrikes:
+		case tag == TagFamily || tag == TagEndOfFamily || tag == TagEndOfFamilies || tag == TagStrikes:
 			start := len(p) - r.Len()
 			if err := SkipOptionRecord(tag, r); err != nil {
 				return out, err
@@ -143,6 +146,25 @@ func Records(p []byte) ([]Record, error) {
 			}
 			if (trnType != 1 && trnType != 2) || trrStatus == 4 {
 				return out, &UnknownRecordError{Tag: tag, Offset: start}
+			}
+			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
+		case tag == TagReadICA:
+			// One-byte size (D: FUN_1803983e0 reads FUN_1801bdf00(r,0,1); S).
+			n, err := r.Byte()
+			if err != nil {
+				return out, fmt.Errorf("ReadICA size: %w", err)
+			}
+			body, err := r.Raw(int(n))
+			if err != nil {
+				return out, fmt.Errorf("ReadICA body: %w", err)
+			}
+			out = append(out, Record{Tag: tag, Body: body})
+		case tag == TagBoard:
+			// Unsized (D: FUN_180395b40, param_3=0): W id, B, Z7, Z30, W, B,
+			// Z8, B, B.
+			start := len(p) - r.Len()
+			if err := skipBoard(r); err != nil {
+				return out, err
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagMessage:
@@ -290,6 +312,11 @@ func Records(p []byte) ([]Record, error) {
 			if _, err := r.Int32(); err != nil {
 				return out, fmt.Errorf("R_FORTS_SESSION: %w", err)
 			}
+			// Optional B when bytes remain before the boundary (D; S: the
+			// production load sends 5f 0005 6b <L> 04).
+			if bounded && r.Len() > 0 {
+				r.Byte()
+			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})
 		case tag == TagEdpRate:
 			start := len(p) - r.Len()
@@ -421,4 +448,24 @@ func Records(p []byte) ([]Record, error) {
 func TradeDate(rec Record) (int64, error) {
 	v, err := wire.NewReader(rec.Body).Int32()
 	return int64(v), err
+}
+
+func skipBoard(r *wire.Reader) error {
+	steps := []func() error{
+		func() error { _, err := r.Uint16(); return err },
+		func() error { _, err := r.Byte(); return err },
+		func() error { _, err := readCString(r, 7); return err },
+		func() error { _, err := readCString(r, 0x1e); return err },
+		func() error { _, err := r.Uint16(); return err },
+		func() error { _, err := r.Byte(); return err },
+		func() error { _, err := readCString(r, 8); return err },
+		func() error { _, err := r.Byte(); return err },
+		func() error { _, err := r.Byte(); return err },
+	}
+	for _, step := range steps {
+		if err := step(); err != nil {
+			return fmt.Errorf("R_BOARD: %w", err)
+		}
+	}
+	return nil
 }
