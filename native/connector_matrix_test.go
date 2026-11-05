@@ -12,12 +12,10 @@ import (
 )
 
 // pendingCommands are the names that are intentionally not implemented yet:
-// moveorder/makeordown wait for the live T19 capture; set_csp/authenticate are
-// external crypto-provider hooks (RE task-64). Everything else must not answer
-// "Command is not implemented by the native connector."
+// moveorder/makeordown wait for the live T19 capture. set_csp/authenticate are
+// implemented (task-64) and must not answer not-implemented.
 var pendingCommands = map[string]bool{
 	"moveorder": true, "makeordown": true,
-	"set_csp": true, "authenticate": true,
 }
 
 // TestEveryDLLCommandIsHandled: all 45 DLL command names are either handled
@@ -45,6 +43,16 @@ func TestEveryDLLCommandIsHandled(t *testing.T) {
 		case name == "disconnect":
 			if got := send(t, c, cmd); !strings.Contains(got, "Соединение не установлено") {
 				t.Fatalf("disconnect without connection = %s", got)
+			}
+		case name == "set_csp":
+			// No csp element = no-op success (D+O).
+			if got := send(t, c, cmd); !strings.Contains(got, "success="+quote+"true"+quote) {
+				t.Fatalf("set_csp without csp = %s", got)
+			}
+		case name == "authenticate":
+			// Default provider: Illegal context for sendpin, no connection needed.
+			if got := send(t, c, cmd); !strings.Contains(got, "Illegal context for") {
+				t.Fatalf("authenticate without connection = %s", got)
 			}
 		case needsConn:
 			// Pending commands are still DLL commands: without a connection the
@@ -133,8 +141,8 @@ func TestDLLCommandCountAgainstDocs(t *testing.T) {
 	// missing from one side.
 	text := string(raw)
 	for _, name := range []string{"newreport4", "cancelreport4"} {
-		if !strings.Contains(text, "<code>"+name+"</code>") && !strings.Contains(text, name) {
-			t.Logf("commands.md does not mention %s yet (RE task)", name)
+		if !strings.Contains(text, name) {
+			t.Errorf("commands.md does not mention %s (45-name table)", name)
 		}
 		if !dllCommands[name] {
 			t.Fatalf("dllCommands is missing %s", name)

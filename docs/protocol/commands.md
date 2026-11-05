@@ -6,7 +6,7 @@
 
 ## Как DLL обрабатывает команды
 
-- Экспорт `SendCommand` (`0x179ec0`) вызывает диспетчер `FUN_1800a5030`. Он ищет команду по `id` в таблице, которую заполняет `FUN_1801774b0` (43 имени), — **D**.
+- Экспорт `SendCommand` (`0x179ec0`) вызывает диспетчер `FUN_1800a5030`. Он ищет команду по `id` в таблице, которую заполняет `FUN_1801774b0` (43 D-имени; нативный `dllCommands` — **45** имён: T28 добавил `newreport4` и `cancelreport4`, RPS/REPO payloads в [rps.md](rps.md)), — **D**.
 - Неизвестный `id` даёт `<result success="false"><message>Unknown command.</message></result>` — **D**, **S**.
 - У каждой команды есть флаг «нужно соединение». Без соединения ответ — `Cannot process this command without connection.` — **D**, **S**. «Соединение» означает завершённую загрузку: во время логина и снапшота DLL отвечает так же — **S**.
 - Обработчик возвращает признак успеха и необязательные атрибуты. Успех — `<result success="true"%1%/>`, ошибка — `<result success="false"><message>…</message></result>` — **D**.
