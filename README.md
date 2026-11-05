@@ -61,6 +61,7 @@ err = client.Run(ctx, native.RunOptions{RqDelay: 100 * time.Millisecond}, func(e
 ```bash
 make cabi          # текущая ОС: dylib/so; артефакты и header — в bin/
 make cabi-test     # C ABI-тест: 9 экспортов, ошибки, callback, FreeMemory
+make cabi-conformance  # C5: сценарии lifecycle/текстов против эталонной DLL (cabi_scenarios.json)
 ```
 
 Публичный заголовок — [`cmd/connector/include/txmlconnector.h`](cmd/connector/include/txmlconnector.h)

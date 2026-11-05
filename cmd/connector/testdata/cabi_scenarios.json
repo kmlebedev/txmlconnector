@@ -1,0 +1,362 @@
+{
+ "schema": "cabi-scenarios/1",
+ "generated_from": "cmd/connector/testdata/cabi-reference.json",
+ "reference": {
+  "dll_sha256": "a197e2625e53c0df453687ae1b20ef2ae1a05e034cd20c424a7014b0c9726342",
+  "source": "reference DLL txmlconnector64-6.47.2.26.4 under Wine 11.21 (local ABI probe, no network, no live server)"
+ },
+ "normalization": {
+  "log_dir": "{LOG_DIR}"
+ },
+ "notes": [
+  "Local only: no network, no live server; scenarios cover lifecycle/wrapper texts/GetServiceInfo/callbacks.",
+  "The harness replays these steps against our c-shared library and compares UTF-8 strings byte-for-byte.",
+  "sleep steps exist to cross the reference 5000 ms GetServiceInfo rate-limit window."
+ ],
+ "steps": [
+  {
+   "id": "uninit_before_init",
+   "call": "UnInitialize",
+   "expect": "error",
+   "text": "<error>Библиотека не инициализирована</error>"
+  },
+  {
+   "id": "send_null_preinit",
+   "call": "SendCommand",
+   "args": "NULL",
+   "expect": "error",
+   "text": "<error>Error document empty.</error>"
+  },
+  {
+   "id": "send_empty_preinit",
+   "call": "SendCommand",
+   "args": "",
+   "expect": "error",
+   "text": "<error>Error document empty.</error>"
+  },
+  {
+   "id": "send_bad_root_preinit",
+   "call": "SendCommand",
+   "args": "<x/>",
+   "expect": "error",
+   "text": "<error>Only &amp;lt;command&amp;gt; tags could be passed to SendCommand function</error>"
+  },
+  {
+   "id": "send_valid_preinit",
+   "call": "SendCommand",
+   "args": "<command id=\"get_connector_version\"/>",
+   "expect": "error",
+   "text": "<error>Библиотека не инициализована. Необходимо выполнить функцию Initialize()</error>"
+  },
+  {
+   "id": "setlog_invalid_preinit",
+   "call": "SetLogLevel",
+   "args": "0",
+   "expect": "error",
+   "text": "<error>Invalid log level. Should be in range [1,3]</error>"
+  },
+  {
+   "id": "setlog_valid_preinit",
+   "call": "SetLogLevel",
+   "args": "2",
+   "expect": "null"
+  },
+  {
+   "id": "setcb_preinit",
+   "call": "SetCallback",
+   "expect": "true"
+  },
+  {
+   "id": "setcbex_preinit",
+   "call": "SetCallbackEx",
+   "args": "0x1234",
+   "expect": "true"
+  },
+  {
+   "id": "svc_null_request",
+   "call": "GetServiceInfo",
+   "args": "NULL",
+   "expect": "code",
+   "code": 4,
+   "resp_null": true
+  },
+  {
+   "id": "svc_rate_limited",
+   "call": "GetServiceInfo",
+   "args": "<request><value>version</value></request>",
+   "expect": "code",
+   "code": 6,
+   "resp_null": true
+  },
+  {
+   "id": "wait_5s_1",
+   "call": "sleep",
+   "ms": 5200
+  },
+  {
+   "id": "svc_response_null",
+   "call": "GetServiceInfo",
+   "args": "!respnull:<request><value>version</value></request>",
+   "expect": "code",
+   "code": 5,
+   "resp_null": true
+  },
+  {
+   "id": "wait_5s_2",
+   "call": "sleep",
+   "ms": 5200
+  },
+  {
+   "id": "svc_version",
+   "call": "GetServiceInfo",
+   "args": "<request><value>version</value></request>",
+   "expect": "code",
+   "code": 0,
+   "resp": "<service_info><version>6.47.2.26.4</version></service_info>"
+  },
+  {
+   "id": "wait_5s_3",
+   "call": "sleep",
+   "ms": 5200
+  },
+  {
+   "id": "svc_unknown",
+   "call": "GetServiceInfo",
+   "args": "<request><value>unknown</value></request>",
+   "expect": "code",
+   "code": 3,
+   "resp": "<error>Unknown parameter \"unknown\"</error>"
+  },
+  {
+   "id": "initialize_null_path",
+   "call": "Initialize",
+   "args": "NULL,1",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. Не указан путь к директории для хранения лог-файлов</error>"
+  },
+  {
+   "id": "initialize_bad_level",
+   "call": "Initialize",
+   "args": "{LOG_DIR},0",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. Wrong log level.</error>"
+  },
+  {
+   "id": "initialize_ok",
+   "call": "Initialize",
+   "args": "{LOG_DIR},2",
+   "expect": "null"
+  },
+  {
+   "id": "initialize_repeat",
+   "call": "Initialize",
+   "args": "{LOG_DIR},2",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. Библиотека уже инициализирована</error>"
+  },
+  {
+   "id": "initex_while_init",
+   "call": "InitializeEx",
+   "args": "<init log_path=\"{LOG_DIR}\" log_level=\"2\"/>",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. Библиотека уже инициализирована</error>"
+  },
+  {
+   "id": "setlog_invalid_after_init",
+   "call": "SetLogLevel",
+   "args": "4",
+   "expect": "error",
+   "text": "<error>Invalid log level. Should be in range [1,3]</error>"
+  },
+  {
+   "id": "setcb_after_init",
+   "call": "SetCallback",
+   "expect": "true"
+  },
+  {
+   "id": "send_unknown",
+   "call": "SendCommand",
+   "args": "<command id=\"unknown_cmd\"/>",
+   "expect": "result",
+   "text": "<result success=\"false\"><message>Unknown command.</message></result>"
+  },
+  {
+   "id": "send_version",
+   "call": "SendCommand",
+   "args": "<command id=\"get_connector_version\"/>",
+   "expect": "result",
+   "text": "<result success=\"true\"/>",
+   "callback": "<connector_version>6.47.2.26.4</connector_version>"
+  },
+  {
+   "id": "free_last_result",
+   "call": "FreeMemory",
+   "args": "last",
+   "expect": "true"
+  },
+  {
+   "id": "setlog_valid_after_init",
+   "call": "SetLogLevel",
+   "args": "3",
+   "expect": "null"
+  },
+  {
+   "id": "send_element_value",
+   "call": "SendCommand",
+   "args": "<x>",
+   "expect": "error",
+   "text": "<error>Error reading Element value.</error>"
+  },
+  {
+   "id": "send_element_name",
+   "call": "SendCommand",
+   "args": "<command",
+   "expect": "error",
+   "text": "<error>Failed to read Element name</error>"
+  },
+  {
+   "id": "send_parsing",
+   "call": "SendCommand",
+   "args": "<command id=\"x\"",
+   "expect": "error",
+   "text": "<error>Error parsing Element.</error>"
+  },
+  {
+   "id": "send_no_connection",
+   "call": "SendCommand",
+   "args": "<command id=\"server_status\"/>",
+   "expect": "result",
+   "text": "<result success=\"false\"><message>Cannot process this command without connection.</message></result>"
+  },
+  {
+   "id": "setcbex_after_init",
+   "call": "SetCallbackEx",
+   "args": "0x5678",
+   "expect": "true"
+  },
+  {
+   "id": "send_version_ex",
+   "call": "SendCommand",
+   "args": "<command id=\"get_connector_version\"/>",
+   "expect": "result",
+   "text": "<result success=\"true\"/>",
+   "callback": "<connector_version>6.47.2.26.4</connector_version>",
+   "callback_user": "0x5678"
+  },
+  {
+   "id": "free_null",
+   "call": "FreeMemory",
+   "args": "NULL",
+   "expect": "true"
+  },
+  {
+   "id": "send_version_2",
+   "call": "SendCommand",
+   "args": "<command id=\"get_connector_version\"/>",
+   "expect": "result",
+   "text": "<result success=\"true\"/>"
+  },
+  {
+   "id": "free_last_result_2",
+   "call": "FreeMemory",
+   "args": "last",
+   "expect": "true"
+  },
+  {
+   "id": "uninitialize_ok",
+   "call": "UnInitialize",
+   "expect": "null"
+  },
+  {
+   "id": "send_after_uninit",
+   "call": "SendCommand",
+   "args": "<command id=\"get_connector_version\"/>",
+   "expect": "error",
+   "text": "<error>Библиотека не инициализована. Необходимо выполнить функцию Initialize()</error>"
+  },
+  {
+   "id": "uninitialize_repeat",
+   "call": "UnInitialize",
+   "expect": "error",
+   "text": "<error>Библиотека не инициализирована</error>"
+  },
+  {
+   "id": "initex_null",
+   "call": "InitializeEx",
+   "args": "NULL",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. параметр функции равен нулю</error>"
+  },
+  {
+   "id": "initex_empty",
+   "call": "InitializeEx",
+   "args": "",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. параметр функции равен нулю</error>"
+  },
+  {
+   "id": "initex_broken",
+   "call": "InitializeEx",
+   "args": "<init log_path>",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. Error reading Attributes.</error>"
+  },
+  {
+   "id": "initex_no_init_element",
+   "call": "InitializeEx",
+   "args": "<root/>",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. не найден элемент &lt;init&gt;</error>"
+  },
+  {
+   "id": "initex_empty_init",
+   "call": "InitializeEx",
+   "args": "<init/>",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. не найден обязательный атрибут &lt;log_path&gt;</error>"
+  },
+  {
+   "id": "initex_no_log_path",
+   "call": "InitializeEx",
+   "args": "<init log_level=\"2\"/>",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. не найден обязательный атрибут &lt;log_path&gt;</error>"
+  },
+  {
+   "id": "initex_no_log_level",
+   "call": "InitializeEx",
+   "args": "<init log_path=\"{LOG_DIR}\"/>",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. не найден обязательный атрибут &lt;log_level&gt;</error>"
+  },
+  {
+   "id": "initex_bad_level",
+   "call": "InitializeEx",
+   "args": "<init log_path=\"{LOG_DIR}\" log_level=\"4\"/>",
+   "expect": "error",
+   "text": "<error>Не удалось инициализировать библиотеку. Wrong log level.</error>"
+  },
+  {
+   "id": "initex_ok",
+   "call": "InitializeEx",
+   "args": "<init log_path=\"{LOG_DIR}\" log_level=\"2\"/>",
+   "expect": "null"
+  },
+  {
+   "id": "uninitialize_final",
+   "call": "UnInitialize",
+   "expect": "null"
+  },
+  {
+   "id": "initialize_after_uninit",
+   "call": "Initialize",
+   "args": "{LOG_DIR},1",
+   "expect": "null"
+  },
+  {
+   "id": "uninitialize_final_2",
+   "call": "UnInitialize",
+   "expect": "null"
+  }
+ ]
+}
