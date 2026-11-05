@@ -3,11 +3,13 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest/rules"
+	"github.com/kmlebedev/txmlconnector/terminal/research"
 )
 
 // rulesSpecArgs is a minimal valid rules.Spec tool argument: buy on the first
@@ -401,4 +403,177 @@ func hasRuleWarningText(warnings []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+// walkForwardArgs is a valid walk_forward argument for the fake data source.
+func walkForwardArgs() map[string]any {
+	return map[string]any{
+		"symbol":    "TQBR:SBER",
+		"periodSec": int(300),
+		"count":     int(300),
+		"strategy":  "sma_cross",
+		"grid": map[string]any{
+			"fast": []any{2, 3},
+			"slow": []any{8, 13},
+		},
+		"trainBars":   int(120),
+		"testBars":    int(60),
+		"stepBars":    int(60),
+		"feeBps":      5,
+		"slippageBps": 1,
+	}
+}
+
+// TestWalkForwardTool runs the walk-forward tool through the core dispatch.
+func TestWalkForwardTool(t *testing.T) {
+	e, data, _ := newTestEngine(t)
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{300: oscillatingBars(300)}
+	result, artifact, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameWalkForward, walkForwardArgs())
+	if err != nil {
+		t.Fatalf("walk_forward: %v", err)
+	}
+	view, ok := result.(walkForwardView)
+	if !ok {
+		t.Fatalf("result type = %T, want walkForwardView", result)
+	}
+	if view.Symbol != "TQBR:SBER" || view.Strategy != "sma_cross" || view.PeriodSec != 300 {
+		t.Fatalf("view header = %+v", view)
+	}
+	if view.Trials != 4 {
+		t.Fatalf("trials = %d, want 4", view.Trials)
+	}
+	if view.Folds != 3 {
+		t.Fatalf("folds = %d, want 3", view.Folds)
+	}
+	if view.OOS.Trades <= 0 {
+		t.Fatalf("OOS trades = %d, want trades", view.OOS.Trades)
+	}
+	if view.DeflatedSharpe < 0 || view.DeflatedSharpe > 1 {
+		t.Fatalf("deflated Sharpe = %v", view.DeflatedSharpe)
+	}
+	if view.PBO < 0 || view.PBO > 1 {
+		t.Fatalf("PBO = %v", view.PBO)
+	}
+	if artifact == nil || artifact.Kind != "walk_forward" {
+		t.Fatalf("artifact = %+v, want walk_forward", artifact)
+	}
+	full, ok := artifact.Payload.(research.WalkForwardResult)
+	if !ok {
+		t.Fatalf("artifact payload type = %T, want research.WalkForwardResult", artifact.Payload)
+	}
+	if len(full.Folds) != 3 {
+		t.Fatalf("artifact folds = %d, want 3", len(full.Folds))
+	}
+	// The model payload must stay compact: no per-fold windows or params.
+	raw, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal view: %v", err)
+	}
+	for _, forbidden := range []string{"trainFrom", "testFrom", "testTo", "params"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("model payload carries %q: %s", forbidden, raw)
+		}
+	}
+	if len(raw) > 2048 {
+		t.Fatalf("model payload = %d bytes, want <= 2048", len(raw))
+	}
+}
+
+// TestWalkForwardToolErrors checks the model-facing errors.
+func TestWalkForwardToolErrors(t *testing.T) {
+	e, data, _ := newTestEngine(t)
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{300: oscillatingBars(300)}
+	cases := []struct {
+		name   string
+		mutate func(map[string]any)
+		want   string
+	}{
+		{"missing strategy", func(args map[string]any) { delete(args, "strategy") }, "strategy is required"},
+		{"missing trainBars", func(args map[string]any) { delete(args, "trainBars") }, "trainBars is required"},
+		{"missing testBars", func(args map[string]any) { delete(args, "testBars") }, "testBars is required"},
+		{"too short history", func(args map[string]any) {
+			args["trainBars"] = 200
+			args["testBars"] = 200
+		}, "not enough"},
+		{"grid too large", func(args map[string]any) {
+			fast := make([]any, 40)
+			slow := make([]any, 30)
+			for index := range fast {
+				fast[index] = index + 2
+			}
+			for index := range slow {
+				slow[index] = index + 50
+			}
+			args["grid"] = map[string]any{"fast": fast, "slow": slow}
+		}, "more than"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := walkForwardArgs()
+			tc.mutate(args)
+			if _, _, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameWalkForward, args); err == nil ||
+				!strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestCompareStrategiesRanksByOOS is the R6 regression: compare_strategies
+// ranks the strategies by their out-of-sample walk-forward metrics, not by the
+// in-sample fit of the full history.
+func TestCompareStrategiesRanksByOOS(t *testing.T) {
+	e, data, _ := newTestEngine(t)
+	bars := oscillatingBars(200)
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{300: bars}
+	split := bars[len(bars)/2].Time
+	e.strategyInfos = func() []backtest.StrategyInfo {
+		return []backtest.StrategyInfo{
+			{ID: "sma_cross", Name: "SMA", Description: "in-sample winner"},
+			{ID: "momentum", Name: "Momentum", Description: "out-of-sample winner"},
+		}
+	}
+	e.backtestRun = func(req backtest.Request) (backtest.Result, error) {
+		oos := len(req.Bars) > 0 && req.Bars[len(req.Bars)-1].Time.After(split)
+		var totalReturn float64
+		switch req.Strategy {
+		case "sma_cross":
+			if oos {
+				totalReturn = -5
+			} else {
+				totalReturn = 30
+			}
+		case "momentum":
+			if oos {
+				totalReturn = 20
+			} else {
+				totalReturn = -10
+			}
+		default:
+			return backtest.Result{}, fmt.Errorf("unexpected strategy %q", req.Strategy)
+		}
+		return makeFakeResult(req, 5, totalReturn, 1, -1), nil
+	}
+	call, artifact := e.executeToolCall(context.Background(), "compare_strategies", map[string]any{
+		"symbol": "TQBR:SBER", "periodSec": 300, "count": 200,
+	})
+	if call.Error != "" {
+		t.Fatalf("compare_strategies: %s", call.Error)
+	}
+	cmp, ok := call.Result.(compareResult)
+	if !ok {
+		t.Fatalf("compare result type = %T", call.Result)
+	}
+	if cmp.Ranked[0].Strategy != "momentum" {
+		t.Fatalf("ranking[0] = %q, want the OOS winner momentum: %+v", cmp.Ranked[0].Strategy, cmp.Ranked)
+	}
+	if cmp.Best.Strategy != "momentum" {
+		t.Fatalf("best = %q, want momentum", cmp.Best.Strategy)
+	}
+	if cmp.Best.Result.Metrics.TotalReturnPct != 20 {
+		t.Fatalf("best full-period return = %v, want 20", cmp.Best.Result.Metrics.TotalReturnPct)
+	}
+	if artifact == nil || artifact.Kind != "backtest" {
+		t.Fatalf("artifact = %+v, want the winner backtest", artifact)
+	}
 }
