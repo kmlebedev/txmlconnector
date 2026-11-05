@@ -25,6 +25,7 @@ type healthResponse struct {
 	ServerTime      time.Time     `json:"serverTime"`
 	ExchangeTZ      string        `json:"exchangeTZ"`
 	SeedGeneratedAt time.Time     `json:"seedGeneratedAt"`
+	InstanceID      string        `json:"instanceId"`
 	LLM             llmStatusDTO  `json:"llm"`
 	Trading         tradingStatus `json:"trading"`
 }
@@ -206,6 +207,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		ServerTime:      utc(st.ServerTime),
 		ExchangeTZ:      st.ExchangeTZ,
 		SeedGeneratedAt: utc(st.SeedGeneratedAt),
+		InstanceID:      s.cfg.InstanceID,
 		LLM:             llmStatusDTO{Enabled: ast.LLM.Enabled, Model: ast.LLM.Model, Note: ast.LLM.Note},
 		Trading:         tradingStatus{Paper: true, Live: s.cfg.LiveTradingAllowed},
 	}

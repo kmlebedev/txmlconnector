@@ -5,6 +5,14 @@
 // and exposes a tiny status/restart control API for the Client panel. The
 // Client half (client.js) renders the main panel and the sidebar entry.
 //
+// Security (plan Task 1 / R1): the Go backend only trusts loopback Hosts and
+// same-origin unsafe requests, and it requires a per-launch token on /api/*.
+// The plugin generates that token and the instance nonce (TERMINAL_API_TOKEN /
+// TERMINAL_INSTANCE_ID), passes both to its child, injects the token into
+// proxied requests, strips the Harness credentials, and adopts a backend on
+// the port only when its /api/health reports the instance nonce of this launch
+// (R10: do not trust whatever listens on the port).
+//
 // Configuration (bundle patch, row id "ai-terminal"):
 //   mode:       "offline" | "live" | "auto"   (default "offline")
 //   port:       local backend port            (default 18090)
@@ -12,6 +20,7 @@
 //   repoDir:    checkout containing cmd/terminal (default: this package's parent)
 //   binaryPath: prebuilt backend binary       (default: <repoDir>/bin/terminal)
 
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -34,6 +43,36 @@ const DEFAULTS = {
   repoDir: '',
   binaryPath: '',
 };
+
+// Environment the backend reads from the Harness process (ARCHITECTURE §2).
+// The DSH subprocess service scrubs credential-shaped ambient variables before
+// a child starts, so the terminal-specific ones are forwarded deliberately and
+// nothing else of the Harness environment is: the backend needs no other
+// Harness secret.
+const BACKEND_ENV_NAMES = [
+  'TRANSAQ_ADDR',
+  'TRANSAQ_LOGIN',
+  'TRANSAQ_PASSWORD',
+  'TC_HOST',
+  'TC_PORT',
+  'TC_LOGIN',
+  'TC_PASSWORD',
+  'TERMINAL_LIVE_TRADING',
+  'TERMINAL_LLM_BASE_URL',
+  'TERMINAL_LLM_API_KEY',
+  'TERMINAL_LLM_MODEL',
+  'TERMINAL_LLM_TIMEOUT',
+];
+
+/** Environment overrides for the backend child: the token, the nonce and the terminal env. */
+function backendEnv(token, instanceId) {
+  const env = { TERMINAL_API_TOKEN: token, TERMINAL_INSTANCE_ID: instanceId };
+  for (const name of BACKEND_ENV_NAMES) {
+    const value = process.env[name];
+    if (typeof value === 'string' && value !== '') env[name] = value;
+  }
+  return env;
+}
 
 /** Read and validate the row config, ignoring unknown keys. */
 function normalizeConfig(config) {
@@ -109,6 +148,10 @@ class TerminalBackend {
     this.child = null;
     this.reused = false;
     this.starting = null;
+    // Per-launch secrets: the backend requires the token on /api/* and the
+    // plugin accepts the port only when health reports this nonce.
+    this.token = randomUUID();
+    this.instanceId = randomUUID();
     this.state = {
       phase: 'stopped',
       message: 'бэкенд не запущен',
@@ -127,13 +170,20 @@ class TerminalBackend {
     this.state = { ...this.state, phase, message, ...extra };
   }
 
-  async health() {
+  /** Raw health probe: any process answering /api/health, without the nonce check. */
+  async probe() {
     try {
       const { status, body } = await getJSON(this.cfg.port, '/api/health', 1_500);
       return status === 200 && body && body.ok === true ? body : null;
     } catch {
       return null;
     }
+  }
+
+  /** Health of our own backend: a foreign process on the port is not it (R10). */
+  async health() {
+    const body = await this.probe();
+    return body && body.instanceId === this.instanceId ? body : null;
   }
 
   async resolveBinary() {
@@ -172,6 +222,9 @@ class TerminalBackend {
     const handle = subprocess.spawn({
       argv: [binary, '-mode', this.cfg.mode, '-addr', `127.0.0.1:${this.cfg.port}`],
       cwd: repo,
+      // The backend reads the token and the instance nonce from the
+      // environment; they are generated per plugin launch and never logged.
+      env: backendEnv(this.token, this.instanceId),
       stdio: {
         stdin: 'ignore',
         stdout: { maxBytes: 1_048_576 },
@@ -225,6 +278,14 @@ class TerminalBackend {
           });
           return;
         }
+        // Something answers on the port but not with our instanceId: refuse to
+        // adopt it instead of spawning over a process we do not own (R10).
+        const foreign = await this.probe();
+        if (foreign) {
+          this.reused = false;
+          this.set('error', 'порт занят чужим процессом: /api/health не подтвердил instanceId этого запуска');
+          return;
+        }
         await this.startFresh();
       } catch (error) {
         this.set('error', error instanceof Error ? error.message : String(error));
@@ -266,19 +327,33 @@ class TerminalBackend {
   }
 }
 
-/** Proxy one request to the Go backend, preserving headers and streaming bodies. */
-function proxyToBackend(port, req, res) {
+/**
+ * Proxy one request to the Go backend, preserving headers and streaming bodies.
+ *
+ * The Harness session credentials (cookie, authorization and x-dsh-* headers)
+ * are never forwarded: the Go backend has no business seeing them. Instead the
+ * per-launch terminal token is injected, which is the only credential the
+ * backend accepts on /api/*. The original Host is kept so the backend can
+ * verify that unsafe requests are same-origin (CSRF guard).
+ */
+function proxyToBackend(port, token, req, res) {
   if (typeof req.url !== 'string' || !req.url.startsWith(`${MOUNT}/`)) {
     json(res, 404, { error: { code: 'not_found', message: 'только /ai-terminal/…' } });
     return;
   }
   const rest = req.url.slice(MOUNT.length) || '/';
-  const headers = { ...req.headers, host: `127.0.0.1:${port}` };
+  const headers = { ...req.headers };
   delete headers.connection;
   delete headers['proxy-connection'];
   delete headers['keep-alive'];
   delete headers['transfer-encoding'];
   delete headers.upgrade;
+  delete headers.cookie;
+  delete headers.authorization;
+  for (const name of Object.keys(headers)) {
+    if (name.startsWith('x-dsh-')) delete headers[name];
+  }
+  headers['x-terminal-token'] = token;
   const upstream = http.request({
     host: '127.0.0.1',
     port,
@@ -291,6 +366,9 @@ function proxyToBackend(port, req, res) {
     delete responseHeaders['keep-alive'];
     delete responseHeaders['transfer-encoding'];
     delete responseHeaders.upgrade;
+    // The backend token cookie belongs to the backend origin; do not leak it
+    // into the Harness cookie jar (the proxy authenticates with the header).
+    delete responseHeaders['set-cookie'];
     res.writeHead(upstreamRes.statusCode || 502, responseHeaders);
     upstreamRes.pipe(res);
     upstreamRes.on('error', () => res.destroy());
@@ -341,7 +419,7 @@ export function apply(ctx, config) {
         json(res, 503, { error: { code: 'backend_unavailable', message: backend.state.message } });
         return;
       }
-      proxyToBackend(cfg.port, req, res);
+      proxyToBackend(cfg.port, backend.token, req, res);
     },
   }));
 
