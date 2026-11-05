@@ -45,6 +45,8 @@ var toolCatalogNames = []string{
 	toolNameWalkForward,
 	toolNameLOBBacktest,
 	toolNameProposeAutomation,
+	toolNameDraftSkillPattern,
+	toolNameListSkillPatterns,
 	// Rule-bot runtime tools (plan Task 22).
 	"bot_create_from_backtest",
 	"bot_check",

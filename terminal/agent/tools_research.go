@@ -3,11 +3,14 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/kmlebedev/txmlconnector/terminal/fingerprint"
 	"github.com/kmlebedev/txmlconnector/terminal/lobreplay"
 	"github.com/kmlebedev/txmlconnector/terminal/research"
+	"github.com/kmlebedev/txmlconnector/terminal/skills"
 	"github.com/kmlebedev/txmlconnector/terminal/vintage"
 	"github.com/kmlebedev/txmlconnector/terminal/volatility"
 )
@@ -94,6 +98,7 @@ func researchToolCatalog() []ToolInfo {
 	return []ToolInfo{
 		backtestRulesTool, batchBacktestTool, detectExecutionAlgosTool, lobBacktestTool,
 		walkForwardTool, volForecastTool, volEventsTool, proposeAutomationTool,
+		draftSkillPatternTool, listSkillPatternsTool,
 	}
 }
 
@@ -258,6 +263,18 @@ func (e *Engine) invokeResearchTool(ctx context.Context, name string, args map[s
 		return res, &Artifact{Kind: "lob_backtest", Payload: ui}, true, nil
 	case toolNameProposeAutomation:
 		res, ui, err := e.toolProposeAutomation(ctx, args)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return res, ui, true, nil
+	case toolNameDraftSkillPattern:
+		res, ui, err := e.toolDraftSkillPattern(ctx, args)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return res, ui, true, nil
+	case toolNameListSkillPatterns:
+		res, ui, err := e.toolListSkillPatterns(ctx, args)
 		if err != nil {
 			return nil, nil, true, err
 		}
@@ -1522,4 +1539,309 @@ func (e *Engine) toolProposeAutomation(ctx context.Context, args map[string]any)
 		view.Path = automation.BacklogPath
 	}
 	return view, &Artifact{Kind: "automation_backlog", Payload: view}, nil
+}
+
+// toolNameDraftSkillPattern is the agent tool name of the pattern draft writer.
+const toolNameDraftSkillPattern = "draft_skill_pattern"
+
+// toolNameListSkillPatterns is the agent tool name of the generated-pattern catalog.
+const toolNameListSkillPatterns = "list_skill_patterns"
+
+// maxSkillPatterns bounds the list_skill_patterns answer.
+const maxSkillPatterns = 50
+
+// draftSkillPatternTool is the draft_skill_pattern tool description.
+var draftSkillPatternTool = ToolInfo{
+	Name:  toolNameDraftSkillPattern,
+	Title: "Черновик SKILL-паттерна",
+	Description: "Записать найденный торговый паттерн черновиком SKILL.md в каталог вне git (<dataDir>/skills): " +
+		"гипотеза, инструменты, условия, вход/выход/риск и блок out-of-sample доказательств. Паттерн остаётся draft: " +
+		"promotion в validated возможен только когда OOS-окно и метрики проходят политику (30 сделок, " +
+		"deflated Sharpe 0.95, PBO 0.3, OOS-окно 3 месяца).",
+	Input: objSchema(map[string]any{
+		"title":          strProp("Короткое название паттерна"),
+		"hypothesis":     strProp("Проверяемая гипотеза: что, где и почему работает"),
+		"instruments":    strArrayProp("Инструменты, на которых найден паттерн, например TQBR:SBER"),
+		"conditions":     strArrayProp("Условия входа и фильтры словами (RSI < 0.2, close > SMA200, окно релиза)"),
+		"entry":          strProp("Правило входа"),
+		"exit":           strProp("Правило выхода"),
+		"risk":           strProp("Риск-менеджмент: стоп, размер позиции"),
+		"source":         strProp("Источник доказательств: bars (walk-forward) или lob (replay стакана)"),
+		"asOf":           strProp("Момент, на который известны данные (point-in-time), RFC3339 UTC; обязателен"),
+		"dataFrom":       strProp("Начало окна данных, RFC3339 UTC"),
+		"dataTo":         strProp("Конец окна данных, RFC3339 UTC"),
+		"oosFrom":        strProp("Начало out-of-sample окна, RFC3339 UTC"),
+		"oosTo":          strProp("Конец out-of-sample окна, RFC3339 UTC"),
+		"oosTrades":      intProp("Число out-of-sample сделок"),
+		"deflatedSharpe": numProp("Deflated Sharpe (0..1)"),
+		"pbo":            numProp("Вероятность переобучения PBO (0..1)"),
+		"trials":         intProp("Число испытаний сетки параметров"),
+		"dataHash":       strProp("Отпечаток датасета или винтажного среза (обязателен для promotion)"),
+		"dir":            strProp("Каталог паттернов; по умолчанию TERMINAL_SKILLS_DIR или <TERMINAL_DATA_DIR>/skills"),
+	}, "title", "hypothesis", "source", "asOf"),
+}
+
+// listSkillPatternsTool is the list_skill_patterns tool description.
+var listSkillPatternsTool = ToolInfo{
+	Name:  toolNameListSkillPatterns,
+	Title: "Каталог паттернов",
+	Description: "Прочитать каталог сгенерированных SKILL-паттернов (<dataDir>/skills): id, заголовок и статус " +
+		"(draft|validated|retired). Черновики видны агенту только здесь; провайдер навыков отдаёт лишь validated.",
+	Input: objSchema(map[string]any{
+		"status": strProp("Необязательный фильтр статуса: draft|validated|retired"),
+		"limit":  intProp(fmt.Sprintf("Сколько записей вернуть, 1..%d (по умолчанию 20)", maxSkillPatterns)),
+		"dir":    strProp("Каталог паттернов; по умолчанию TERMINAL_SKILLS_DIR или <TERMINAL_DATA_DIR>/skills"),
+	}),
+}
+
+// draftSkillPatternResult is the compact model-facing payload of draft_skill_pattern.
+type draftSkillPatternResult struct {
+	ID       string   `json:"id"`
+	Title    string   `json:"title"`
+	Status   string   `json:"status"`
+	Path     string   `json:"path"`
+	Evidence string   `json:"evidence"`
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// listSkillPatternsResult is the compact payload of list_skill_patterns.
+type listSkillPatternsResult struct {
+	Dir      string           `json:"dir"`
+	Count    int              `json:"count"`
+	Patterns []skills.Summary `json:"patterns"`
+}
+
+// toolDraftSkillPattern implements draft_skill_pattern: the agent writes the
+// pattern it found into the generated-pattern catalog (outside git) through
+// skills.WriteDraft. The pattern is always a draft; promotion to validated
+// stays a human decision after the evidence review.
+func (e *Engine) toolDraftSkillPattern(ctx context.Context, args map[string]any) (draftSkillPatternResult, *Artifact, error) {
+	empty := draftSkillPatternResult{}
+	if err := contextErr(ctx); err != nil {
+		return empty, nil, err
+	}
+	title := strings.TrimSpace(argString(args, "title"))
+	if title == "" {
+		return empty, nil, fmt.Errorf("%w: title is required", errBadArgument)
+	}
+	hypothesis := strings.TrimSpace(argString(args, "hypothesis"))
+	if hypothesis == "" {
+		return empty, nil, fmt.Errorf("%w: hypothesis is required", errBadArgument)
+	}
+	source := strings.ToLower(strings.TrimSpace(argString(args, "source")))
+	switch source {
+	case skills.SourceBars, skills.SourceLOB:
+	default:
+		return empty, nil, fmt.Errorf("%w: source=%q, want %q or %q", errBadArgument, source, skills.SourceBars, skills.SourceLOB)
+	}
+	asOf, err := toolAsOfArg(args)
+	if err != nil {
+		return empty, nil, err
+	}
+	dataFrom, err := optionalToolTimeArg(args, "dataFrom")
+	if err != nil {
+		return empty, nil, err
+	}
+	dataTo, err := optionalToolTimeArg(args, "dataTo")
+	if err != nil {
+		return empty, nil, err
+	}
+	oosFrom, err := optionalToolTimeArg(args, "oosFrom")
+	if err != nil {
+		return empty, nil, err
+	}
+	oosTo, err := optionalToolTimeArg(args, "oosTo")
+	if err != nil {
+		return empty, nil, err
+	}
+	oosTrades, err := argIntStrict(args, "oosTrades", 0, 0, maxToolQty)
+	if err != nil {
+		return empty, nil, err
+	}
+	trials, err := argIntStrict(args, "trials", 0, 0, maxToolQty)
+	if err != nil {
+		return empty, nil, err
+	}
+	deflatedSharpe, err := argRate(args, "deflatedSharpe")
+	if err != nil {
+		return empty, nil, err
+	}
+	pbo, err := argRate(args, "pbo")
+	if err != nil {
+		return empty, nil, err
+	}
+	dir, err := skillPatternDir(args)
+	if err != nil {
+		return empty, nil, err
+	}
+	pattern := skills.Pattern{
+		Title:       title,
+		Hypothesis:  hypothesis,
+		Instruments: argStringList(args, "instruments"),
+		Conditions:  argStringList(args, "conditions"),
+		Entry:       strings.TrimSpace(argString(args, "entry")),
+		Exit:        strings.TrimSpace(argString(args, "exit")),
+		Risk:        strings.TrimSpace(argString(args, "risk")),
+		Evidence: skills.Evidence{
+			DataFrom:       dataFrom,
+			DataTo:         dataTo,
+			AsOf:           asOf,
+			Source:         source,
+			OOS:            backtest.Metrics{From: oosFrom, To: oosTo, Trades: int(oosTrades)},
+			DeflatedSharpe: deflatedSharpe,
+			PBO:            pbo,
+			Trials:         int(trials),
+			OOSTrades:      int(oosTrades),
+			DataHash:       strings.TrimSpace(argString(args, "dataHash")),
+		},
+		Status:    skills.StatusDraft,
+		CreatedAt: e.now().UTC(),
+	}
+	pattern.ID, err = newPatternID(dir, title, pattern.Evidence.DataHash)
+	if err != nil {
+		return empty, nil, err
+	}
+	path, err := skills.WriteDraft(dir, pattern)
+	if err != nil {
+		return empty, nil, fmt.Errorf("agent: draft the skill pattern: %w", err)
+	}
+	// The draft may be incomplete: report what still blocks promotion instead of
+	// hiding it from the model or writing an unverified pattern.
+	warnings := make([]string, 0, 1)
+	reviewed := pattern
+	if err := skills.Promote(&reviewed, skills.PromotionPolicy{}); err != nil {
+		warnings = append(warnings, "promotion пока невозможен: "+err.Error())
+	}
+	result := draftSkillPatternResult{
+		ID:       pattern.ID,
+		Title:    pattern.Title,
+		Status:   pattern.Status,
+		Path:     path,
+		Evidence: evidenceSummary(pattern.Evidence),
+		Warnings: warnings,
+	}
+	return result, &Artifact{Kind: "skill_pattern", Payload: pattern}, nil
+}
+
+// toolListSkillPatterns implements list_skill_patterns: the catalog of the
+// generated patterns with their promotion status.
+func (e *Engine) toolListSkillPatterns(ctx context.Context, args map[string]any) (listSkillPatternsResult, *Artifact, error) {
+	empty := listSkillPatternsResult{}
+	if err := contextErr(ctx); err != nil {
+		return empty, nil, err
+	}
+	dir, err := skillPatternDir(args)
+	if err != nil {
+		return empty, nil, err
+	}
+	limit, err := argIntStrict(args, "limit", 20, 1, maxSkillPatterns)
+	if err != nil {
+		return empty, nil, err
+	}
+	statusFilter := strings.ToLower(strings.TrimSpace(argString(args, "status")))
+	switch statusFilter {
+	case "", skills.StatusDraft, skills.StatusValidated, skills.StatusRetired:
+	default:
+		return empty, nil, fmt.Errorf("%w: status=%q, want draft|validated|retired or empty", errBadArgument, statusFilter)
+	}
+	all, err := skills.List(dir)
+	if err != nil {
+		return empty, nil, fmt.Errorf("agent: read the pattern catalog: %w", err)
+	}
+	patterns := make([]skills.Summary, 0, len(all))
+	for _, summary := range all {
+		if statusFilter != "" && summary.Status != statusFilter {
+			continue
+		}
+		patterns = append(patterns, summary)
+	}
+	if len(patterns) > int(limit) {
+		patterns = patterns[:limit]
+	}
+	result := listSkillPatternsResult{Dir: dir, Count: len(patterns), Patterns: patterns}
+	return result, &Artifact{Kind: "skill_patterns", Payload: result}, nil
+}
+
+// skillPatternDir resolves the generated-pattern catalog: the dir argument wins,
+// then TERMINAL_SKILLS_DIR, then <TERMINAL_DATA_DIR>/skills. The repository
+// skills/ tree is never written: generated patterns live outside git.
+func skillPatternDir(args map[string]any) (string, error) {
+	if dir := strings.TrimSpace(argString(args, "dir")); dir != "" {
+		return dir, nil
+	}
+	if dir := strings.TrimSpace(os.Getenv("TERMINAL_SKILLS_DIR")); dir != "" {
+		return dir, nil
+	}
+	if dataDir := strings.TrimSpace(os.Getenv("TERMINAL_DATA_DIR")); dataDir != "" {
+		return filepath.Join(dataDir, "skills"), nil
+	}
+	return "", errors.New("agent: укажите dir (или TERMINAL_DATA_DIR/TERMINAL_SKILLS_DIR): паттерны пишутся в <dataDir>/skills вне git, репозиторий skills/ агент не трогает")
+}
+
+// newPatternID builds the slug id of a draft: pattern-<8 hex of title+dataHash>;
+// a repeated id gets a numeric suffix so two drafts never collide.
+func newPatternID(dir, title, dataHash string) (string, error) {
+	sum := sha1.Sum([]byte(title + dataHash))
+	base := fmt.Sprintf("pattern-%x", sum[:4])
+	existing, err := skills.List(dir)
+	if err != nil {
+		return "", fmt.Errorf("agent: read the pattern catalog: %w", err)
+	}
+	used := make(map[string]bool, len(existing))
+	for _, summary := range existing {
+		used[summary.ID] = true
+	}
+	id := base
+	for suffix := 2; used[id]; suffix++ {
+		id = fmt.Sprintf("%s-%d", base, suffix)
+	}
+	return id, nil
+}
+
+// optionalToolTimeArg reads an optional RFC3339 tool argument (the zero time
+// when it is absent or empty).
+func optionalToolTimeArg(args map[string]any, key string) (time.Time, error) {
+	raw, ok := args[key]
+	if !ok || raw == nil {
+		return time.Time{}, nil
+	}
+	if text, ok := raw.(string); ok && strings.TrimSpace(text) == "" {
+		return time.Time{}, nil
+	}
+	return toolTimeArg(args, key)
+}
+
+// argRate reads an optional probability/ratio argument in [0, 1].
+func argRate(args map[string]any, key string) (float64, error) {
+	raw, ok := args[key]
+	if !ok || raw == nil {
+		return 0, nil
+	}
+	value := argFloat(args, key, 0)
+	if value < 0 || value > 1 {
+		return 0, fmt.Errorf("%w: %s=%v is outside 0..1", errBadArgument, key, value)
+	}
+	return value, nil
+}
+
+// evidenceSummary renders the one-line evidence description of the tool payload.
+func evidenceSummary(evidence skills.Evidence) string {
+	parts := []string{evidence.Source}
+	if !evidence.OOS.From.IsZero() || !evidence.OOS.To.IsZero() {
+		parts = append(parts, "OOS "+shortDate(evidence.OOS.From)+".."+shortDate(evidence.OOS.To))
+	}
+	parts = append(parts, fmt.Sprintf("сделок %d, deflated Sharpe %.2f, PBO %.2f, trials %d",
+		evidence.OOSTradeCount(), evidence.DeflatedSharpe, evidence.PBO, evidence.Trials))
+	if strings.TrimSpace(evidence.DataHash) == "" {
+		parts = append(parts, "нет dataHash")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// shortDate renders the date part of an instant (the zero time as "?").
+func shortDate(t time.Time) string {
+	if t.IsZero() {
+		return "?"
+	}
+	return t.UTC().Format("2006-01-02")
 }

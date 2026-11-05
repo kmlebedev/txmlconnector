@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest/rules"
 	"github.com/kmlebedev/txmlconnector/terminal/research"
+	"github.com/kmlebedev/txmlconnector/terminal/skills"
 )
 
 // rulesSpecArgs is a minimal valid rules.Spec tool argument: buy on the first
@@ -688,5 +690,147 @@ func TestProposeAutomationToolValidation(t *testing.T) {
 				t.Fatalf("error = %v, want it to mention %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// draftSkillPatternArgs is a complete evidence set for draft_skill_pattern: a
+// bar-based walk-forward with 40 OOS trades that passes the default policy.
+func draftSkillPatternArgs(asOf time.Time) map[string]any {
+	from := asOf.AddDate(0, -6, 0)
+	return map[string]any{
+		"title":          "RSI-возврат SBER",
+		"hypothesis":     "RSI(14) ниже 0.2 и close выше SMA(200) дают положительное ожидание на SBER.",
+		"instruments":    []any{"TQBR:SBER"},
+		"conditions":     []any{"close > SMA(200)", "RSI(14) < 0.2"},
+		"entry":          "покупка на закрытии бара при RSI(14) < 0.2 и close > SMA(200)",
+		"exit":           "выход при RSI(14) > 0.8 или по стоп-лоссу 2%",
+		"risk":           "стоп-лосс 2% от цены входа, не более 25% портфеля",
+		"source":         "bars",
+		"asOf":           asOf.Format(time.RFC3339),
+		"dataFrom":       from.Format(time.RFC3339),
+		"dataTo":         asOf.Format(time.RFC3339),
+		"oosFrom":        from.Format(time.RFC3339),
+		"oosTo":          asOf.Format(time.RFC3339),
+		"oosTrades":      int(40),
+		"deflatedSharpe": 0.97,
+		"pbo":            0.12,
+		"trials":         int(64),
+		"dataHash":       "sha256:test-dataset",
+	}
+}
+
+// TestDraftSkillPatternTool is the plan Task 19 tool test: the draft is written
+// to the generated-pattern catalog outside git, carries the evidence metadata
+// and is returned as both the compact result and the UI artifact.
+func TestDraftSkillPatternTool(t *testing.T) {
+	engine, _, _ := newTestEngine(t)
+	dir := t.TempDir()
+	t.Setenv("TERMINAL_SKILLS_DIR", dir)
+	result, artifact, err := engine.invokeTool(context.Background(), toolInvocation{}, toolNameDraftSkillPattern, draftSkillPatternArgs(testNow))
+	if err != nil {
+		t.Fatalf("invokeTool(%s): %v", toolNameDraftSkillPattern, err)
+	}
+	draft, ok := result.(draftSkillPatternResult)
+	if !ok {
+		t.Fatalf("result type = %T, want draftSkillPatternResult", result)
+	}
+	if draft.Status != skills.StatusDraft || !strings.HasPrefix(draft.ID, "pattern-") {
+		t.Fatalf("draft = %+v", draft)
+	}
+	if len(draft.Warnings) != 0 {
+		t.Fatalf("complete evidence must not warn: %+v", draft.Warnings)
+	}
+	if !strings.HasPrefix(draft.Path, dir) {
+		t.Fatalf("draft path = %q, want under %q", draft.Path, dir)
+	}
+	raw, err := os.ReadFile(draft.Path)
+	if err != nil {
+		t.Fatalf("read draft: %v", err)
+	}
+	content := string(raw)
+	for _, want := range []string{"name: " + draft.ID, "metadata:", "status: draft", "dataHash:", "## Ограничения"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("draft is missing %q:\n%s", want, content)
+		}
+	}
+	if artifact == nil || artifact.Kind != "skill_pattern" {
+		t.Fatalf("artifact = %+v, want a skill_pattern artifact", artifact)
+	}
+	pattern, ok := artifact.Payload.(skills.Pattern)
+	if !ok || pattern.ID != draft.ID || pattern.Evidence.Source != skills.SourceBars {
+		t.Fatalf("artifact payload = %#v", artifact.Payload)
+	}
+	// The same title and evidence produce another id instead of overwriting.
+	again, _, err := engine.invokeTool(context.Background(), toolInvocation{}, toolNameDraftSkillPattern, draftSkillPatternArgs(testNow))
+	if err != nil {
+		t.Fatalf("second draft: %v", err)
+	}
+	if second := again.(draftSkillPatternResult); second.ID == draft.ID {
+		t.Fatalf("second draft reused the id %q", second.ID)
+	}
+}
+
+// TestListSkillPatternsTool checks the catalog tool and its status filter.
+func TestListSkillPatternsTool(t *testing.T) {
+	engine, _, _ := newTestEngine(t)
+	t.Setenv("TERMINAL_SKILLS_DIR", t.TempDir())
+	if _, _, err := engine.invokeTool(context.Background(), toolInvocation{}, toolNameDraftSkillPattern, draftSkillPatternArgs(testNow)); err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+	result, artifact, err := engine.invokeTool(context.Background(), toolInvocation{}, toolNameListSkillPatterns, map[string]any{"limit": 10})
+	if err != nil {
+		t.Fatalf("invokeTool(%s): %v", toolNameListSkillPatterns, err)
+	}
+	list, ok := result.(listSkillPatternsResult)
+	if !ok || list.Count != 1 || len(list.Patterns) != 1 {
+		t.Fatalf("list = %#v", result)
+	}
+	if list.Patterns[0].Status != skills.StatusDraft {
+		t.Fatalf("pattern status = %q, want draft", list.Patterns[0].Status)
+	}
+	if artifact == nil || artifact.Kind != "skill_patterns" {
+		t.Fatalf("artifact = %+v", artifact)
+	}
+	validated, _, err := engine.invokeTool(context.Background(), toolInvocation{}, toolNameListSkillPatterns, map[string]any{"status": "validated"})
+	if err != nil {
+		t.Fatalf("validated list: %v", err)
+	}
+	if got := validated.(listSkillPatternsResult); got.Count != 0 {
+		t.Fatalf("validated list = %#v, want empty", got)
+	}
+}
+
+// TestDraftSkillPatternRequiresAsOf keeps the Task 18 point-in-time guard on
+// the pattern tool: a research request has no implicit "now".
+func TestDraftSkillPatternRequiresAsOf(t *testing.T) {
+	engine, _, _ := newTestEngine(t)
+	t.Setenv("TERMINAL_SKILLS_DIR", t.TempDir())
+	args := draftSkillPatternArgs(testNow)
+	delete(args, "asOf")
+	_, _, err := engine.invokeTool(context.Background(), toolInvocation{}, toolNameDraftSkillPattern, args)
+	if err == nil || !strings.Contains(err.Error(), "asOf") {
+		t.Fatalf("error = %v, want a hint about the required asOf", err)
+	}
+}
+
+// TestDraftSkillPatternIncompleteEvidenceWarns checks the honest draft flow: the
+// pattern is written but the promotion warning explains what is missing.
+func TestDraftSkillPatternIncompleteEvidenceWarns(t *testing.T) {
+	engine, _, _ := newTestEngine(t)
+	t.Setenv("TERMINAL_SKILLS_DIR", t.TempDir())
+	args := map[string]any{
+		"title": "Непроверенная идея", "hypothesis": "гипотеза ещё не проверена бэктестом",
+		"source": "bars", "asOf": testNow.Format(time.RFC3339),
+	}
+	result, _, err := engine.invokeTool(context.Background(), toolInvocation{}, toolNameDraftSkillPattern, args)
+	if err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+	draft := result.(draftSkillPatternResult)
+	if len(draft.Warnings) == 0 || !strings.Contains(draft.Warnings[0], "promotion") {
+		t.Fatalf("warnings = %+v, want the promotion hint", draft.Warnings)
+	}
+	if draft.Status != skills.StatusDraft {
+		t.Fatalf("status = %q, want draft", draft.Status)
 	}
 }
