@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -315,6 +316,60 @@ func TestLiveCandlesCache(t *testing.T) {
 	}
 	if _, err := svc.Candles(ctx, "TQBR:UNKNOWN", 60, 10); err == nil {
 		t.Fatal("unknown symbol must fail")
+	}
+}
+
+// TestLiveCandlesDictionaryNotLoaded is the R8 wire of the 503: before
+// <candlekinds> arrives nothing is known about the period, so the request must
+// be a temporary unavailable, not a bad_period (which claims the period does
+// not exist).
+func TestLiveCandlesDictionaryNotLoaded(t *testing.T) {
+	client := &fakeClient{}
+	svc := newLive(t, client) // no candleKinds: the dictionary has not arrived
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Close()
+	_, err := svc.Candles(context.Background(), "TQBR:SBER", 60, 10)
+	var ferr *Error
+	if !errors.As(err, &ferr) || ferr.Code != CodeUnavailable {
+		t.Fatalf("Candles without the period dictionary = %v, want unavailable", err)
+	}
+	if !strings.Contains(ferr.Message, "справочник периодов ещё не загружен") {
+		t.Fatalf("message = %q, want the dictionary hint", ferr.Message)
+	}
+	if _, calls := client.counts(); calls != 0 {
+		t.Fatalf("history calls = %d, want 0 (no request without a period id)", calls)
+	}
+}
+
+// TestLiveCandlesForwardsUnknownPeriodWarning checks that the native warning
+// of an undatable series reaches feed.History instead of being dropped.
+func TestLiveCandlesForwardsUnknownPeriodWarning(t *testing.T) {
+	client := &fakeClient{}
+	client.histFn = func(ctx context.Context, req native.HistoryRequest) (model.Candles, error) {
+		return model.Candles{
+			Symbol:   req.Symbol,
+			Period:   req.Period,
+			Warnings: []string{"unknown candle period 2"},
+			Items:    []model.Candle{{Open: model.Decimal{Units: 10000, Scale: 2}}},
+		}, nil
+	}
+	svc := newLive(t, client)
+	svc.candleKinds = map[int]int{60: 7}
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Close()
+	h, err := svc.Candles(context.Background(), "TQBR:SBER", 60, 10)
+	if err != nil {
+		t.Fatalf("Candles: %v", err)
+	}
+	if len(h.Warnings) != 1 || h.Warnings[0] != "unknown candle period 2" {
+		t.Fatalf("warnings = %v, want [unknown candle period 2]", h.Warnings)
+	}
+	if len(h.Bars) != 1 || !h.Bars[0].Time.IsZero() {
+		t.Fatalf("bars = %+v, want one undated bar", h.Bars)
 	}
 }
 

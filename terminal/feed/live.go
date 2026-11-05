@@ -536,8 +536,18 @@ func (s *Service) cachedHistory(key string, count int) (History, bool) {
 func (s *Service) fetchHistory(ctx context.Context, client marketClient, symbol string, periodSec, count int) (History, error) {
 	s.mu.RLock()
 	kind, ok := s.candleKinds[periodSec]
+	kindsLoaded := len(s.candleKinds) > 0
 	s.mu.RUnlock()
 	if !ok {
+		if !kindsLoaded {
+			// <candlekinds> of the session has not arrived yet (the catalog is
+			// refreshed after connect/reconnect): the period may well be valid,
+			// so this is a temporary unavailability, not a client bad_period.
+			return History{}, &Error{
+				Code:    CodeUnavailable,
+				Message: "справочник периодов ещё не загружен: повторите запрос после загрузки словарей сессии",
+			}
+		}
 		return History{}, &Error{
 			Code:    CodeBadPeriod,
 			Message: "сервер не поддерживает период свечей: " + strconv.Itoa(periodSec) + " с",
@@ -623,6 +633,9 @@ func trimHistory(history History, count int) History {
 // model.Decimal.
 func historyFromCandles(candles model.Candles, symbol string, periodSec int, note string) History {
 	history := History{Symbol: symbol, PeriodSec: periodSec, Source: "live", Note: note}
+	if len(candles.Warnings) > 0 {
+		history.Warnings = append([]string(nil), candles.Warnings...)
+	}
 	history.Bars = make([]Bar, 0, len(candles.Items))
 	for _, item := range candles.Items {
 		history.Bars = append(history.Bars, Bar{

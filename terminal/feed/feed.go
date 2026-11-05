@@ -78,6 +78,11 @@ type History struct {
 	Bars      []Bar
 	Source    string // "live" | "seed"
 	Note      string // e.g. "демо-снапшот 05.11.2026"
+	// Warnings reports a series that cannot be trusted as typed. The live
+	// source forwards "unknown candle period N" of native/records: the period
+	// was not in the session <candlekinds>, so the bars carry zero times
+	// instead of guessed minutes (R8). Empty means the series is clean.
+	Warnings []string
 }
 
 // Level is one order-book level.

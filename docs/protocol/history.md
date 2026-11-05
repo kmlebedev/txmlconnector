@@ -65,8 +65,22 @@ B reset(1)  W secid  W board  B period  W count  L -1  L 0   (последние
 `498306` → 18:00 MSK; `period=5` (86400 с) дал `20762` → 00:00 MSK торговой даты; при `period=1`
 (60 с) значение совпадает с минутами Unix. Старая формула «всегда минуты» давала для 5м/1ч/1д даты
 1981/1970 годов — это был **баг** `records.Candles.Event`, исправлен 05.11.2026 (тест
-`TestCandlesTimeUnitFollowsPeriod`). Множитель берётся из словаря сессии; при отсутствии словаря
-используется 60 с (совместимо с 1-минутными фикстурами).
+`TestCandlesTimeUnitFollowsPeriod`).
+
+**Неизвестный период не угадывается — R8 (I, поведение native-клиента, не DLL).** Множитель берётся
+только из словаря сессии; единственное исключение — `period=1`: вид 1 — это 1-минутная серия (`S`),
+поэтому 60 с известны без `<candlekinds>` (живые 1-минутные фикстуры от словаря не зависят). Если
+период не найден в `<candlekinds>` и не равен 1, 60-секундный fallback **не применяется**: событие
+`model.Candles` получает предупреждение `unknown candle period N` (поле `Warnings`), а `Time` каждой
+свечи остаётся нулевым. Отгадывать период нельзя: для 5м/1ч/1д подстановка 60 с давала 1981/1970
+годы. В терминале `feed.History` пробрасывает предупреждение в своё поле `Warnings`; если же
+справочник периодов ещё не загружен (каталог приходит после `connect`/переподключения),
+`/api/instruments/{symbol}/candles` отвечает 503 `unavailable` с текстом «справочник периодов ещё не
+загружен» — это временная недоступность, а не `400 bad_period` (период мог быть валидным). Тесты:
+`TestCandlesUnknownPeriodDoesNotGuessMinutes`, `TestCandlesPeriodOneFallsBackToMinute`,
+`TestCombineCandlesCarriesUnknownPeriodWarning`, `TestLiveCandlesDictionaryNotLoaded`,
+`TestLiveCandlesForwardsUnknownPeriodWarning`. Для DLL такого пути нет: словарь `<candlekinds>` у неё
+есть всегда, поэтому поведение восстановлено по коду native-клиента, а не оракулом.
 
 XML: строители `FUN_180101e20`/`FUN_180130670`; `<candles secid=… board=… seccode=… period=…
 status=…>` + `<candle date="04.11.2026 18:44:00" open="291.46" close="291.46" high="291.46"
