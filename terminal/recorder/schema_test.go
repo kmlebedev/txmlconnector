@@ -69,6 +69,14 @@ func TestSchemaStatements(t *testing.T) {
 		"open_interest Int64",
 		"ReplacingMergeTree",
 		"ORDER BY (sec_code, trade_no)",
+		// md.news: first_seen is the ReplacingMergeTree version (the point-in-time).
+		"CREATE TABLE IF NOT EXISTS md.news",
+		"first_seen DateTime64(3, 'UTC')",
+		"published DateTime64(3, 'UTC')",
+		"news_id Int64",
+		"content_hash UInt64",
+		"ReplacingMergeTree(first_seen)",
+		"ORDER BY (news_id)",
 	} {
 		if !strings.Contains(ddl, want) {
 			t.Fatalf("schema is missing %q:\n%s", want, ddl)
@@ -88,13 +96,14 @@ func TestEnsureSchemaCreatesTables(t *testing.T) {
 		t.Fatalf("EnsureSchema: %v", err)
 	}
 	query, _ := stub.captured()
-	if len(query) != 3 {
-		t.Fatalf("requests = %d, want 3", len(query))
+	if len(query) != 4 {
+		t.Fatalf("requests = %d, want 4 (database, book_events, trades, news)", len(query))
 	}
 	for i, want := range []string{
 		"CREATE DATABASE IF NOT EXISTS md",
 		"CREATE TABLE IF NOT EXISTS md.book_events",
 		"CREATE TABLE IF NOT EXISTS md.trades",
+		"CREATE TABLE IF NOT EXISTS md.news",
 	} {
 		if !strings.Contains(query[i], want) {
 			t.Fatalf("DDL request %d = %q, want %q", i, query[i], want)
@@ -200,6 +209,23 @@ func TestClickHouseSinkInserts(t *testing.T) {
 	}
 	if trade["side"] != "buy" || trade["trade_no"] != float64(42) {
 		t.Fatalf("trade row = %v", trade)
+	}
+}
+
+// TestNewsRowMapping checks the md.news row: both instants are milliseconds and
+// the content hash is passed through untouched.
+func TestNewsRowMapping(t *testing.T) {
+	firstSeen := time.Date(2026, 11, 5, 10, 0, 0, 123_000_000, time.UTC)
+	published := time.Date(2026, 11, 5, 9, 59, 30, 500_000_000, time.UTC)
+	row := newsRowOf(NewsEvent{
+		FirstSeen: firstSeen, Published: published, ID: 7,
+		Source: "SRC", Title: "Заголовок", Body: "Текст", ContentHash: 42,
+	})
+	if row.FirstSeen != "2026-11-05 10:00:00.123" || row.Published != "2026-11-05 09:59:30.500" {
+		t.Fatalf("times = %q/%q", row.FirstSeen, row.Published)
+	}
+	if row.NewsID != 7 || row.Source != "SRC" || row.Title != "Заголовок" || row.Body != "Текст" || row.ContentHash != 42 {
+		t.Fatalf("row = %+v", row)
 	}
 }
 

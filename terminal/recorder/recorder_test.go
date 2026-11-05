@@ -17,6 +17,7 @@ type fakeSink struct {
 	mu     sync.Mutex
 	books  [][]BookEvent
 	trades [][]TradeEvent
+	news   [][]NewsEvent
 }
 
 func (f *fakeSink) Book(events []BookEvent) error {
@@ -31,6 +32,20 @@ func (f *fakeSink) Trades(events []TradeEvent) error {
 	defer f.mu.Unlock()
 	f.trades = append(f.trades, append([]TradeEvent(nil), events...))
 	return nil
+}
+
+func (f *fakeSink) News(events []NewsEvent) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.news = append(f.news, append([]NewsEvent(nil), events...))
+	return nil
+}
+
+// newsCalls returns the recorded News batches.
+func (f *fakeSink) newsCalls() [][]NewsEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]NewsEvent(nil), f.news...)
 }
 
 // bookCalls returns the recorded Book batches.
@@ -50,11 +65,13 @@ func (f *fakeSink) tradeCalls() [][]TradeEvent {
 // fakeSubscriber stands in for *native.Client: it records subscriptions and
 // replays the events the test feeds through Run.
 type fakeSubscriber struct {
-	mu      sync.Mutex
-	subs    []native.Subscription
-	runs    int
-	runFunc func(ctx context.Context, h func([]model.Event) error) error
-	subErr  error
+	mu       sync.Mutex
+	subs     []native.Subscription
+	runs     int
+	runFunc  func(ctx context.Context, h func([]model.Event) error) error
+	subErr   error
+	oldNews  int
+	bodyReqs int
 }
 
 func (f *fakeSubscriber) Subscribe(ctx context.Context, sub native.Subscription) error {
@@ -79,6 +96,41 @@ func (f *fakeSubscriber) subscriptions() []native.Subscription {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]native.Subscription(nil), f.subs...)
+}
+
+// OldNews and NewsBody make the fake a newsFetcher, so run() starts the news
+// poller in every test (the no-op calls are harmless).
+func (f *fakeSubscriber) OldNews(ctx context.Context, count int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.oldNews++
+	return nil
+}
+
+func (f *fakeSubscriber) NewsBody(ctx context.Context, id int64) (model.NewsBody, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.bodyReqs++
+	return model.NewsBody{ID: id}, nil
+}
+
+func (f *fakeSubscriber) oldNewsCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.oldNews
+}
+
+// waitUntil polls cond until it holds or the deadline expires.
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for %s", what)
 }
 
 var (
@@ -343,3 +395,121 @@ type failingSink struct{ err error }
 
 func (f *failingSink) Book([]BookEvent) error    { return f.err }
 func (f *failingSink) Trades([]TradeEvent) error { return f.err }
+func (f *failingSink) News([]NewsEvent) error    { return f.err }
+
+// newsHeader is one <news_header> event.
+func newsHeader(id int64, published time.Time, source, title string) *model.NewsHeader {
+	return &model.NewsHeader{ID: id, Time: published, Source: source, Title: title}
+}
+
+// TestRecorderStoresNewsWithFirstSeen is the plan Task 12 test: the header is
+// recorded with first_seen = the receive instant, a repeated get_old_news answer
+// does not write it again, and the body arriving later updates title/body/hash
+// but never the first_seen (the point-in-time of the news).
+func TestRecorderStoresNewsWithFirstSeen(t *testing.T) {
+	sink := &fakeSink{}
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	rec := newRecorder(sink, []model.Symbol{testSymbol}, "sid", func() time.Time { return now })
+	ctx := context.Background()
+	published := time.Date(2026, 11, 5, 9, 59, 30, 0, time.UTC)
+	header := newsHeader(7, published, "SRC", "Заголовок")
+
+	if err := rec.handle(ctx, []model.Event{header}); err != nil {
+		t.Fatalf("handle header: %v", err)
+	}
+	calls := sink.newsCalls()
+	if len(calls) != 1 || len(calls[0]) != 1 {
+		t.Fatalf("news batches = %v, want one header row", calls)
+	}
+	first := calls[0][0]
+	if !first.FirstSeen.Equal(now) {
+		t.Fatalf("first_seen = %v, want the receive instant %v", first.FirstSeen, now)
+	}
+	if !first.Published.Equal(published) || first.ID != 7 || first.Source != "SRC" || first.Title != "Заголовок" {
+		t.Fatalf("header row = %+v", first)
+	}
+	if first.Body != "" || first.ContentHash == 0 {
+		t.Fatalf("header row body/hash = %q/%d, want empty body and a content hash", first.Body, first.ContentHash)
+	}
+
+	// get_old_news is polled repeatedly and returns the same header again: the
+	// unchanged copy must not produce a second row.
+	if err := rec.handle(ctx, []model.Event{newsHeader(7, published, "SRC", "Заголовок")}); err != nil {
+		t.Fatalf("handle repeated header: %v", err)
+	}
+	if got := len(sink.newsCalls()); got != 1 {
+		t.Fatalf("news batches after the repeated header = %d, want 1", got)
+	}
+
+	// The body comes later: first_seen is frozen, body and hash are updated.
+	now = now.Add(2 * time.Minute)
+	if err := rec.handle(ctx, []model.Event{&model.NewsBody{ID: 7, Text: "Текст новости"}}); err != nil {
+		t.Fatalf("handle body: %v", err)
+	}
+	calls = sink.newsCalls()
+	if len(calls) != 2 || len(calls[1]) != 1 {
+		t.Fatalf("news batches = %v, want the body row", calls)
+	}
+	updated := calls[1][0]
+	if !updated.FirstSeen.Equal(first.FirstSeen) {
+		t.Fatalf("first_seen after the body = %v, want the header instant %v (body must not move it)", updated.FirstSeen, first.FirstSeen)
+	}
+	if updated.Body != "Текст новости" || updated.Title != "Заголовок" || updated.ID != 7 {
+		t.Fatalf("body row = %+v", updated)
+	}
+	if updated.ContentHash == first.ContentHash || updated.ContentHash == 0 {
+		t.Fatalf("content hash = %d, want a new non-zero hash of the body", updated.ContentHash)
+	}
+
+	// A body of an unknown news is ignored (native emits it only for requested
+	// headers, this is a defensive check).
+	if err := rec.handle(ctx, []model.Event{&model.NewsBody{ID: 999, Text: "чужая"}}); err != nil {
+		t.Fatalf("handle unknown body: %v", err)
+	}
+	if got := len(sink.newsCalls()); got != 2 {
+		t.Fatalf("news batches after the unknown body = %d, want 2", got)
+	}
+}
+
+// TestRecorderNewsHeaderChangeKeepsFirstSeen checks the ReplacingMergeTree
+// version rule: a corrected title is written as a new row of the same news, and
+// the first_seen is still the original receive instant.
+func TestRecorderNewsHeaderChangeKeepsFirstSeen(t *testing.T) {
+	sink := &fakeSink{}
+	now := time.Date(2026, 11, 5, 11, 0, 0, 0, time.UTC)
+	rec := newRecorder(sink, []model.Symbol{testSymbol}, "sid", func() time.Time { return now })
+	published := now.Add(-time.Minute)
+	ctx := context.Background()
+	if err := rec.handle(ctx, []model.Event{newsHeader(8, published, "SRC", "Черновик")}); err != nil {
+		t.Fatalf("handle header: %v", err)
+	}
+	now = now.Add(5 * time.Minute)
+	if err := rec.handle(ctx, []model.Event{newsHeader(8, published, "SRC", "Исправленный заголовок")}); err != nil {
+		t.Fatalf("handle changed header: %v", err)
+	}
+	calls := sink.newsCalls()
+	if len(calls) != 2 {
+		t.Fatalf("news batches = %d, want a row for the correction", len(calls))
+	}
+	if got := calls[1][0]; got.Title != "Исправленный заголовок" || !got.FirstSeen.Equal(calls[0][0].FirstSeen) {
+		t.Fatalf("corrected row = %+v, want the same first_seen", got)
+	}
+}
+
+// TestRunPollsOldNews checks the recorder news ingestion: Run requests the news
+// headers from the client (there is no news subscription on the wire), and the
+// poller stops with the recording session.
+func TestRunPollsOldNews(t *testing.T) {
+	sub := &fakeSubscriber{}
+	sub.runFunc = func(ctx context.Context, h func([]model.Event) error) error {
+		waitUntil(t, "the initial get_old_news request", func() bool { return sub.oldNewsCalls() > 0 })
+		return nil
+	}
+	sink := &fakeSink{}
+	if err := run(context.Background(), sub, sink, []string{"TQBR:SBER"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := sub.oldNewsCalls(); got == 0 {
+		t.Fatal("Run did not request the news headers")
+	}
+}

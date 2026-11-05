@@ -10,11 +10,29 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/native"
 	"github.com/kmlebedev/txmlconnector/native/model"
+)
+
+// News ingestion tuning. The TRANSAQ news feed has no subscription on the wire:
+// the headers come from get_old_news polling and the bodies from get_news_body
+// requests (docs/protocol/news.md).
+const (
+	// defaultNewsPollInterval is how often the recorder asks for the news
+	// headers with get_old_news.
+	defaultNewsPollInterval = 30 * time.Second
+	// defaultNewsBodyTimeout bounds the wait for one <news_body> event.
+	defaultNewsBodyTimeout = 5 * time.Second
+	// newsHeaderCount is the get_old_news count (the protocol maximum is 100).
+	newsHeaderCount = 100
+	// newsNotifyBuffer is the body-request queue size; a full queue drops the
+	// notification (the next header poll re-notifies).
+	newsNotifyBuffer = 64
 )
 
 // BookKind is one md.book_events.kind value: the shape of the row.
@@ -100,12 +118,29 @@ type TradeEvent struct {
 	OpenInterest int64
 }
 
-// Sink receives the recorder batches: Book for md.book_events rows and Trades
-// for md.trades rows. A nil error means the batch is durably accepted; the
-// recorder stops the stream on an error (a lost insert is a gap in the data).
+// NewsEvent is one md.news row: a TRANSAQ news header with the body when it
+// arrives. FirstSeen is the instant the recorder first saw the news — the
+// point-in-time used as the ReplacingMergeTree version; a body arriving later
+// updates the row content but never FirstSeen. Published is the exchange
+// timestamp of the wire header.
+type NewsEvent struct {
+	FirstSeen   time.Time
+	Published   time.Time
+	ID          int64
+	Source      string
+	Title       string
+	Body        string
+	ContentHash uint64
+}
+
+// Sink receives the recorder batches: Book for md.book_events rows, Trades for
+// md.trades rows and News for md.news rows. A nil error means the batch is
+// durably accepted; the recorder stops the stream on an error (a lost insert is
+// a gap in the data).
 type Sink interface {
 	Book([]BookEvent) error
 	Trades([]TradeEvent) error
+	News([]NewsEvent) error
 }
 
 // subscriber is the native.Client subset the recorder needs; the tests replace
@@ -152,9 +187,31 @@ func run(ctx context.Context, cl subscriber, sink Sink, symbols []string) error 
 	if err := rec.subscribe(ctx); err != nil {
 		return fmt.Errorf("recorder: subscribe: %w", err)
 	}
-	return cl.Run(ctx, native.RunOptions{}, func(events []model.Event) error {
+	// The news feed is request-driven, so the recorder polls it in a goroutine
+	// bound to the session lifetime; the data itself arrives via Run.
+	sessionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if fetcher, ok := cl.(newsFetcher); ok {
+		go rec.pollNews(sessionCtx, fetcher)
+	}
+	return cl.Run(sessionCtx, native.RunOptions{}, func(events []model.Event) error {
 		return rec.handle(ctx, events)
 	})
+}
+
+// newsFetcher is the native.Client news API: the news headers are requested
+// with get_old_news and the bodies with get_news_body (news.md).
+type newsFetcher interface {
+	OldNews(ctx context.Context, count int) error
+	NewsBody(ctx context.Context, id int64) (model.NewsBody, error)
+}
+
+// newsRecord is the recorder state of one news story.
+type newsRecord struct {
+	header    model.NewsHeader
+	firstSeen time.Time
+	body      string
+	requested bool // a get_news_body request is in flight
 }
 
 // recorder is the stateful event-to-row converter.
@@ -168,6 +225,14 @@ type recorder struct {
 	// snapshot (after the initial subscription or a reconnect).
 	pending map[model.Symbol]bool
 	seq     uint64
+
+	// News state: the map is shared with the news poller goroutine.
+	newsMu          sync.Mutex
+	news            map[int64]*newsRecord
+	bodyWaiters     map[int64]chan struct{}
+	newsNotify      chan int64
+	newsPoll        time.Duration // test seam; defaultNewsPollInterval when 0
+	newsBodyTimeout time.Duration // test seam; defaultNewsBodyTimeout when 0
 }
 
 // newRecorder builds the converter; now is the clock used for receive instants.
@@ -179,7 +244,16 @@ func newRecorder(sink Sink, symbols []model.Symbol, sessionID string, now func()
 	for _, symbol := range symbols {
 		pending[symbol] = true
 	}
-	return &recorder{sink: sink, symbols: symbols, sessionID: sessionID, now: now, pending: pending}
+	return &recorder{
+		sink:        sink,
+		symbols:     symbols,
+		sessionID:   sessionID,
+		now:         now,
+		pending:     pending,
+		news:        map[int64]*newsRecord{},
+		bodyWaiters: map[int64]chan struct{}{},
+		newsNotify:  make(chan int64, newsNotifyBuffer),
+	}
 }
 
 // handle converts one Run callback batch into sink batches. Book rows of the
@@ -188,6 +262,7 @@ func newRecorder(sink Sink, symbols []model.Symbol, sessionID string, now func()
 func (r *recorder) handle(ctx context.Context, events []model.Event) error {
 	var books []BookEvent
 	var trades []TradeEvent
+	var news []NewsEvent
 	for _, event := range events {
 		switch ev := event.(type) {
 		case *model.Quotes:
@@ -196,6 +271,10 @@ func (r *recorder) handle(ctx context.Context, events []model.Event) error {
 			if row, ok := r.tradeEvent(ev); ok {
 				trades = append(trades, row)
 			}
+		case *model.NewsHeader:
+			news = append(news, r.handleNewsHeader(ev)...)
+		case *model.NewsBody:
+			news = append(news, r.handleNewsBody(ev)...)
 		case model.ServerStatus:
 			switch {
 			case ev.Recover:
@@ -218,6 +297,11 @@ func (r *recorder) handle(ctx context.Context, events []model.Event) error {
 	if len(trades) > 0 {
 		if err := r.sink.Trades(trades); err != nil {
 			return fmt.Errorf("recorder: write trades: %w", err)
+		}
+	}
+	if len(news) > 0 {
+		if err := r.sink.News(news); err != nil {
+			return fmt.Errorf("recorder: write news: %w", err)
 		}
 	}
 	return nil
@@ -375,4 +459,176 @@ func newSessionID() (string, error) {
 	out[23] = '-'
 	hex.Encode(out[24:36], b[10:16])
 	return string(out[:]), nil
+}
+
+// handleNewsHeader records one <news_header> event. The first sighting sets
+// FirstSeen; get_old_news is polled repeatedly, so an unchanged header is not
+// written again. A changed header (a correction) is written as a new row of the
+// same news keeping the original FirstSeen.
+func (r *recorder) handleNewsHeader(ev *model.NewsHeader) []NewsEvent {
+	if ev == nil || ev.ID == 0 {
+		return nil
+	}
+	r.newsMu.Lock()
+	rec, seen := r.news[ev.ID]
+	emit := false
+	if !seen {
+		rec = &newsRecord{header: *ev, firstSeen: r.now().UTC()}
+		r.news[ev.ID] = rec
+		emit = true
+	} else if rec.header != *ev {
+		rec.header = *ev
+		emit = true
+	}
+	needBody := rec.body == "" && !rec.requested
+	row := newsEvent(rec)
+	r.newsMu.Unlock()
+	if needBody {
+		r.notifyNewsBody(ev.ID)
+	}
+	if !emit {
+		return nil
+	}
+	return []NewsEvent{row}
+}
+
+// handleNewsBody records the <news_body> of a known news: the content changes,
+// the FirstSeen does not.
+func (r *recorder) handleNewsBody(ev *model.NewsBody) []NewsEvent {
+	if ev == nil {
+		return nil
+	}
+	r.newsMu.Lock()
+	rec := r.news[ev.ID]
+	if rec == nil {
+		r.newsMu.Unlock()
+		return nil
+	}
+	rec.body = ev.Text
+	row := newsEvent(rec)
+	if waiter := r.bodyWaiters[ev.ID]; waiter != nil {
+		close(waiter)
+		delete(r.bodyWaiters, ev.ID)
+	}
+	r.newsMu.Unlock()
+	return []NewsEvent{row}
+}
+
+// newsEvent builds the md.news row of one news. FirstSeen is frozen at the first
+// sighting; the content hash covers source, title and body of the moment.
+func newsEvent(rec *newsRecord) NewsEvent {
+	hash := fnv.New64a()
+	_, _ = hash.Write([]byte(rec.header.Source))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write([]byte(rec.header.Title))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write([]byte(rec.body))
+	return NewsEvent{
+		FirstSeen:   rec.firstSeen,
+		Published:   rec.header.Time.UTC(),
+		ID:          rec.header.ID,
+		Source:      rec.header.Source,
+		Title:       rec.header.Title,
+		Body:        rec.body,
+		ContentHash: hash.Sum64(),
+	}
+}
+
+// pollNews owns the news ingestion of the recording session: get_old_news every
+// news poll and one get_news_body per newly seen header. The events themselves
+// arrive through the Run callback, so the poller only sends the requests.
+func (r *recorder) pollNews(ctx context.Context, fetcher newsFetcher) {
+	interval := r.newsPoll
+	if interval <= 0 {
+		interval = defaultNewsPollInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	r.fetchNewsHeaders(ctx, fetcher)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.fetchNewsHeaders(ctx, fetcher)
+		case id := <-r.newsNotify:
+			r.fetchNewsBody(ctx, fetcher, id)
+		}
+	}
+}
+
+// fetchNewsHeaders requests the news headers. A failure is best effort: a news
+// hiccup must not stop the market recording.
+func (r *recorder) fetchNewsHeaders(ctx context.Context, fetcher newsFetcher) {
+	if ctx.Err() != nil {
+		return
+	}
+	_ = fetcher.OldNews(ctx, newsHeaderCount)
+}
+
+// fetchNewsBody requests one news body and waits for its <news_body> event: the
+// native client keeps a single pending body request, so this goroutine
+// serializes the requests (it is the only caller of NewsBody).
+func (r *recorder) fetchNewsBody(ctx context.Context, fetcher newsFetcher, id int64) {
+	waiter, ok := r.registerBodyWaiter(id)
+	if !ok {
+		return
+	}
+	defer r.dropBodyWaiter(id)
+	if _, err := fetcher.NewsBody(ctx, id); err != nil {
+		r.resetBodyRequest(id)
+		return
+	}
+	timeout := r.newsBodyTimeout
+	if timeout <= 0 {
+		timeout = defaultNewsBodyTimeout
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-waiter:
+	case <-ctx.Done():
+		r.resetBodyRequest(id)
+	case <-timer.C:
+		r.resetBodyRequest(id)
+	}
+}
+
+// registerBodyWaiter starts waiting for the body of one news.
+func (r *recorder) registerBodyWaiter(id int64) (<-chan struct{}, bool) {
+	r.newsMu.Lock()
+	defer r.newsMu.Unlock()
+	rec := r.news[id]
+	if rec == nil || rec.body != "" || r.bodyWaiters[id] != nil {
+		return nil, false
+	}
+	waiter := make(chan struct{})
+	r.bodyWaiters[id] = waiter
+	rec.requested = true
+	return waiter, true
+}
+
+// dropBodyWaiter forgets the waiter of one news.
+func (r *recorder) dropBodyWaiter(id int64) {
+	r.newsMu.Lock()
+	delete(r.bodyWaiters, id)
+	r.newsMu.Unlock()
+}
+
+// resetBodyRequest allows another get_news_body attempt after a failure.
+func (r *recorder) resetBodyRequest(id int64) {
+	r.newsMu.Lock()
+	if rec := r.news[id]; rec != nil {
+		rec.requested = false
+	}
+	r.newsMu.Unlock()
+}
+
+// notifyNewsBody queues a body request without blocking the Run callback; a full
+// queue drops it (the next header poll re-notifies).
+func (r *recorder) notifyNewsBody(id int64) {
+	select {
+	case r.newsNotify <- id:
+	default:
+	}
 }
