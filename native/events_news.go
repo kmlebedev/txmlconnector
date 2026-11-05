@@ -40,7 +40,6 @@ func decodeNewsHeader(c *Client, body []byte) ([]model.Event, error) {
 		Flag:   parsed.Flag,
 	}
 	c.storeNewsHeaderLocked(header)
-	c.newsLastOld = parsed.ID
 	return []model.Event{&header}, nil
 }
 
@@ -74,7 +73,6 @@ func decodeNewsUpload(c *Client, body []byte) ([]model.Event, error) {
 			c.newsBodies = map[int64]string{}
 		}
 		c.newsBodies[id] = string(text)
-		// No <news_body> event: the DLL emitter path is not confirmed (I).
 	}
 	return events, nil
 }

@@ -988,13 +988,18 @@ func NewsBodyXML(b model.NewsBody) string {
 }
 
 // MessageXML renders one <message> item (messages.md D/O): only HH:MM:SS of the
-// UTC instant (the machine-local conversion is I), Y/N urgency and CDATA text.
+// WALL time (Time - bias; the machine-local conversion is I), Y/N urgency and
+// CDATA text.
 func MessageXML(m model.Message) string {
 	urgent := "N"
 	if m.Urgent {
 		urgent = "Y"
 	}
-	return "<message><date>" + m.Time.UTC().Format("15:04:05") + "</date><urgent>" + urgent +
+	wall := m.WallTime
+	if wall.IsZero() {
+		wall = m.Time
+	}
+	return "<message><date>" + wall.UTC().Format("15:04:05") + "</date><urgent>" + urgent +
 		"</urgent><from>" + escape(m.From) + "</from><text><![CDATA[" + cdata(m.Text) + "]]></text></message>"
 }
 
