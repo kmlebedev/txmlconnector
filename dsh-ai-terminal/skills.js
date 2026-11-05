@@ -21,12 +21,26 @@ const SKILL_RANK = 300;
 /** Harness skill-name grammar. */
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-/** Strip one pair of matching quotes from a frontmatter value. */
+/** Strip one pair of matching quotes and undo the double-quote escapes. */
 function unquote(value) {
-  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
-    return value.slice(1, -1);
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1).replace(/\\(["\\])/g, '$1');
+  }
+  if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1).replace(/''/g, "'");
   }
   return value;
+}
+
+/**
+ * Pattern status of a generated SKILL.md (plan Task 19): repository skills
+ * carry no metadata.status and are always visible, while generated patterns are
+ * visible to the agent only after promotion to validated. Drafts and retired
+ * patterns stay in the on-disk catalog but never reach the agent.
+ */
+function skillVisible(data) {
+  const status = String(data.status === undefined ? '' : data.status).trim().toLowerCase();
+  return status === '' || status === 'validated';
 }
 
 /**
@@ -119,6 +133,7 @@ function readCandidate(file) {
   const description = parsed.data.description;
   if (typeof name !== 'string' || !SKILL_NAME.test(name)) return null;
   if (typeof description !== 'string' || description.trim() === '') return null;
+  if (!skillVisible(parsed.data)) return null;
   return skillCandidate(file, path.dirname(file), parsed.data);
 }
 
@@ -162,6 +177,7 @@ export function createSkillProvider(options = {}) {
     const description = parsed.data.description;
     if (typeof name !== 'string' || !SKILL_NAME.test(name)) return undefined;
     if (typeof description !== 'string' || description.trim() === '') return undefined;
+    if (!skillVisible(parsed.data)) return undefined;
     return {
       name,
       description,
