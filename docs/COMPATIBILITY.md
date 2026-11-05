@@ -199,6 +199,17 @@ windows-amd64 — успешно (включая C ABI-тесты; windows mingw
    PE32+ DLL x86-64; экспорты: 9/9 в `nm -D` (linux), `nm -gU` (macOS), `objdump -p` (windows).
    Linux arm64 в CI проверен нативным runner (ABI-тест success).
 
+**C5 conformance-корпус (2026-11-05).** Машиночитаемая часть §6.1–6.2 реализована как
+`cmd/connector/testdata/cabi_scenarios.json` (52 упорядоченных локальных шага: lifecycle, тексты
+обёртки, `GetServiceInfo` коды 0/3/4/5/6 с 5-секундным rate-limit, порядок/поток колбэков) и
+C-харнесс `cmd/connector/testdata/abi_conformance.c`: он загружает нашу `.so`/`.dylib`/`.dll`
+через `dlopen`, проигрывает сценарии и сравнивает возвращаемые UTF-8 строки **побайтно** с текстами
+эталонной DLL из `cabi-reference.json` (C2). Запуск — `make cabi-conformance` (локально
+macOS/Linux); в CI шаг «C ABI conformance» добавлен для linux/macos (strict) и windows (best effort).
+Сценарии только локальные: сеть/сервер не используются, `{LOG_DIR}` нормализует временный путь
+логов. Расхождения печатаются с ожидаемой/фактической строками и hex-дампами и блокируют релиз до
+синхронизации C2.1 (task-73).
+
 Критерий релиза: L0–L3 зелёные на Windows x64 (главная цель) и на каждой заявленной платформе,
 открытых пунктов §3.2 уровня L0–L1 нет, оставшиеся L3–L4 перечислены в release notes.
 
