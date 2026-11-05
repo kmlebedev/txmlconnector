@@ -138,3 +138,8 @@
 - Ревью второй моделью: все фронтенд-diff отправлены Qwen 3.8 Flash; обязательных P1/P2 после триажа Lead нет
   (отчёты — `docs/ai-terminal/reviews/`).
 - Phase X (внешние репозитории) не входит в этот PR: ALFRED-винтажи, календарь FOMC, схема `transaq_quotes`.
+## PR открыт
+
+- PR [#62](https://github.com/kmlebedev/txmlconnector/pull/62) — draft, base `main`, head `plan/ai-terminal-a`; CI «Run Go Tests» — pass.
+- Все 26 задач плана закрыты; 8 шагов Live/Manual check остаются до согласия пользователя на живые прогоны.
+- Перевод в ready-for-review / merge — после живых Step 5 (по команде пользователя).
