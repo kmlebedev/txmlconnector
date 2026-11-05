@@ -1134,9 +1134,13 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		if _, err := time.Parse("02.01.2006", *req.MatDate); err != nil {
 			return failure(fmt.Sprintf("Failed to parse mat_date=%s", *req.MatDate)), nil
 		}
-		// The family-name -> (secid, family_id) mapping is not recovered (D:
+		// Below the protocol gate the DLL refuses locally (D+S); above it the
+		// family-name -> (secid, family_id) mapping is not recovered (D:
 		// internal family store, options.md I), so no guessed request is sent.
-		return failure("family id mapping is not recovered (I)"), nil
+		if _, err := client.FamilyStrikes(ctx, ""); err != nil {
+			return failure(err.Error()), nil
+		}
+		return success(), nil
 	case "get_options":
 		var req struct {
 			OptCodes []string `xml:"opt_code"`
@@ -1154,6 +1158,10 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure("No seccodes found"), nil
 		}
 		if _, err := client.Options(ctx, model.OptionsRequest{OptCodes: req.OptCodes}); err != nil {
+			if errors.Is(err, session.ErrUnsupportedRequest) {
+				// S (demo): the DLL answers the gated 151 without a message.
+				return `<result success="false"/>`, nil
+			}
 			if message, ok := optionsServerMessage(err); ok {
 				return failure(message), nil
 			}
