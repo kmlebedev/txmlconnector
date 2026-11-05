@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 )
@@ -21,6 +22,37 @@ const systemPrompt = `Ты — торговый аналитик AI-термин
 Обязательно предупреждай о рисках: прошлая доходность не гарантирует будущую, возможны просадки и комиссии, торговля в терминале только бумажная.
 Если пользователь просит запустить автоторговлю: сначала выполни run_backtest (или compare_strategies), затем вызови start_autonomy с разумным бюджетом; live-режим запрещён.
 Проценты и деньги оформляй по-русски (запятая, знак ₽). Никогда не обещай прибыль.`
+
+// screenContextMessage renders the ephemeral "Текущий экран: …" system message
+// for one chat request (plan Task 8). Interval times are RFC3339 UTC; an empty
+// context yields "" so the provider payload stays unchanged.
+func screenContextMessage(screen *ScreenContext) string {
+	if screen == nil {
+		return ""
+	}
+	parts := make([]string, 0, 5)
+	if symbol := strings.TrimSpace(screen.Symbol); symbol != "" {
+		parts = append(parts, "инструмент "+symbol)
+	}
+	if screen.PeriodSec > 0 {
+		parts = append(parts, fmt.Sprintf("период %d с (%s)", screen.PeriodSec, periodLabel(screen.PeriodSec)))
+	}
+	if !screen.From.IsZero() && !screen.To.IsZero() {
+		parts = append(parts, fmt.Sprintf("видимый диапазон %s — %s UTC",
+			screen.From.UTC().Format(time.RFC3339), screen.To.UTC().Format(time.RFC3339)))
+	}
+	if selection := screen.Selection; selection != nil && !selection.From.IsZero() && !selection.To.IsZero() {
+		parts = append(parts, fmt.Sprintf("выделение %s — %s UTC",
+			selection.From.UTC().Format(time.RFC3339), selection.To.UTC().Format(time.RFC3339)))
+	}
+	if tab := strings.TrimSpace(screen.ActiveTab); tab != "" {
+		parts = append(parts, "активная вкладка "+tab)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Текущий экран: " + strings.Join(parts, ", ") + "."
+}
 
 // llmMessage is one OpenAI-compatible chat message.
 type llmMessage struct {
@@ -153,7 +185,7 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 		return resp, nil
 	}
 
-	resp, err := e.chatLLM(ctx, message, conversationID)
+	resp, err := e.chatLLM(ctx, message, conversationID, req.Context)
 	if err == nil {
 		resp.ConversationID = conversationID
 		return resp, nil
@@ -192,7 +224,7 @@ func (e *Engine) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error
 // not pollute the history. On failure it returns the calls executed so far
 // together with the error, so Chat can decide whether a local fallback is safe
 // (R3).
-func (e *Engine) chatLLM(ctx context.Context, message, conversationID string) (ChatResponse, error) {
+func (e *Engine) chatLLM(ctx context.Context, message, conversationID string, screen *ScreenContext) (ChatResponse, error) {
 	started := e.now()
 	// The stored tool results are already compacted (toolMessageContent), so
 	// replaying the dialog to the model keeps the context small.
@@ -205,6 +237,12 @@ func (e *Engine) chatLLM(ctx context.Context, message, conversationID string) (C
 		turn = append(turn, systemMessage)
 	} else {
 		messages = append(messages, history...)
+	}
+	// The visible-screen context is attached as a separate system message for
+	// this request only: it goes into the provider payload but not into the
+	// persisted turn, so a stale screen never leaks into the next dialog turn.
+	if screenMessage := screenContextMessage(screen); screenMessage != "" {
+		messages = append(messages, llmMessage{Role: "system", Content: screenMessage})
 	}
 	userMessage := llmMessage{Role: "user", Content: message}
 	messages = append(messages, userMessage)

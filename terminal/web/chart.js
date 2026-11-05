@@ -80,8 +80,17 @@ export class CandleChart {
       ? new ResizeObserver(() => this.resize())
       : null;
     if (this.resizeObserver && canvas.parentElement) this.resizeObserver.observe(canvas.parentElement);
+    this.selection = null; // { from, to, fromIndex, toIndex } in candle seconds
+    this.selectionDraft = null; // { startIndex, endIndex } while shift+dragging
+    this.onSelectionChange = null;
     canvas.addEventListener('mousemove', (event) => this.onMove(event));
     canvas.addEventListener('mouseleave', () => this.onLeave());
+    canvas.addEventListener('mousedown', (event) => this.onDown(event));
+    canvas.addEventListener('mouseup', () => this.onUp());
+    window.addEventListener('mouseup', () => this.onUp());
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && this.selection) this.clearSelection();
+    });
     window.addEventListener('resize', () => this.resize());
   }
 
@@ -92,6 +101,11 @@ export class CandleChart {
     if (overlay !== undefined) this.overlay = overlay;
     this.crosshair = null;
     this.hideTooltip();
+    if (this.selection || this.selectionDraft) {
+      this.selection = null;
+      this.selectionDraft = null;
+      this.notifySelection();
+    }
     this.draw();
   }
 
@@ -134,6 +148,14 @@ export class CandleChart {
 
   onMove(event) {
     if (!this.layout || !this.candles.length) return;
+    if (this.selectionDraft) {
+      const index = this.indexAt(event);
+      if (index >= 0) {
+        this.selectionDraft.endIndex = index;
+        this.draw();
+      }
+      return;
+    }
     const rect = this.canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -146,6 +168,74 @@ export class CandleChart {
     this.crosshair = { x, y, index };
     this.draw();
     this.showTooltip(index, x, y);
+  }
+
+  // ---- shift+drag range selection ("ask AI about this range") -----------
+
+  /** Candle index under the pointer, or -1 outside the plot. */
+  indexAt(event) {
+    if (!this.layout) return -1;
+    const rect = this.canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const { plotLeft, plotWidth, count } = this.layout;
+    if (x < plotLeft || x > plotLeft + plotWidth || y < this.pad.top || y > this.layout.plotBottom) {
+      return -1;
+    }
+    return clamp(Math.floor(((x - plotLeft) / plotWidth) * count), 0, count - 1);
+  }
+
+  onDown(event) {
+    if (!event.shiftKey || !this.layout || !this.candles.length) return;
+    const index = this.indexAt(event);
+    if (index < 0) return;
+    this.selectionDraft = { startIndex: index, endIndex: index };
+    this.crosshair = null;
+    this.hideTooltip();
+    this.draw();
+    event.preventDefault();
+  }
+
+  onUp() {
+    const draft = this.selectionDraft;
+    if (!draft) return;
+    this.selectionDraft = null;
+    const fromIndex = Math.min(draft.startIndex, draft.endIndex);
+    const toIndex = Math.max(draft.startIndex, draft.endIndex);
+    this.selection = {
+      from: this.candles[fromIndex].t,
+      to: this.candles[toIndex].t,
+      fromIndex,
+      toIndex,
+    };
+    this.draw();
+    this.notifySelection();
+  }
+
+  /** Removes the selected range and notifies the owner. */
+  clearSelection() {
+    this.selection = null;
+    this.selectionDraft = null;
+    this.draw();
+    this.notifySelection();
+  }
+
+  /** Selected candle range in bar seconds, or null. */
+  getSelection() {
+    if (!this.selection) return null;
+    return { from: this.selection.from, to: this.selection.to };
+  }
+
+  /** Full candle window shown on the chart in bar seconds, or null. */
+  getVisibleRange() {
+    const n = this.candles.length;
+    if (!n) return null;
+    return { from: this.candles[0].t, to: this.candles[n - 1].t };
+  }
+
+  notifySelection() {
+    const selection = this.getSelection();
+    if (typeof this.onSelectionChange === 'function') this.onSelectionChange(selection);
   }
 
   showTooltip(index, x, y) {
@@ -403,6 +493,9 @@ export class CandleChart {
       });
     }
 
+    // shift+drag range selection (ask-AI screen context)
+    this.drawSelection(ctx, { plotLeft, plotRight, plotTop, plotBottom, stepX });
+
     // crosshair
     if (this.crosshair) {
       const { index, y } = this.crosshair;
@@ -475,6 +568,45 @@ export class CandleChart {
       return { name, values, levels };
     }
     return null;
+  }
+
+  /** Draws the selected (or being dragged) candle range over the plot. */
+  drawSelection(ctx, { plotLeft, plotRight, plotTop, plotBottom, stepX }) {
+    const draft = this.selectionDraft;
+    const selection = this.selection;
+    let fromIndex = -1;
+    let toIndex = -1;
+    if (draft) {
+      fromIndex = Math.min(draft.startIndex, draft.endIndex);
+      toIndex = Math.max(draft.startIndex, draft.endIndex);
+    } else if (selection) {
+      fromIndex = selection.fromIndex;
+      toIndex = selection.toIndex;
+    }
+    if (fromIndex < 0 || toIndex < 0) return;
+    const left = plotLeft + fromIndex * stepX;
+    const right = plotLeft + (toIndex + 1) * stepX;
+    const width = Math.max(stepX, right - left);
+    ctx.save();
+    ctx.fillStyle = 'rgba(45, 108, 223, 0.14)';
+    ctx.fillRect(left, plotTop, width, plotBottom - plotTop);
+    ctx.strokeStyle = '#2d6cdf';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(crisp(left), crisp(plotTop), width, plotBottom - plotTop);
+    ctx.setLineDash([]);
+    const chip = 'выделено';
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    const chipWidth = ctx.measureText(chip).width + 12;
+    const chipX = clamp(left, plotLeft, Math.max(plotLeft, plotRight - chipWidth));
+    roundRect(ctx, chipX, plotTop + 2, chipWidth, 15, 3);
+    ctx.fillStyle = '#2d6cdf';
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(chip, chipX + chipWidth / 2, plotTop + 9.5);
+    ctx.restore();
   }
 
   /** Fills the entry..exit intervals of the overlay trades behind the candles. */

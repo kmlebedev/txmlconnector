@@ -196,10 +196,32 @@ type Artifact struct {
 	Payload any    `json:"payload"`
 }
 
+// Range is one chart interval in UTC (a selection or the visible window).
+type Range struct {
+	From time.Time `json:"from"`
+	To   time.Time `json:"to"`
+}
+
+// ScreenContext is the terminal screen the user is looking at; the UI sends it
+// with a chat request so the model can answer questions about the visible chart
+// (plan Task 8). It travels to the LLM as a separate ephemeral system message,
+// never as part of the persisted dialog history.
+type ScreenContext struct {
+	Symbol    string    `json:"symbol,omitempty"`
+	PeriodSec int       `json:"periodSec,omitempty"`
+	From      time.Time `json:"from,omitempty"`
+	To        time.Time `json:"to,omitempty"`
+	Selection *Range    `json:"selection,omitempty"`
+	ActiveTab string    `json:"activeTab,omitempty"`
+}
+
 // ChatRequest is one user message to the agent.
 type ChatRequest struct {
 	Message        string `json:"message"`
 	ConversationID string `json:"conversationId,omitempty"`
+	// Context is the visible terminal screen (chart window/selection and the
+	// active tab) attached by the UI.
+	Context *ScreenContext `json:"context,omitempty"`
 }
 
 // ChatResponse is the final agent answer plus the executed tool calls.

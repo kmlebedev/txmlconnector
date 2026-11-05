@@ -81,6 +81,10 @@ function boot() {
   injectHeaderIcons();
   renderRail();
   chart = new CandleChart(refs.chartCanvas, refs.chartTooltip);
+  chart.onSelectionChange = (selection) => {
+    store.set({ chartSelection: selection });
+    renderToolbar();
+  };
   renderSkeleton();
   bindEvents();
   setStatusClock();
@@ -140,6 +144,7 @@ async function startApp() {
       chart,
       onToast: toast,
       onOpenBacktests: () => switchBottomTab('analytics'),
+      getScreenContext: buildScreenContext,
     });
     renderAll();
     if (selectedSymbol) await loadSymbol(selectedSymbol, store.get().periodSec);
@@ -497,6 +502,43 @@ function updateHeaderQuote(inst) {
   }
 }
 
+/** Converts chart bar seconds into an RFC3339 UTC timestamp. */
+function isoFromSeconds(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value)) return '';
+  return new Date(value * 1000).toISOString();
+}
+
+/** The visible screen sent with a chat request (plan Task 8, ScreenContext). */
+function buildScreenContext() {
+  const state = store.get();
+  const tab = state.ui ? (state.ui.drawerOpen ? state.ui.drawerTab : state.ui.rightTab) : '';
+  const context = {
+    symbol: state.selected || '',
+    periodSec: state.periodSec || 0,
+    activeTab: tab || '',
+  };
+  const candles = state.candles || [];
+  if (candles.length) {
+    context.from = isoFromSeconds(candles[0].t);
+    context.to = isoFromSeconds(candles[candles.length - 1].t);
+  } else if (chart) {
+    const visible = chart.getVisibleRange ? chart.getVisibleRange() : null;
+    if (visible) {
+      context.from = isoFromSeconds(visible.from);
+      context.to = isoFromSeconds(visible.to);
+    }
+  }
+  const selection = state.chartSelection;
+  if (selection && Number.isFinite(Number(selection.from)) && Number.isFinite(Number(selection.to))) {
+    context.selection = {
+      from: isoFromSeconds(selection.from),
+      to: isoFromSeconds(selection.to),
+    };
+  }
+  return context;
+}
+
 function renderToolbar() {
   const state = store.get();
   const overlay = state.overlay;
@@ -517,6 +559,9 @@ function renderToolbar() {
       <button type="button" class="tool-btn" data-action="soon" data-soon="Сигналы" title="Сигналы — скоро">${icon('bolt', 17)}</button>
     </div>
     <div class="toolbar-right">
+      ${state.chartSelection ? `<button type="button" class="btn btn-ai btn-sm" data-ask-selection title="Спросить AI о выделенном диапазоне">
+        ${icon('chat', 13)} Спросить AI о выделенном</button>
+        <button type="button" class="tool-btn" data-clear-selection title="Снять выделение" aria-label="Снять выделение">${icon('close', 12)}</button>` : ''}
       ${overlay ? `<span class="overlay-chip">${icon('lineChart', 13)} ${esc(strategyTitle(overlay.strategy))} · ${fmtSignedPct(overlay.metrics.totalReturnPct)}
         <button type="button" data-action="clear-overlay" title="Снять с графика" aria-label="Снять бэктест с графика">${icon('close', 12)}</button></span>` : ''}
       <button type="button" class="tool-btn" data-action="soon" data-soon="Развернуть график" title="Развернуть — скоро">${icon('expand', 16)}</button>
@@ -1420,6 +1465,21 @@ function handleClick(event) {
     chart.type = chartType;
     renderToolbar();
     chart.draw();
+    return;
+  }
+
+  const askSelection = target.closest('[data-ask-selection]');
+  if (askSelection) {
+    if (store.get().chartSelection && ai) {
+      ai.open('chat');
+      ai.send('Объясни выделенный диапазон на графике: что здесь произошло и на что обратить внимание?');
+    }
+    return;
+  }
+
+  const clearSelection = target.closest('[data-clear-selection]');
+  if (clearSelection) {
+    chart?.clearSelection();
     return;
   }
 
