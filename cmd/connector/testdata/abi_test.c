@@ -98,23 +98,30 @@ int main(int argc, char** argv) {
     expect_null(UnInitialize(), "UnInitialize after InitEx");
     expect(UnInitialize(), "<error>Библиотека не инициализирована</error>", "UnInitialize again after InitEx");
 
-    /* GetServiceInfo codes/texts. */
+    /* GetServiceInfo codes/texts. The reference checks the 5000 ms rate limit
+     * first and updates its timestamp before the parameter checks, so a limited
+     * call returns 6 even for a NULL response/request; the timestamp is not
+     * updated by limited calls (docs/protocol/cabi.md §9). */
     BYTE* resp = NULL;
-    if (GetServiceInfo(NULL, &resp) != 4 || resp != NULL) { fprintf(stderr, "GetServiceInfo(NULL) != 4\n"); return 4; }
     if (GetServiceInfo((const BYTE*)"<request><value>version</value></request>", NULL) != 5) { fprintf(stderr, "GetServiceInfo(resp NULL) != 5\n"); return 4; }
-    if (GetServiceInfo((const BYTE*)"<request><value>version</value></request>", NULL) != 5) { fprintf(stderr, "GetServiceInfo(resp NULL) != 5\n"); return 4; }
-    int rc = GetServiceInfo((const BYTE*)"<request><value>version</value></request>", &resp);
-    if (rc != 0) { fprintf(stderr, "GetServiceInfo(version) rc=%d\n", rc); return 4; }
-    expect(resp, "<service_info><version>6.47.2.26.4</version></service_info>", "GetServiceInfo version"); resp = NULL;
-    if (GetServiceInfo((const BYTE*)"<request><value>version</value></request>", &resp) != 6) { fprintf(stderr, "rate limit != 6\n"); return 4; }
+    if (GetServiceInfo(NULL, &resp) != 6) { fprintf(stderr, "rate limit != 6 before parameter checks\n"); return 4; }
 #ifdef _WIN32
-    Sleep(5100);
+    Sleep(6100);
 #else
     sleep(6);
 #endif
     resp = NULL;
-    if (GetServiceInfo((const BYTE*)"<request><value>version</value></request>", &resp) != 0) { fprintf(stderr, "rate limit reset failed\n"); return 4; }
-    expect(resp, "<service_info><version>6.47.2.26.4</version></service_info>", "GetServiceInfo version after wait"); resp = NULL;
+    if (GetServiceInfo(NULL, &resp) != 4 || resp != NULL) { fprintf(stderr, "GetServiceInfo(NULL) != 4\n"); return 4; }
+#ifdef _WIN32
+    Sleep(6100);
+#else
+    sleep(6);
+#endif
+    resp = NULL;
+    int rc = GetServiceInfo((const BYTE*)"<request><value>version</value></request>", &resp);
+    if (rc != 0) { fprintf(stderr, "GetServiceInfo(version) rc=%d\n", rc); return 4; }
+    expect(resp, "<service_info><version>6.47.2.26.4</version></service_info>", "GetServiceInfo version"); resp = NULL;
+    if (GetServiceInfo((const BYTE*)"<request><value>version</value></request>", &resp) != 6) { fprintf(stderr, "rate limit != 6\n"); return 4; }
 
     /* get_connector_version async callback (already uninitialized, so init again). */
     expect_null(Initialize(logs, 1), "Initialize for callback");
