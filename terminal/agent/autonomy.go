@@ -112,6 +112,11 @@ func (r *autonomyRun) appendLog(entry LogEntry) {
 // are loaded and the strategy is built synchronously, the run budget is
 // reserved on the paper broker, then the replay runs in its own goroutine.
 // Live autonomy is rejected.
+//
+// Known limitation (iteration 1): the "autonomy" paper account is not reset
+// between runs. A repeated start adds the new budget to the balance left by the
+// previous replay and keeps any position it left open, so the effective trading
+// equity of the second run may exceed its Config.Budget.
 func (e *Engine) StartAutonomy(ctx context.Context, cfg AutonomyConfig) error {
 	cfg, riskBlocks, bars, strategy, err := e.prepareAutonomy(ctx, cfg)
 	if err != nil {
