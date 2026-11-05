@@ -126,3 +126,20 @@ XML-фикстур (`option-*-dll.xml`) нет — честный **I** (см. �
 D: `tools/re/ghidra/XrefDecomp.java` по `txmlconnector64-6.47.2.26.4.dll`; функции — выше.
 O: `tools/replay-server` + `tools/tcproxy` + DLL под Wine 11.21, dump `.re-run/r14/decode-full.txt`
 (вне git), модификация дампа — `.re-run/t49/mk-opt-dump.py`; прогоны `.re-run/t49/opt{A,B,C,D}`.
+
+## S-попытка на проде (2026-11-05, read-only): S-НЕГАТИВ
+
+- Первый прогон (opts1): команды успели отправиться, но DLL ответил
+  `Cannot process this command without connection.` — соединение с прод-сервером оборвалось сразу после
+  загрузки (`<server_status connected="false">`, затем RQ_LOGOUT). Повторные прогоны (opts2–opts5):
+  соединение доходит только до RQ_LOGIN/RQ_PWD, затем `<server_status connected="error">` — прод-сервер
+  перестал устанавливать сессию после серии подключений (вероятно, лимит сессий/логинов; точная причина —
+  **I**, на стороне сервера).
+- Поэтому **опционные команды в S не проверены**: `get_option_families`/`get_family_strikes`/
+  `get_options`, версия/гейт `0x45` на проде — **S-негатив по доступу** (внешний блокер).
+- Что известно без S: гейт `*(int *)(symbolStore + 0x694) < 0x45` (D, `FUN_1803b9950`/`FUN_1803b9cd0`);
+  на записанной сессии версия 68 (0x44) → `Unsupported request.` (O, task-58); `sys_ver="650"` на
+  проде (S) — но это не то поле, что `+0x694` (**I**). S-прогон нужно повторить в следующую сессию
+  (или после паузы), когда прод снова пускает логин.
+- Торговых/изменяющих команд на проде не было: только `connect`/`server_status`/опционные
+  read-only команды/`disconnect` (и они не дошли до сервера). Сырьё — `.re-run/s/opts{1..5}/` (вне git).
