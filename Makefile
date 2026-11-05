@@ -17,6 +17,7 @@ STAGING_REMOTE_BIN  ?= $(STAGING_BIN_DIR)/txmlconnector-server.exe
 STAGING_UNIT_TMPL   ?= deploy/txmlconnector-server.service
 
 .PHONY: compile test vet verify server_build server queues_build queues client tgbot \
+	cabi cabi-so cabi-dylib cabi-test \
 	staging-precheck staging-prepare deploy-staging deploy-staging-binary \
 	deploy-staging-dll deploy-staging-unit deploy-staging-smoke \
 	deploy-staging-status deploy-staging-logs deploy-staging-restart rollback-staging
@@ -99,6 +100,43 @@ exporter_financial: exporter_financial_build
 
 dev_financial:
 	docker-compose -f docker/compose/clickhouse-exporter-financial-compose.yaml -p financial up
+
+
+## C ABI compat library (docs/COMPATIBILITY.md, task-69). The wrapper is cgo;
+## native/... stays pure Go. On macOS use cabi-dylib, on Linux cabi-so;
+## "make cabi" picks the current OS.
+TXC_VERSION ?= 6.47.2.26.4
+CABI_GOARCH ?= $(shell go env GOARCH)
+CABI_LIB_BASE = bin/libtxmlconnector
+
+cabi-so:
+	mkdir -p bin
+	CGO_ENABLED=1 GOARCH=$(CABI_GOARCH) go build -buildmode=c-shared -trimpath -ldflags "-X main.defaultVersion=$(TXC_VERSION)" -o $(CABI_LIB_BASE).so ./cmd/connector
+	cp -f cmd/connector/include/txmlconnector.h bin/txmlconnector.h
+	cp -f $(CABI_LIB_BASE).so bin/libtxmlconnector64.so
+
+cabi-dylib:
+	mkdir -p bin
+	CGO_ENABLED=1 GOARCH=$(CABI_GOARCH) go build -buildmode=c-shared -trimpath -ldflags "-X main.defaultVersion=$(TXC_VERSION)" -o $(CABI_LIB_BASE).dylib ./cmd/connector
+	cp -f cmd/connector/include/txmlconnector.h bin/txmlconnector.h
+	cp -f $(CABI_LIB_BASE).dylib bin/libtxmlconnector64.dylib
+
+ifeq ($(shell go env GOOS),darwin)
+cabi: cabi-dylib
+CABI_TEST_LIB = $(CABI_LIB_BASE).dylib
+CABI_TEST_ENV = DYLD_LIBRARY_PATH=bin
+CABI_TEST_LIBS = -Lbin -ltxmlconnector
+else
+cabi: cabi-so
+CABI_TEST_LIB = $(CABI_LIB_BASE).so
+CABI_TEST_ENV = LD_LIBRARY_PATH=bin
+CABI_TEST_LIBS = -Lbin -ltxmlconnector -ldl
+endif
+
+## Portable dlopen/LoadLibrary ABI test (all 9 exports, error paths, callback).
+cabi-test: cabi
+	$(CC) -I cmd/connector/include -o bin/abi_test cmd/connector/testdata/abi_test.c $(CABI_TEST_LIBS)
+	$(CABI_TEST_ENV) ./bin/abi_test $(CABI_TEST_LIB)
 
 ## Deploy to palmshell via SSH. See deploy/README.md for paths and overrides.
 
