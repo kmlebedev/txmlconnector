@@ -53,6 +53,8 @@ static char g_log_dir[512];
 static BYTE* g_last_alloc = NULL;
 static int g_fail = 0;
 static int g_pass = 0;
+static int g_step_ok = 0;
+static int g_step_fail = 0;
 static int g_step_no = 0;
 static unsigned long g_main_thread = 0;
 static char g_cb_text[16384];
@@ -676,9 +678,14 @@ int main(int argc, char** argv) {
     if (!steps || count == 0) { say("no scenarios parsed", NULL); return 2; }
     printf("conformance: %d steps, log dir %s", count, g_log_dir);
     emit_nl();
-    for (int i = 0; i < count; i++) run_step(&steps[i]);
-    printf("conformance: %d passed, %d failed", g_pass, g_fail);
+    for (int i = 0; i < count; i++) {
+        int fail_before = g_fail;
+        run_step(&steps[i]);
+        if (g_fail == fail_before) g_step_ok++;
+        else g_step_fail++;
+    }
+    printf("conformance: %d/%d steps passed, %d failed", g_step_ok, count, g_step_fail);
     emit_nl();
     close_lib(h);
-    return g_fail == 0 ? 0 : 1;
+    return g_step_fail == 0 ? 0 : 1;
 }
