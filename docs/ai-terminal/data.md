@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS md.trades (
     open_interest Int64
 ) ENGINE = ReplacingMergeTree
 ORDER BY (sec_code, trade_no);
+
+CREATE TABLE IF NOT EXISTS md.news (
+    first_seen DateTime64(3, 'UTC'),
+    published DateTime64(3, 'UTC'),
+    news_id Int64,
+    source LowCardinality(String),
+    title String,
+    body String,
+    content_hash UInt64
+) ENGINE = ReplacingMergeTree(first_seen)
+ORDER BY (news_id);
 ```
 
 Семантика полей:
@@ -94,6 +105,12 @@ ORDER BY (sec_code, trade_no);
   Значение с более чем 6 знаками усекается (для бумаг MOEX не встречается — **I**).
 - `md.trades` — `ReplacingMergeTree ORDER BY (sec_code, trade_no)`: повторная запись той же сделки
   (переподключение/переигровка) схлопывается при мердже.
+- **`md.news` (первый момент появления = point-in-time).** `first_seen` — момент, когда рекордер
+  впервые получил новость; `published` — биржевой `timestamp` из заголовка (Unix-секунды на проводе,
+  UTC). `first_seen` — версия `ReplacingMergeTree`: тело, пришедшее позже заголовка, пишется новой
+  строкой того же `news_id` с **тем же** `first_seen` (поздняя версия побеждает при мердже, а
+  point-in-time не сдвигается). `content_hash` — FNV-1a 64 от `source\x00title\x00body`; `source`/`title`
+  из CP1251 уже переведены в UTF-8 нативным клиентом, `body` — распакованный текст.
 - Retention/TTL у таблиц не задан — вопрос следующих задач (**I**).
 
 ## 3. Рекордер
@@ -102,6 +119,7 @@ ORDER BY (sec_code, trade_no);
 type Sink interface {
     Book([]BookEvent) error
     Trades([]TradeEvent) error
+    News([]NewsEvent) error
 }
 func Run(ctx context.Context, cl *native.Client, sink Sink, symbols []string) error
 ```
@@ -126,15 +144,51 @@ func Run(ctx context.Context, cl *native.Client, sink Sink, symbols []string) er
   `TestRecorderKeepsMillis` проверяет 123 мс в `ts`.
 - Если сессия восстановиться не смогла, `Run` возвращает ошибку, а `cmd/md-recorder` открывает
   новую сессию (новый `session_id`) — разрыв уже отмечен строкой `gap` старой сессии.
+- **Новости (I, поведение клиента).** На проводе у новостей **нет подписки** (см.
+  [news.md](../protocol/news.md)): заголовки приходят записями RQ_MAIN только в ответ на
+  `get_old_news`, тела — в ответ на `get_news_body`. Поэтому рекордер сам опрашивает их в
+  горутине сессии: `OldNews` каждые 30 с (`defaultNewsPollInterval`) и `NewsBody` для каждого нового
+  заголовка; данные приходят через колбэк `Run`, горутина только отправляет запросы. Ошибка опроса
+  новостей — best effort и не останавливает запись стакана/сделок. `first_seen` фиксируется при
+  первом заголовке и не меняется телом (тест `TestRecorderStoresNewsWithFirstSeen`); повторная
+  выдача того же заголовка в `get_old_news` не пишется, исправленный заголовок пишется с прежним
+  `first_seen` (`TestRecorderNewsHeaderChangeKeepsFirstSeen`).
 - Ошибка `Sink` останавливает поток (потерянная вставка — это дыра в данных, а не повод продолжать
   молча); тест `TestRecorderPropagatesSinkError`.
 - Тесты: `TestRecorderWritesSnapshotThenLevels`, `TestRecorderMarksGapOnReconnect`,
-  `TestRecorderKeepsMillis`, `TestRunSubscribesReadOnlyFeeds`, `TestRunRejectsBadInput`,
-  `TestSchemaStatements`, `TestEnsureSchemaCreatesTables`, `TestBookRowMapping`,
-  `TestTradeRowMapping`, `TestClickHouseSinkInserts`, `TestNewSessionIDIsUUIDv4` — все на
+  `TestRecorderKeepsMillis`, `TestRecorderStoresNewsWithFirstSeen`,
+  `TestRecorderNewsHeaderChangeKeepsFirstSeen`, `TestRunPollsOldNews`,
+  `TestRunSubscribesReadOnlyFeeds`, `TestRunRejectsBadInput`, `TestSchemaStatements`,
+  `TestEnsureSchemaCreatesTables`, `TestBookRowMapping`, `TestTradeRowMapping`,
+  `TestNewsRowMapping`, `TestClickHouseSinkInserts`, `TestNewSessionIDIsUUIDv4` — все на
   `httptest`/фейках, без сети и без ClickHouse.
 
-## 4. Команда `cmd/md-recorder`
+## 4. Новости в терминале и инструмент агента `get_news`
+
+- **Лента терминала (feed).** Live-режим опрашивает заголовки `get_old_news` (раз в 30 с,
+  `newsPollCount=100`) и публикует `feed.Event{Type:"news", Data: feed.News}` — `ID`,
+  `Published` (время из заголовка, UTC), `FirstSeen` (момент получения фидом), `Source`, `Title`,
+  `Body` (пусто, пока не пришло тело). Тело, пришедшее позже, обновляет кэш и публикует событие, но
+  `FirstSeen` не меняет. Доступ — `feed.Service.News(since, limit)` (свежие первыми, кольцо на 200
+  новостей). Offline-режим новостей не имеет (в seed их нет).
+- **Инструмент агента `get_news(symbol?, since, limit)`** (Phase D, plan Task 12) читает
+  **`md.news`** через `chstore`, т.е. записанные рекордером новости с точным `first_seen`:
+  - `since` — начало окна по `first_seen`: RFC3339, `ГГГГ-ММ-ДД`, `ГГГГ-ММ-ДД ЧЧ:ММ:СС` или
+    длительность (`24h`); по умолчанию последние 24 часа;
+  - `limit` — 1..500, по умолчанию 50; результат — `{since, news:[{id,published,firstSeen,source,title,body}]}`,
+    от свежих к старым;
+  - `symbol` — необязательный текстовый фильтр: на проводе новость не привязана к бумаге, поэтому
+    фильтр ищет тикер в заголовке/тексте без учёта регистра
+    (`positionCaseInsensitiveUTF8(concat(title,' ',body), ...)`).
+  Код — [`terminal/agent/tools_news.go`](../../terminal/agent/tools_news.go): `NewsStore`,
+  `ClickHouseNewsStore`, `get_news`-дескриптор и хук `invokeNewsTool`. **Проводка в
+  `terminal/agent/tools.go` намеренно не сделана** (файл занят параллельной задачей): владельцу
+  каталога нужно добавить `newsToolCatalog()` в `buildTools()` и вызвать
+  `e.invokeNewsTool(ctx, store, name, args)` в диспетчере, передав `NewClickHouseNewsStore(...)`
+  из wiring. Тесты инструмента: `TestGetNewsToolFiltersBySince`, `TestNewsToolCatalog`,
+  `TestClickHouseNewsStoreQuery` (httptest).
+
+## 5. Команда `cmd/md-recorder`
 
 | Переменная | Смысл |
 |---|---|
@@ -160,15 +214,16 @@ go run ./cmd/md-recorder
 завершают запись штатно. В лог пишутся только режим, адрес, число символов и класс ошибки — креды и
 значения переменных не печатаются.
 
-## 5. Проверки и что не проверено
+## 6. Проверки и что не проверено
 
 Выполнено (unit, без сети):
 
 ```bash
 export GOCACHE="$PWD/.cache/go-build"
-go test -race ./terminal/chstore ./terminal/recorder
+go test -race ./terminal/chstore ./terminal/recorder ./terminal/feed
+go test -race ./terminal/agent -run 'News'
 go build ./cmd/md-recorder
-gofmt -l terminal/chstore terminal/recorder cmd/md-recorder
+gofmt -l terminal/chstore terminal/recorder terminal/feed terminal/agent/tools_news.go cmd/md-recorder
 go vet ./... && go build ./...
 make verify
 ```
@@ -187,3 +242,8 @@ make verify
   см. [alltrades.md](../protocol/alltrades.md)); в рекордере покрыто юнит-тестом.
 - Многосессионность: `session_id` на сессию и `gap` при обрыве проверены юнит-тестами, не живым
   переподключением.
+- **Живой поток новостей не снимался**: `get_old_news`/`get_news_body` к демо-серверу в этой
+  задаче не вызывались (нет согласия пользователя на живую сессию); формат заголовков/тел взят из
+  [news.md](../protocol/news.md) (**S/D/O**), а семантика `first_seen` — контракт рекордера (**I**).
+  `get_news` против реального ClickHouse не гонялся: SQL и разбор ответа проверены на
+  `httptest`-заглушке.

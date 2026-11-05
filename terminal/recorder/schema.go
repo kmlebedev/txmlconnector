@@ -19,7 +19,10 @@ const (
 	// TradesTable holds the market trades; ReplacingMergeTree dedupes the
 	// replayed trade numbers.
 	TradesTable = "md.trades"
-	// priceScale is the Decimal64 scale of both tables.
+	// NewsTable holds the TRANSAQ news with the first-seen point-in-time; the
+	// ReplacingMergeTree version is first_seen, so a late body never moves it.
+	NewsTable = "md.news"
+	// priceScale is the Decimal64 scale of both market tables.
 	priceScale = 6
 )
 
@@ -62,6 +65,16 @@ PARTITION BY toYYYYMMDD(ts)`,
 	open_interest Int64
 ) ENGINE = ReplacingMergeTree
 ORDER BY (sec_code, trade_no)`,
+	`CREATE TABLE IF NOT EXISTS md.news (
+	first_seen DateTime64(3, 'UTC'),
+	published DateTime64(3, 'UTC'),
+	news_id Int64,
+	source LowCardinality(String),
+	title String,
+	body String,
+	content_hash UInt64
+) ENGINE = ReplacingMergeTree(first_seen)
+ORDER BY (news_id)`,
 }
 
 // Schema returns the CREATE DATABASE / CREATE TABLE IF NOT EXISTS statements of
@@ -112,9 +125,22 @@ type tradeRow struct {
 	OpenInterest int64  `json:"open_interest"`
 }
 
-// ClickHouseSink writes the recorder batches into md.book_events/md.trades. It
-// is the recorder.Sink the md-recorder command wires to the chstore client; the
-// context is the lifetime of the recording session.
+// newsRow is one md.news JSONEachRow line: first_seen is the ReplacingMergeTree
+// version, so a late body is written as a new row of the same news_id with the
+// unchanged first_seen.
+type newsRow struct {
+	FirstSeen   string `json:"first_seen"`
+	Published   string `json:"published"`
+	NewsID      int64  `json:"news_id"`
+	Source      string `json:"source"`
+	Title       string `json:"title"`
+	Body        string `json:"body"`
+	ContentHash uint64 `json:"content_hash"`
+}
+
+// ClickHouseSink writes the recorder batches into md.book_events, md.trades and
+// md.news. It is the recorder.Sink the md-recorder command wires to the chstore
+// client; the context is the lifetime of the recording session.
 type ClickHouseSink struct {
 	ctx    context.Context
 	client *chstore.Client
@@ -146,6 +172,21 @@ func (s *ClickHouseSink) Book(events []BookEvent) error {
 		rows = append(rows, row)
 	}
 	return s.client.Insert(s.ctx, BookEventsTable, rows)
+}
+
+// News inserts the md.news rows of one recorder batch.
+func (s *ClickHouseSink) News(events []NewsEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	if s == nil || s.client == nil {
+		return fmt.Errorf("recorder: no ClickHouse client")
+	}
+	rows := make([]newsRow, 0, len(events))
+	for _, event := range events {
+		rows = append(rows, newsRowOf(event))
+	}
+	return s.client.Insert(s.ctx, NewsTable, rows)
 }
 
 // Trades inserts the md.trades rows of one recorder batch.
@@ -188,6 +229,19 @@ func bookRowOf(ev BookEvent) (bookRow, error) {
 		Price:     decimalString(ev.Price, priceScale),
 		Qty:       ev.Qty,
 	}, nil
+}
+
+// newsRowOf maps one typed news event to its ClickHouse row.
+func newsRowOf(ev NewsEvent) newsRow {
+	return newsRow{
+		FirstSeen:   chTime(ev.FirstSeen, timeMillisLayout),
+		Published:   chTime(ev.Published, timeMillisLayout),
+		NewsID:      ev.ID,
+		Source:      ev.Source,
+		Title:       ev.Title,
+		Body:        ev.Body,
+		ContentHash: ev.ContentHash,
+	}
 }
 
 // tradeRowOf maps one typed trade event to its ClickHouse row.

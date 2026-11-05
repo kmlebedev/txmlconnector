@@ -20,6 +20,7 @@ type marketClient interface {
 	ServerTimeDifference(ctx context.Context) (time.Duration, error)
 	ServerTZ() string
 	Catalog() *records.Catalog
+	OldNews(ctx context.Context, count int) error
 	Close() error
 }
 
@@ -41,6 +42,11 @@ const (
 	liveDialTimeout = 15 * time.Second
 	// liveTradeRing is how many recent ticks are kept per symbol.
 	liveTradeRing = 500
+	// newsPollInterval is how often the live feed asks get_old_news: the news
+	// feed has no subscription on the wire (docs/protocol/news.md).
+	newsPollInterval = 30 * time.Second
+	// newsPollCount is the get_old_news count (the protocol maximum is 100).
+	newsPollCount = 100
 )
 
 // stableSessionDuration is how long a live session must survive to count as
@@ -153,10 +159,39 @@ func (s *Service) runOnce(client marketClient) error {
 		return err
 	}
 	s.setSessionState(true, "подключено к серверу биржи")
+	// The news feed is request-driven, so it is polled for this session only.
+	newsCtx, cancelNews := context.WithCancel(s.ctx)
+	defer cancelNews()
+	s.wg.Add(1)
+	go s.newsLoop(newsCtx, client)
 	return client.Run(s.ctx, native.RunOptions{}, func(events []model.Event) error {
 		s.applyEvents(events)
 		return nil
 	})
+}
+
+// newsLoop requests the news headers of the live session: the headers arrive
+// through the Run callback, the loop only sends get_old_news.
+func (s *Service) newsLoop(ctx context.Context, client marketClient) {
+	defer s.wg.Done()
+	fetch := func() {
+		if ctx.Err() != nil {
+			return
+		}
+		// Best effort: a news failure must not break the market feed.
+		_ = client.OldNews(ctx, newsPollCount)
+	}
+	fetch()
+	ticker := time.NewTicker(newsPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			fetch()
+		}
+	}
 }
 
 // subscribeAll subscribes quotations, order books and the tick tape for the
@@ -300,6 +335,10 @@ func (s *Service) applyEvents(events []model.Event) {
 			s.applyQuotes(ev)
 		case *model.Trade:
 			s.applyTrade(ev)
+		case *model.NewsHeader:
+			s.applyNewsHeader(ev)
+		case *model.NewsBody:
+			s.applyNewsBody(ev)
 		case model.ServerStatus:
 			s.applyServerStatus(ev)
 		default:
@@ -438,6 +477,58 @@ func (s *Service) applyTrade(ev *model.Trade) {
 	s.trades[key] = ring
 	s.status.LastEventAt = now
 	s.mu.Unlock()
+}
+
+// applyNewsHeader stores one news header and publishes the news lenta event.
+// get_old_news is polled repeatedly, so an unchanged story is not re-published;
+// a correction keeps the original FirstSeen.
+func (s *Service) applyNewsHeader(ev *model.NewsHeader) {
+	if ev == nil || ev.ID == 0 {
+		return
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	item, known := s.news[ev.ID]
+	changed := !known
+	if !known {
+		item = News{ID: ev.ID, FirstSeen: now}
+		s.newsOrder = append(s.newsOrder, ev.ID)
+		if len(s.newsOrder) > maxNews {
+			delete(s.news, s.newsOrder[0])
+			s.newsOrder = append([]int64(nil), s.newsOrder[1:]...)
+		}
+	}
+	published := ev.Time.UTC()
+	if item.Published != published || item.Source != ev.Source || item.Title != ev.Title {
+		changed = true
+	}
+	item.Published, item.Source, item.Title = published, ev.Source, ev.Title
+	s.news[ev.ID] = item
+	s.status.LastEventAt = now
+	s.mu.Unlock()
+	if changed {
+		s.publish(Event{Type: "news", Data: item})
+	}
+}
+
+// applyNewsBody attaches the body of a known news and publishes the update; the
+// FirstSeen of the story never moves.
+func (s *Service) applyNewsBody(ev *model.NewsBody) {
+	if ev == nil {
+		return
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	item, ok := s.news[ev.ID]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	item.Body = ev.Text
+	s.news[ev.ID] = item
+	s.status.LastEventAt = now
+	s.mu.Unlock()
+	s.publish(Event{Type: "news", Data: item})
 }
 
 // applyServerStatus updates the session status and publishes it.
