@@ -26,12 +26,19 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { createAutonomy } from './autonomy.js';
 import { createLLMBridge } from './llm-bridge.js';
 import { createSkillProvider } from './skills.js';
 import { createToolBridge } from './tools.js';
 
-/** Services required by the plugin; without them the row stays inactive. */
-export const inject = ['webServer', 'tools'];
+/**
+ * Services required by the plugin; without them the row stays inactive.
+ * workflowEngine/schedule/sessionController/storageDomain are the Harness Web
+ * composition services of the autonomous nightly workflow (plan Task 21,
+ * docs/ai-terminal/dsh-integration.md §2.4-2.6/2.8); the plan's "storage" name
+ * is the storageDomain service.
+ */
+export const inject = ['webServer', 'tools', 'workflowEngine', 'schedule', 'sessionController', 'storageDomain'];
 
 const MOUNT = '/ai-terminal';
 const CONTROL = '/ai-terminal-ctl';
@@ -52,6 +59,15 @@ const DEFAULTS = {
   llmModel: 'deepseek-flash',
   // Optional directory of generated skill patterns (<dataDir>/skills, Task 19).
   dataDir: '',
+  // Autonomous nightly research workflow (plan Task 21): disabled by default,
+  // a token budget and a wall clock cancel the run; mutating proposals still
+  // need human confirmation in the chat.
+  autonomy: {
+    enabled: false,
+    tokenBudget: 200_000,
+    maxWallMinutes: 60,
+    approvalMode: 'confirm',
+  },
 };
 
 // Environment the backend reads from the Harness process (ARCHITECTURE §2).
@@ -93,7 +109,7 @@ function backendEnv(token, instanceId, overrides = {}) {
 
 /** Read and validate the row config, ignoring unknown keys. */
 function normalizeConfig(config) {
-  const cfg = { ...DEFAULTS };
+  const cfg = { ...DEFAULTS, autonomy: { ...DEFAULTS.autonomy } };
   if (!config || typeof config !== 'object') return cfg;
   if (typeof config.mode === 'string' && ['offline', 'live', 'auto'].includes(config.mode)) cfg.mode = config.mode;
   if (Number.isInteger(config.port) && config.port >= 1024 && config.port <= 65535) cfg.port = config.port;
@@ -103,6 +119,12 @@ function normalizeConfig(config) {
   if (typeof config.llmProvider === 'string' && config.llmProvider.trim() !== '') cfg.llmProvider = config.llmProvider.trim();
   if (typeof config.llmModel === 'string' && config.llmModel.trim() !== '') cfg.llmModel = config.llmModel.trim();
   if (typeof config.dataDir === 'string' && config.dataDir.trim() !== '') cfg.dataDir = path.resolve(config.dataDir.trim());
+  if (config.autonomy && typeof config.autonomy === 'object') {
+    if (typeof config.autonomy.enabled === 'boolean') cfg.autonomy.enabled = config.autonomy.enabled;
+    if (Number.isInteger(config.autonomy.tokenBudget) && config.autonomy.tokenBudget >= 0) cfg.autonomy.tokenBudget = config.autonomy.tokenBudget;
+    if (Number.isInteger(config.autonomy.maxWallMinutes) && config.autonomy.maxWallMinutes > 0) cfg.autonomy.maxWallMinutes = config.autonomy.maxWallMinutes;
+    if (config.autonomy.approvalMode === 'confirm' || config.autonomy.approvalMode === 'auto') cfg.autonomy.approvalMode = config.autonomy.approvalMode;
+  }
   return cfg;
 }
 
@@ -496,13 +518,107 @@ export function apply(ctx, config) {
 
   // Skill provider: the repository skills/trading-* tree (same frontmatter as
   // "npx skills add") plus the generated patterns under <dataDir>/skills.
+  const repoDir = findRepoDir(cfg.repoDir);
   const skillsService = typeof ctx.get === 'function' ? ctx.get('skills') : ctx.skills;
   if (skillsService && typeof skillsService.registerProvider === 'function') {
-    const repoDir = findRepoDir(cfg.repoDir);
     const roots = [path.join(repoDir, 'skills')];
     if (cfg.dataDir !== '') roots.push(path.join(cfg.dataDir, 'skills'));
     own(ctx.effect(() => skillsService.registerProvider(() => createSkillProvider({ roots })), 'ai-terminal: skill provider'));
   }
+
+  // --- Autonomous nightly research (plan Task 21) -----------------------
+  //
+  // autonomy.js owns the ai-terminal-nightly workflow run: the schedule is a
+  // Harness task (00:30 Europe/Moscow, Tue-Sat) whose prompt calls the
+  // terminal_nightly_research tool; the tool starts the workflow, the token
+  // budget is enforced by intercepting ctx.llm streams, and the kill switch
+  // cancels the run plus the backend autonomy runner. The script is read from
+  // workflows/nightly-research.js as text: the workflow engine executes the
+  // body in its own realm.
+  const resolveService = (name) => (typeof ctx.get === 'function' ? ctx.get(name) : ctx[name]);
+  let nightlyScript = '';
+  try {
+    nightlyScript = fs.readFileSync(path.join(repoDir, 'workflows', 'nightly-research.js'), 'utf8');
+  } catch (error) {
+    console.warn('[ai-terminal] скрипт ночного workflow недоступен: '
+      + (error instanceof Error ? error.message : String(error)));
+  }
+  const autonomy = createAutonomy({
+    ctx,
+    cfg: cfg.autonomy,
+    workflowEngine: resolveService('workflowEngine'),
+    schedule: resolveService('schedule'),
+    sessionController: resolveService('sessionController'),
+    scriptText: nightlyScript,
+    invokeTool: toolBridge ? (name, args, signal) => toolBridge.invoke(name, args, signal) : null,
+    log: (level, message) => {
+      const line = '[ai-terminal] ' + message;
+      if (level === 'warn') console.warn(line);
+      else console.log(line);
+    },
+  });
+  own(() => autonomy.dispose());
+  own(autonomy.registerTool(toolService));
+
+  own(ctx.webServer.register({
+    kind: 'exact',
+    path: CONTROL + '/autonomy/status',
+    handler: (req, res) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        json(res, 405, { error: { code: 'method_not_allowed', message: 'только GET' } });
+        return;
+      }
+      if (req.method === 'HEAD') {
+        res.statusCode = 200;
+        res.end();
+        return;
+      }
+      json(res, 200, autonomy.status());
+    },
+  }));
+
+  own(ctx.webServer.register({
+    kind: 'exact',
+    path: CONTROL + '/autonomy/run',
+    handler: (req, res) => {
+      if (req.method !== 'POST') {
+        json(res, 405, { error: { code: 'method_not_allowed', message: 'только POST' } });
+        return;
+      }
+      if (autonomy.status().running) {
+        json(res, 409, { error: { code: 'already_running', message: 'ночное исследование уже выполняется' }, status: autonomy.status() });
+        return;
+      }
+      // Start the run without blocking the control request: the panel polls
+      // /autonomy/status, the workflow itself may run for minutes.
+      void autonomy.runNow({ trigger: 'control' }).catch((error) => {
+        console.warn('[ai-terminal] ночной workflow не запустился: '
+          + (error instanceof Error ? error.message : String(error)));
+      });
+      json(res, 202, { started: true, status: autonomy.status() });
+    },
+  }));
+
+  own(ctx.webServer.register({
+    kind: 'exact',
+    path: CONTROL + '/autonomy/stop',
+    handler: async (req, res) => {
+      if (req.method !== 'POST') {
+        json(res, 405, { error: { code: 'method_not_allowed', message: 'только POST' } });
+        return;
+      }
+      try {
+        json(res, 200, await autonomy.stop());
+      } catch (error) {
+        json(res, 503, { error: { code: 'autonomy_stop_failed', message: error instanceof Error ? error.message : String(error) }, status: autonomy.status() });
+      }
+    },
+  }));
+
+  void autonomy.ensureSchedule().catch((error) => {
+    console.warn('[ai-terminal] расписание ночного исследования не создано: '
+      + (error instanceof Error ? error.message : String(error)));
+  });
 
   own(ctx.webServer.register({
     kind: 'exact',

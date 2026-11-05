@@ -420,6 +420,12 @@ window.__ModuleLoader__.load({
     const TERMINAL_TAB_KIND = 'ai-terminal';
     const SELECTION_INTERACTION_ID = 'ai-terminal-ask-selection';
     const SCREEN_POLL_MS = 2_000;
+    // Autonomous nightly research (plan Task 21): right-panel control surface.
+    const AUTONOMY_TAB_ID = 'ai-terminal/autonomy';
+    const AUTONOMY_TAB_KIND = 'ai-terminal-autonomy';
+    const AUTONOMY_STATUS_URL = '/ai-terminal-ctl/autonomy/status';
+    const AUTONOMY_RUN_URL = '/ai-terminal-ctl/autonomy/run';
+    const AUTONOMY_STOP_URL = '/ai-terminal-ctl/autonomy/stop';
 
     /** Last known screen context of the embedded terminal SPA. */
     let screenContext = { source: 'ai-terminal', url: TERMINAL_URL, activeTab: 'chart', symbol: '', periodSec: 0 };
@@ -578,6 +584,99 @@ window.__ModuleLoader__.load({
       }, 'Спросить о выделенном');
     }
 
+
+    /** Fetch one autonomy control endpoint, keeping the status payload on errors. */
+    async function fetchAutonomy(url, init) {
+      const response = await fetch(url, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+        ...(init || {}),
+      });
+      let data = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+      if (!response.ok) {
+        const message = data && data.error && data.error.message ? data.error.message : 'HTTP ' + response.status;
+        const error = new Error(message);
+        error.status = response.status;
+        error.payload = data;
+        throw error;
+      }
+      return data;
+    }
+
+    /** Human label of one autonomy run state. */
+    function autonomyRunLabel(status) {
+      if (!status) return '—';
+      if (status.running) return 'выполняется';
+      if (status.stopReason === 'cancelled') return 'отменено (' + String(status.reason || '') + ')';
+      if (status.stopReason === 'error') return 'ошибка';
+      if (status.lastFinishedAt) return 'завершено';
+      return 'ещё не запускалось';
+    }
+
+    /** Right-panel "Автономия" tab: last run, token budget and kill switch (plan Task 21). */
+    function AutonomyPanelTabBody() {
+      const [state, setState] = React.useState({ loading: true, busy: '', status: null, error: '' });
+      const refresh = React.useCallback(async () => {
+        try {
+          const status = await fetchAutonomy(AUTONOMY_STATUS_URL);
+          setState((current) => ({ ...current, loading: false, status, error: '' }));
+        } catch (error) {
+          setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
+        }
+      }, []);
+      React.useEffect(() => {
+        let alive = true;
+        void refresh();
+        const timer = setInterval(() => {
+          if (alive) void refresh();
+        }, 3_000);
+        return () => {
+          alive = false;
+          clearInterval(timer);
+        };
+      }, [refresh]);
+      const act = React.useCallback(async (url, busy) => {
+        setState((current) => ({ ...current, busy, error: '' }));
+        try {
+          await fetchAutonomy(url, { method: 'POST' });
+        } catch (error) {
+          setState((current) => ({ ...current, error: error instanceof Error ? error.message : String(error) }));
+        } finally {
+          setState((current) => ({ ...current, busy: '' }));
+          await refresh();
+        }
+      }, [refresh]);
+      const status = state.status;
+      const usage = status && status.usage ? status.usage : { total: 0 };
+      const budget = status && status.budget ? status.budget : { tokenBudget: 0 };
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', padding: '10px 12px', fontSize: '12px' } },
+        h('div', { style: CARD.title }, 'Автономия'),
+        h('div', { style: CARD.note }, state.loading ? 'Загрузка…' : (status && status.enabled ? 'Расписание включено' : 'Расписание выключено (autonomy.enabled: false)')),
+        h('div', { style: CARD.note }, 'Состояние: ' + autonomyRunLabel(status)),
+        h('div', { style: CARD.note }, 'Токены: ' + String(usage.total) + ' / ' + String(budget.tokenBudget) + ' · лимит ' + String(budget.maxWallMinutes) + ' мин'),
+        status && status.scheduleId ? h('div', { style: CARD.note }, 'Расписание: ' + String(status.scheduleId)) : null,
+        status && status.lastFinishedAt ? h('div', { style: CARD.note }, 'Последний запуск: ' + new Date(status.lastFinishedAt).toLocaleString('ru-RU')) : null,
+        h('div', { style: { display: 'flex', gap: '6px', marginTop: '4px' } },
+          h('button', {
+            type: 'button',
+            style: styles.button(true),
+            disabled: state.busy !== '' || (status !== null && status.running),
+            onClick: () => { void act(AUTONOMY_RUN_URL, 'run'); },
+          }, 'Запустить сейчас'),
+          h('button', {
+            type: 'button',
+            style: styles.button(false),
+            disabled: state.busy !== '',
+            onClick: () => { void act(AUTONOMY_STOP_URL, 'stop'); },
+          }, 'Стоп')),
+        state.error !== '' ? h('div', { style: CARD.error }, state.error) : null);
+    }
+
     function TerminalPanel({ t }) {
       const frameRef = React.useRef(null);
       React.useEffect(() => {
@@ -714,6 +813,20 @@ window.__ModuleLoader__.load({
         key: TERMINAL_TAB_ID,
         locale: NS,
       }, TerminalPanelTabBody));
+
+      // Right-panel "Автономия" tab (plan Task 21): last run, budget, kill switch.
+      if (ctx.sidebarRightTabs && typeof ctx.sidebarRightTabs.register === 'function') {
+        ctx.effect(() => ctx.sidebarRightTabs.register({
+          id: AUTONOMY_TAB_ID,
+          kind: AUTONOMY_TAB_KIND,
+          title: () => 'Автономия',
+        }), 'ai-terminal: autonomy tab type');
+      }
+      ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+        name: 'sidebar.right.pane.tab',
+        key: AUTONOMY_TAB_ID,
+        locale: NS,
+      }, AutonomyPanelTabBody));
 
       // Session header action: send the visible chart into the chat input.
       ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
