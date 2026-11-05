@@ -105,7 +105,8 @@ func (c *Conn) ChangePassword(ctx context.Context, oldPassword, newPassword stri
 	parsed, err := ParseChangePasswordReply(reply)
 	if err != nil {
 		// Any malformed reply is the DLL fatal "incorrect server buffer" path.
-		_ = c.Close()
+		// The caller (Client) records the terminal failure BEFORE closing the
+		// socket, so a concurrent Run poll cannot enter the recover branch.
 		return ChangePasswordReply{}, ErrChangePasswordFatal
 	}
 	return parsed, nil

@@ -101,5 +101,5 @@ O: `tools/replay-server` + `tools/tcproxy` + DLL под Wine 11.21, dump `.re-ru
 - Строгий разбор: status 0/1 — ровно один байт; status 2 — непустая C-строка + отсутствие хвоста;
   zero-length/неизвестный status/лишние байты → fatal.
 - Пароль/recover: сессионные ключи после успеха не меняются (DLL); Go-клиент обновляет
-  сохранённый `cfg.Password` (под Client.mu) для будущего полного reconnect; recover/relelogin
-  читают снимок cfg под локом.
+  сохранённый `cfg.Password` (под Client.mu) для будущего полного reconnect; recover не читает Password (shortRecover только Restore); relogin
+  читает снимок cfg под локом.

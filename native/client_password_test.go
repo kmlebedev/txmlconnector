@@ -200,6 +200,7 @@ func TestChangePasswordConnectorFatal(t *testing.T) {
 	if falseCount != 1 {
 		t.Fatalf("connected=false callbacks = %d, want exactly 1", falseCount)
 	}
+	_ = trueCount // the initial connected=true is expected; late true checked below
 	if recoverCount != 0 {
 		t.Fatalf("recover=true callbacks = %d, want 0 for fatal change_pass", recoverCount)
 	}
@@ -222,4 +223,41 @@ func TestChangePasswordConnectorFatal(t *testing.T) {
 		t.Fatalf("connected=true after false = %d, want 0", lateTrue)
 	}
 	_ = trueCount
+}
+
+// TestConnChangePasswordMalformedEndToEnd: status 3 and status-2 trailing bytes
+// are rejected by Conn.ChangePassword itself (not only by the parser) and are
+// terminal for the connector.
+func TestConnChangePasswordMalformedEndToEnd(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply []byte
+	}{
+		{"status3", []byte{3}},
+		{"status2-trailing", []byte{2, 'x', 0, 0}},
+		{"status0-trailing", []byte{0, 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newRunServer(t)
+			srv.Snapshot = clientSnapshot(t)
+			srv.Handle(session.RqChangePwd, func([]byte) (byte, []byte) {
+				return wire.KindReply | wire.FlagPlain, tc.reply
+			})
+			c := New(Config{Dial: srv.Dial})
+			rec := newRecorder()
+			if err := c.Start(rec.handle); err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			send(t, c, connectCommand())
+			rec.next(t, "<server_status")
+			cmd := "<command id=" + quote + "change_pass" + quote + " oldpass=" + quote + "OldPass2!" + quote + " newpass=" + quote + "TestPass1!" + quote + "/>"
+			if got := send(t, c, cmd); !strings.Contains(got, "RQ_CHANGE_PWD incorrect server buffer") {
+				t.Fatalf("malformed reply = %s", got)
+			}
+			if got := rec.next(t, "<server_status"); !strings.Contains(got, "connected="+quote+"false"+quote) {
+				t.Fatalf("fatal status = %s", got)
+			}
+		})
+	}
 }
