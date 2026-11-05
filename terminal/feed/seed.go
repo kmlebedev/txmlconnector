@@ -193,7 +193,7 @@ func (s *Service) loadOffline(seed *seedFile) error {
 		Connected:       true,
 		Message:         "офлайн-снапшот",
 		ServerTime:      lastEvent,
-		ExchangeTZ:      seed.ExchangeTZ,
+		ExchangeTZ:      s.exchangeTZ,
 		SeedGeneratedAt: seed.GeneratedAt,
 		LastEventAt:     lastEvent,
 	}
@@ -225,7 +225,7 @@ func (s *Service) loadLiveSkeleton(seed *seedFile) {
 		Mode:            ModeLive,
 		Connected:       false,
 		Message:         "нет соединения с сервером биржи",
-		ExchangeTZ:      seed.ExchangeTZ,
+		ExchangeTZ:      s.exchangeTZ,
 		SeedGeneratedAt: seed.GeneratedAt,
 	}
 }

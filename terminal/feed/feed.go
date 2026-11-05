@@ -195,10 +195,13 @@ func tradeLimit(limit int) int {
 	return limit
 }
 
-// historyEntry is a live history cache record.
+// historyEntry is a live history cache record. count is the candle count the
+// series was fetched with: a cached series satisfies any request up to that
+// count, a larger request re-fetches (a smaller one is trimmed).
 type historyEntry struct {
 	history  History
 	expireAt time.Time
+	count    int
 }
 
 // Service is the market-data source. It is safe for concurrent use.
@@ -257,7 +260,7 @@ func New(cfg Config) (*Service, error) {
 		trades:       map[string][]Trade{},
 		historyCache: map[string]*historyEntry{},
 		subs:         map[uint64]func(Event){},
-		exchangeTZ:   seed.ExchangeTZ,
+		exchangeTZ:   exchangeZoneName(seed.ExchangeTZ),
 	}
 	s.symbols = parseSymbols(universeSymbols(cfg.Universe, seed.Universe))
 	s.universe = universeSymbols(cfg.Universe, seed.Universe)
@@ -373,7 +376,9 @@ func (s *Service) Status() Status {
 	st := s.status
 	offset := s.serverOffset
 	s.mu.RUnlock()
-	if st.Mode == ModeLive && st.Connected && offset != 0 {
+	// In live mode the exchange clock keeps running: render the current
+	// instant from the measured offset (a zero offset is meaningful too).
+	if st.Mode == ModeLive && st.Connected {
 		st.ServerTime = time.Now().UTC().Add(offset)
 	}
 	return st

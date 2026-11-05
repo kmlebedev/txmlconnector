@@ -176,6 +176,15 @@ func reconnectMessage(err error) string {
 // catalog and the candle-kind ids. It must be called only while Run is not
 // polling: the catalog is otherwise mutated under the native client lock.
 func (s *Service) applyCatalog(client marketClient) {
+	// The server reports a Windows zone name; the contract exposes IANA (§6).
+	// Normalize it before the catalog work so the exchange time zone is right
+	// even when the dictionaries are not ready yet.
+	if zone := exchangeZoneName(client.ServerTZ()); zone != "" {
+		s.mu.Lock()
+		s.exchangeTZ = zone
+		s.status.ExchangeTZ = zone
+		s.mu.Unlock()
+	}
 	catalog := client.Catalog()
 	if catalog == nil {
 		return
@@ -216,11 +225,6 @@ func (s *Service) applyCatalog(client marketClient) {
 			inst.Decimals = int(decimals)
 		}
 	}
-	exchangeTZ := client.ServerTZ()
-	if exchangeTZ != "" {
-		s.exchangeTZ = exchangeTZ
-		s.status.ExchangeTZ = exchangeTZ
-	}
 	s.mu.Unlock()
 }
 
@@ -234,15 +238,15 @@ func (s *Service) refreshServerTime(ctx context.Context, client marketClient) {
 	now := time.Now()
 	localWall := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second(), 0, time.UTC)
 	serverWall := localWall.Add(diff).UTC()
-	instant := serverWall
 	s.mu.RLock()
 	zone := s.exchangeTZ
 	s.mu.RUnlock()
-	if zone != "" {
-		if loc, err := time.LoadLocation(zone); err == nil {
-			instant = time.Date(serverWall.Year(), serverWall.Month(), serverWall.Day(),
-				serverWall.Hour(), serverWall.Minute(), serverWall.Second(), 0, loc).UTC()
-		}
+	instant, ok := serverTimeFromWall(serverWall, zone)
+	if !ok {
+		// Unknown exchange zone: fall back to the local UTC clock instead of
+		// mislabelling the server wall clock as UTC (a wrong instant is worse
+		// than a small local-clock skew).
+		instant = time.Now().UTC()
 	}
 	s.mu.Lock()
 	s.serverOffset = instant.Sub(now)
@@ -435,7 +439,10 @@ func (s *Service) liveCandles(ctx context.Context, symbol string, periodSec, cou
 	s.mu.RLock()
 	entry := s.historyCache[key]
 	s.mu.RUnlock()
-	if entry != nil && now.Before(entry.expireAt) {
+	// A cached series satisfies requests up to the count it was fetched with;
+	// a larger request must re-fetch, otherwise the backtest would silently get
+	// the short series of an earlier endpoint call.
+	if entry != nil && now.Before(entry.expireAt) && count <= entry.count {
 		return trimHistory(entry.history, count), nil
 	}
 	s.mu.RLock()
@@ -460,7 +467,7 @@ func (s *Service) liveCandles(ctx context.Context, symbol string, periodSec, cou
 	}
 	history := historyFromCandles(candles, symbol, periodSec, "с сервера биржи")
 	s.mu.Lock()
-	s.historyCache[key] = &historyEntry{history: history, expireAt: now.Add(s.cfg.HistoryTTL)}
+	s.historyCache[key] = &historyEntry{history: history, expireAt: now.Add(s.cfg.HistoryTTL), count: count}
 	s.mu.Unlock()
 	return trimHistory(history, count), nil
 }
