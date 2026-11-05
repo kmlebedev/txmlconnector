@@ -101,6 +101,11 @@ type Client struct {
 	// marginRates is the R_SEC_RATE (0x0a) price P per secid (lot cost in
 	// kopecks) used by the local max-buy/sell formula (task 23/52).
 	marginRates map[uint16]int64
+	// 0x5a tick deltas accumulate per (secid,board) across RQ_MAIN records (S).
+	tickTradeNos map[tickKey]int64
+	tickTimes    map[tickKey]int64
+	// newsBodyRequest is the get_news_body id waiting for its 0x36 flags=2 body.
+	newsBodyRequest int64
 	// news is the header store of get_old_news/get_news_body. The RQ_GETNEWS
 	// from/to rule uses the MINIMUM stored id (news.md D+O, task-56).
 	news      map[int64]model.NewsHeader

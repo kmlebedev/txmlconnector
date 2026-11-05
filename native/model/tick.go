@@ -19,3 +19,11 @@ type Tick struct {
 }
 
 func (*Tick) isEvent() {}
+
+// Ticks is one 0x5a record batch: one RQ_MAIN record can carry several ticks
+// and the connector renders one <ticks> callback for the batch (S).
+type Ticks struct {
+	Items []Tick
+}
+
+func (*Ticks) isEvent() {}
