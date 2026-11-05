@@ -10,6 +10,13 @@
 //                                                         aligned with candles,
 //                                                         NaN/null on warm-up;
 //   result.levels  {name: number[]}  (optional)        - indicator thresholds.
+//
+// Volatility oracle overlay contract (setVolatility(payload), plan Task 16):
+//   payload.sigmaPct    expected standard deviation of the horizon return, %;
+//   payload.horizonSec  forecast horizon, seconds;
+//   payload.multiplier  variance multiplier over the HAR baseline;
+//   payload.regime      calm|normal|event|stress (colors the cone and markers);
+//   payload.events      [{at: RFC3339, category, title, exact}] release markers.
 
 import {
   clamp, fmtDate, fmtDayMonth, fmtHM, fmtNum, fmtPrice, fmtVolume,
@@ -33,6 +40,50 @@ const COLORS = {
   indicator: '#3b82f6',
   indicatorLevel: '#a9b6c6',
 };
+
+// Volatility oracle overlay palette: the regime colors the expected-volatility
+// cone, its chip and the release markers.
+const VOLATILITY_COLORS = {
+  calm: { fill: 'rgba(15, 157, 107, 0.10)', line: '#0f9d6b', chip: '#0f9d6b', marker: 'rgba(15, 157, 107, 0.60)' },
+  normal: { fill: 'rgba(59, 130, 246, 0.10)', line: '#3b82f6', chip: '#3b82f6', marker: 'rgba(59, 130, 246, 0.60)' },
+  event: { fill: 'rgba(217, 154, 0, 0.14)', line: '#d99a00', chip: '#b07d00', marker: 'rgba(217, 154, 0, 0.80)' },
+  stress: { fill: 'rgba(229, 72, 77, 0.14)', line: '#e5484d', chip: '#e5484d', marker: 'rgba(229, 72, 77, 0.80)' },
+};
+
+function volatilityColor(regime) {
+  return VOLATILITY_COLORS[regime] || VOLATILITY_COLORS.normal;
+}
+
+/** Formats the forecast horizon for the overlay chip (8ч, 90м, 1д). */
+function formatHorizon(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  if (seconds % 86400 === 0) return Math.round(seconds / 86400) + 'д';
+  if (seconds % 3600 === 0) return Math.round(seconds / 3600) + 'ч';
+  return Math.round(seconds / 60) + 'м';
+}
+
+/** Short release label of the marker (the tool category is the contract key). */
+function shortReleaseLabel(category) {
+  const labels = {
+    cbr_rate: 'CBR', fomc: 'FOMC', us_cpi: 'US CPI', us_nfp: 'US NFP', us_eia: 'EIA', us_wgc: 'WGC',
+    ru_cpi: 'CPI РФ', ru_gdp: 'ВВП', ru_gov: 'Правительство', moex_rebalance: 'MOEX', bank_results: 'Отчёты',
+  };
+  const key = String(category || '');
+  if (labels[key]) return labels[key];
+  return key ? key.slice(0, 8).toUpperCase() : 'EVENT';
+}
+
+/** Nearest candle index of a Unix-seconds instant (the candles are evenly spaced). */
+function nearestCandleIndex(candles, seconds) {
+  if (!candles.length) return -1;
+  let low = 0;
+  let high = candles.length - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >> 1;
+    if (candles[middle].t <= seconds) low = middle; else high = middle;
+  }
+  return Math.abs(candles[low].t - seconds) <= Math.abs(candles[high].t - seconds) ? low : high;
+}
 
 function dpr() {
   return Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
@@ -71,6 +122,7 @@ export class CandleChart {
     this.instrument = null;
     this.periodSec = 300;
     this.overlay = null;
+    this.volatility = null;
     this.crosshair = null;
     this.hoverIndex = -1;
     this.layout = null;
@@ -116,6 +168,27 @@ export class CandleChart {
 
   clearOverlay() {
     this.overlay = null;
+    this.draw();
+  }
+
+  /**
+   * Volatility oracle overlay contract (setVolatility(payload)):
+   *   payload.sigmaPct    expected standard deviation of the horizon return, %;
+   *   payload.horizonSec  forecast horizon, seconds;
+   *   payload.multiplier  variance multiplier over the HAR baseline;
+   *   payload.regime      calm|normal|event|stress (colors the cone and markers);
+   *   payload.events      [{at: RFC3339, category, title, exact}] release markers.
+   * The cone projects the expected move from the last close to the right edge,
+   * the markers sit on the release instants (future releases are pinned to the
+   * right edge with an arrow).
+   */
+  setVolatility(payload) {
+    this.volatility = payload || null;
+    this.draw();
+  }
+
+  clearVolatility() {
+    this.volatility = null;
     this.draw();
   }
 
@@ -388,6 +461,8 @@ export class CandleChart {
 
     // position shading: entry..exit intervals behind the candles
     this.drawPositionBands(ctx, { n, stepX, plotLeft, priceTop, priceBottom });
+    // volatility oracle: expected-volatility cone behind the candles
+    this.drawVolatilityBand(ctx, { plotLeft, plotRight, priceTop, priceBottom, yPrice, bodyWidth, stepX });
 
     // volume bars
     for (let i = 0; i < n; i += 1) {
@@ -486,6 +561,9 @@ export class CandleChart {
     ctx.textBaseline = 'middle';
     ctx.fillText(label, labelX + 6, labelY + labelHeight / 2 + 0.5);
 
+    // volatility oracle: release markers on top of the candles
+    this.drawVolatilityMarkers(ctx, { plotLeft, plotRight, plotTop, priceTop, priceBottom, stepX });
+
     // overlay: equity line + benchmark + trade markers (own vertical scale)
     if (this.overlay) {
       this.drawOverlay(ctx, {
@@ -568,6 +646,126 @@ export class CandleChart {
       return { name, values, levels };
     }
     return null;
+  }
+
+  /**
+   * Draws the expected-volatility cone of the oracle to the right of the last
+   * candle: the band expands as sqrt(time) up to sigmaPct at the horizon edge,
+   * clamped to the price area so a stress forecast stays readable.
+   */
+  drawVolatilityBand(ctx, { plotLeft, plotRight, priceTop, priceBottom, yPrice, bodyWidth, stepX }) {
+    const forecast = this.volatility;
+    if (!forecast) return;
+    const sigmaPct = Number(forecast.sigmaPct);
+    if (!Number.isFinite(sigmaPct) || sigmaPct <= 0) return;
+    const n = this.candles.length;
+    if (!n) return;
+    const lastClose = Number(this.candles[n - 1].c);
+    if (!(lastClose > 0)) return;
+    const sigma = sigmaPct / 100;
+    const lastX = plotLeft + (n - 0.5) * stepX;
+    const xStart = clamp(lastX + Math.max(1, bodyWidth) / 2, plotLeft, plotRight);
+    const xEnd = plotRight;
+    if (xEnd - xStart < 8) return;
+    const steps = 24;
+    const upper = [];
+    const lower = [];
+    for (let i = 0; i <= steps; i += 1) {
+      const fraction = i / steps;
+      const x = xStart + (xEnd - xStart) * fraction;
+      const move = sigma * Math.sqrt(fraction);
+      upper.push([x, clamp(yPrice(lastClose * (1 + move)), priceTop + 1, priceBottom - 1)]);
+      lower.push([x, clamp(yPrice(lastClose * (1 - move)), priceTop + 1, priceBottom - 1)]);
+    }
+    const color = volatilityColor(forecast.regime);
+    const baseY = clamp(yPrice(lastClose), priceTop + 1, priceBottom - 1);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(xStart, baseY);
+    for (const point of upper) ctx.lineTo(point[0], point[1]);
+    for (let i = lower.length - 1; i >= 0; i -= 1) ctx.lineTo(lower[i][0], lower[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = color.fill;
+    ctx.fill();
+    ctx.strokeStyle = color.line;
+    ctx.globalAlpha = 0.85;
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    for (const path of [upper, lower]) {
+      ctx.beginPath();
+      path.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point[0], point[1]); else ctx.lineTo(point[0], point[1]);
+      });
+      ctx.stroke();
+    }
+    ctx.restore();
+    // legend chip: sigma, horizon, variance multiplier and the regime
+    const parts = ['сигма ' + sigmaPct.toFixed(2) + '%'];
+    const horizon = formatHorizon(Number(forecast.horizonSec));
+    if (horizon) parts.push(horizon);
+    const multiplier = Number(forecast.multiplier);
+    if (Number.isFinite(multiplier)) parts.push('x' + multiplier.toFixed(2));
+    if (forecast.regime) parts.push(String(forecast.regime));
+    const chip = parts.join(' ');
+    ctx.save();
+    ctx.font = '10.5px ui-monospace, SFMono-Regular, Menlo, "Segoe UI", sans-serif';
+    const width = ctx.measureText(chip).width + 12;
+    const x = clamp(plotRight - width, plotLeft, plotRight);
+    roundRect(ctx, x, priceTop + 4, width, 17, 4);
+    ctx.fillStyle = color.chip;
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(chip, x + 6, priceTop + 13);
+    ctx.restore();
+  }
+
+  /**
+   * Draws the release markers of the oracle forecast: a dashed vertical line on
+   * every release instant inside the candles; a future release is pinned to the
+   * right edge with an arrow.
+   */
+  drawVolatilityMarkers(ctx, { plotLeft, plotRight, plotTop, priceTop, priceBottom, stepX }) {
+    const forecast = this.volatility;
+    const events = forecast && Array.isArray(forecast.events) ? forecast.events : [];
+    if (!events.length || !this.candles.length) return;
+    const lastT = this.candles[this.candles.length - 1].t;
+    const color = volatilityColor(forecast.regime).marker;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.setLineDash([2, 3]);
+    ctx.lineWidth = 1;
+    ctx.font = '9.5px ui-monospace, SFMono-Regular, Menlo, "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    let labels = 0;
+    const labelX = [];
+    for (const event of events) {
+      const timestamp = Date.parse(event && event.at);
+      if (!Number.isFinite(timestamp)) continue;
+      const seconds = timestamp / 1000;
+      let x = plotRight;
+      let future = true;
+      if (seconds <= lastT) {
+        const index = nearestCandleIndex(this.candles, seconds);
+        x = plotLeft + (index + 0.5) * stepX;
+        future = false;
+      }
+      x = clamp(x, plotLeft, plotRight);
+      ctx.beginPath();
+      ctx.moveTo(crisp(x), priceTop);
+      ctx.lineTo(crisp(x), priceBottom);
+      ctx.stroke();
+      if (labels < 5 && !labelX.includes(Math.round(x))) {
+        labelX.push(Math.round(x));
+        const label = shortReleaseLabel(event.category);
+        ctx.fillText(future ? label + ' >' : label, clamp(x, plotLeft + 16, plotRight - 16), plotTop + 2 + (labels % 2) * 11);
+        labels += 1;
+      }
+    }
+    ctx.restore();
   }
 
   /** Draws the selected (or being dragged) candle range over the plot. */

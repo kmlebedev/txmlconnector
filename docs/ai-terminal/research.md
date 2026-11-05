@@ -120,3 +120,91 @@ make verify
 - Живых прогонов на истории TRANSAQ в этой задаче не было: тесты синтетические и на фикстурах
   (`I`), ручная проверка промптом в DSH — после появления tool-bridge (задача 9).
 - Fingerprint-исследование (задача 17) документируется отдельно в `docs/ai-terminal/fingerprint.md`.
+
+## 7. Оракул волатильности: релизы и новости (задача 16)
+
+Пакет [`terminal/volatility`](../../terminal/volatility/oracle.go) — статическая модель ожидаемой
+волатильности без внешних библиотек: HAR-RV по внутридневным барам, окна релизов макростатистики и
+затухающая интенсивность аннотированных новостей. Все формулы и числа — **I** (реализация и
+синтетические тесты; живых прогонов на истории TRANSAQ в этой задаче не было).
+
+### 7.1 Контракт
+
+```go
+type Forecast struct { Symbol string; At time.Time; Horizon time.Duration; SigmaPct float64; Multiplier float64; Drivers []Driver; Regime string }
+type Driver struct { Kind string; Ref string; Contribution float64 }
+func Fit(ctx context.Context, bars []backtest.Bar, rel []vintage.Release, news []vintage.NewsItem, asOf time.Time) (*Model, error)
+func (m *Model) Forecast(at time.Time, horizon time.Duration, upcoming []vintage.Release, recentNews []vintage.NewsItem) Forecast
+func (m *Model) QLIKE(bars []backtest.Bar, rel []vintage.Release, news []vintage.NewsItem, from, to time.Time) (float64, int)
+```
+
+- `SigmaPct` — ожидаемое стандартное отклонение доходности за горизонт, %; `Multiplier` —
+  отношение прогнозной дисперсии к HAR-базовой (без релизов и новостей): ×3 означает втрое большую
+  дисперсию. Тест `TestOracleRaisesSigmaBeforeKeyRateDecision` строит синтетику с ×16 по дисперсии
+  вокруг решения ЦБ и требует `Multiplier > 2` в окне решения.
+- `Regime`: `calm` (Multiplier ≤ 0.85), `normal`, `event` (≥ 1.3 или активен релиз/новость),
+  `stress` (≥ 2.0).
+- `Drivers`: `release:<категория>`, `news:intensity`, `har:daily|weekly|monthly` — вклады в
+  лог-дисперсию для объяснения прогноза агенту и UI.
+
+### 7.2 Модель
+
+1. **Реализованная дисперсия дня** — сумма квадратов внутридневных доходностей баров дня
+   (овернайт-гэп не входит); неполные дни (< 20 баров) отбрасываются.
+2. **HAR-RV**: `ln RV_t = c + βd·ln RV_{t−1} + βw·ln mean(RV, 5 дней) + βm·ln mean(RV, 22 дня) + …`;
+   OLS решается вручную (нормальные уравнения + ridge 1e-6, метод Гаусса с выбором главного
+   элемента) — без внешних библиотек.
+3. **Окна релизов**: дамми по категории, если окно `[At−2ч, At+2ч]` пересекает день. Календарь
+   известен заранее, поэтому в обучение попадают релизы до `asOf`.
+4. **Новости**: `intensity = Σ exp(−(t_day−t_news)/24ч)·(1+|sentiment|)` по новостям моложе 72 ч;
+   регрессор `ln(1+intensity)`. И положительная, и отрицательная тональность повышают
+   неопределённость, поэтому вес — модуль тональности.
+5. **Point-in-time**: `Fit` берёт только бары/релизы/новости строго до `asOf` и только полные
+   торговые дни; `TestOracleFitUsesOnlyDataBeforeAsOf` «отравляет» данные после `asOf` (σ×20) —
+   коэффициенты и прогноз не меняются.
+6. **Прогноз**: HAR-состояние последнего полного дня + активные окна релизов в `[at, at+horizon]`
+   + интенсивность новостей до `at`; σ горизонта = `sqrt(exp(lnRV)/N_bar · horizon/step) · 100%`
+   (внутридневная дисперсия считается равномерной по барам дня).
+7. **Качество**: QLIKE = `RV_true/RV_pred − ln(RV_true/RV_pred) − 1` по дням после обучения;
+   `TestQLIKEBeatsHARonSynthetic` требует, чтобы оракул был лучше наивного HAR-only (без релизов и
+   новостей) на синтетике с эффектом решения ЦБ.
+
+### 7.3 Инструменты агента и график
+
+- `vol_forecast(symbol, periodSec?, count?, horizon?, asOf?)` — обучает модель на истории
+  (по умолчанию 15-минутные бары, до 5000 баров), берёт релизы и новости из `vintage.Store`,
+  возвращает компактную сводку (σ, множитель, режим, ≤6 драйверов, QLIKE за последние 30 дней) и
+  `Artifact{Kind:"volatility"}` для UI.
+- `vol_events(from, to, categories?)` — релизы календаря и аннотированные новости окна
+  (`Artifact{Kind:"vol_events"}` — маркеры релизов).
+- Винтажный источник подключается необязательным интерфейсом `VolatilityDataSource`
+  (реализация `vintage.Store` в адаптере данных). Пока адаптер не связан с ClickHouse, инструменты
+  возвращают понятную ошибку «источник не подключён».
+- График: `CandleChart.setVolatility(payload)` в `terminal/web/chart.js` рисует конус ожидаемой
+  волатильности от последней цены (расширение ∝ √времени до `sigmaPct` на горизонте, цвет по
+  режиму), вертикальные маркеры релизов (будущие прижаты к правому краю) и чип
+  `σ X% горизонт ×multiplier regime`. Контракт `volatility`/`vol_events` — для проводки артефактов
+  в `app.js`/`ai.js` (отдельная задача).
+
+### 7.4 Ограничения и не проверенное
+
+- Живых прогонов оракула на TRANSAQ не было: тесты синтетические, ClickHouse не поднимался (**I**).
+- Для обучения нужно ≥ 62 полных торговых дней внутридневных баров (22 дня warm-up HAR + 40
+  обучающих). 5-минутные бары в лимите истории фида (5000) дают ~17 дней, поэтому по умолчанию
+  инструмент берёт 15-минутные (~150 торговых дней) и сообщает об ошибке, если данных мало.
+- Пороги режимов (0.85 / 1.3 / 2.0) и трактовка коэффициентов — эмпирические (**I**), уточняются
+  на реальных данных; событийные дамми требуют нескольких однотипных релизов в обучении.
+- Модель статическая (OLS); интерфейс `Model` позволяет заменить её ML-моделью (задача 20).
+
+Проверки задачи 16:
+
+```bash
+go test -race ./terminal/volatility
+go test -race ./terminal/agent -run 'Vol|ResearchTools|WalkForward'  # проводка инструментов
+node --check terminal/web/chart.js
+make verify
+```
+
+Ключевые тесты: `TestOracleRaisesSigmaBeforeKeyRateDecision`, `TestOracleFitUsesOnlyDataBeforeAsOf`,
+`TestQLIKEBeatsHARonSynthetic`.
+
