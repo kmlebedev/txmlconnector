@@ -11,11 +11,13 @@ import (
 // TagCandles is R_HISTORY (0x09), the <candles> data of gethistorydata.
 const TagCandles byte = 0x09
 
-// Candle is one wire candle: 7 packed ints (time delta in minutes, open,
-// close/high/low deltas to open, unknown field 6, volume), plus an extra value
-// per candle when the record flag is set (openinterest candidate, I).
+// Candle is one wire candle: 7 packed ints (time, open, close/high/low deltas to
+// open, unknown field 6, volume), plus an extra value per candle when the record
+// flag is set (openinterest candidate, I). The time is expressed in units of the
+// candle period (see Candles.Event): for 1-minute data that is Unix minutes, for
+// a 5-minute series it is 5-minute units, and so on.
 type Candle struct {
-	Time   int64 // Unix minutes (absolute for the first candle, delta afterwards)
+	Time   int64 // absolute for the first candle, a same-unit delta afterwards
 	Open   int64
 	Close  int64
 	High   int64
@@ -93,8 +95,9 @@ func ParseCandles(body []byte) (Candles, error) {
 }
 
 // Event builds the typed <candles> event: prices are absolute (open, open+deltas
-// for close/high/low) with the mode decimals, time is the accumulated Unix
-// minute, and the items are reversed to the DLL chronological order.
+// for close/high/low) with the mode decimals, time is the accumulated count of
+// candle periods (period seconds from <candlekinds>, 60 s fallback) converted to
+// a UTC instant, and the items are reversed to the DLL chronological order.
 func (c Candles) Event(cat *Catalog, bias time.Duration) model.Candles {
 	ev := model.Candles{SecID: c.SecID, Period: int(c.Period), Status: c.Status, ZoneBias: bias}
 	var decimals uint8
