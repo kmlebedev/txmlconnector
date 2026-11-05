@@ -81,5 +81,8 @@ func (c *Client) NewsBody(ctx context.Context, id int64) (model.NewsBody, error)
 	if _, err := conn.Request(ctx, session.RqGetNews, c.newsPayload(id, id, 1, 2)); err != nil {
 		return model.NewsBody{}, fmt.Errorf("RQ_GETNEWS: %w", err)
 	}
+	c.mu.Lock()
+	c.newsBodyRequest = id
+	c.mu.Unlock()
 	return model.NewsBody{ID: id}, nil
 }

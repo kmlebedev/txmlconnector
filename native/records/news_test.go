@@ -2,6 +2,7 @@ package records_test
 
 import (
 	"encoding/hex"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -67,14 +68,10 @@ func TestNewsParseNegatives(t *testing.T) {
 	var w wire.Writer
 	w.Byte(2)                 // flags: body only
 	w.Int32(7)                // news id
-	w.Int32(4)                // package length
+	w.Raw(make([]byte, 4))    // S: unknown 4-byte field
 	w.Raw([]byte{1, 2, 3, 4}) // not a zlib stream
-	upload, err := records.ParseNewsUpload(w.Bytes())
-	if err != nil {
-		t.Fatalf("ParseNewsUpload: %v", err)
-	}
-	if _, err := records.UnpackNewsBody(upload.Package); err == nil {
-		t.Fatal("bad package accepted")
+	if _, err := records.ParseNewsUpload(w.Bytes()); !errors.Is(err, records.ErrUnknownRecord) {
+		t.Fatalf("bad S package err = %v, want ErrUnknownRecord", err)
 	}
 }
 
@@ -159,7 +156,7 @@ func TestNewsUploadFlags2(t *testing.T) {
 	var w wire.Writer
 	w.Byte(2)
 	w.Int32(int32(upload.Header.ID))
-	w.Int32(int32(len(upload.Package)))
+	w.Raw(make([]byte, 4)) // S: unknown 4-byte field, then package
 	w.Raw(upload.Package)
 	parsed, err := records.ParseNewsUpload(w.Bytes())
 	if err != nil {
@@ -194,7 +191,7 @@ func TestNewsUploadFlagForms(t *testing.T) {
 	var body wire.Writer
 	body.Byte(2)
 	body.Int32(2002)
-	body.Int32(int32(len(upload.Package)))
+	body.Raw(make([]byte, 4)) // S: unknown 4-byte field, then int32+zlib package
 	body.Raw(upload.Package)
 	stream := append([]byte{records.TagNewsUpload}, header.Bytes()...)
 	stream = append(stream, records.TagNewsUpload)

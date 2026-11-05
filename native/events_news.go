@@ -35,8 +35,8 @@ func decodeNewsHeader(c *Client, body []byte) ([]model.Event, error) {
 	header := model.NewsHeader{
 		ID:     parsed.ID,
 		Time:   time.Unix(parsed.Timestamp, 0).UTC(),
-		Source: parsed.Source,
-		Title:  parsed.Title,
+		Source: records.DecodeCP1251(parsed.Source),
+		Title:  records.DecodeCP1251(parsed.Title),
 		Flag:   parsed.Flag,
 	}
 	c.storeNewsHeaderLocked(header)
@@ -53,8 +53,8 @@ func decodeNewsUpload(c *Client, body []byte) ([]model.Event, error) {
 		header := model.NewsHeader{
 			ID:     parsed.Header.ID,
 			Time:   time.Unix(parsed.Header.Timestamp, 0).UTC(),
-			Source: parsed.Header.Source,
-			Title:  parsed.Header.Title,
+			Source: records.DecodeCP1251(parsed.Header.Source),
+			Title:  records.DecodeCP1251(parsed.Header.Title),
 			Flag:   parsed.Header.Flag,
 		}
 		c.storeNewsHeaderLocked(header)
@@ -71,16 +71,25 @@ func decodeNewsUpload(c *Client, body []byte) ([]model.Event, error) {
 		if parsed.Header != nil {
 			id = parsed.Header.ID
 		}
-		if _, ok := c.news[id]; ok {
-			if c.newsBodies == nil {
-				c.newsBodies = map[int64]string{}
-			}
-			c.newsBodies[id] = string(text)
+		utf8Text := records.DecodeCP1251(string(text))
+		if c.newsBodies == nil {
+			c.newsBodies = map[int64]string{}
 		}
-		// S (production): the body arrives as RQ_MAIN 0x36 flags=2 and is
-		// rendered as <news_body> (the reply RQ_GETNEWS 73 is empty).
-		body := model.NewsBody{ID: id, Text: records.DecodeCP1251(string(text))}
-		events = append(events, &body)
+		// The body is stored only when its header is known (P3: silent store).
+		if _, ok := c.news[id]; ok {
+			c.newsBodies[id] = utf8Text
+		}
+		// P2: emit only for the S channel flags=2 AND when a get_news_body
+		// request is pending and its header is known; flags=3/unknown header are
+		// silently stored (news.md).
+		requested := c.newsBodyRequest
+		if parsed.Flags&2 != 0 && requested != 0 {
+			if _, ok := c.news[requested]; ok {
+				c.newsBodyRequest = 0
+				body := model.NewsBody{ID: id, Text: utf8Text}
+				events = append(events, &body)
+			}
+		}
 	}
 	return events, nil
 }
