@@ -60,6 +60,9 @@ type Server struct {
 	AfterSubscribe []byte
 	// MainDelay delays every RQ_MAIN reply.
 	MainDelay time.Duration
+	// Protocol is the PRO# field of the RQ_PWD reply; 0 leaves the optional
+	// tail out, so the client keeps the DLL default 62.
+	Protocol uint16
 	// SessionTimeout is the RQ_PWD session timeout in seconds; 0 means the
 	// demo-server value of 120. The client uses it as the recovery limit.
 	SessionTimeout int32
@@ -274,6 +277,18 @@ func (s *Server) serve(nc net.Conn) {
 			w.Raw([]byte{0, 0})
 			w.Int32(626) // SYS#
 			w.Int32(4)   // BLD#
+			s.mu.Lock()
+			protocol := s.Protocol
+			s.mu.Unlock()
+			if protocol != 0 {
+				// Byte14, Int2, Text4, Text5, Text6, then PRO#.
+				w.Byte(0)
+				w.Int32(0)
+				w.String("", 0xf)
+				w.String("", 0x80)
+				w.String("", 0x40)
+				w.Uint16(protocol)
+			}
 			if err = reply(wire.KindReply, f.Type, w.Bytes()); err == nil {
 				keys, err = wire.NewKeys(sessionKey, sessionSync)
 			}

@@ -201,9 +201,15 @@ func decodeOvernight(c *Client, body []byte) ([]model.Event, error) {
 }
 
 func decodeUnion(c *Client, body []byte) ([]model.Event, error) {
-	name, err := records.ParseUnion(body)
+	name, unicat, err := records.ParseUnionCategory(body)
 	if err != nil {
 		return nil, err
+	}
+	if unicat != 0 {
+		if c.unionCategories == nil {
+			c.unionCategories = map[string]byte{}
+		}
+		c.unionCategories[name] = unicat
 	}
 	union := model.Union{ID: name}
 	c.unions = append(c.unions, union)

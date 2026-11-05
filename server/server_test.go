@@ -306,3 +306,39 @@ func TestNativeBackendTCClientRE4(t *testing.T) {
 		t.Fatal("server did not stop")
 	}
 }
+
+// The DLL answers get_securities with one <securities> callback of ~9.5 MB on
+// the demo server (RE-2, 2026-11-05); the native backend does the same. The
+// client's dial options must accept it (gRPC's default receive limit is 4 MB).
+func TestClientReceivesFullSecuritiesMessage(t *testing.T) {
+	listener := bufconn.Listen(1024 * 1024)
+	native := &fakeConnector{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = Serve(ctx, listener, native, Config{SubscriberBuffer: 4, ShutdownTimeout: time.Second}) }()
+
+	opts := append(tcClient.DialOptions(), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+		return listener.Dial()
+	}))
+	conn, err := grpc.NewClient("passthrough:///bufnet", opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	stream, err := pb.NewConnectServiceClient(conn).FetchResponseData(ctx, &pb.DataRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Header(); err != nil {
+		t.Fatal(err)
+	}
+	big := "<securities>" + strings.Repeat("x", 9_600_000) + "</securities>"
+	native.emit(big)
+	received, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(received.Message) != len(big) {
+		t.Fatalf("len = %d, want %d", len(received.Message), len(big))
+	}
+}

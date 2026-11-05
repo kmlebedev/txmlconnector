@@ -90,6 +90,43 @@ B: DAT_1809d4064 (наблюдалось 0)
 
 Демо-сервер принял RQ_PWD Go-клиента со строками хоста macOS (`darwin/arm64`) и без адресов — **S**.
 
+### Отказ во входе: BYE с кодом причины — S/D
+
+Если сервер отказывает уже после проверки пароля, на RQ_PWD приходит не ответ, а **BYE** (`flags=0x03`,
+`type=46`) с payload из одного байта — кода причины. **S** (прод, 2026-11-05): при открытой другой
+сессии того же логина — `04` через ~4 с после RQ_PWD; DLL в той же ситуации пишет в журнал
+`RQ_PWD Connection closed by server - BYE` и отдаёт
+`<server_status connected="error">Пользователь с таким идентификатором уже подключен к серверу</server_status>`.
+
+Тексты DLL берёт из таблицы `FUN_1801043f0` (switch по коду, строки CP1251 `0x18082e610…0x18082e860`) —
+**D**. Это та же таблица, что для ненулевого статуса RQ_PWD (код 14 = `0x0e` — текст от сервера) и
+отказов RQ_LOGIN (12, 13):
+
+| Код | Текст DLL |
+|---|---|
+| 1 | Ошибка подключения |
+| 2 | Неверный идентификатор, пароль или Touch Memory |
+| 3 | Вы не имеете прав на подключение к данному серверу |
+| 4 | Пользователь с таким идентификатором уже подключен к серверу (**S**) |
+| 5 | Unpermitted IP address |
+| 6 | На данный момент исчерпаны все лицензии на подключение к черверу. Обратись в службу поддержки брокера. |
+| 7 | Ваша версия программы критично устарела. Установите новую версию. |
+| 8 | Сервер не доступен |
+| 9 | Ошибка криптосистемы |
+| 10 | Истек или не начался период действия ключа ЭЦП |
+| 11 | Не найден или неверный сертификат ключа ЭЦП |
+| 12 | Не найден сертификат для ключа обмена |
+| 13 | Данный тип криптопровайдера не поддерживается сервером |
+| 14 | текст из ответа сервера |
+
+Опечатки («черверу», «Обратись») — как в DLL. Что код в BYE и код статуса RQ_PWD — одно
+пространство, подтверждено живьём только для 4; для остальных — **I**. Go: `session.ByeError`
+(совпадает с `ErrBye`), `LoginError{Code}` для BYE на RQ_PWD, `session.LoginErrorText`;
+`native.Connector` выводит текст в `connected="error"`.
+
+Следствие для RE-4: «`connected=error`» на демо и проде в предыдущих прогонах — это код 4, сессия
+логина была занята (терминалом пользователя или не закрытым процессом), а не ошибка клиента.
+
 ## Номера запросов
 
 Константа, передаваемая вместе с именем в `FUN_180355d50` (скрипт по всем вызовам) — **D**: 1 RQ_LOGIN, 2 RQ_LOGOUT, 3 RQ_CHANGE_PWD, 4 RQ_SEND_MESSAGE, 5 RQ_MAIN, 9 RQ_STARTUP, 10 RQ_SUBSCRIBE, 11 RQ_HISTORY, 13 RQ_TICKS, 14 RQ_TRANSACT, 15 RQ_SEC_SPEC, 16 RQ_DEPO_POS, 17 RQ_MONEY_POS, 21 RQ_REPORT_INFO, 22 RQ_GET_REPORT, 42 RQ_CLIENT_HOLDINGS, 43 RQ_CLIENT_LIMITS, 46 RQ_PWD, 47 RQ_FORTS_FIRM_MONEY, 48 RQ_INDEX_RTS, 49 RQ_UPLOAD, 50 RQ_TIME, 51 RQ_GET_SETTLECODE, 52 RQ_GET_SEC_SETTLECODE, 54 RQ_PACKET, 63 RQ_RELOGIN, 64 RQ_RECOVER, 69 RQ_CANCEL_UPLOAD, 72 RQ_RPSREPO_SUBSCR, 73 RQ_GETNEWS, 78 RQ_SEND_FILE, 81 RQ_POSITIONS, 82 RQ_GET_RPSREPO, 84 RQ_MARGIN_POS, 85 RQ_MARGIN_POS_LIST, 86 RQ_FOND_PORTFOLIO, 106 RQ_HANDSHAKE, 111 RQ_INQUIRE_SECURITY, 112 RQ_MAKE_COND_OWN, 120 RQ_SUBSCRIBE_TICKS, 127 RQ_LOGIN_EXT, 129 RQ_ATTACH_CLIENT, 131 RQ_VALIDATE_TRADER, 132 RQ_CLIENT_LIST, 133 RQ_CHANGE_TRADER_PWD, 134 RQ_GET_CONFIG, 135 RQ_GET_FILE, 148 RQ_HISTORY_EXT, 149 RQ_OPTION_FAMILIES, 150 RQ_FAMILIY_OPTIONS, 151 RQ_CERTAIN_OPTIONS, 152 RQ_INQUIRE_UT, 153 RQ_FAMILY_STRIKES, 156 RQ_TRNS_IN_PROGRESS, 157 RQ_ENFORCE_TRN_RELEASE.

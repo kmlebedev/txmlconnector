@@ -132,3 +132,56 @@ func TestLoginErrorWithMessage(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// The server answers RQ_PWD with BYE and a one-byte reason when it refuses the
+// login after the password check (S, production 2026-11-05: payload 04 while
+// another session of the same login was open). The DLL turns the byte into a
+// text of its login error table (FUN_1801043f0).
+func TestLoginByeCarriesReason(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	go func() {
+		defer server.Close()
+		keys := wire.DefaultKeys()
+		if _, err := keys.Decode(wire.ClientToServer, server); err != nil {
+			return
+		}
+		if _, err := server.Write(unhex(t, stubLoginReply)); err != nil {
+			return
+		}
+		if _, err := keys.Decode(wire.ClientToServer, server); err != nil {
+			return
+		}
+		bye, _ := keys.Encode(wire.ServerToClient, wire.Frame{Flags: wire.KindBye, Type: RqPwd, Payload: []byte{4}})
+		server.Write(bye)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, err := Login(ctx, client, Config{Login: "TESTLOGIN", Password: "TESTPASS"})
+	var le *LoginError
+	if !errors.As(err, &le) || le.Code != 4 {
+		t.Fatalf("err = %v, want LoginError code 4", err)
+	}
+	if !errors.Is(err, ErrBye) {
+		t.Fatalf("err = %v, want it to match ErrBye", err)
+	}
+	if got, want := LoginErrorText(le.Code), "Пользователь с таким идентификатором уже подключен к серверу"; got != want {
+		t.Fatalf("text = %q, want %q", got, want)
+	}
+}
+
+func TestLoginErrorTextTable(t *testing.T) {
+	cases := map[int]string{
+		1:  "Ошибка подключения",
+		2:  "Неверный идентификатор, пароль или Touch Memory",
+		5:  "Unpermitted IP address",
+		13: "Данный тип криптопровайдера не поддерживается сервером",
+		14: "",
+		0:  "",
+	}
+	for code, want := range cases {
+		if got := LoginErrorText(code); got != want {
+			t.Errorf("LoginErrorText(%d) = %q, want %q", code, got, want)
+		}
+	}
+}

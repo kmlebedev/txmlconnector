@@ -118,6 +118,30 @@ func (c *Client) MoveOrder(ctx context.Context, req model.MoveOrder) error {
 	return err
 }
 
+// ErrNotOwnCondOrder is the DLL refusal of makeordown (D: FUN_1800efda0).
+var ErrNotOwnCondOrder = errors.New("Cannot make specified transaction_id an own conditional order")
+
+// MakeOrdOwn is makeordown: RQ_MAKE_COND_OWN (112) for a conditional order of
+// this session. The DLL checks two fields of its order store (+0x12a, the
+// condition, and +0x1a8) before sending; the native check is the O-consistent
+// equivalent: a known order with a condition that is still watching (O: success
+// for the order-new-inject record, refusal after its 0x10 cancel). Which flag
+// +0x1a8 is exactly stays I.
+func (c *Client) MakeOrdOwn(ctx context.Context, transactionID uint64) error {
+	c.mu.Lock()
+	order, ok := c.orders[transactionID]
+	eligible := ok && transactionID > 0 && order.Condition != 0 && order.Status == 1 // watching (render.go orderStatusName)
+	c.mu.Unlock()
+	if !eligible {
+		return ErrNotOwnCondOrder
+	}
+	conn := c.connection()
+	if conn == nil {
+		return errors.New("transaq: client is not connected")
+	}
+	return conn.MakeCondOwn(ctx, int32(transactionID))
+}
+
 // clientNumericIDLocked maps the client code (or union) to the numeric id the
 // neworder payload carries (the accounts raw records keep it).
 func (c *Client) clientNumericIDLocked(client, union string) (int64, bool) {

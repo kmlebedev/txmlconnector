@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,36 +21,26 @@ func main() {
 		log.Fatal(err)
 	}
 	defer client.Close()
-	defer func() {
-		if err := client.Disconnect(); err != nil {
-			log.Warnf("disconnect: %v", err)
-		}
-	}()
 
 	// RE-4 smoke sequence (task 29): with TC_RE4_SEQUENCE=1 the example issues
 	// connect (done by NewTCClient) -> wait for connected status ->
 	// get_securities -> subscribe -> disconnect against the native backend.
 	if os.Getenv("TC_RE4_SEQUENCE") != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), real4ConnectTimeout())
-		defer cancel()
-		if err := waitConnected(ctx, client); err != nil {
-			log.Fatalf("RE-4 connect: %v", err)
-		}
-		if err := client.SendCommand(tcCommands.Command{Id: "get_securities"}); err != nil {
-			log.Fatalf("RE-4 get_securities: %v", err)
-		}
-		if err := client.SendCommand(tcCommands.Command{
-			Id:        "subscribe",
-			AllTrades: tcCommands.SubAllTrades{Items: []int{26}},
-		}); err != nil {
-			log.Fatalf("RE-4 subscribe: %v", err)
-		}
-		if err := client.Disconnect(); err != nil {
-			log.Fatalf("RE-4 disconnect: %v", err)
+		if err := re4Sequence(client); err != nil {
+			// log.Fatal skips deferred calls: release the server session first,
+			// or the backend keeps it and the next login gets code 4.
+			_ = client.Disconnect()
+			client.Close()
+			log.Fatalf("RE-4 %v", err)
 		}
 		log.Info("RE-4 sequence: get_securities -> subscribe -> disconnect OK")
 		return
 	}
+	defer func() {
+		if err := client.Disconnect(); err != nil {
+			log.Warnf("disconnect: %v", err)
+		}
+	}()
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
@@ -70,6 +61,36 @@ func main() {
 	}
 }
 
+func re4Sequence(client *tcClient.TCClient) error {
+	ctx, cancel := context.WithTimeout(context.Background(), real4ConnectTimeout())
+	defer cancel()
+	if err := waitConnected(ctx, client); err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	if err := client.SendCommand(tcCommands.Command{Id: "get_securities"}); err != nil {
+		return fmt.Errorf("get_securities: %w", err)
+	}
+	if err := client.SendCommand(tcCommands.Command{
+		Id:        "subscribe",
+		AllTrades: tcCommands.SubAllTrades{Items: []int{re4SecID()}},
+	}); err != nil {
+		return fmt.Errorf("subscribe: %w", err)
+	}
+	if err := client.Disconnect(); err != nil {
+		return fmt.Errorf("disconnect: %w", err)
+	}
+	return nil
+}
+
+// re4SecID is the alltrades secid of the RE-4 subscribe step (TC_RE4_SECID;
+// secids differ per server, 26 is SBER on the demo server).
+func re4SecID() int {
+	if v, err := strconv.Atoi(os.Getenv("TC_RE4_SECID")); err == nil && v > 0 {
+		return v
+	}
+	return 26
+}
+
 // real4ConnectTimeout bounds the asynchronous connect of the RE-4 sequence.
 func real4ConnectTimeout() time.Duration {
 	if raw := os.Getenv("TC_RE4_CONNECT_TIMEOUT"); raw != "" {
@@ -82,10 +103,16 @@ func real4ConnectTimeout() time.Duration {
 
 // waitConnected waits for the native/backend <server_status connected="true"/>
 // callback before issuing commands that require the connection (the connect
-// command itself returns success immediately, DLL contract).
+// command itself returns success immediately, DLL contract). The status follows
+// the initial load, so the typed channels the load fills are drained meanwhile:
+// the client dispatches messages in order and blocks on a full channel.
 func waitConnected(ctx context.Context, client *tcClient.TCClient) error {
 	for {
 		select {
+		case <-client.SecInfoUpdChan:
+		case <-client.SecInfoChan:
+		case <-client.AllTradesChan:
+		case <-client.QuotesChan:
 		case status := <-client.ServerStatusChan:
 			switch strings.TrimSpace(status.Connected) {
 			case "true":

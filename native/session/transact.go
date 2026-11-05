@@ -153,8 +153,11 @@ func (c *Conn) transactExchange(ctx context.Context, payload []byte) ([]byte, er
 	if _, err := nc.Write(out); err != nil {
 		return nil, &OutcomeError{TransactionID: model.TransactionID(transactionSeq.Load()), Err: ctxErr(ctx, err)}
 	}
-	f, err := c.keys.Decode(wire.ServerToClient, nc)
+	f, err := c.readReply(nc)
 	if err != nil {
+		if ctx.Err() != nil {
+			c.abandoned = append(c.abandoned, RqTransact)
+		}
 		return nil, &OutcomeError{TransactionID: model.TransactionID(transactionSeq.Load()), Err: ctxErr(ctx, err)}
 	}
 	switch {

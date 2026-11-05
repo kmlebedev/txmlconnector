@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/session"
 )
 
@@ -41,18 +43,33 @@ func (c *Client) OptionFamilies(ctx context.Context, underlying model.Symbol) ([
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := append([]model.OptionFamily(nil), c.optionFamilies[secID]...)
-	return out, nil
+	return c.sortedFamiliesLocked(secID), nil
 }
 
-// FamilyStrikes is get_family_strikes: the family-name -> (secid, family_id)
-// mapping is not recovered (the DLL derives it from its internal family store,
-// options.md I), so this returns the explicit I error instead of sending a
-// guessed request.
-func (c *Client) FamilyStrikes(ctx context.Context, family string) ([]model.Strike, error) {
-	_ = ctx
-	_ = family
-	return nil, fmt.Errorf("family id mapping is not recovered (I)")
+// FamilyStrikes is get_family_strikes: RQ_FAMILY_STRIKES (153) with the
+// underlying secid and the family id, which is the expiration date in days
+// (S: 395c 421405 for SiZ6, 17.12.2026). The strikes arrive as R_STRIKES and
+// are delivered as a model.OptionStrikes event.
+func (c *Client) FamilyStrikes(ctx context.Context, underlying model.Symbol, matDate time.Time) error {
+	if !c.optionsSupported() {
+		return session.ErrUnsupportedRequest
+	}
+	secID, err := c.optionSecID(underlying)
+	if err != nil {
+		return err
+	}
+	conn := c.connection()
+	if conn == nil {
+		return fmt.Errorf("transaq: client is not connected")
+	}
+	return conn.FamilyStrikes(ctx, secID, int64(model.FamilyID(matDate)))
+}
+
+// optionsSupported reports whether the server protocol passes the DLL gate of
+// RQ_FAMILY_STRIKES/RQ_CERTAIN_OPTIONS (session.OptionsMinProtocol).
+func (c *Client) optionsSupported() bool {
+	info := c.Info()
+	return info != nil && info.Protocol >= session.OptionsMinProtocol
 }
 
 // Options is get_options: RQ_CERTAIN_OPTIONS 151 with the Z25 opt_code list
@@ -61,6 +78,9 @@ func (c *Client) FamilyStrikes(ctx context.Context, family string) ([]model.Stri
 func (c *Client) Options(ctx context.Context, req model.OptionsRequest) ([]model.Option, error) {
 	if len(req.OptCodes) == 0 {
 		return nil, fmt.Errorf("No seccodes found")
+	}
+	if !c.optionsSupported() {
+		return nil, session.ErrUnsupportedRequest
 	}
 	conn := c.connection()
 	if conn == nil {
@@ -77,7 +97,7 @@ func (c *Client) Options(ctx context.Context, req model.OptionsRequest) ([]model
 func optionsServerMessage(err error) (string, bool) {
 	var reply *session.OptionsServerError
 	if errors.As(err, &reply) {
-		return reply.Message, true
+		return records.DecodeCP1251(reply.Message), true
 	}
 	return "", false
 }

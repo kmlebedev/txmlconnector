@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kmlebedev/txmlconnector/native/wire"
@@ -74,6 +75,9 @@ func OptionsReply(payload []byte) (string, error) {
 }
 
 func optionsReplyError(payload []byte) error {
+	if len(payload) == 0 {
+		return nil // S: 151 answered with an empty payload, DLL success
+	}
 	message, err := OptionsReply(payload)
 	if err != nil {
 		return err
@@ -83,6 +87,17 @@ func optionsReplyError(payload []byte) error {
 	}
 	return nil
 }
+
+// OptionsMinProtocol is the lowest server protocol (PRO# of the RQ_PWD reply,
+// Info.Protocol) for which the DLL sends RQ_FAMILY_STRIKES and
+// RQ_CERTAIN_OPTIONS: FUN_180257680 stores PRO# at +0x694 and
+// FUN_1803b9950/FUN_1803b9cd0 refuse while it is below 0x45 (D; S on demo,
+// PRO#=68: neither request reached the server).
+const OptionsMinProtocol = 0x45
+
+// ErrUnsupportedRequest is the DLL refusal of a request the server protocol
+// does not support ("Unsupported request.").
+var ErrUnsupportedRequest = errors.New("Unsupported request.")
 
 // OptionsServerError is the non-empty C-string reply (the DLL <message> text).
 type OptionsServerError struct{ Message string }

@@ -218,18 +218,25 @@ func ParseOvernight(body []byte) (bool, error) {
 
 // ParseUnion decodes R_UNION (tag 0x68): L id, Z20 name, Z32 category, B unicat.
 func ParseUnion(body []byte) (name string, err error) {
+	name, _, err = ParseUnionCategory(body)
+	return name, err
+}
+
+// ParseUnionCategory also returns unicat, the margin template category the
+// DLL requests with RQ_INQUIRE_UT (S: 0x12 on production).
+func ParseUnionCategory(body []byte) (name string, unicat byte, err error) {
 	r := wire.NewReader(body)
 	if _, err = r.Int64(); err != nil {
-		return "", fmt.Errorf("R_UNION id: %w", err)
+		return "", 0, fmt.Errorf("R_UNION id: %w", err)
 	}
 	if name, err = r.String(20); err != nil {
-		return "", fmt.Errorf("R_UNION name: %w", err)
+		return "", 0, fmt.Errorf("R_UNION name: %w", err)
 	}
 	if _, err = r.String(32); err != nil {
-		return "", fmt.Errorf("R_UNION category: %w", err)
+		return "", 0, fmt.Errorf("R_UNION category: %w", err)
 	}
-	if _, err = r.Byte(); err != nil {
-		return "", fmt.Errorf("R_UNION unicat: %w", err)
+	if unicat, err = r.Byte(); err != nil {
+		return "", 0, fmt.Errorf("R_UNION unicat: %w", err)
 	}
-	return name, nil
+	return name, unicat, nil
 }

@@ -10,7 +10,10 @@ import (
 const (
 	TagFamily      byte = 0x6f // R_FAMILY
 	TagEndOfFamily byte = 0x71 // R_END_OF_FAMILY
-	TagStrikes     byte = 0x78 // R_STRIKES
+	// TagEndOfFamilies closes the R_FAMILY list of one underlying (D:
+	// FUN_180396720, "R_END_OF_FAMILIES"; S: production 5x 0x6f then 70 395c 00).
+	TagEndOfFamilies byte = 0x70
+	TagStrikes       byte = 0x78 // R_STRIKES
 )
 
 // FamilyRecord is one R_FAMILY body: W secid, Z6 opt_code, L, L.
@@ -31,6 +34,36 @@ type EndOfFamilyRecord struct {
 
 // StrikesRecord is one R_STRIKES body: W secid, L family_id, {Z26 opt_code,
 // B cp, L price}* terminated by an empty opt_code, then B final.
+// EndOfFamiliesRecord is R_END_OF_FAMILIES: W secid, Z512 text (empty on
+// success; a non-empty text is I).
+type EndOfFamiliesRecord struct {
+	SecID uint16
+	Text  string
+}
+
+func readEndOfFamilies(r *wire.Reader) (EndOfFamiliesRecord, error) {
+	var out EndOfFamiliesRecord
+	secID, err := r.Uint16()
+	if err != nil {
+		return out, fmt.Errorf("R_END_OF_FAMILIES secid: %w", err)
+	}
+	text, err := readCString(r, 0x200)
+	if err != nil {
+		return out, fmt.Errorf("R_END_OF_FAMILIES text: %w", err)
+	}
+	return EndOfFamiliesRecord{SecID: secID, Text: text}, nil
+}
+
+// ParseEndOfFamilies decodes R_END_OF_FAMILIES (0x70).
+func ParseEndOfFamilies(body []byte) (EndOfFamiliesRecord, error) {
+	r := wire.NewReader(body)
+	out, err := readEndOfFamilies(r)
+	if err == nil && r.Len() > 0 {
+		err = fmt.Errorf("R_END_OF_FAMILIES: %d trailing bytes", r.Len())
+	}
+	return out, err
+}
+
 type StrikesRecord struct {
 	SecID    uint16
 	FamilyID int64
@@ -133,6 +166,9 @@ func SkipOptionRecord(tag byte, r *wire.Reader) error {
 		return err
 	case TagEndOfFamily:
 		_, err := readEndOfFamily(r)
+		return err
+	case TagEndOfFamilies:
+		_, err := readEndOfFamilies(r)
 		return err
 	case TagStrikes:
 		_, err := readStrikes(r)

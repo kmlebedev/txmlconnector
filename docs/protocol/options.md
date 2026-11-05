@@ -143,3 +143,47 @@ O: `tools/replay-server` + `tools/tcproxy` + DLL под Wine 11.21, dump `.re-ru
   (или после паузы), когда прод снова пускает логин.
 - Торговых/изменяющих команд на проде не было: только `connect`/`server_status`/опционные
   read-only команды/`disconnect` (и они не дошли до сервера). Сырьё — `.re-run/s/opts{1..5}/` (вне git).
+
+## S на демо и гейт версии (2026-11-05, read-only) — S/D
+
+Прогон DLL 6.47.2.26.4 через `tcproxy` на демо (захват — `.re-run/s/optdemo/`, вне git) и тот же сценарий
+на `native.Connector`:
+
+| Команда | DLL (S) | Что ушло на сервер (S) |
+|---|---|---|
+| `get_option_families` `FUT:SiZ6` | `<result success="false"><message>[231]Информационный сервис опционов недоступен</message></result>` | `type=149 W secid` → ответ `"[231]…"\0` (CP1251) |
+| `get_family_strikes` `FUT:SiZ6`, `17.12.2026` | `<result success="false"><message>Unsupported request.</message></result>` | ничего |
+| `get_options` `Si76000BL6` | `<result success="false"/>` | ничего |
+
+- **Где хранится `+0x694` — D (закрыт пункт I-2):** обработчик ответа RQ_PWD (`FUN_1803895c0`) читает
+  `W PRO#` (по умолчанию `0x3e`, если поля нет) и вызывает `FUN_180257680(conn+0x60, PRO#)`, а тот пишет
+  значение в `+0x694`. Значит, гейт 153/151 — `PRO# < 0x45`; на демо `PRO#=68` (S), поэтому оба запроса
+  DLL отсекает локально — захват это подтверждает.
+- **Сервиса опционов на демо нет** (S): данных `<option_families>`/`<family_strikes>`/`<option>` с демо
+  снять нельзя. Формы XML данных остаются **I** до прода с `PRO# ≥ 0x45`.
+- Go: `session.OptionsMinProtocol`, `session.ErrUnsupportedRequest`; `native.Connector` отвечает теми же
+  тремя строками (проверено живьём на демо), текст ошибки 149 перекодируется из CP1251.
+  Фикстура `option-families-reply-231-live.hex` — **S**.
+
+
+## S на проде (2026-11-05, read-only) — формы данных сняты
+
+Прод: `PRO#=78` (≥ 0x45), сервис опционов есть. DLL и `native.Connector` прогнаны по одному сценарию
+(`FUT:SiZ6`, `17.12.2026`, `Si76000BL6`); колбэки совпали побайтно, кроме `secid` — он свой в каждой
+сессии.
+
+- **`family_id` = дата экспирации в днях от 1970-01-01** (S): 20804 = 17.12.2026, 20776 = 19.11.2026.
+  RQ_FAMILY_STRIKES (153) = `W secid, L family_id` (S: `395c 421405`); хранилище для расчёта не нужно.
+- **0x6f R_FAMILY** = `W secid, Z6 "" , L family_id, L lot_size` (S, совпадает с D).
+- **0x70 R_END_OF_FAMILIES** (D `FUN_180396720`, раньше не описана) = `W secid, Z512 text`; по ней DLL
+  отдаёт **один** `<option_families>`, семейства отсортированы по дате:
+  `<option_families><security seccode=".." board=".." secid=".."/><family><lot_size>1</lot_size><mat_date>05.11.2026</mat_date></family>…</option_families>`.
+- **0x78 R_STRIKES** (S, совпадает с D): после `final=1` DLL отдаёт `<family_strikes>` со страйками,
+  **отсортированными по цене, затем C раньше P** (156 из 156 совпали):
+  `<family_strikes><security …/><mat_date>17.12.2026</mat_date><strike><cp>C</cp><price>65000</price><opt_code>Si65000BL6</opt_code></strike>…</family_strikes>`.
+- **`get_options` (151)**: ответ сервера пустой (len=0) → `success="true"`; данные опциона приходят
+  записью `R_SEC_NEW` (`<securities>`), отдельного `<option>` колбэка нет (S).
+- Фикстуры **S**: `option-families-live.hex`, `option-strikes-live.hex`, `option-families-dll.xml`,
+  `family-strikes-dll.xml`; тест `TestConnectorOptionLiveForms` сравнивает побайтно.
+- Остаётся **I**: непустой текст `R_END_OF_FAMILIES`, `R_END_OF_FAMILY 0x71`/`<options_failed>`,
+  масштаб дробных страйков, `final=0` (в живых данных не встречались).
