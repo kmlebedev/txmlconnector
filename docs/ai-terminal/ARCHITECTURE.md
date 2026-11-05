@@ -334,8 +334,9 @@ func (b *Broker) Snapshot() Snapshot
 ```
 
 Правила исполнения: market buy = ask (нет ask → last), market sell = bid (нет bid → last),
-проскальзывание 0 (упрощение); limit исполняется, если marketable на момент постановки, иначе
-висит и исполняется в `OnQuote` при касании (buy: ask ≤ price; sell: bid ≥ price);
+проскальзывание 0 (упрощение); limit исполняется по **цене касания** (buy по ask, sell по bid),
+если marketable на момент постановки, иначе висит и исполняется в `OnQuote` при касании
+(buy: ask ≤ price; sell: bid ≥ price);
 частичных исполнений в итерации 1 нет (`Filled = Qty` при fill). Комиссия `Fee = |price*qty| *
 FeeBps/10000` списывается/учитывается в `Fees`, `RealizedPnL` — по средней цене. Продажа больше
 позиции — reject (`short not supported`). Кэш не может стать отрицательным — reject.
@@ -714,6 +715,11 @@ func (e *Engine) Hints(ctx context.Context, symbol string, periodSec int) (Marke
   шлёт SSE-события `agent`. Остановка — ручная, kill-switch (`POST /api/agent/autonomy action=stop`)
   и автоматическая при достижении `DailyLossPct` (статус `stopped_by_risk`, лог).
 - `Live:true` → ошибка `live autonomy is not implemented in iteration 1`.
+- Автостоп по `DailyLossPct` решается на закрытии бара, но исполняется по open следующего бара
+  (на последнем баре — по close с пометкой в логе).
+- На естественном завершении replay открытая позиция **не закрывается фиктивно**: PnL считается
+  mark-to-market по последнему обработанному бару, `Trades` не растёт, в лог пишется
+  `mark_to_market`; `finalEquity = cash + qty*lastPrice`.
 - После Stop статус сохраняет итоговые PnL/лог для UI.
 
 ## 10. Пакет `terminal/api` (HTTP/JSON/SSE)
