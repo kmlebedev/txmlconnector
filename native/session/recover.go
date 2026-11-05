@@ -138,6 +138,7 @@ func (c *Conn) Restore(ctx context.Context, nc net.Conn, login string) error {
 
 	old := c.nc
 	c.nc = nc
+	c.abandoned = nil // replies of the old socket never come
 	if old != nil && old != nc {
 		old.Close()
 	}
