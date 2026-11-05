@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParseSymbols(t *testing.T) {
 	got, err := parseSymbols("TQBR:SBER, TQBR:GAZP")
@@ -13,6 +16,18 @@ func TestParseSymbols(t *testing.T) {
 	def, err := parseSymbols("")
 	if err != nil || len(def) != 20 {
 		t.Fatalf("default symbols = %d, %v; want 20", len(def), err)
+	}
+}
+
+func TestParseSoakDuration(t *testing.T) {
+	for raw, want := range map[string]time.Duration{"300": 300 * time.Second, "300s": 300 * time.Second, "5m": 5 * time.Minute, "": 0} {
+		got, err := parseSoakDuration(raw)
+		if err != nil || got != want {
+			t.Fatalf("parseSoakDuration(%q) = %v, %v; want %v", raw, got, err, want)
+		}
+	}
+	if _, err := parseSoakDuration("abc"); err == nil {
+		t.Fatal("bad duration accepted")
 	}
 }
 

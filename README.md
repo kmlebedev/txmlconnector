@@ -49,9 +49,8 @@ err = client.Run(ctx, native.RunOptions{RqDelay: 100 * time.Millisecond}, func(e
 
 `Run` сам опрашивает RQ_MAIN, восстанавливает соединение после обрыва
 (`connected="true" recover="true"`) и отдаёт `model.UnknownRecord`, если
-встретил неизвестную запись. Долгий read-only soak (20 бумаг, Stats/RSS/latency
-раз в 5 минут) — `go run ./tools/native-soak` при `TC_SOAK=1`; без env он
-завершается сразу.
+встретил неизвестную запись. Долгий read-only soak (20 валидных бумаг TQBR, Stats/RSS/latency раз в 5 минут) —
+`go run ./tools/native-soak` при `TC_SOAK=1`; `TC_SOAK_DURATION` принимает `300` и `300s`; без env он завершается сразу.
 
 ## Architecture
 

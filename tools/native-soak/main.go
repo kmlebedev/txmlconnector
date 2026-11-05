@@ -20,17 +20,20 @@ import (
 	"github.com/kmlebedev/txmlconnector/native/model"
 )
 
+// defaultSymbols are 20 TQBR securities present in the demo catalog fixture
+// (native/records/testdata/securities1-demo.xml.gz); POLY/YNDX/ROSN/MTSS are
+// absent there and would fail subscribe with "unknown security".
 var defaultSymbols = []model.Symbol{
 	{Board: "TQBR", SecCode: "SBER"}, {Board: "TQBR", SecCode: "GAZP"},
-	{Board: "TQBR", SecCode: "LKOH"}, {Board: "TQBR", SecCode: "ROSN"},
-	{Board: "TQBR", SecCode: "NVTK"}, {Board: "TQBR", SecCode: "GMKN"},
-	{Board: "TQBR", SecCode: "TATN"}, {Board: "TQBR", SecCode: "MTSS"},
+	{Board: "TQBR", SecCode: "LKOH"}, {Board: "TQBR", SecCode: "NVTK"},
+	{Board: "TQBR", SecCode: "GMKN"}, {Board: "TQBR", SecCode: "TATN"},
 	{Board: "TQBR", SecCode: "MGNT"}, {Board: "TQBR", SecCode: "SNGS"},
-	{Board: "TQBR", SecCode: "SNGSP"}, {Board: "TQBR", SecCode: "VTBR"},
-	{Board: "TQBR", SecCode: "ALRS"}, {Board: "TQBR", SecCode: "CHMF"},
-	{Board: "TQBR", SecCode: "PLZL"}, {Board: "TQBR", SecCode: "POLY"},
-	{Board: "TQBR", SecCode: "YNDX"}, {Board: "TQBR", SecCode: "MOEX"},
-	{Board: "TQBR", SecCode: "AFKS"}, {Board: "TQBR", SecCode: "RUAL"},
+	{Board: "TQBR", SecCode: "SNGSP"}, {Board: "TQBR", SecCode: "CHMF"},
+	{Board: "TQBR", SecCode: "AFKS"}, {Board: "TQBR", SecCode: "AFLT"},
+	{Board: "TQBR", SecCode: "BSPB"}, {Board: "TQBR", SecCode: "HYDR"},
+	{Board: "TQBR", SecCode: "IRAO"}, {Board: "TQBR", SecCode: "RTKM"},
+	{Board: "TQBR", SecCode: "FEES"}, {Board: "TQBR", SecCode: "CHMK"},
+	{Board: "TQBR", SecCode: "DVEC"}, {Board: "TQBR", SecCode: "TGKA"},
 }
 
 func env(name, def string) string {
@@ -78,6 +81,18 @@ func rssBytes() uint64 {
 	return m.Sys
 }
 
+// parseSoakDuration accepts a Go duration or a bare number of seconds.
+func parseSoakDuration(raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	if _, err := strconv.Atoi(raw); err == nil {
+		raw += "s"
+	}
+	return time.ParseDuration(raw)
+}
+
 func main() {
 	host, port := os.Getenv("TC_HOST"), os.Getenv("TC_PORT")
 	login, password := os.Getenv("TC_LOGIN"), os.Getenv("TC_PASSWORD")
@@ -94,10 +109,8 @@ func main() {
 		log.Fatalf("native-soak: %v", err)
 	}
 	duration := time.Duration(0)
-	if raw := env("TC_SOAK_DURATION", ""); raw != "" {
-		if duration, err = time.ParseDuration(raw); err != nil {
-			log.Fatalf("native-soak: TC_SOAK_DURATION: %v", err)
-		}
+	if duration, err = parseSoakDuration(env("TC_SOAK_DURATION", "")); err != nil {
+		log.Fatalf("native-soak: TC_SOAK_DURATION: %v", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

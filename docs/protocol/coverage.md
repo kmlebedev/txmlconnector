@@ -46,8 +46,8 @@
 | 26 | change_pass | 6 | **done** | RQ_CHANGE_PWD 3, payload/SHA-1, strict replies, fatal reply терминален (no recover, один connected=false), local texts; живьём не выполнялось (S-негатив) |
 | 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply (empty reply=failure, 00=success), 149 O e2e и exact DLL error text, dedup family callbacks (fix после ревью); S на проде — **негатив по доступу** (гейт 0x45/sys_ver, внешний блокер), 153/151 на записанной сессии — Unsupported request; mapping/XML — D/I |
 | 28 | RPS/REPO/отчёты | 8 | **partial** | payloads newrpsorder/newrepoorder/cancel O-побайтно, 6 команд, ошибки, D-literal XML (b9f305a); newrepoorder known fields (repoterm/reporate/discounts/block) encoded, value/refundrate/matchref/cpfirmid/settlecode — explicit I; newmrepoorder/newreport4, records/XML negdeal/report и RPS-специфичные reply-тексты — I |
-| 29 | XML-коннектор целиком, native backend | 9 | **done** | `dllCommands` = 45 имён, 45/45 реализовано, pending пуст; server.Backend dll|native + TC_BACKEND без Wine; TestServerErrorTexts/errors.md; matrix 45 имён зелёный; RE-4 demo stream EOF — отдельная задача |
-| 30 | Матрица покрытия, soak, выпуск | 9 | **in progress** | этот документ; soak/выпуск — после 29 |
+| 29 | XML-коннектор целиком, native backend | 9 | **done** | matrix 45/45 (TestEveryDLLCommand*, pending пуст); server.Backend dll|native, TC_BACKEND без Wine; TestServerErrorTexts + errors.md; RE-4 live demo — внешний блокер (demo connected=error/лимит сессий; native backend+TCClient path покрыт тестом) |
+| 30 | PR, soak, финальный прогон | 10 | **partial** | short soak PASS: 5 мин, UnknownRecords=0, RSS ~30 MiB (full-day soak не выполнялся — ограничение времени); tools/native-soak; PR Фаз 3-8 готовится |
 
 Фазы 0–2 закрыты по AGENTS.md (коммиты в истории ветки, PR #47/#48 — в main).
 
