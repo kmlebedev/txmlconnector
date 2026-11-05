@@ -44,6 +44,9 @@ type ClientConfig struct {
 	PushULimits, PushPosEquity time.Duration
 	// Dial opens the TCP connection; net.Dialer if nil.
 	Dial func(ctx context.Context, address string) (net.Conn, error)
+	// OnLogin is called once RQ_PWD succeeded, before the load, with the
+	// effective request timeout and session window (DLL log: "Logged in").
+	OnLogin func(info *session.Info, requestTimeout, sessionTTL time.Duration)
 	// OnDictionaries is called once after RQ_STARTUP is parsed, before the
 	// first RQ_MAIN poll, so the session owner can emit <markets>/<boards>/
 	// <candlekinds> callbacks in the DLL's order.
@@ -157,8 +160,12 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	// The DLL normalizes request_timeout against session_timeout once RQ_PWD
 	// brought the server value: the default is 20 s, and a value >= the window
 	// becomes half the window (docs/protocol/connect.md).
-	cfg.RequestTimeout = normalizeRequestTimeout(cfg.RequestTimeout, effectiveSessionTTL(cfg.SessionTimeout, info))
+	sessionTTL := effectiveSessionTTL(cfg.SessionTimeout, info)
+	cfg.RequestTimeout = normalizeRequestTimeout(cfg.RequestTimeout, sessionTTL)
 	conn.SetRequestTimeout(cfg.RequestTimeout)
+	if cfg.OnLogin != nil {
+		cfg.OnLogin(info, cfg.RequestTimeout, sessionTTL)
+	}
 	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}, secSpecs: map[uint16]records.SecSpec{}, history: map[historyKey]*historyCollector{}, orders: map[uint64]*model.Order{}, secPositions: map[positionKey]model.SecPosition{}}
 	c.resetAccountsLocked()
 	if err := c.load(ctx, conn); err != nil {
