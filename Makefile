@@ -17,7 +17,7 @@ STAGING_REMOTE_BIN  ?= $(STAGING_BIN_DIR)/txmlconnector-server.exe
 STAGING_UNIT_TMPL   ?= deploy/txmlconnector-server.service
 
 .PHONY: compile test vet verify server_build server queues_build queues client tgbot \
-	cabi cabi-so cabi-dylib cabi-test cabi-live-test cabi-conformance \
+	cabi cabi-so cabi-dylib cabi-zig cabi-test cabi-live-test cabi-conformance \
 	staging-precheck staging-prepare deploy-staging deploy-staging-binary \
 	deploy-staging-dll deploy-staging-unit deploy-staging-smoke \
 	deploy-staging-status deploy-staging-logs deploy-staging-restart rollback-staging
@@ -133,9 +133,21 @@ CABI_TEST_ENV = LD_LIBRARY_PATH=bin
 CABI_TEST_LIBS = -Lbin -ltxmlconnector -ldl
 endif
 
+## C9 release builds: Zig is the C toolchain for every target (zig cc -target
+## ...; Linux pinned to glibc 2.17). macOS targets need the macOS SDK, so they
+## are built on a macOS host. Output: bin/zig/<target>/.
+ifeq ($(shell go env GOOS),darwin)
+CABI_ZIG_TARGETS ?= linux-amd64 linux-arm64 windows-amd64 macos-arm64 macos-amd64
+else
+CABI_ZIG_TARGETS ?= linux-amd64 linux-arm64 windows-amd64
+endif
+cabi-zig:
+	TXC_VERSION=$(TXC_VERSION) tools/cabi/zig_build.sh bin/zig $(CABI_ZIG_TARGETS)
+
 ## Live read-only C ABI test (C4): source ~/re/demo.env first. No trading commands.
 cabi-live-test: cabi
 	$(CC) -I cmd/connector/include -o bin/abi_live cmd/connector/testdata/abi_live.c $(CABI_TEST_LIBS)
+	mkdir -p $${TXC_LOG_DIR:-bin/abi-live-logs}
 	$(CABI_TEST_ENV) ./bin/abi_live $(CABI_TEST_LIB)
 
 ## Portable dlopen/LoadLibrary ABI test (all 9 exports, error paths, callback).

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/kmlebedev/txmlconnector/cmd/connector/internal/dlllog"
 )
 
 // InitConfig is the <init log_path log_level use_minidump logfile_lifetime/> payload.
@@ -55,6 +57,8 @@ func parseInitXML(text string) (InitConfig, string) {
 		return cfg, prefixInit + "Wrong log level."
 	}
 	cfg.LogPath, cfg.LogLevel = path, level
+	// O: an absent logfile_lifetime keeps 7 days; a non-number counts as 0.
+	cfg.LogfileLifetime = dlllog.DefaultLifetime
 	if raw, ok := get("use_minidump"); ok {
 		cfg.UseMinidump = strings.EqualFold(raw, "true")
 	}
