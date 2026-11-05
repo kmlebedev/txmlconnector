@@ -227,15 +227,22 @@ type Service struct {
 	subs   map[uint64]func(Event)
 	subSeq uint64
 
+	// history flights deduplicate concurrent live history requests of the same
+	// symbol+period: native.Client allows only one History request per series
+	// in flight, a second concurrent one would fail with "already in flight".
+	flightMu sync.Mutex
+	flights  map[string]*historyFlight
+
 	// Live state, used by live.go. It is zero in offline mode.
-	client     marketClient
-	backoffMin time.Duration
-	backoffMax time.Duration
-	dial       liveDial
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	closed     bool
+	client        marketClient
+	backoffMin    time.Duration
+	backoffMax    time.Duration
+	stableSession time.Duration
+	dial          liveDial
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	closed        bool
 }
 
 // New builds the market-data service. Offline mode loads the seed immediately
@@ -278,6 +285,8 @@ func New(cfg Config) (*Service, error) {
 	s.dial = dialNative
 	s.backoffMin = 2 * time.Second
 	s.backoffMax = 30 * time.Second
+	s.stableSession = stableSessionDuration
+	s.flights = map[string]*historyFlight{}
 	return s, nil
 }
 

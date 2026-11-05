@@ -610,3 +610,81 @@ func TestLiveServerTimeAndExchangeTZ(t *testing.T) {
 		t.Fatalf("ServerTime = %v is shifted from UTC now (delta %v)", st.ServerTime, delta)
 	}
 }
+
+// TestLiveHistorySingleFlight is the P2 regression: concurrent requests for the
+// same symbol+period share one client.History call (native rejects a second
+// concurrent request with "already in flight"), and both callers get the series.
+func TestLiveHistorySingleFlight(t *testing.T) {
+	client := &fakeClient{}
+	release := make(chan struct{})
+	client.histFn = func(ctx context.Context, req native.HistoryRequest) (model.Candles, error) {
+		<-release
+		items := make([]model.Candle, req.Count)
+		for i := range items {
+			value := dec(float64(i))
+			items[i] = model.Candle{Time: time.Unix(testBase+int64(i)*60, 0).UTC(), Open: *value, High: *value, Low: *value, Close: *value}
+		}
+		return model.Candles{Symbol: req.Symbol, Period: req.Period, Items: items}, nil
+	}
+	svc := newLive(t, client)
+	svc.candleKinds = map[int]int{300: 9}
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Close()
+
+	// The leader blocks inside client.History; a second caller must join the
+	// same flight instead of issuing a second exchange request.
+	leaderDone := make(chan History, 1)
+	leaderErr := make(chan error, 1)
+	go func() {
+		h, err := svc.Candles(context.Background(), "TQBR:SBER", 300, 100)
+		leaderDone <- h
+		leaderErr <- err
+	}()
+	waitFor(t, "leader history call", func() bool {
+		_, calls := client.counts()
+		return calls >= 1
+	})
+	time.AfterFunc(20*time.Millisecond, func() { close(release) })
+	follower, err := svc.Candles(context.Background(), "TQBR:SBER", 300, 100)
+	if err != nil {
+		t.Fatalf("follower Candles: %v", err)
+	}
+	leader := <-leaderDone
+	if err := <-leaderErr; err != nil {
+		t.Fatalf("leader Candles: %v", err)
+	}
+	if len(leader.Bars) != 100 || len(follower.Bars) != 100 {
+		t.Fatalf("leader/follower bars = %d/%d", len(leader.Bars), len(follower.Bars))
+	}
+	if _, calls := client.counts(); calls != 1 {
+		t.Fatalf("client History calls = %d, want 1 (single-flight)", calls)
+	}
+}
+
+// TestBackoffSchedule checks the reconnect escalation: the wait doubles up to
+// the cap, a flapping session keeps it, and only a stable session resets it.
+func TestBackoffSchedule(t *testing.T) {
+	schedule := newBackoffSchedule(2*time.Second, 30*time.Second)
+	for i, want := range []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second, 30 * time.Second} {
+		if got := schedule.next(); got != want {
+			t.Fatalf("next #%d = %v, want %v", i, got, want)
+		}
+	}
+	// A stable session resets the escalation back to the minimum.
+	schedule.observeSession(31*time.Second, 30*time.Second)
+	if got := schedule.next(); got != 2*time.Second {
+		t.Fatalf("after stable session next = %v, want 2s", got)
+	}
+	// A flapping session keeps the escalation (2s -> 4s).
+	schedule.observeSession(2*time.Second, 30*time.Second)
+	if got := schedule.next(); got != 4*time.Second {
+		t.Fatalf("after flapping session next = %v, want 4s", got)
+	}
+	// Defensive defaults for a zeroed schedule.
+	zero := newBackoffSchedule(0, 0)
+	if got := zero.next(); got != 2*time.Second {
+		t.Fatalf("zero schedule next = %v, want 2s", got)
+	}
+}

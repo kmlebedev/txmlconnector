@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -783,8 +784,9 @@ func TestBacktest(t *testing.T) {
 	}
 }
 
-// TestBacktestNotImplemented checks the 503 mapping of an unimplemented engine.
-func TestBacktestNotImplemented(t *testing.T) {
+// TestBacktestEngineError checks that a genuine engine failure stays 500 (only
+// unavailable data/engine is 503; bad request parameters are 400).
+func TestBacktestEngineError(t *testing.T) {
 	deps, _, _, _ := defaultDeps()
 	deps.Backtest = func(req backtest.Request) (backtest.Result, error) {
 		return backtest.Result{}, errors.New("backtest: not implemented")
@@ -1269,6 +1271,9 @@ func TestAutonomyErrorMapping(t *testing.T) {
 		{"missing strategy", "start", errors.New("agent: autonomy strategy is required"), nil, http.StatusBadRequest, codeBadRequest},
 		{"not enough history", "start", errors.New("agent: not enough history for TQBR:SBER (5 bars)"), nil, http.StatusBadRequest, codeBadRequest},
 		{"not implemented", "start", errors.New("agent: not implemented"), nil, http.StatusServiceUnavailable, codeUnavailable},
+		{"unknown symbol", "start", fmt.Errorf("agent: autonomy history for TQBR:NOPE: %w", &feed.Error{Code: feed.CodeNotFound, Message: "инструмент не найден: TQBR:NOPE"}), nil, http.StatusNotFound, codeNotFound},
+		{"bad period", "start", fmt.Errorf("agent: autonomy history for TQBR:SBER: %w", &feed.Error{Code: feed.CodeBadPeriod, Message: "неподдерживаемый период"}), nil, http.StatusBadRequest, codeBadRequest},
+		{"data unavailable", "start", fmt.Errorf("agent: autonomy history for TQBR:SBER: %w", &feed.Error{Code: feed.CodeUnavailable, Message: "нет соединения с сервером биржи"}), nil, http.StatusServiceUnavailable, codeUnavailable},
 		{"deadline", "start", context.DeadlineExceeded, nil, http.StatusServiceUnavailable, codeUnavailable},
 		{"unknown start error", "start", errors.New("boom"), nil, http.StatusInternalServerError, codeInternal},
 		{"unknown stop error", "stop", nil, errors.New("boom"), http.StatusInternalServerError, codeInternal},
@@ -1405,5 +1410,319 @@ func TestStableAutonomyNormalizesUTC(t *testing.T) {
 	empty := stableAutonomy(agent.AutonomyStatus{})
 	if !empty.StartedAt.IsZero() || !empty.LastActionAt.IsZero() {
 		t.Fatalf("empty autonomy = %+v", empty)
+	}
+}
+
+// --- P2/P3 review regression tests ----------------------------------------
+
+// sseTestWriter is an http.ResponseWriter + http.Flusher + write-deadline
+// writer used by the SSE deadline tests.
+type sseTestWriter struct {
+	mu        sync.Mutex
+	header    http.Header
+	deadlines []time.Time
+	writes    int
+	block     bool
+}
+
+func newSSETestWriter(block bool) *sseTestWriter {
+	return &sseTestWriter{header: http.Header{}, block: block}
+}
+
+func (w *sseTestWriter) Header() http.Header { return w.header }
+
+func (w *sseTestWriter) WriteHeader(int) {}
+
+func (w *sseTestWriter) Flush() {}
+
+// SetWriteDeadline makes the fake a deadline-aware writer for ResponseController.
+func (w *sseTestWriter) SetWriteDeadline(t time.Time) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.deadlines = append(w.deadlines, t)
+	return nil
+}
+
+func (w *sseTestWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	w.writes++
+	var deadline time.Time
+	if len(w.deadlines) > 0 {
+		deadline = w.deadlines[len(w.deadlines)-1]
+	}
+	block := w.block
+	w.mu.Unlock()
+	if !block {
+		return len(p), nil
+	}
+	// Simulate a client that stopped reading: block until the write deadline.
+	if !deadline.IsZero() {
+		if d := time.Until(deadline); d > 0 {
+			time.Sleep(d)
+		}
+	}
+	return 0, context.DeadlineExceeded
+}
+
+func (w *sseTestWriter) counts() (writes, deadlines int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writes, len(w.deadlines)
+}
+
+// startSSEHandler runs handleEvents against the fake writer and waits until it
+// subscribed to the hub.
+func startSSEHandler(t *testing.T, srv *Server, w *sseTestWriter) chan struct{} {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	t.Cleanup(cancel)
+	req = req.WithContext(ctx)
+	done := make(chan struct{})
+	go func() {
+		srv.handleEvents(w, req)
+		close(done)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for srv.hub.size() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if srv.hub.size() == 0 {
+		t.Fatal("SSE handler did not subscribe to the hub")
+	}
+	return done
+}
+
+// TestSSEWriteDeadlineUnblocksStalledClient is the P2 regression: a client that
+// stopped reading must not pin the SSE goroutine forever — the per-write
+// deadline turns the blocked write into an error and the handler exits.
+func TestSSEWriteDeadlineUnblocksStalledClient(t *testing.T) {
+	deps, _, _, _ := defaultDeps()
+	srv, err := New(Config{}, deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer srv.Close()
+	srv.writeDeadline = 20 * time.Millisecond
+
+	w := newSSETestWriter(true)
+	done := startSSEHandler(t, srv, w)
+	srv.hub.publish(event{Type: "quote", Data: map[string]any{"symbol": "TQBR:SBER"}})
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SSE handler stuck on a stalled client")
+	}
+	writes, deadlines := w.counts()
+	if writes == 0 {
+		t.Fatal("no SSE write was attempted")
+	}
+	if deadlines < writes {
+		t.Fatalf("write deadlines = %d for %d writes, want one per write", deadlines, writes)
+	}
+	w.mu.Lock()
+	for _, deadline := range w.deadlines {
+		if deadline.IsZero() {
+			w.mu.Unlock()
+			t.Fatal("zero write deadline recorded")
+		}
+	}
+	w.mu.Unlock()
+}
+
+// TestSSEWriteDeadlinePerWrite checks that every SSE frame is written under a
+// fresh deadline and the handler stops when the request is cancelled.
+func TestSSEWriteDeadlinePerWrite(t *testing.T) {
+	deps, _, _, _ := defaultDeps()
+	srv, err := New(Config{}, deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer srv.Close()
+	srv.writeDeadline = 50 * time.Millisecond
+
+	w := newSSETestWriter(false)
+	done := startSSEHandler(t, srv, w)
+	for i := 0; i < 3; i++ {
+		srv.hub.publish(event{Type: "quote", Data: map[string]any{"n": i}})
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		writes, _ := w.counts()
+		if writes >= 3 || time.Now().Before(deadline) {
+			if writes >= 3 {
+				break
+			}
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		t.Fatalf("writes = %d, want at least 3", writes)
+	}
+	if writes, deadlines := w.counts(); deadlines < writes+1 {
+		t.Fatalf("deadlines = %d, writes = %d, want a deadline for the header flush too", deadlines, writes)
+	}
+	// Cancelling the request ends the handler.
+	srv.hub.closeAll()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SSE handler did not stop after the client channel closed")
+	}
+}
+
+// TestBacktestInvalidRequest is the P2 regression: an unknown strategy or bad
+// parameters are a 400 bad_request, not a 500 internal error.
+func TestBacktestInvalidRequest(t *testing.T) {
+	deps, _, _, _ := defaultDeps()
+	called := false
+	deps.Backtest = func(req backtest.Request) (backtest.Result, error) {
+		called = true
+		return backtest.Result{}, nil
+	}
+	_, ts := newTestServer(t, deps, Config{})
+	cases := []map[string]any{
+		{"symbol": "TQBR:SBER", "strategy": "nope_strategy", "periodSec": 60},
+		{"symbol": "TQBR:SBER", "strategy": "sma_cross", "periodSec": 60, "initialCash": -100},
+		{"symbol": "TQBR:SBER", "strategy": "sma_cross", "periodSec": 60, "feeBps": 20_000},
+	}
+	for _, body := range cases {
+		status, data := do(t, ts, http.MethodPost, "/api/backtest", body)
+		if status != http.StatusBadRequest {
+			t.Fatalf("body %v: status = %d, want 400, response %s", body, status, data)
+		}
+		if code := errorCode(t, data); code != codeBadRequest {
+			t.Fatalf("body %v: code = %q", body, code)
+		}
+	}
+	if called {
+		t.Fatal("engine must not run for an invalid request")
+	}
+	// A valid request still reaches the engine.
+	status, _ := do(t, ts, http.MethodPost, "/api/backtest", map[string]any{
+		"symbol": "TQBR:SBER", "strategy": "sma_cross", "periodSec": 60,
+	})
+	if status != http.StatusOK || !called {
+		t.Fatalf("valid backtest status = %d, called = %v", status, called)
+	}
+}
+
+// TestAutonomyLogUTC checks that /api/agent/autonomy/log renders RFC3339 UTC
+// times, matching /api/agent/status.
+func TestAutonomyLogUTC(t *testing.T) {
+	msk := time.FixedZone("MSK", 3*3600)
+	at := time.Date(2026, 11, 5, 19, 30, 0, 0, msk)
+	deps, _, _, a := defaultDeps()
+	a.status.Autonomy.Log = []agent.LogEntry{{Time: at, Kind: "start", Message: "старт"}}
+	_, ts := newTestServer(t, deps, Config{})
+	status, data := do(t, ts, http.MethodGet, "/api/agent/autonomy/log", nil)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body %s", status, data)
+	}
+	var resp struct {
+		Log []struct {
+			Time time.Time `json:"time"`
+			Kind string    `json:"kind"`
+		} `json:"log"`
+	}
+	decode(t, data, &resp)
+	if len(resp.Log) != 1 || resp.Log[0].Kind != "start" {
+		t.Fatalf("log = %+v", resp.Log)
+	}
+	if !resp.Log[0].Time.Equal(at) {
+		t.Fatalf("log time = %v, want instant %v", resp.Log[0].Time, at)
+	}
+	if resp.Log[0].Time.Location() != time.UTC {
+		t.Fatalf("log time zone = %v, want UTC", resp.Log[0].Time.Location())
+	}
+}
+
+// TestNormalizeEventTimes checks that agent event payloads get every embedded
+// time.Time rendered as UTC without mutating the input.
+func TestNormalizeEventTimes(t *testing.T) {
+	msk := time.FixedZone("MSK", 3*3600)
+	at := time.Date(2026, 11, 5, 19, 30, 0, 0, msk)
+
+	type nested struct{ At time.Time }
+	type payload struct {
+		Time   time.Time
+		Nested nested
+		List   []nested
+		Ptr    *nested
+		Any    any
+		Table  map[string]nested
+	}
+	original := payload{
+		Time:   at,
+		Nested: nested{At: at},
+		List:   []nested{{At: at}},
+		Ptr:    &nested{At: at},
+		Any:    agent.LogEntry{Time: at},
+		Table:  map[string]nested{"k": {At: at}},
+	}
+	out := normalizeEventTimes(original).(payload)
+	isUTC := func(name string, got time.Time) {
+		t.Helper()
+		if !got.Equal(at) {
+			t.Fatalf("%s = %v, want %v", name, got, at)
+		}
+		if got.Location() != time.UTC {
+			t.Fatalf("%s zone = %v, want UTC", name, got.Location())
+		}
+	}
+	isUTC("Time", out.Time)
+	isUTC("Nested.At", out.Nested.At)
+	isUTC("List[0].At", out.List[0].At)
+	isUTC("Ptr.At", out.Ptr.At)
+	isUTC("Table[k].At", out.Table["k"].At)
+	if entry, ok := out.Any.(agent.LogEntry); !ok {
+		t.Fatalf("Any = %T", out.Any)
+	} else {
+		isUTC("Any.Time", entry.Time)
+	}
+	// The input value must not be mutated.
+	if original.Time.Location() != msk || original.Nested.At.Location() != msk {
+		t.Fatal("normalizeEventTimes mutated its input")
+	}
+	if normalizeEventTimes(nil) != nil {
+		t.Fatal("nil payload must stay nil")
+	}
+	// Pointers are copied too.
+	ptr := &agent.LogEntry{Time: at, Kind: "log"}
+	normalizedPtr := normalizeEventTimes(ptr).(*agent.LogEntry)
+	isUTC("Ptr.Time", normalizedPtr.Time)
+	if ptr.Time.Location() != msk {
+		t.Fatal("normalizeEventTimes mutated the pointed-to value")
+	}
+}
+
+// TestAgentEventUTCOverSSE checks the SSE agent event path: a log payload with
+// a local time reaches the hub as UTC.
+func TestAgentEventUTCOverSSE(t *testing.T) {
+	msk := time.FixedZone("MSK", 3*3600)
+	at := time.Date(2026, 11, 5, 19, 30, 0, 0, msk)
+	deps, _, _, _ := defaultDeps()
+	srv, err := New(Config{}, deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer srv.Close()
+	ch, cancel := srv.hub.subscribe()
+	defer cancel()
+	srv.onAgentEvent(agent.Event{Type: "log", Data: agent.LogEntry{Time: at, Kind: "start", Message: "старт"}})
+	select {
+	case ev := <-ch:
+		data, ok := ev.Data.(agent.Event)
+		if !ok {
+			t.Fatalf("event data = %T", ev.Data)
+		}
+		entry, ok := data.Data.(agent.LogEntry)
+		if !ok {
+			t.Fatalf("agent data = %T", data.Data)
+		}
+		if !entry.Time.Equal(at) || entry.Time.Location() != time.UTC {
+			t.Fatalf("SSE log time = %v (%v), want UTC instant %v", entry.Time, entry.Time.Location(), at)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no agent event on the hub")
 	}
 }

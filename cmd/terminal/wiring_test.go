@@ -268,9 +268,11 @@ func TestIsLoopbackAddr(t *testing.T) {
 		"127.0.0.1:8090": true,
 		"localhost:8090": true,
 		"[::1]:8090":     true,
-		":8090":          true,
+		":8090":          false, // empty host: all interfaces, not loopback
 		"0.0.0.0:8090":   false,
+		"[::]:8090":      false,
 		"192.168.1.2:80": false,
+		"example.com:80": false,
 		"bad":            false,
 	}
 	for addr, want := range cases {

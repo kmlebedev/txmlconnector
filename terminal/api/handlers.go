@@ -245,7 +245,7 @@ func (s *Server) handleCandles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeBadRequest, "некорректное количество свечей")
 		return
 	}
-	ctx, cancel := requestContext(r, defaultRequestTimeout)
+	ctx, cancel := requestContext(r, candlesRequestTimeout)
 	defer cancel()
 	history, err := s.deps.Feed.Candles(ctx, symbol, periodSec, count)
 	if err != nil {
@@ -467,6 +467,24 @@ type backtestRequest struct {
 	Count       int                `json:"count"`
 }
 
+// validateBacktestRequest checks the client-side backtest parameters; an empty
+// result means the engine can run the request. Bad parameters are a 400, while
+// engine/data failures stay 500/503.
+func validateBacktestRequest(req backtestRequest) string {
+	if _, err := backtest.NewStrategy(req.Strategy, req.Params); err != nil {
+		return "некорректная стратегия или параметры бэктеста: " + err.Error()
+	}
+	switch {
+	case req.InitialCash < 0:
+		return "начальный капитал не может быть отрицательным"
+	case req.FeeBps < 0 || req.FeeBps >= 10_000:
+		return "комиссия (б.п.) должна быть в диапазоне [0, 10000)"
+	case req.SlippageBps < 0 || req.SlippageBps >= 10_000:
+		return "проскальзывание (б.п.) должно быть в диапазоне [0, 10000)"
+	}
+	return ""
+}
+
 // handleBacktest serves POST /api/backtest.
 func (s *Server) handleBacktest(w http.ResponseWriter, r *http.Request) {
 	var req backtestRequest
@@ -489,6 +507,10 @@ func (s *Server) handleBacktest(w http.ResponseWriter, r *http.Request) {
 	}
 	if !feed.ValidPeriod(periodSec) {
 		writeError(w, http.StatusBadRequest, codeBadRequest, "неподдерживаемый период свечей")
+		return
+	}
+	if msg := validateBacktestRequest(req); msg != "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, msg)
 		return
 	}
 	count := req.Count
@@ -515,6 +537,10 @@ func (s *Server) handleBacktest(w http.ResponseWriter, r *http.Request) {
 	if run == nil {
 		run = backtest.Run
 	}
+	// The HTTP backtest result is intentionally NOT recorded in the agent
+	// backtest history: §12 documents this as an accepted deviation (the
+	// analytics tab shows the agent's own runs). Only agent tool calls call
+	// agent.Engine.recordBacktest.
 	result, err := run(backtest.Request{
 		Symbol:      req.Symbol,
 		PeriodSec:   periodSec,
@@ -683,6 +709,7 @@ func stableAutonomy(status agent.AutonomyStatus) agent.AutonomyStatus {
 // request, an unimplemented feature is unavailable, everything else is
 // internal.
 func (s *Server) mapAutonomyError(w http.ResponseWriter, err error) {
+	var feedErr *feed.Error
 	message := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(message, "already running"), strings.Contains(message, "уже запущена"):
@@ -691,6 +718,19 @@ func (s *Server) mapAutonomyError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "функция пока не реализована")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "превышено время ожидания ответа")
+	case errors.As(err, &feedErr):
+		// The agent wraps data-source failures: an unknown symbol is not found,
+		// an unsupported period is a bad request, no connection is unavailable.
+		switch feedErr.Code {
+		case feed.CodeBadPeriod:
+			writeError(w, http.StatusBadRequest, codeBadRequest, feedErr.Message)
+		case feed.CodeNotFound:
+			writeError(w, http.StatusNotFound, codeNotFound, feedErr.Message)
+		case feed.CodeUnavailable:
+			writeError(w, http.StatusServiceUnavailable, codeUnavailable, feedErr.Message)
+		default:
+			writeInternal(w)
+		}
 	case isAutonomyConfigError(err):
 		writeError(w, http.StatusBadRequest, codeBadRequest, "некорректные параметры автономии: "+err.Error())
 	default:
@@ -732,9 +772,16 @@ func (s *Server) handleAutonomyLog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeBadRequest, "некорректный лимит лога")
 		return
 	}
-	entries := s.deps.Agent.Status().Autonomy.Log
-	if limit > 0 && len(entries) > limit {
-		entries = entries[len(entries)-limit:]
+	log := s.deps.Agent.Status().Autonomy.Log
+	if limit > 0 && len(log) > limit {
+		log = log[len(log)-limit:]
+	}
+	// LogEntry.Time is rendered RFC3339 UTC like every API time (§10.2); the
+	// engine keeps local times.
+	entries := make([]agent.LogEntry, len(log))
+	for i, entry := range log {
+		entry.Time = utc(entry.Time)
+		entries[i] = entry
 	}
 	if entries == nil {
 		entries = []agent.LogEntry{}

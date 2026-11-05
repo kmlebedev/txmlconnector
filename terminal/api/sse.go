@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"sync"
 	"time"
 
@@ -211,26 +212,134 @@ func (s *Server) onFeedEvent(ev feed.Event) {
 	}
 }
 
-// onAgentEvent forwards agent events to the SSE clients.
+// onAgentEvent forwards agent events to the SSE clients with the timestamps
+// rendered as RFC3339 UTC (§10.2).
 func (s *Server) onAgentEvent(ev agent.Event) {
+	ev.Data = normalizeEventTimes(ev.Data)
 	s.hub.publish(event{Type: "agent", Data: ev})
 }
 
-// handleEvents serves the /api/events server-sent event stream.
-func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, codeInternal, "SSE не поддерживается транспортом")
-		return
+// timeType is the reflect type of time.Time used by normalizeEventTimes.
+var timeType = reflect.TypeOf(time.Time{})
+
+// normalizeEventTimes returns a copy of an agent event payload with every
+// time.Time rendered in UTC. The agent engine uses the local clock
+// (time.Now()), while every JSON time in the API must be RFC3339 UTC (§10.2);
+// SSE "log"/"autonomy" events carry such times. Unknown/complex payloads are
+// copied structurally, a deeply nested value is left as is at depth 8.
+func normalizeEventTimes(value any) (out any) {
+	if value == nil {
+		return nil
 	}
+	// Defensive: this runs on the SSE event-loop goroutine, a reflection panic
+	// must never crash the server — fall back to the original payload.
+	defer func() {
+		if recover() != nil {
+			out = value
+		}
+	}()
+	normalized := normalizeTimeValue(reflect.ValueOf(value), 0)
+	if !normalized.IsValid() {
+		return value
+	}
+	return normalized.Interface()
+}
+
+// normalizeTimeValue copies v and normalizes every reachable time.Time to UTC.
+func normalizeTimeValue(v reflect.Value, depth int) reflect.Value {
+	if !v.IsValid() || depth > 8 {
+		return v
+	}
+	if v.Type() == timeType {
+		return reflect.ValueOf(v.Interface().(time.Time).UTC())
+	}
+	switch v.Kind() {
+	case reflect.Interface:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.New(v.Type()).Elem()
+		out.Set(normalizeTimeValue(v.Elem(), depth+1))
+		return out
+	case reflect.Pointer:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.New(v.Type().Elem())
+		out.Elem().Set(normalizeTimeValue(v.Elem(), depth+1))
+		return out
+	case reflect.Struct:
+		out := reflect.New(v.Type()).Elem()
+		out.Set(v)
+		for i := 0; i < v.NumField(); i++ {
+			field := out.Field(i)
+			if !field.CanSet() {
+				continue
+			}
+			field.Set(normalizeTimeValue(field, depth+1))
+		}
+		return out
+	case reflect.Slice:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		for i := 0; i < v.Len(); i++ {
+			out.Index(i).Set(normalizeTimeValue(v.Index(i), depth+1))
+		}
+		return out
+	case reflect.Array:
+		out := reflect.New(v.Type()).Elem()
+		for i := 0; i < v.Len(); i++ {
+			out.Index(i).Set(normalizeTimeValue(v.Index(i), depth+1))
+		}
+		return out
+	case reflect.Map:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.MakeMapWithSize(v.Type(), v.Len())
+		iter := v.MapRange()
+		for iter.Next() {
+			out.SetMapIndex(iter.Key(), normalizeTimeValue(iter.Value(), depth+1))
+		}
+		return out
+	}
+	return v
+}
+
+// handleEvents serves the /api/events server-sent event stream. Every write
+// carries a fresh write deadline: a client that stopped reading must not pin
+// the handler goroutine (and its connection) forever.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	header := w.Header()
 	header.Set("Content-Type", "text/event-stream; charset=utf-8")
 	header.Set("Cache-Control", "no-store")
 	header.Set("Connection", "keep-alive")
 	header.Set("X-Accel-Buffering", "no")
+	controller := http.NewResponseController(w)
+	deadline := s.writeDeadline
+	if deadline <= 0 {
+		deadline = sseWriteTimeout
+	}
+	// write sends one already-encoded SSE frame under the write deadline.
+	// It reports false when the connection is dead or the client is too slow.
+	write := func(frame []byte) bool {
+		_ = controller.SetWriteDeadline(time.Now().Add(deadline))
+		if len(frame) > 0 {
+			if _, err := w.Write(frame); err != nil {
+				return false
+			}
+		}
+		if err := controller.Flush(); err != nil {
+			return false
+		}
+		return true
+	}
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
-
+	if !write(nil) {
+		return
+	}
 	ch, cancel := s.hub.subscribe()
 	defer cancel()
 	for {
@@ -245,10 +354,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			if _, err := fmt.Fprintf(w, "event: message\ndata: %s\n\n", data); err != nil {
+			if !write([]byte(fmt.Sprintf("event: message\ndata: %s\n\n", data))) {
 				return
 			}
-			flusher.Flush()
 		}
 	}
 }
