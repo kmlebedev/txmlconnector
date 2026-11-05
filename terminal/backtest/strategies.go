@@ -94,6 +94,10 @@ var strategyRegistry = []strategyDef{
 	{info: rsiReversionInfo, build: fixed(newRSIReversion)},
 	{info: donchianBreakoutInfo, build: fixed(newDonchianBreakout)},
 	{info: momentumInfo, build: fixed(newMomentum)},
+	{info: tsmomInfo, build: fixed(newTSMOM)},
+	{info: keltnerInfo, build: fixed(newKeltner)},
+	{info: supertrendInfo, build: fixed(newSupertrend)},
+	{info: maribbonInfo, build: fixed(newMARibbon)},
 	{info: rulesInfo, build: newRulesStrategy},
 }
 

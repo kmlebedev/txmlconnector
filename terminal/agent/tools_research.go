@@ -39,6 +39,9 @@ const toolNameBatchBacktest = "batch_backtest"
 // fingerprint analysis.
 const toolNameDetectExecutionAlgos = "detect_execution_algos"
 
+// toolNameWalkForward is the agent tool name of the walk-forward grid search.
+const toolNameWalkForward = "walk_forward"
+
 // maxBatchSymbols bounds one batch comparison so a single tool call cannot fan
 // out unbounded history requests.
 const maxBatchSymbols = 20
@@ -56,7 +59,7 @@ var errRulesStrategyNeedsSpec = fmt.Errorf(
 // researchToolCatalog returns the catalog of research tools added by phases
 // E–G, in catalog order.
 func researchToolCatalog() []ToolInfo {
-	return []ToolInfo{backtestRulesTool, batchBacktestTool, detectExecutionAlgosTool}
+	return []ToolInfo{backtestRulesTool, batchBacktestTool, detectExecutionAlgosTool, walkForwardTool}
 }
 
 // backtestRulesTool is the backtest_rules tool description.
@@ -193,6 +196,12 @@ func (e *Engine) invokeResearchTool(ctx context.Context, name string, args map[s
 			return nil, nil, true, err
 		}
 		return res, &Artifact{Kind: "execution_algos", Payload: ui}, true, nil
+	case toolNameWalkForward:
+		res, ui, err := e.toolWalkForward(ctx, args)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return res, ui, true, nil
 	}
 	return nil, nil, false, nil
 }
@@ -527,4 +536,216 @@ func parseRulesSpec(raw any) (rules.Spec, error) {
 		return rules.Spec{}, fmt.Errorf("agent: invalid rules JSON: %w", err)
 	}
 	return spec, nil
+}
+
+// walkForwardTool is the walk_forward tool description.
+var walkForwardTool = ToolInfo{
+	Name:  toolNameWalkForward,
+	Title: "Walk-forward проверка",
+	Description: "Скользящая walk-forward проверка стратегии: перебор сетки параметров на обучающих окнах, " +
+		"проверка лучшей комбинации на следующих окнах; возвращает OOS/IS метрики, deflated Sharpe " +
+		"(поправка на число испытаний) и PBO (вероятность переобучения).",
+	Input: objSchema(map[string]any{
+		"symbol":      strProp("Тикер инструмента, например TQBR:SBER или SBER"),
+		"periodSec":   intProp("Период свечей в секундах: 60, 300, 900, 3600 или 86400"),
+		"count":       intProp(fmt.Sprintf("Сколько последних баров использовать, максимум %d", maxBacktestBars)),
+		"strategy":    strProp("ID каталоговой стратегии: sma_cross, rsi_reversion, donchian_breakout, momentum или trend_*"),
+		"grid":        gridProp(),
+		"trainBars":   intProp("Баров в обучающем окне (обязательно)"),
+		"testBars":    intProp("Баров в тестовом окне (обязательно)"),
+		"stepBars":    intProp("Сдвиг окна в барах (0 = testBars)"),
+		"feeBps":      numProp("Комиссия в базисных пунктах (по умолчанию 5)"),
+		"slippageBps": numProp("Проскальзывание в базисных пунктах (по умолчанию 1)"),
+	}, "symbol", "strategy", "trainBars", "testBars"),
+}
+
+// gridProp is the JSON Schema of the parameter grid argument.
+func gridProp() map[string]any {
+	return map[string]any{
+		"type":        "object",
+		"description": "Сетка параметров: имя → список значений (например fast → [2, 3, 5], slow → [8, 13, 21])",
+		"additionalProperties": map[string]any{
+			"type":  "array",
+			"items": map[string]any{"type": "number"},
+		},
+	}
+}
+
+// walkForwardView is the compact model-facing payload of walk_forward: the
+// aggregate metrics and statistics only; the full per-fold result goes to the
+// UI artifact.
+type walkForwardView struct {
+	Symbol         string           `json:"symbol"`
+	Strategy       string           `json:"strategy"`
+	PeriodSec      int              `json:"periodSec"`
+	Trials         int              `json:"trials"`
+	Folds          int              `json:"folds"`
+	OOS            backtest.Metrics `json:"oos"`
+	IS             backtest.Metrics `json:"is"`
+	DeflatedSharpe float64          `json:"deflatedSharpe"`
+	PBO            float64          `json:"pbo"`
+	Warnings       []string         `json:"warnings,omitempty"`
+}
+
+// argGrid decodes the grid tool argument: parameter name -> values. Both the
+// JSON shape map[string][]float64 and the heterogeneous map[string]any are
+// accepted.
+func argGrid(args map[string]any, key string) map[string][]float64 {
+	raw, ok := args[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	out := make(map[string][]float64)
+	switch value := raw.(type) {
+	case map[string][]float64:
+		for name, values := range value {
+			out[name] = append([]float64(nil), values...)
+		}
+	case map[string]any:
+		for name, valuesRaw := range value {
+			values, ok := numericSlice(valuesRaw)
+			if !ok {
+				continue
+			}
+			out[name] = values
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// numericSlice converts one grid value list to float64. Values that are not
+// numbers are dropped by the caller.
+func numericSlice(raw any) ([]float64, bool) {
+	switch value := raw.(type) {
+	case []float64:
+		return append([]float64(nil), value...), true
+	case []any:
+		out := make([]float64, 0, len(value))
+		for _, item := range value {
+			number, ok := numericValue(item)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, number)
+		}
+		return out, len(out) > 0
+	}
+	return nil, false
+}
+
+// compareWalkForwardWindows derives the compare_strategies walk-forward windows
+// from the history length: half of the bars is the train window, a quarter the
+// test window and the test length is the step (two folds are typical).
+func compareWalkForwardWindows(count int) (train, test, step int, ok bool) {
+	if count < 12 {
+		return 0, 0, 0, false
+	}
+	train = count / 2
+	test = count / 4
+	if train < 6 {
+		train = 6
+	}
+	if test < 2 {
+		test = 2
+	}
+	if train+test > count {
+		return 0, 0, 0, false
+	}
+	return train, test, test, true
+}
+
+// walkForwardRunner routes walk-forward windows through the engine backtest
+// seam, so a fake engine and the tests behave exactly like run_backtest.
+func (e *Engine) walkForwardRunner() research.Runner {
+	return func(req backtest.Request) (backtest.Result, error) {
+		return e.runBacktest(req)
+	}
+}
+
+// toolWalkForward implements walk_forward: a rolling grid search whose ranking
+// evidence is out of sample. The model gets the aggregates (OOS/IS metrics,
+// deflated Sharpe, PBO); the UI artifact carries the full per-fold result.
+func (e *Engine) toolWalkForward(ctx context.Context, args map[string]any) (walkForwardView, *Artifact, error) {
+	empty := walkForwardView{}
+	if err := contextErr(ctx); err != nil {
+		return empty, nil, err
+	}
+	symbol := e.resolveSymbol(argString(args, "symbol"))
+	if symbol == "" {
+		return empty, nil, errors.New("agent: symbol is required")
+	}
+	strategy := argString(args, "strategy")
+	if strategy == "" {
+		return empty, nil, errors.New("agent: strategy is required")
+	}
+	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+	if err != nil {
+		return empty, nil, err
+	}
+	countArg, err := argIntStrict(args, "count", maxBacktestBars, minToolCount, maxBacktestBars)
+	if err != nil {
+		return empty, nil, err
+	}
+	trainBars, err := argIntStrict(args, "trainBars", 0, 2, maxBacktestBars)
+	if err != nil {
+		return empty, nil, err
+	}
+	if trainBars == 0 {
+		return empty, nil, errors.New("agent: trainBars is required")
+	}
+	testBars, err := argIntStrict(args, "testBars", 0, 2, maxBacktestBars)
+	if err != nil {
+		return empty, nil, err
+	}
+	if testBars == 0 {
+		return empty, nil, errors.New("agent: testBars is required")
+	}
+	stepBars, err := argIntStrict(args, "stepBars", 0, 0, maxBacktestBars)
+	if err != nil {
+		return empty, nil, err
+	}
+	period := e.normalizePeriod(int(periodSec))
+	count := clampCount(int(countArg), maxBacktestBars)
+	bars, err := e.data.History(ctx, symbol, period, count)
+	if err != nil {
+		return empty, nil, fmt.Errorf("agent: history for %s: %w", symbol, err)
+	}
+	if len(bars) < 2 {
+		return empty, nil, fmt.Errorf("agent: not enough history for %s (%d bars)", symbol, len(bars))
+	}
+	result, err := research.WalkForward(ctx, research.WalkForwardRequest{
+		Bars:        bars,
+		Strategy:    strategy,
+		Grid:        argGrid(args, "grid"),
+		TrainBars:   int(trainBars),
+		TestBars:    int(testBars),
+		StepBars:    int(stepBars),
+		FeeBps:      argFloat(args, "feeBps", e.feeBps()),
+		SlippageBps: argFloat(args, "slippageBps", 1),
+		Run:         e.walkForwardRunner(),
+	})
+	if err != nil {
+		return empty, nil, fmt.Errorf("agent: walk-forward %s on %s: %w", strategy, symbol, err)
+	}
+	view := walkForwardView{
+		Symbol:         symbol,
+		Strategy:       strategy,
+		PeriodSec:      period,
+		Trials:         result.Trials,
+		Folds:          len(result.Folds),
+		OOS:            result.OOS,
+		IS:             result.IS,
+		DeflatedSharpe: result.DeflatedSharpe,
+		PBO:            result.PBO,
+	}
+	if warning := backtest.SampleWarning(result.OOS.Trades, result.OOS.From, result.OOS.To, period); warning != "" {
+		view.Warnings = append(view.Warnings, warning)
+	}
+	if result.IS.Trades == 0 && result.OOS.Trades == 0 {
+		view.Warnings = append(view.Warnings, "стратегия не дала сделок ни в одном окне")
+	}
+	return view, &Artifact{Kind: "walk_forward", Payload: result}, nil
 }

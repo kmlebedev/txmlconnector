@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
+	"github.com/kmlebedev/txmlconnector/terminal/research"
 )
 
 // errLiveAutonomy is the iteration-1 guard rail: autonomy trades the paper
@@ -37,6 +38,7 @@ var toolCatalogNames = []string{
 	toolNameBatchBacktest,
 	toolNameDetectExecutionAlgos,
 	toolNameGetNews,
+	toolNameWalkForward,
 }
 
 // buildTools returns the tool catalog with JSON schemas. Research tools
@@ -561,12 +563,14 @@ func (e *Engine) toolRunBacktest(ctx context.Context, args map[string]any) (back
 	return res, nil
 }
 
-// toolCompareStrategies implements compare_strategies: every catalog strategy
-// is replayed on the same bars. Only strategies that actually traded are
-// eligible for "best" (ranked by total return, then Sharpe as tie-break);
-// zero-trade strategies are pushed to the end with a warning because their
-// zero Sharpe/drawdown must never win. When nothing traded the returned best is
-// nil and the payload says there are no signals.
+// toolCompareStrategies implements compare_strategies. Every catalog strategy is
+// first validated on a rolling out-of-sample window (walk-forward, review
+// finding R6), so the reported ranking metrics are OOS and not the in-sample fit
+// of the whole history; the returned best result is the full-period replay used
+// for the chart. Only strategies that actually traded are eligible for "best";
+// zero-trade strategies are pushed to the end with a warning because their zero
+// Sharpe/drawdown must never win. When nothing traded the returned best is nil
+// and the payload says there are no signals.
 func (e *Engine) toolCompareStrategies(ctx context.Context, args map[string]any) (compareResult, *backtest.Result, error) {
 	symbol := e.resolveSymbol(argString(args, "symbol"))
 	if symbol == "" {
@@ -590,36 +594,62 @@ func (e *Engine) toolCompareStrategies(ctx context.Context, args map[string]any)
 		return compareResult{}, nil, fmt.Errorf("agent: not enough history for %s (%d bars)", symbol, len(bars))
 	}
 
-	results := make([]backtest.Result, 0, len(e.strategyCatalog()))
-	warnings := make([]string, 0, 1)
+	type compareEntry struct {
+		strategy string
+		metrics  backtest.Metrics
+		full     *backtest.Result
+	}
+	entries := make([]compareEntry, 0, len(e.strategyCatalog()))
+	warnings := make([]string, 0, 2)
 	var failures []string
+	trainBars, testBars, stepBars, canWalk := compareWalkForwardWindows(len(bars))
 	for _, info := range e.strategyCatalog() {
-		req := backtest.Request{
+		entry := compareEntry{strategy: info.ID}
+		if canWalk {
+			walked, walkErr := research.WalkForward(ctx, research.WalkForwardRequest{
+				Bars:        bars,
+				Strategy:    info.ID,
+				TrainBars:   trainBars,
+				TestBars:    testBars,
+				StepBars:    stepBars,
+				FeeBps:      e.feeBps(),
+				SlippageBps: 1,
+				Run:         e.walkForwardRunner(),
+			})
+			if walkErr == nil {
+				entry.metrics = walked.OOS
+				entries = append(entries, entry)
+				continue
+			}
+			warnings = append(warnings, fmt.Sprintf(
+				"%s: walk-forward недоступен (%v), ранжирование по in-sample", info.ID, walkErr))
+		}
+		res, runErr := e.runBacktest(backtest.Request{
 			Symbol:      symbol,
 			PeriodSec:   period,
 			Bars:        bars,
 			Strategy:    info.ID,
 			InitialCash: defaultBacktestCash,
 			FeeBps:      e.feeBps(),
-		}
-		res, err := e.runBacktest(req)
-		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", info.ID, err))
+		})
+		if runErr != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", info.ID, runErr))
 			continue
 		}
-		results = append(results, res)
+		entry.metrics = res.Metrics
+		entry.full = &res
+		entries = append(entries, entry)
 	}
-	if len(results) == 0 {
+	if len(entries) == 0 {
 		return compareResult{}, nil, fmt.Errorf("agent: all strategies failed: %s", strings.Join(failures, "; "))
 	}
 	if len(failures) > 0 {
 		warnings = append(warnings, "не удалось прогнать: "+strings.Join(failures, "; "))
 	}
-	sort.SliceStable(results, func(i, j int) bool {
-		a, b := results[i].Metrics, results[j].Metrics
+	sort.SliceStable(entries, func(i, j int) bool {
+		a, b := entries[i].metrics, entries[j].metrics
 		tradedA, tradedB := a.Trades > 0, b.Trades > 0
 		if tradedA != tradedB {
-			// Traded strategies always rank above zero-trade strategies.
 			return tradedA
 		}
 		if a.TotalReturnPct != b.TotalReturnPct {
@@ -631,23 +661,43 @@ func (e *Engine) toolCompareStrategies(ctx context.Context, args map[string]any)
 		if a.MaxDrawdownPct != b.MaxDrawdownPct {
 			return a.MaxDrawdownPct > b.MaxDrawdownPct
 		}
-		return results[i].Strategy < results[j].Strategy
+		return entries[i].strategy < entries[j].strategy
 	})
 
-	out := compareResult{Ranked: make([]rankedStrategy, 0, len(results))}
-	for _, res := range results {
-		row := rankedStrategy{Strategy: res.Strategy, Metrics: res.Metrics}
-		if res.Metrics.Trades <= 0 {
-			row.Warning = "нет сделок на выбранном периоде"
+	out := compareResult{
+		Ranked:   make([]rankedStrategy, 0, len(entries)),
+		Warnings: warnings,
+	}
+	for _, entry := range entries {
+		row := rankedStrategy{Strategy: entry.strategy, Metrics: entry.metrics}
+		if entry.metrics.Trades <= 0 {
+			row.Warning = "нет сделок на выбранном out-of-sample периоде"
 		}
 		out.Ranked = append(out.Ranked, row)
 	}
-	if results[0].Metrics.Trades <= 0 {
+	if entries[0].metrics.Trades <= 0 {
 		out.Warnings = append(out.Warnings,
 			"нет стратегий со сделками на выбранном периоде: сигналов нет, лучшая стратегия не выбирается")
 		return out, nil, nil
 	}
-	bestResult := results[0]
+	best := entries[0]
+	bestResult := backtest.Result{}
+	if best.full != nil {
+		bestResult = *best.full
+	} else {
+		res, runErr := e.runBacktest(backtest.Request{
+			Symbol:      symbol,
+			PeriodSec:   period,
+			Bars:        bars,
+			Strategy:    best.strategy,
+			InitialCash: defaultBacktestCash,
+			FeeBps:      e.feeBps(),
+		})
+		if runErr != nil {
+			return compareResult{}, nil, fmt.Errorf("agent: best strategy %s backtest failed: %w", best.strategy, runErr)
+		}
+		bestResult = res
+	}
 	out.Best = bestStrategy{
 		Strategy: bestResult.Strategy,
 		Params:   bestResult.Params,

@@ -13,6 +13,10 @@ func TestStrategiesCatalog(t *testing.T) {
 		"rsi_reversion":     {"period": 14, "oversold": 30, "overbought": 55},
 		"donchian_breakout": {"period": 20},
 		"momentum":          {"lookback": 20, "thresholdPct": 1.0},
+		"trend_tsmom":       {"lookback": 20, "thresholdPct": 0},
+		"trend_keltner":     {"period": 20, "multiplier": 2},
+		"trend_supertrend":  {"period": 10, "multiplier": 3},
+		"trend_maribbon":    {"fast": 5, "slow": 40},
 		// The rule strategy is built from a rules.Spec, not from numeric
 		// params, so its catalog entry carries no tunable parameters.
 		"rules": {},
