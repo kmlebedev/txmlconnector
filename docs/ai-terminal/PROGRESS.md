@@ -126,3 +126,15 @@
 - `npx skills add … --skill trading-terminal` в чистом Claude Code/Cursor (Step 5 T25) **не выполнялся** — статус **I**; проверены только frontmatter/исполняемость скрипта/README тестом `go test ./skills` и smoke `scripts/terminal.sh` против заглушки бэкенда.
 - Phase X (винтажи ALFRED, календарь FOMC, схема transaq_quotes) — отдельные репозитории, не трогались.
 - Push/PR не выполнялись (по правилам AGENTS.md — только по команде пользователя).
+## Финальная приёмка и готовность PR (2026-11-06)
+
+- Все **26 задач плана** закрыты (28 карточек на доске: 26 задач + T9-prep + T-accept). Финальные гейты на HEAD:
+  `make verify` = **exit 0**; `node --test dsh-ai-terminal/test/` = **39/39 pass**; `make terminal_smoke` = **37/37 PASS**;
+  `make server_build`/`queues_build` = exit 0.
+- Шаги плана отмечены в файле плана: **108/116** выполнено; **8** шагов `Live check`/`Manual check` оставлены
+  незакрытыми — они требуют живого окружения и согласия пользователя (T9, T10, T11, T21, T22, T24, T25, T26).
+- PR-описание и инструкция запуска: [`docs/ai-terminal/PR.md`](PR.md). Ветка `plan/ai-terminal-a` не пушена —
+  push/PR выполняются по команде пользователя (AGENTS.md §3/§6).
+- Ревью второй моделью: все фронтенд-diff отправлены Qwen 3.8 Flash; обязательных P1/P2 после триажа Lead нет
+  (отчёты — `docs/ai-terminal/reviews/`).
+- Phase X (внешние репозитории) не входит в этот PR: ALFRED-винтажи, календарь FOMC, схема `transaq_quotes`.
