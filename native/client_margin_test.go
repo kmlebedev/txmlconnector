@@ -79,7 +79,9 @@ func TestMarginMatchDLL(t *testing.T) {
 	}
 }
 
-// TestClnSecPermissionsMatchDLL renders the permissions form. The permission
+// TestClnSecPermissionsStoredFormI renders the permissions form from the store;
+// the expected false/0.00 values are the honest I fallback (O fixture has
+// true/14.28, mask/rates store is not recovered). The permission
 // mask and rate store of FUN_18001a700 are not present in RQ_MAIN (margin.md:
 // mask formula D, source I), so the four rights fall back to false and the
 // rates to 0.00; marketable is taken from the R_SEC_MKT_PERMIT bit (O).
@@ -87,7 +89,7 @@ func TestMarginMatchDLL(t *testing.T) {
 // I-EXPECTATION: tradeable/longable/shortable=false and regrate*=0.00 are our
 // store-derived values, NOT the DLL fixture (true/14.28). After task-52 switch
 // to margin-dll.xml; never edit margin-dll.xml.
-func TestClnSecPermissionsMatchDLL(t *testing.T) {
+func TestClnSecPermissionsStoredFormI(t *testing.T) {
 	srv := newRunServer(t)
 	srv.Snapshot = marginSnapshot(t)
 	c := New(Config{Dial: srv.Dial})
@@ -98,8 +100,9 @@ func TestClnSecPermissionsMatchDLL(t *testing.T) {
 	defer c.Close()
 	send(t, c, connectCommand())
 	rec.next(t, "<server_status")
-	// O: R_SEC_MKT_PERMIT 0x0e permit=yes flips <marketable> to true.
-	srv.QueueMain(readOrderFixture(t, "marketord-inject.hex")[:5])
+	// O: one complete R_SEC_MKT_PERMIT 0x0e permit=yes record flips
+	// <marketable> to true (a truncated two-record prefix would not prove it).
+	srv.QueueMain([]byte{0x0e, 0x00, 0x1a, 0x01})
 	cmd := "<command id=" + quote + "get_cln_sec_permissions" + quote + ">"
 	cmd += "<security><seccode>SBER</seccode><market>1</market><board>TQBR</board></security><client>TESTCLIEN</client></command>"
 	if got := send(t, c, cmd); got != "<result success="+quote+"true"+quote+"/>" {
@@ -380,5 +383,50 @@ func TestMarginSnapshotIncludesRate(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("margin-inject.hex has no R_SEC_RATE 0x0a record")
+	}
+}
+
+// TestMarginRateUnknownFails: without a 0x0a record the maxbuy/maxsell formula
+// must return the explicit I failure, not success 0/0.
+func TestMarginRateUnknownFails(t *testing.T) {
+	raw := marginSnapshot(t)
+	recs, err := records.Records(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var store []byte
+	for _, rec := range recs {
+		if rec.Tag == records.TagSecRate {
+			continue
+		}
+		store = append(store, rec.Tag, byte(len(rec.Body)>>8), byte(len(rec.Body)))
+		store = append(store, rec.Body...)
+	}
+	srv := newRunServer(t)
+	srv.Snapshot = store
+	c := New(Config{Dial: srv.Dial})
+	recorder := newRecorder()
+	if err := c.Start(recorder.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	recorder.next(t, "<server_status")
+	cmd := "<command id=" + quote + "get_max_buy_sell" + quote + " client=" + quote + "TESTCLIEN" + quote + ">"
+	cmd += "<security><seccode>SBER</seccode><market>1</market></security></command>"
+	if got := send(t, c, cmd); !strings.Contains(got, "rate is not known for secid 26 (I)") {
+		t.Fatalf("get_max_buy_sell without 0x0a = %s", got)
+	}
+}
+
+// TestReloginResetsMarginRates: the per-secid R_SEC_RATE cache must not survive
+// the relogin/account reset (a new session can have different secids).
+func TestReloginResetsMarginRates(t *testing.T) {
+	c := &Client{marginRates: map[uint16]int64{26: 29146}}
+	c.mu.Lock()
+	c.resetAccountsLocked()
+	c.mu.Unlock()
+	if c.marginRates != nil {
+		t.Fatalf("marginRates after reset = %v, want nil", c.marginRates)
 	}
 }

@@ -25,7 +25,8 @@ func decodeSecRate(c *Client, body []byte) ([]model.Event, error) {
 		c.marginRates = map[uint16]int64{}
 	}
 	c.marginRates[parsed.SecID] = parsed.Value
-	return nil, nil
+	event := model.SecRate{SecID: parsed.SecID, Value: parsed.Value}
+	return []model.Event{&event}, nil
 }
 
 // unknownMarketOrdSecCode is the 12-question-mark placeholder the DLL uses when

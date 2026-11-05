@@ -81,3 +81,23 @@ func TestParseSecRate(t *testing.T) {
 		t.Fatal("trailing byte accepted")
 	}
 }
+
+// TestSecRateLongPackedL: the 0x0a value can need the wide packed-L form (count
+// 7); the splitter and ParseSecRate must consume it identically.
+func TestSecRateLongPackedL(t *testing.T) {
+	var w wire.Writer
+	w.Int64(1 << 40)
+	if len(w.Bytes()) != 6 { // packed L: 6 bytes for this value
+		t.Fatalf("packed L length = %d, want 6", len(w.Bytes()))
+	}
+	stream := append([]byte{records.TagSecRate, 0x00, 0x1a}, w.Bytes()...)
+	stream = append(stream, 0x18, 0x01) // next record stays aligned
+	recs, err := records.Records(stream)
+	if err != nil || len(recs) != 2 || recs[1].Tag != 0x18 {
+		t.Fatalf("records = %+v, %v", recs, err)
+	}
+	rate, err := records.ParseSecRate(recs[0].Body)
+	if err != nil || rate.SecID != 26 || rate.Value != 1<<40 {
+		t.Fatalf("rate = %+v, %v", rate, err)
+	}
+}
