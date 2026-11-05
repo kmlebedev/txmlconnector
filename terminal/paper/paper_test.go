@@ -347,3 +347,124 @@ func TestDuplicateClientOrderIDRejected(t *testing.T) {
 		}
 	}
 }
+
+// TestAllocateMovesBudgetFromMainAccount checks the budget transfer the agent
+// autonomy uses: money leaves the main account and appears on the named
+// sub-account, and the transfer can never exceed the free main cash.
+func TestAllocateMovesBudgetFromMainAccount(t *testing.T) {
+	b := newTestBroker(100_000, 5)
+	if err := b.Allocate(AutonomyAccount, 25_000); err != nil {
+		t.Fatalf("Allocate: %v", err)
+	}
+	snap := b.Snapshot()
+	if !floatEq(snap.Cash, 75_000) {
+		t.Fatalf("main cash = %v, want 75000", snap.Cash)
+	}
+	acc, ok := snap.Accounts[AutonomyAccount]
+	if !ok {
+		t.Fatalf("no %q account in snapshot accounts %v", AutonomyAccount, snap.Accounts)
+	}
+	if !floatEq(acc.Cash, 25_000) {
+		t.Fatalf("autonomy cash = %v, want 25000", acc.Cash)
+	}
+	if main, ok := snap.Accounts[MainAccount]; !ok || !floatEq(main.Cash, 75_000) {
+		t.Fatalf("main account view = %+v, want cash 75000", main)
+	}
+
+	// The transfer cannot exceed the main cash and leaves the account intact.
+	if err := b.Allocate(AutonomyAccount, 1_000_000); err == nil {
+		t.Fatal("oversized Allocate must fail")
+	}
+	if snap := b.Snapshot(); !floatEq(snap.Cash, 75_000) {
+		t.Fatalf("main cash changed by a failed transfer: %v", snap.Cash)
+	}
+	// A non-positive budget is rejected.
+	for _, amount := range []float64{0, -100} {
+		if err := b.Allocate(AutonomyAccount, amount); err == nil {
+			t.Fatalf("Allocate(%v) must fail", amount)
+		}
+	}
+}
+
+// TestPlaceAtFillsIntoNamedAccount checks that a replay fill is executed at the
+// explicit price/time on the named account, leaves the main account untouched
+// and shows up in the global order/trade history.
+func TestPlaceAtFillsIntoNamedAccount(t *testing.T) {
+	b := newTestBroker(100_000, 5)
+	if err := b.Allocate(AutonomyAccount, 10_000); err != nil {
+		t.Fatalf("Allocate: %v", err)
+	}
+	at := time.Date(2026, 11, 5, 7, 0, 0, 0, time.UTC) // 10:00 МСК
+	order, err := b.PlaceAt(
+		OrderRequest{Symbol: "TQBR:SBER", Side: Buy, Qty: 10, Type: Market, Source: "autonomy"},
+		QuoteView{Symbol: "TQBR:SBER", Last: 100, Time: at}, at, AutonomyAccount)
+	if err != nil {
+		t.Fatalf("PlaceAt: %v", err)
+	}
+	if order.Status != StatusFilled || order.Filled != 10 || order.AvgFillPrice != 100 {
+		t.Fatalf("order = %+v, want a fill of 10 at 100", order)
+	}
+	if !order.CreatedAt.Equal(at) || !order.UpdatedAt.Equal(at) {
+		t.Fatalf("order times = %v/%v, want the replay instant %v", order.CreatedAt, order.UpdatedAt, at)
+	}
+	fee := 100.0 * 10 * 5 / 10000
+	snap := b.Snapshot()
+	// The allocation already moved 10000 to the autonomy account; the fill
+	// itself must not touch the main account.
+	if !floatEq(snap.Cash, 90_000) {
+		t.Fatalf("main cash = %v, want 90000 untouched by the autonomy fill", snap.Cash)
+	}
+	if len(snap.Orders) != 1 || len(snap.Trades) != 1 {
+		t.Fatalf("global orders/trades = %d/%d, want 1/1", len(snap.Orders), len(snap.Trades))
+	}
+	acc := snap.Accounts[AutonomyAccount]
+	if !floatEq(acc.Cash, 10_000-1000-fee) {
+		t.Fatalf("autonomy cash = %v, want %v", acc.Cash, 10_000-1000-fee)
+	}
+	if len(acc.Positions) != 1 || acc.Positions[0].Qty != 10 || !floatEq(acc.Positions[0].AvgPrice, 100) {
+		t.Fatalf("autonomy positions = %+v", acc.Positions)
+	}
+	if len(acc.Trades) != 1 || acc.Trades[0].Account != AutonomyAccount || !acc.Trades[0].Time.Equal(at) {
+		t.Fatalf("autonomy trades = %+v, want one trade at %v on %q", acc.Trades, at, AutonomyAccount)
+	}
+	if main := snap.Accounts[MainAccount]; len(main.Positions) != 0 || len(main.Trades) != 0 {
+		t.Fatalf("main account received the autonomy fill: %+v", main)
+	}
+
+	// A sell on the same account realizes PnL there and keeps the histories apart.
+	sellAt := at.Add(5 * time.Minute)
+	if _, err := b.PlaceAt(
+		OrderRequest{Symbol: "TQBR:SBER", Side: Sell, Qty: 10, Type: Market, Source: "autonomy"},
+		QuoteView{Symbol: "TQBR:SBER", Last: 110, Time: sellAt}, sellAt, AutonomyAccount); err != nil {
+		t.Fatalf("sell PlaceAt: %v", err)
+	}
+	snap = b.Snapshot()
+	acc = snap.Accounts[AutonomyAccount]
+	if !floatEq(acc.RealizedPnL, (110-100)*10) {
+		t.Fatalf("autonomy realized = %v, want %v", acc.RealizedPnL, (110-100)*10)
+	}
+	if len(acc.Positions) != 0 || len(acc.Trades) != 2 {
+		t.Fatalf("autonomy after sell = %+v", acc)
+	}
+	if !floatEq(snap.RealizedPnL, 0) {
+		t.Fatalf("main realized = %v, want 0 (main account traded nothing)", snap.RealizedPnL)
+	}
+}
+
+// TestPlaceAtDefaultsToMainAndRejectsDuplicates covers the account default and
+// the idempotency key across Place/PlaceAt.
+func TestPlaceAtDefaultsToMainAndRejectsDuplicates(t *testing.T) {
+	b := newTestBroker(100_000, 0)
+	at := time.Date(2026, 11, 5, 7, 0, 0, 0, time.UTC)
+	req := OrderRequest{Symbol: "S", Side: Buy, Qty: 1, Type: Market, ClientOrderID: "conv-1:call_1"}
+	if _, err := b.PlaceAt(req, QuoteView{Symbol: "S", Last: 100}, at, ""); err != nil {
+		t.Fatalf("PlaceAt on the default account: %v", err)
+	}
+	snap := b.Snapshot()
+	if len(snap.Accounts[MainAccount].Orders) != 1 || !floatEq(snap.Cash, 100_000-100*(1+5.0/10000)) {
+		t.Fatalf("default account did not receive the fill: %+v", snap.Accounts[MainAccount])
+	}
+	if _, err := b.PlaceAt(req, QuoteView{Symbol: "S", Last: 100}, at, ""); !errors.Is(err, ErrDuplicateClientOrderID) {
+		t.Fatalf("duplicate PlaceAt err = %v, want ErrDuplicateClientOrderID", err)
+	}
+}

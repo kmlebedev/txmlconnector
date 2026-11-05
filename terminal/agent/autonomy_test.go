@@ -497,3 +497,147 @@ func TestAutonomyStopIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// TestAutonomyFillsVisibleInPortfolio is the R7 regression test: the replay
+// executes its fills through the paper broker on the "autonomy" account, so the
+// order history and the portfolio account contain the autonomy trades, and the
+// main account is only debited by the reserved budget.
+func TestAutonomyFillsVisibleInPortfolio(t *testing.T) {
+	e, data, broker := newTestEngine(t)
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{300: syntheticBars(12, 100, 1)}
+	e.newStrategy = strategyScript(map[int]backtest.Action{1: backtest.Buy, 5: backtest.Sell})
+	if err := e.StartAutonomy(context.Background(), AutonomyConfig{
+		Symbol: "TQBR:SBER", PeriodSec: 300, Strategy: "sma_cross", Speed: 60, Budget: 100_000,
+		StopLossPct: 90, TakeProfitPct: 90,
+	}); err != nil {
+		t.Fatalf("StartAutonomy: %v", err)
+	}
+	status := waitAutonomy(t, e)
+	if status.Trades != 1 {
+		t.Errorf("Trades = %d, want 1 closed round trip", status.Trades)
+	}
+
+	// The /api/orders view is the global broker order history.
+	orders := broker.Orders()
+	if len(orders) != 2 {
+		t.Fatalf("broker orders = %d, want the two autonomy fills visible", len(orders))
+	}
+	if orders[0].Side != "buy" || orders[1].Side != "sell" || orders[1].Filled <= 0 {
+		t.Errorf("autonomy orders = %+v", orders)
+	}
+
+	portfolio := broker.Portfolio()
+	acc, ok := portfolio.Accounts["autonomy"]
+	if !ok {
+		t.Fatalf("no autonomy account in portfolio %+v", portfolio.Accounts)
+	}
+	if acc.Orders != 2 || acc.Trades != 1 {
+		t.Errorf("autonomy account orders/trades = %d/%d, want 2/1", acc.Orders, acc.Trades)
+	}
+	if acc.RealizedPnL <= 0 {
+		t.Errorf("autonomy realized PnL = %v, want > 0 on rising bars", acc.RealizedPnL)
+	}
+	if len(acc.Positions) != 0 {
+		t.Errorf("autonomy positions = %+v, want flat after the sell", acc.Positions)
+	}
+	if status.PnL <= 0 {
+		t.Errorf("status PnL = %v, want > 0", status.PnL)
+	}
+
+	// The main account only lost the reserved budget, not the fills.
+	main, ok := portfolio.Accounts["main"]
+	if !ok {
+		t.Fatalf("no main account in portfolio %+v", portfolio.Accounts)
+	}
+	if main.Cash != 900_000 {
+		t.Errorf("main cash = %v, want 900000 after the 100000 budget reservation", main.Cash)
+	}
+	if len(main.Positions) != 0 {
+		t.Errorf("main positions = %+v, want none: the replay must not trade it", main.Positions)
+	}
+}
+
+// moscowTestDayBars builds four bars of one Moscow trading day starting at
+// 10:00 MSK; the second bar dips to dipPrice and the third recovers to 100.
+func moscowTestDayBars(dayOffset int, dipPrice float64) []backtest.Bar {
+	msk := time.FixedZone("MSK", 3*60*60)
+	start := time.Date(2026, 11, 5+dayOffset, 10, 0, 0, 0, msk)
+	return []backtest.Bar{
+		{Time: start, Open: 100, High: 100, Low: 100, Close: 100},
+		{Time: start.Add(30 * time.Minute), Open: 100, High: 100, Low: dipPrice, Close: dipPrice},
+		{Time: start.Add(time.Hour), Open: dipPrice, High: 100, Low: dipPrice, Close: 100},
+		{Time: start.Add(90 * time.Minute), Open: 100, High: 100, Low: 100, Close: 100},
+	}
+}
+
+// TestDailyLossResetsPerMoscowDay is the R7 regression test: the daily loss is
+// measured from the equity at the start of the Moscow trading day, so three
+// consecutive -2.9% days do not stop the runner, while a -3.1% move inside one
+// trading day triggers stopped_by_risk.
+func TestDailyLossResetsPerMoscowDay(t *testing.T) {
+	const budget = 100_000.0
+	newEngine := func(t *testing.T, bars []backtest.Bar) (*Engine, *fakeBroker) {
+		t.Helper()
+		data := newFakeDataSource()
+		data.histories["TQBR:SBER"] = map[int][]backtest.Bar{300: bars}
+		broker := newFakeBroker(1_000_000)
+		e := newTestEngineWith(t, Config{
+			DefaultSymbol: "TQBR:SBER",
+			Risk: RiskLimits{
+				MaxPositionPct: 100, MaxOrderPct: 99,
+				StopLossPct: 90, TakeProfitPct: 90,
+				DailyLossPct: 3, MaxTradesPerHour: 30,
+			},
+		}, data, broker)
+		e.newStrategy = strategyScript(map[int]backtest.Action{0: backtest.Buy})
+		if err := e.StartAutonomy(context.Background(), AutonomyConfig{
+			Symbol: "TQBR:SBER", PeriodSec: 300, Strategy: "sma_cross", Speed: 60, Budget: budget,
+			StopLossPct: 90, TakeProfitPct: 90, DailyLossPct: 3, MaxPositionPct: 100,
+		}); err != nil {
+			t.Fatalf("StartAutonomy: %v", err)
+		}
+		return e, broker
+	}
+
+	// Three trading days, each dipping -2.9% from that day's starting equity:
+	// the runner must survive all of them.
+	var threeDays []backtest.Bar
+	for day := 0; day < 3; day++ {
+		threeDays = append(threeDays, moscowTestDayBars(day, 97.12)...)
+	}
+	e, broker := newEngine(t, threeDays)
+	status := waitAutonomy(t, e)
+	for _, entry := range status.Log {
+		if entry.Kind == "stopped_by_risk" {
+			t.Fatalf("runner stopped on a -2.9%% day: %+v", entry)
+		}
+		if strings.Contains(entry.Message, "дневной убыток") {
+			t.Fatalf("daily loss limit fired on a -2.9%% day: %+v", entry)
+		}
+	}
+	if status.Trades != 0 {
+		t.Errorf("Trades = %d, want 0 (the position stays open)", status.Trades)
+	}
+	if _, ok := broker.Portfolio().Accounts[autonomyAccount]; !ok {
+		t.Errorf("autonomy account missing after the replay")
+	}
+
+	// A -3.1% move inside a single Moscow trading day stops the runner.
+	e, _ = newEngine(t, moscowTestDayBars(0, 96.8))
+	status = waitAutonomy(t, e)
+	foundRisk := false
+	for _, entry := range status.Log {
+		if entry.Kind == "stopped_by_risk" {
+			foundRisk = true
+		}
+		if entry.Kind == "risk_block" && strings.Contains(entry.Message, "дневной убыток") {
+			foundRisk = true
+		}
+	}
+	if !foundRisk {
+		t.Fatalf("no stopped_by_risk entry for a -3.1%% day: %+v", status.Log)
+	}
+	if status.Trades != 1 {
+		t.Errorf("Trades = %d, want 1 (the autostop closed the position)", status.Trades)
+	}
+}

@@ -28,6 +28,8 @@ type marketSource interface {
 // *paper.Broker).
 type brokerSource interface {
 	Place(req paper.OrderRequest, q paper.QuoteView) (paper.Order, error)
+	PlaceAt(req paper.OrderRequest, fill paper.QuoteView, at time.Time, account string) (paper.Order, error)
+	Allocate(account string, amount float64) error
 	Cancel(id string) (paper.Order, error)
 	Snapshot() paper.Snapshot
 }
@@ -129,8 +131,8 @@ func newPaperAdapter(broker brokerSource, market marketSource) *paperAdapter {
 	return &paperAdapter{broker: broker, market: market}
 }
 
-// Place executes one paper order for the agent.
-func (a *paperAdapter) Place(order agent.PlaceOrder) (agent.OrderView, error) {
+// paperOrderRequest maps the agent order view to the paper broker request.
+func paperOrderRequest(order agent.PlaceOrder) paper.OrderRequest {
 	req := paper.OrderRequest{
 		Symbol:        order.Symbol,
 		Side:          paper.Side(order.Side),
@@ -143,6 +145,12 @@ func (a *paperAdapter) Place(order agent.PlaceOrder) (agent.OrderView, error) {
 	if req.Type == "" {
 		req.Type = paper.Market
 	}
+	return req
+}
+
+// Place executes one paper order for the agent on the main account.
+func (a *paperAdapter) Place(order agent.PlaceOrder) (agent.OrderView, error) {
+	req := paperOrderRequest(order)
 	view := paper.QuoteView{Symbol: order.Symbol}
 	if quote, ok := a.market.Quote(order.Symbol); ok {
 		view.Last, view.Bid, view.Ask, view.Time = quote.Last, quote.Bid, quote.Ask, quote.Time
@@ -152,6 +160,28 @@ func (a *paperAdapter) Place(order agent.PlaceOrder) (agent.OrderView, error) {
 		return agent.OrderView{}, err
 	}
 	return orderView(placed), nil
+}
+
+// PlaceAt executes one replay order through the paper broker on the named
+// account: the fill quote is the historical bar price, not the live market.
+func (a *paperAdapter) PlaceAt(order agent.PlaceOrder, fill agent.Quote, at time.Time, account string) (agent.OrderView, error) {
+	req := paperOrderRequest(order)
+	placed, err := a.broker.PlaceAt(req, paper.QuoteView{
+		Symbol: order.Symbol,
+		Last:   fill.Last,
+		Bid:    fill.Bid,
+		Ask:    fill.Ask,
+		Time:   at,
+	}, at, account)
+	if err != nil {
+		return agent.OrderView{}, err
+	}
+	return orderView(placed), nil
+}
+
+// Allocate transfers the autonomy budget from the main paper account.
+func (a *paperAdapter) Allocate(account string, amount float64) error {
+	return a.broker.Allocate(account, amount)
 }
 
 // Cancel cancels a resting paper order.
@@ -210,7 +240,45 @@ func (a *paperAdapter) Portfolio() agent.PortfolioView {
 	if base := total - dayChange; base != 0 {
 		view.DayChangePct = dayChange / base * 100
 	}
+	view.Accounts = paperAccounts(snapshot, a.market)
 	return view
+}
+
+// paperAccounts maps the paper per-account snapshot to the agent account views,
+// marking the autonomy positions to the current market quotes.
+func paperAccounts(snapshot paper.Snapshot, market marketSource) map[string]agent.AccountView {
+	if len(snapshot.Accounts) == 0 {
+		return nil
+	}
+	out := make(map[string]agent.AccountView, len(snapshot.Accounts))
+	for name, acc := range snapshot.Accounts {
+		item := agent.AccountView{
+			Cash:        acc.Cash,
+			RealizedPnL: acc.RealizedPnL,
+			Orders:      len(acc.Orders),
+			Trades:      len(acc.Trades),
+		}
+		total := acc.Cash
+		for _, pos := range acc.Positions {
+			price := pos.AvgPrice
+			if quote, ok := market.Quote(pos.Symbol); ok && quote.Last > 0 {
+				price = quote.Last
+			}
+			value := price * float64(pos.Qty)
+			total += value
+			item.Positions = append(item.Positions, agent.PositionView{
+				Symbol:   pos.Symbol,
+				Qty:      pos.Qty,
+				AvgPrice: pos.AvgPrice,
+				Price:    price,
+				Value:    value,
+				Profit:   (price - pos.AvgPrice) * float64(pos.Qty),
+			})
+		}
+		item.TotalValue = total
+		out[name] = item
+	}
+	return out
 }
 
 // Cash returns the free paper cash.
