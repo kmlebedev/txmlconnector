@@ -22,6 +22,7 @@ type fakeClient struct {
 	diff         time.Duration
 	subscribes   int
 	historyCalls int
+	histCounts   []int
 	closed       bool
 }
 
@@ -43,6 +44,7 @@ func (f *fakeClient) Run(ctx context.Context, opt native.RunOptions, h func([]mo
 func (f *fakeClient) History(ctx context.Context, req native.HistoryRequest) (model.Candles, error) {
 	f.mu.Lock()
 	f.historyCalls++
+	f.histCounts = append(f.histCounts, req.Count)
 	f.mu.Unlock()
 	if f.histFn != nil {
 		return f.histFn(ctx, req)
@@ -69,6 +71,13 @@ func (f *fakeClient) counts() (subscribes, historyCalls int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.subscribes, f.historyCalls
+}
+
+// requestedCounts returns the candle counts of the history calls.
+func (f *fakeClient) requestedCounts() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int(nil), f.histCounts...)
 }
 
 func (f *fakeClient) isClosed() bool {
@@ -462,5 +471,142 @@ func TestHelpersLive(t *testing.T) {
 	hist := trimHistory(History{Bars: []Bar{{Close: 1}, {Close: 2}, {Close: 3}}}, 2)
 	if len(hist.Bars) != 2 || hist.Bars[0].Close != 2 {
 		t.Fatalf("trimHistory = %+v", hist)
+	}
+}
+
+// TestLiveCandlesCacheCount is the P1 regression: a live candle cache filled by
+// a small request must re-fetch when a larger count is asked for (the HTTP
+// backtest asked for 700 bars and silently got the 50 cached ones), while a
+// request below the fetched count is served from the cache.
+func TestLiveCandlesCacheCount(t *testing.T) {
+	client := &fakeClient{}
+	client.histFn = func(ctx context.Context, req native.HistoryRequest) (model.Candles, error) {
+		items := make([]model.Candle, req.Count)
+		for i := range items {
+			value := dec(float64(i))
+			items[i] = model.Candle{
+				Time: time.Unix(testBase+int64(i)*60, 0).UTC(),
+				Open: *value, High: *value, Low: *value, Close: *value,
+				Volume: int64(i),
+			}
+		}
+		return model.Candles{Symbol: req.Symbol, Period: req.Period, Items: items}, nil
+	}
+	svc := newLive(t, client)
+	svc.candleKinds = map[int]int{300: 9}
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Close()
+	ctx := context.Background()
+
+	h50, err := svc.Candles(ctx, "TQBR:SBER", 300, 50)
+	if err != nil {
+		t.Fatalf("Candles(50): %v", err)
+	}
+	if len(h50.Bars) != 50 {
+		t.Fatalf("Candles(50) bars = %d", len(h50.Bars))
+	}
+	h700, err := svc.Candles(ctx, "TQBR:SBER", 300, 700)
+	if err != nil {
+		t.Fatalf("Candles(700): %v", err)
+	}
+	if len(h700.Bars) != 700 {
+		t.Fatalf("Candles(700) bars = %d, want 700 (cache must re-fetch on a larger count)", len(h700.Bars))
+	}
+	// A smaller request is served from the cached 700-bar series: its last 100
+	// bars (the series ends at close 699).
+	h100, err := svc.Candles(ctx, "TQBR:SBER", 300, 100)
+	if err != nil {
+		t.Fatalf("Candles(100): %v", err)
+	}
+	if len(h100.Bars) != 100 {
+		t.Fatalf("Candles(100) bars = %d", len(h100.Bars))
+	}
+	if h100.Bars[0].Close != 600 || h100.Bars[99].Close != 699 {
+		t.Fatalf("Candles(100) window = %v..%v, want 600..699", h100.Bars[0].Close, h100.Bars[99].Close)
+	}
+	if got, want := client.requestedCounts(), []int{50, 700}; len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("client history counts = %v, want %v (the 100 request must be cached)", got, want)
+	}
+}
+
+// TestIANATimeZoneMapping checks the Windows -> IANA exchange zone mapping.
+func TestIANATimeZoneMapping(t *testing.T) {
+	cases := map[string]string{
+		"Russian Standard Time":       "Europe/Moscow",
+		"Moscow Standard Time":        "Europe/Moscow",
+		"UTC":                         "UTC",
+		"Coordinated Universal Time":  "UTC",
+		"Europe/Moscow":               "Europe/Moscow",
+		"europe/moscow":               "europe/moscow", // IANA lookup is case-sensitive, the value is passed through
+		"":                            "",
+		"Unknown Time Zone":           "",
+		"Vladivostok Standard Time":   "Asia/Vladivostok",
+		"Yekaterinburg Standard Time": "Asia/Yekaterinburg",
+	}
+	for name, want := range cases {
+		if got := ianaTimeZone(name); got != want {
+			t.Fatalf("ianaTimeZone(%q) = %q, want %q", name, got, want)
+		}
+	}
+	// exchangeZoneName keeps an unmapped name instead of dropping it.
+	if got := exchangeZoneName("Weird Zone"); got != "Weird Zone" {
+		t.Fatalf("exchangeZoneName(unknown) = %q", got)
+	}
+}
+
+// TestServerTimeFromWall checks the server-wall -> UTC-instant conversion.
+func TestServerTimeFromWall(t *testing.T) {
+	// The demo reports MSK wall clock 19:38:55; the real UTC instant is 16:38:55.
+	wall := time.Date(2026, 11, 5, 19, 38, 55, 0, time.UTC)
+	instant, ok := serverTimeFromWall(wall, "Europe/Moscow")
+	if !ok {
+		t.Fatal("serverTimeFromWall(Europe/Moscow) failed")
+	}
+	want := time.Date(2026, 11, 5, 16, 38, 55, 0, time.UTC)
+	if !instant.Equal(want) {
+		t.Fatalf("instant = %v, want %v", instant, want)
+	}
+	if _, ok := serverTimeFromWall(wall, ""); ok {
+		t.Fatal("empty zone must not convert")
+	}
+	if _, ok := serverTimeFromWall(wall, "Not/AZone"); ok {
+		t.Fatal("unknown zone must not convert")
+	}
+	// UTC stays the same wall clock.
+	if instant, ok := serverTimeFromWall(wall, "UTC"); !ok || !instant.Equal(wall) {
+		t.Fatalf("UTC instant = %v (ok=%v)", instant, ok)
+	}
+}
+
+// TestLiveServerTimeAndExchangeTZ is the P2 regression: the demo reports the
+// Windows zone "Russian Standard Time"; the feed must expose IANA
+// "Europe/Moscow" and a real UTC instant, not the MSK wall clock labelled UTC.
+func TestLiveServerTimeAndExchangeTZ(t *testing.T) {
+	msk, err := time.LoadLocation("Europe/Moscow")
+	if err != nil {
+		t.Fatalf("LoadLocation(Europe/Moscow): %v", err)
+	}
+	now := time.Now()
+	localWall := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second(), 0, time.UTC)
+	mskNow := now.In(msk)
+	mskWall := time.Date(mskNow.Year(), mskNow.Month(), mskNow.Day(), mskNow.Hour(), mskNow.Minute(), mskNow.Second(), 0, time.UTC)
+	client := &fakeClient{tz: "Russian Standard Time", diff: mskWall.Sub(localWall)}
+	svc := newLive(t, client)
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Close()
+	waitFor(t, "live status", func() bool {
+		st := svc.Status()
+		return st.Connected && !st.ServerTime.IsZero()
+	})
+	st := svc.Status()
+	if st.ExchangeTZ != "Europe/Moscow" {
+		t.Fatalf("ExchangeTZ = %q, want Europe/Moscow", st.ExchangeTZ)
+	}
+	if delta := st.ServerTime.Sub(time.Now().UTC()); delta > 5*time.Second || delta < -5*time.Second {
+		t.Fatalf("ServerTime = %v is shifted from UTC now (delta %v)", st.ServerTime, delta)
 	}
 }
