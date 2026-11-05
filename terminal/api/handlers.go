@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -573,7 +575,9 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 		writeUnavailable(w, "AI-агент недоступен")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.deps.Agent.Status())
+	status := s.deps.Agent.Status()
+	status.Autonomy = stableAutonomy(status.Autonomy)
+	writeJSON(w, http.StatusOK, status)
 }
 
 // autonomyRequest is the POST /api/agent/autonomy body.
@@ -581,6 +585,9 @@ type autonomyRequest struct {
 	Action string                `json:"action"`
 	Config *agent.AutonomyConfig `json:"config"`
 }
+
+// autonomyAlreadyRunning is the user-facing conflict text of a duplicate start.
+const autonomyAlreadyRunning = "автономия уже запущена"
 
 // handleAutonomy serves POST /api/agent/autonomy.
 func (s *Server) handleAutonomy(w http.ResponseWriter, r *http.Request) {
@@ -603,22 +610,115 @@ func (s *Server) handleAutonomy(w http.ResponseWriter, r *http.Request) {
 				"live-автономия в итерации 1 не реализована; доступен только бумажный счёт")
 			return
 		}
+		// A duplicate start is a state conflict, not an internal error: check
+		// the engine state first and keep the error mapping below as a guard
+		// for the start/check race.
+		if s.deps.Agent.Status().Autonomy.Running {
+			writeError(w, http.StatusConflict, codeConflict, autonomyAlreadyRunning)
+			return
+		}
 		ctx, cancel := requestContext(r, agentRequestTimeout)
 		defer cancel()
 		if err := s.deps.Agent.StartAutonomy(ctx, cfg); err != nil {
-			s.mapError(w, err)
+			s.mapAutonomyError(w, err)
 			return
 		}
 	case "stop":
 		if err := s.deps.Agent.StopAutonomy(); err != nil {
-			s.mapError(w, err)
+			s.mapAutonomyError(w, err)
 			return
 		}
 	default:
 		writeError(w, http.StatusBadRequest, codeBadRequest, "неизвестное действие автономии: "+req.Action)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"autonomy": s.deps.Agent.Status().Autonomy})
+	writeJSON(w, http.StatusOK, map[string]any{"autonomy": s.autonomyResponse()})
+}
+
+// autonomyResponse returns the autonomy status after a state transition with
+// non-zero startedAt/lastActionAt: the frozen contract renders both as
+// timestamps, and a zero time shows up as year 0001 in the UI. The engine sets
+// them synchronously; this is a defensive normalization for older engines.
+func (s *Server) autonomyResponse() agent.AutonomyStatus {
+	status := stableAutonomy(s.deps.Agent.Status().Autonomy)
+	now := time.Now().UTC()
+	if status.StartedAt.IsZero() {
+		status.StartedAt = now
+	}
+	if status.LastActionAt.IsZero() {
+		status.LastActionAt = now
+	}
+	return status
+}
+
+// stableAutonomy renders the autonomy timestamps for the API: a missing
+// lastActionAt of a running runner falls back to startedAt (the UI never shows
+// a zero "last action" for an active run), and every timestamp is normalized to
+// RFC3339 UTC as §10.2 requires. A never-started status keeps its zero times.
+func stableAutonomy(status agent.AutonomyStatus) agent.AutonomyStatus {
+	if status.Running && status.LastActionAt.IsZero() && !status.StartedAt.IsZero() {
+		status.LastActionAt = status.StartedAt
+	}
+	if !status.StartedAt.IsZero() {
+		status.StartedAt = status.StartedAt.UTC()
+	}
+	if !status.LastActionAt.IsZero() {
+		status.LastActionAt = status.LastActionAt.UTC()
+	}
+	if len(status.Log) > 0 {
+		log := make([]agent.LogEntry, len(status.Log))
+		copy(log, status.Log)
+		for i := range log {
+			if !log[i].Time.IsZero() {
+				log[i].Time = log[i].Time.UTC()
+			}
+		}
+		status.Log = log
+	}
+	return status
+}
+
+// mapAutonomyError maps agent StartAutonomy/StopAutonomy failures to the API
+// codes of §10: a duplicate start is a conflict, a bad configuration is a bad
+// request, an unimplemented feature is unavailable, everything else is
+// internal.
+func (s *Server) mapAutonomyError(w http.ResponseWriter, err error) {
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "already running"), strings.Contains(message, "уже запущена"):
+		writeError(w, http.StatusConflict, codeConflict, autonomyAlreadyRunning)
+	case isNotImplementedError(err):
+		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "функция пока не реализована")
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "превышено время ожидания ответа")
+	case isAutonomyConfigError(err):
+		writeError(w, http.StatusBadRequest, codeBadRequest, "некорректные параметры автономии: "+err.Error())
+	default:
+		writeInternal(w)
+	}
+}
+
+// isAutonomyConfigError reports whether err is a validation problem of the
+// autonomy configuration (as opposed to a runtime failure).
+func isAutonomyConfigError(err error) bool {
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"is required", "not enough history", "unknown strategy",
+		"agent: strategy", "agent: autonomy symbol", "live autonomy",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// isNotImplementedError reports whether err marks an unimplemented feature.
+// The package sentinels of the contract scaffold (agent/backtest
+// ErrNotImplemented) were replaced by the implementations, so the check is
+// textual and defensive.
+func isNotImplementedError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "not implemented")
 }
 
 // handleAutonomyLog serves GET /api/agent/autonomy/log.
