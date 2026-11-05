@@ -36,12 +36,17 @@ type Order struct {
 	Client        string
 	Status        int
 	BuySell       byte
-	Time          int32 // seconds of day
-	AcceptTime    int32 // seconds of day
-	BrokerRef     string
-	Balance       int64
-	// <balance> for a cancelled (disabled) order; the oracle shows time=11 and
-	// balance=1 for the disabled fixture (I until the D offsets are confirmed).
+	// Time, AcceptTime and WithdrawTime are server-local seconds: since the
+	// epoch for live orders (S: 1793873559 = 05.11.2026 10:12:39) or of the
+	// day for small values (O: 11 = 00:00:11).
+	Time           int32
+	AcceptTime     int32
+	WithdrawTime   int32
+	BrokerRef      string
+	SettleCode     string
+	Value          Decimal // order value (W mask & 2)
+	WithinPos      bool
+	Balance        int64
 	Price          Decimal
 	Quantity       int64
 	Yield          Decimal

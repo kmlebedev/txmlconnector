@@ -17,168 +17,204 @@ const (
 // OrderNew is one decoded R_ORD_NEW body plus the wire board number the catalog
 // needs for the board code.
 type OrderNew struct {
-	// Short marks a cancelled/removed/denied/rejected order whose R_ORD_NEW
-	// body is shorter than the linear 52-read scheme (D status branches not
-	// recovered): it is skipped instead of failing the whole snapshot (I).
+	// Short marks a body that ran out before the mask-selected reads ended or
+	// a denied order (status 4, resume block not recovered): it is skipped
+	// instead of failing the whole snapshot.
 	Short    bool
 	Order    model.Order
 	BoardID  uint16
 	ClientID int64 // numeric client id: the DLL drops orders of other clients (O)
 }
 
-// ParseOrderNew decodes one 0x03 body. The wire fields are the oracle-confirmed
-// part of the 52-read body (orders.md / M6 experiment): order id, secid, board,
-// numeric client id, buysell, status, price, time, yield, quantity, client,
-// condition value/after/before, brokerref, accepttime, orderno, condition and
-// balance. The rest of the body is consumed without mapping (I).
+// R_ORD_NEW body mask bits (D: ReadOrderBody FUN_18039b390, the W after the
+// price).
+const (
+	orderMaskYield      = 0x01  // L yield
+	orderMaskValue      = 0x02  // G value; later B + Z12 settlecode
+	orderMaskWithdraw   = 0x04  // L withdrawtime
+	orderMask08         = 0x08  // L (+0x1b4), not rendered
+	orderMask10         = 0x10  // L (+0x14c), B (+0x150), not rendered
+	orderMask20         = 0x20  // L (+0x154), G (+0x1b8), not rendered
+	orderMask40         = 0x40  // L (+0x38), not rendered
+	orderMask80         = 0x80  // B (+0x161), not rendered
+	orderMask100        = 0x100 // W, W, not rendered
+	orderStatusDenied   = 4     // D: OS_DENIED reads a resume block (not recovered)
+	orderStatusRejected = 6     // D: OS_REJECTED reads a Z512 reason
+)
+
+// orderReader reads the R_ORD_NEW fields in order and keeps the first error.
+type orderReader struct {
+	r   *wire.Reader
+	err error
+}
+
+func (o *orderReader) b() byte {
+	if o.err != nil {
+		return 0
+	}
+	v, err := o.r.Byte()
+	o.err = err
+	return v
+}
+
+func (o *orderReader) w() uint16 {
+	if o.err != nil {
+		return 0
+	}
+	v, err := o.r.Uint16()
+	o.err = err
+	return v
+}
+
+func (o *orderReader) l() int32 {
+	if o.err != nil {
+		return 0
+	}
+	v, err := o.r.Int32()
+	o.err = err
+	return v
+}
+
+func (o *orderReader) g() int64 {
+	if o.err != nil {
+		return 0
+	}
+	v, err := o.r.Int64()
+	o.err = err
+	return v
+}
+
+func (o *orderReader) z(max int) string {
+	if o.err != nil {
+		return ""
+	}
+	v, err := o.r.String(max)
+	o.err = err
+	return v
+}
+
+// ParseOrderNew decodes one 0x03 body: L order id, then ReadOrderBody (D:
+// FUN_18039b390), whose reads depend on the W mask after the price, on the
+// condition byte and on the status:
+//
+//	W secid, W board, G client id, B buysell, B (+0xd), L price, W mask,
+//	[mask&1: L yield], L quantity, Z20 brokerref, B condition,
+//	[condition: L conditionvalue, L validafter, L validbefore, B within_pos, L (+0x13c)],
+//	[mask&2: G value], Z12 client, L accepttime, G orderno, B status, L time,
+//	L balance, Z12 (+0x1e5), L (+0x3c), [mask&2: B, Z12 settlecode],
+//	[mask&4: L withdrawtime], [mask&8: L], [mask&0x10: L, B], [mask&0x20: L, G],
+//	[status 4: B + resume block; status 6: Z512 result], [mask&0x40: L],
+//	[mask&0x80: B], B, B, B, B, B, [B(+0x21a)=='R': L, L, L, G, G, G], B, B,
+//	[mask&0x100: W, W].
+//
+// O: order-new-inject.hex (active conditional order, mask 1) and the live
+// cancelled order (S, mask 0x116) render byte-identical to the DLL; every
+// mapped field was confirmed by the field-mutation oracle (orders.md). The
+// L (+0x13c) of the condition block is read only for server protocol >= 0x3f
+// in the DLL; both known servers (PRO# 68, 78) pass, so it is always read (I).
+// A denied order (status 4) is marked Short: its resume block is not recovered.
 func ParseOrderNew(body []byte) (OrderNew, error) {
 	var out OrderNew
 	var o model.Order
 	r := wire.NewReader(body)
-	id, err := r.Int32()
-	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW order_id: %w", err)
+	rd := &orderReader{r: r}
+	id := rd.l()
+	if rd.err != nil {
+		return out, fmt.Errorf("R_ORD_NEW order_id: %w", rd.err)
 	}
 	o.TransactionID = uint64(uint32(id))
-	if secID, err := r.Uint16(); err != nil {
-		return out, fmt.Errorf("R_ORD_NEW secid: %w", err)
-	} else {
-		o.SecID = secID
+	o.SecID = rd.w()
+	out.BoardID = rd.w()
+	out.ClientID = rd.g()
+	if rd.err != nil {
+		return out, fmt.Errorf("R_ORD_NEW header: %w", rd.err)
 	}
-	boardID, err := r.Uint16()
-	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW board: %w", err)
-	}
-	out.BoardID = boardID
-	if out.ClientID, err = r.Int64(); err != nil {
-		return out, fmt.Errorf("R_ORD_NEW client id: %w", err)
-	}
-	if o.BuySell, err = r.Byte(); err != nil {
-		return out, fmt.Errorf("R_ORD_NEW buysell: %w", err)
-	}
-	status, err := r.Byte()
-	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW status: %w", err)
-	}
-	o.Status = int(status)
-	price, err := r.Int32()
-	if err != nil {
+	o.BuySell = rd.b()
+	rd.b() // +0xd, not rendered (I)
+	o.Price = model.Decimal{Units: int64(rd.l()), Scale: 2}
+	mask := rd.w()
+	short := func() (OrderNew, error) {
 		out.Short = true
 		out.Order = o
 		return out, nil
 	}
-	o.Price = model.Decimal{Units: int64(price), Scale: 2}
-	if _, err := r.Uint16(); err != nil { // field 7 is not rendered (I)
-		out.Short = true
-		out.Order = o
-		return out, nil
+	if rd.err != nil {
+		return short()
 	}
-	yield, err := r.Int32()
-	if err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
+	if mask&orderMaskYield != 0 {
+		o.Yield = model.Decimal{Units: int64(rd.l()), Scale: 2}
 	}
-	o.Yield = model.Decimal{Units: int64(yield), Scale: 2}
-	quantity, err := r.Int32()
-	if err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
+	o.Quantity = int64(rd.l())
+	o.BrokerRef = rd.z(20)
+	o.Condition = int(rd.b())
+	if o.Condition != 0 {
+		o.ConditionValue = model.Decimal{Units: int64(rd.l()), Scale: 2}
+		o.ValidAfter = rd.l()
+		o.ValidBefore = rd.l()
+		o.WithinPos = rd.b() != 0 // I: the O fixture has 1 and renders true
+		rd.l()
 	}
-	o.Quantity = int64(quantity)
-	if o.Client, err = r.String(20); err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
+	if mask&orderMaskValue != 0 {
+		o.Value = model.Decimal{Units: rd.g(), Scale: 2}
 	}
-	// hidden byte (not rendered; the oracle fixture shows 0) then the mapped
-	// condition fields.
-	if _, err := r.Byte(); err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
+	o.Client = rd.z(12)
+	o.AcceptTime = rd.l()
+	o.OrderNo = uint64(rd.g())
+	o.Status = int(rd.b())
+	o.Time = rd.l()
+	o.Balance = int64(rd.l())
+	rd.z(12)
+	rd.l()
+	if mask&orderMaskValue != 0 {
+		rd.b()
+		o.SettleCode = rd.z(12)
 	}
-	condValue, err := r.Int32()
-	if err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
+	if mask&orderMaskWithdraw != 0 {
+		o.WithdrawTime = rd.l()
 	}
-	o.ConditionValue = model.Decimal{Units: int64(condValue), Scale: 2}
-	if o.ValidAfter, err = r.Int32(); err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
+	if mask&orderMask08 != 0 {
+		rd.l()
 	}
-	if o.ValidBefore, err = r.Int32(); err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
+	if mask&orderMask10 != 0 {
+		rd.l()
+		rd.b()
 	}
-	if _, err := r.Byte(); err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
+	if mask&orderMask20 != 0 {
+		rd.l()
+		rd.g()
 	}
-	if _, err := r.Int32(); err != nil { // maxcomission (rendered as 0.0 in the fixture, I)
-		out.Short = true
-		out.Order = o
-		return out, nil
+	switch o.Status {
+	case orderStatusDenied:
+		return short()
+	case orderStatusRejected:
+		o.Result = rd.z(512)
 	}
-	if _, err := r.Int64(); err != nil { // numeric client id duplicate (I)
-		out.Short = true
-		out.Order = o
-		return out, nil
+	if mask&orderMask40 != 0 {
+		rd.l()
 	}
-	if o.BrokerRef, err = r.String(12); err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
+	if mask&orderMask80 != 0 {
+		rd.b()
 	}
-	if o.AcceptTime, err = r.Int32(); err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
+	rd.b()
+	rd.b()
+	rd.b()
+	rd.b()
+	if rd.b() == 'R' {
+		rd.l()
+		rd.l()
+		rd.l()
+		rd.g()
+		rd.g()
+		rd.g()
 	}
-	orderNo, err := r.Int64()
-	if err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
+	rd.b()
+	rd.b()
+	if mask&orderMask100 != 0 {
+		rd.w()
+		rd.w()
 	}
-	o.OrderNo = uint64(orderNo)
-	cond, err := r.Byte()
-	if err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
-	}
-	o.Condition = int(cond)
-	// Orders table (docs/protocol/orders.md, D+O): field 22 is <time> (seconds
-	// of day) and field 23 is <balance>.
-	timeRaw, err := r.Int32()
-	if err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
-	}
-	o.Time = timeRaw
-	balance, err := r.Int32()
-	if err != nil {
-		out.Short = true
-		out.Order = o
-		return out, nil
-	}
-	o.Balance = int64(balance)
-	// The remaining reads of the D body are not mapped (I); the record is
-	// sized, so skip the rest.
-	if r.Len() > 0 {
-		if _, err := r.Raw(r.Len()); err != nil {
-			out.Short = true
-			out.Order = o
-			return out, nil
-		}
+	if rd.err != nil {
+		return short()
 	}
 	out.Order = o
 	return out, nil

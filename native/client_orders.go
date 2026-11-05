@@ -171,9 +171,18 @@ func (c *Client) storeOrderLocked(order model.Order) {
 	c.orders[order.TransactionID] = &order
 }
 
-// buildOrderEventLocked fills the catalog identity of a parsed order.
+// buildOrderEventLocked fills the catalog identity of a parsed order and the
+// client/union of its numeric client id: the DLL renders them from its client
+// store, not from the record string (O: mutating the Z12 client string leaves
+// <client> unchanged; the live cancelled order shows the account's union).
 func (c *Client) buildOrderEventLocked(parsed records.OrderNew) model.Order {
 	order := parsed.Order
+	for _, id := range c.accountOrder {
+		if state := c.accounts[id]; state != nil && state.raw.ID == parsed.ClientID {
+			order.Client, order.Union = state.account.ID, state.account.Union
+			break
+		}
+	}
 	if c.catalog != nil {
 		if sec, ok := c.catalog.Security(order.SecID); ok {
 			order.SecCode = sec.SecCode
