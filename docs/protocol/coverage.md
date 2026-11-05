@@ -263,6 +263,18 @@ makeordown, moveorder (2 имени; T19 — ждут живую S-серию).
 9. **Windows/Wine**: нативный клиент проверяется сборками `make server_build/queues_build` и `make verify`;
    отдельного прогона native на Windows не было (не проверено).
 
+10. **T30 live soak (S, 2026-11-05)**: `tools/native-soak` на demo.env, 20 бумаг TQBR — PASS.
+    Прогон 300 с: `stopped uptime=5m0s stats={Polls:2222 Trades:5946 Duplicates:0 UnknownRecords:0
+    LastUnknownTag:0} rss=30MiB`, exit 0. Прогон 320 с (чтобы поймать 5-минутный тик):
+    `uptime=5m2s runs=2222 events=45069 trades=7152 recoveries=0 unknown=0 stats={Polls:2257
+    Trades:7152 Duplicates:0 UnknownRecords:0 LastUnknownTag:0} rss=30MiB maxGap=662ms`;
+    финал `stopped uptime=5m20s … UnknownRecords:0 rss=30MiB`, exit 0 (корректный Run/Close).
+    Замечания по инструменту: (a) карточка/дока говорит `TC_SOAK_DURATION=300`, а main.go парсит
+    Go-duration → нужен `300s`; (b) дефолтный список содержит устаревший `TQBR:POLY` (на демо нет —
+    `subscribe: unknown security`), для прогона использован `TC_SOAK_SYMBOLS` с 20 валидными TQBR;
+    (c) до fix 8bcf007 soak падал на `R_ORD_NEW brokerref: short buffer` (status=6 тела) и на
+    неизвестном теге 0x0f R_RES. Логи: `.re-run/soak/demo-soak-*.log` (вне git).
+
 ## 8. Ссылки
 
 `docs/protocol/connect.md`, `dictionaries.md`, `commands.md`, `alltrades.md`, `records.md`,
