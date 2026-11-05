@@ -56,8 +56,12 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return MarketOrdXML(*e), true
 	case *model.NewsHeader:
 		return NewsHeaderXML(*e), true
+	case *model.NewsBody:
+		return NewsBodyXML(*e), true
 	case *model.Messages:
 		return MessagesXML(e.Items), true
+	case *model.Tick:
+		return TicksXML([]model.Tick{*e}), true
 	case *model.OptionFamily:
 		return OptionFamiliesXML([]model.OptionFamily{*e}), true
 	case *model.OptionStrikes:
@@ -1085,5 +1089,25 @@ func ReportXML(report model.ExecutionReport) string {
 	b.WriteString("<repovalue>" + report.RepoValue.String() + "</repovalue>")
 	b.WriteString("<repo2value>" + report.Repo2Value.String() + "</repo2value>")
 	b.WriteString("</report>")
+	return b.String()
+}
+
+// TicksXML renders the S form <ticks><tick>...</tick></ticks> (production S
+// capture; RQ_TICKS polling does not exist on prod).
+func TicksXML(ticks []model.Tick) string {
+	var b strings.Builder
+	b.WriteString("<ticks>")
+	for _, tick := range ticks {
+		b.WriteString("<tick><secid>" + strconv.Itoa(int(tick.SecID)) + "</secid>")
+		b.WriteString("<board>" + escape(tick.Symbol.Board) + "</board>")
+		b.WriteString("<seccode>" + escape(tick.Symbol.SecCode) + "</seccode>")
+		b.WriteString("<tradeno>" + strconv.FormatInt(tick.TradeNo, 10) + "</tradeno>")
+		b.WriteString("<tradetime>" + tick.Time.UTC().Format("02.01.2006 15:04:05") + "</tradetime>")
+		b.WriteString("<price>" + tick.Price.String() + "</price>")
+		b.WriteString("<quantity>" + strconv.FormatInt(tick.Quantity, 10) + "</quantity>")
+		b.WriteString("<period>" + escape(string([]byte{tick.Period})) + "</period>")
+		b.WriteString("<buysell>" + escape(string([]byte{tick.BuySell})) + "</buysell></tick>")
+	}
+	b.WriteString("</ticks>")
 	return b.String()
 }

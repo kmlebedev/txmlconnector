@@ -934,11 +934,6 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 			return failure(fmt.Sprintf("Header with id = %d not found", newsID)), nil
 		}
 		if _, err := client.NewsBody(ctx, newsID); err != nil {
-			if errors.Is(err, errNewsBodyI) {
-				// The DLL request is sent and the command succeeds; the body
-				// callback path is I until task-56 (news.md).
-				return success(), nil
-			}
 			return failure(err.Error()), nil
 		}
 		return success(), nil
@@ -1501,8 +1496,12 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.MarketOrdXML(*e))
 			case *model.NewsHeader:
 				c.emit(xmlcompat.NewsHeaderXML(*e))
+			case *model.NewsBody:
+				c.emit(xmlcompat.NewsBodyXML(*e))
 			case *model.Messages:
 				c.emit(xmlcompat.MessagesXML(e.Items))
+			case *model.Tick:
+				c.emit(xmlcompat.TicksXML([]model.Tick{*e}))
 			case *model.OptionFamily:
 				c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{*e}))
 			case *model.OptionStrikes:
@@ -1607,8 +1606,14 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 				if header, ok := ev.(*model.NewsHeader); ok {
 					c.emit(xmlcompat.NewsHeaderXML(*header))
 				}
+				if body, ok := ev.(*model.NewsBody); ok {
+					c.emit(xmlcompat.NewsBodyXML(*body))
+				}
 				if messages, ok := ev.(*model.Messages); ok {
 					c.emit(xmlcompat.MessagesXML(messages.Items))
+				}
+				if tick, ok := ev.(*model.Tick); ok {
+					c.emit(xmlcompat.TicksXML([]model.Tick{*tick}))
 				}
 				if family, ok := ev.(*model.OptionFamily); ok {
 					c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{*family}))

@@ -18,8 +18,9 @@ type TickRequest struct {
 
 // SubscribeTicks sends RQ_SUBSCRIBE_TICKS for the given securities (D/S: B
 // filter then {W secid, W board, G tradeno}*, written in the reverse XML order).
-// The DLL answers with an empty result; the tick data itself is polled with
-// RQ_TICKS (see PollTicks).
+// The DLL answers with an empty result; the tick data arrives as RQ_MAIN
+// records 0x5a (S, history.md). RQ_TICKS polling is refuted on production and
+// PollTicks below is kept only for the D/I compatibility tests.
 func (c *Client) SubscribeTicks(ctx context.Context, filter bool, reqs ...TickRequest) error {
 	items, err := c.tickItems(reqs)
 	if err != nil {
