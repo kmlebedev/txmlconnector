@@ -3,11 +3,13 @@ package feed
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/native"
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
+	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 )
 
 // marketClient is the subset of *native.Client the live feed uses. It is an
@@ -739,6 +741,212 @@ func historyFromCandles(candles model.Candles, symbol string, periodSec int, not
 		})
 	}
 	return history
+}
+
+// ---- bot closed-bar stream (plan Task 22) --------------------------------
+
+// barCloseGrace is the "interval boundary + 2s" grace of the closed-bar timer:
+// the exchange can publish the last fill of an interval slightly late, so the
+// bar is requested only after the grace period (status I of the plan).
+const barCloseGrace = 2 * time.Second
+
+// History implements bot.BarStream: the closed candle series of one instrument
+// as backtest bars. It works in both modes (offline serves the seed).
+func (s *Service) History(ctx context.Context, symbol string, periodSec, count int) ([]backtest.Bar, error) {
+	history, err := s.Candles(ctx, symbol, periodSec, count)
+	if err != nil {
+		return nil, err
+	}
+	return barsFromHistory(history), nil
+}
+
+// SubscribeClosedBars implements bot.BarStream: it streams the closed candles of
+// one series exactly once, in order. A bar is emitted by the first quote of the
+// next interval or by the boundary timer (+2s), whichever comes first; after a
+// reconnect the missed bars are backfilled from the history without duplicates.
+func (s *Service) SubscribeClosedBars(ctx context.Context, symbol string, periodSec int) (<-chan backtest.Bar, error) {
+	if _, ok := s.Instrument(symbol); !ok {
+		return nil, notFound(symbol)
+	}
+	if !ValidPeriod(periodSec) {
+		return nil, periodError(periodSec)
+	}
+	if s.mode != ModeLive {
+		return nil, &Error{Code: CodeUnavailable, Message: "поток закрытых свечей доступен только в live-режиме"}
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	out := make(chan backtest.Bar, 16)
+	go s.streamClosedBars(ctx, symbol, periodSec, out)
+	return out, nil
+}
+
+// streamClosedBars is the closed-bar producer of one subscription.
+func (s *Service) streamClosedBars(ctx context.Context, symbol string, periodSec int, out chan<- backtest.Bar) {
+	defer close(out)
+	events := make(chan Event, 64)
+	cancel := s.Subscribe(func(ev Event) {
+		if ev.Type != "quote" && ev.Type != "status" {
+			return
+		}
+		select {
+		case events <- ev:
+		default:
+			// The consumer is slower than the feed: the next tick/timer still
+			// triggers the history fetch, so dropping a tick is safe.
+		}
+	})
+	defer cancel()
+
+	// Seed the last emitted bar from the history, so the subscription starts
+	// with the current interval instead of replaying the whole series.
+	var last time.Time
+	if bars, err := s.closedBacktestBars(ctx, symbol, periodSec, 3); err == nil {
+		cutoff := barIntervalStart(time.Now().UTC(), periodSec)
+		for _, bar := range bars {
+			if !bar.Partial && bar.Time.Before(cutoff) && bar.Time.After(last) {
+				last = bar.Time
+			}
+		}
+	}
+	timer := time.NewTimer(nextBarCloseDelay(time.Now().UTC(), periodSec))
+	defer timer.Stop()
+
+	emit := func(now time.Time) {
+		cutoff := barIntervalStart(now, periodSec)
+		count := 4
+		if !last.IsZero() && cutoff.After(last) {
+			missed := int(cutoff.Sub(last)/(time.Duration(periodSec)*time.Second)) + 2
+			if missed > count {
+				count = missed
+			}
+		}
+		if count > 500 {
+			count = 500
+		}
+		bars, err := s.closedBacktestBars(ctx, symbol, periodSec, count)
+		if err != nil {
+			return
+		}
+		closed := make([]backtest.Bar, 0, len(bars))
+		for _, bar := range bars {
+			if !bar.Partial && bar.Time.Before(cutoff) {
+				closed = append(closed, bar)
+			}
+		}
+		if last.IsZero() {
+			// No seed history: start from the newest closed bar instead of
+			// replaying the series.
+			if len(closed) > 0 {
+				last = closed[len(closed)-1].Time
+			}
+			return
+		}
+		for _, bar := range closed {
+			if !bar.Time.After(last) {
+				continue
+			}
+			select {
+			case out <- bar:
+				last = bar.Time
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+
+	connected := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			emit(time.Now().UTC())
+			timer.Reset(nextBarCloseDelay(time.Now().UTC(), periodSec))
+		case ev := <-events:
+			switch ev.Type {
+			case "status":
+				status, ok := ev.Data.(Status)
+				if !ok {
+					continue
+				}
+				if !status.Connected {
+					connected = false
+					continue
+				}
+				if !connected {
+					// A (re)connection: backfill the bars missed while offline.
+					connected = true
+					emit(time.Now().UTC())
+				}
+			case "quote":
+				quote, ok := ev.Data.(Quote)
+				if !ok || !strings.EqualFold(quote.Symbol, symbol) {
+					continue
+				}
+				tickAt := quote.Time
+				if tickAt.IsZero() {
+					tickAt = time.Now().UTC()
+				}
+				if !last.IsZero() && !barIntervalStart(tickAt, periodSec).After(barIntervalStart(last, periodSec)) {
+					continue
+				}
+				emit(tickAt)
+			}
+		}
+	}
+}
+
+// closedBacktestBars fetches the last closed bars directly from the exchange
+// connection, bypassing the TTL history cache: a bot must see a closed bar as
+// soon as the exchange publishes it.
+func (s *Service) closedBacktestBars(ctx context.Context, symbol string, periodSec, count int) ([]backtest.Bar, error) {
+	client := s.currentClient()
+	if client == nil {
+		return nil, &Error{Code: CodeUnavailable, Message: "нет соединения с сервером биржи"}
+	}
+	history, err := s.fetchHistory(ctx, client, symbol, periodSec, count)
+	if err != nil {
+		return nil, err
+	}
+	return barsFromHistory(history), nil
+}
+
+// barsFromHistory converts the feed series into backtest bars.
+func barsFromHistory(history History) []backtest.Bar {
+	bars := make([]backtest.Bar, 0, len(history.Bars))
+	for _, bar := range history.Bars {
+		bars = append(bars, backtest.Bar{
+			Time:   bar.Time.UTC(),
+			Open:   bar.Open,
+			High:   bar.High,
+			Low:    bar.Low,
+			Close:  bar.Close,
+			Volume: bar.Volume,
+		})
+	}
+	return bars
+}
+
+// barIntervalStart returns the UTC start of the candle interval containing t.
+func barIntervalStart(t time.Time, periodSec int) time.Time {
+	if periodSec <= 0 {
+		return t.UTC()
+	}
+	secs := int64(periodSec)
+	return time.Unix((t.UTC().Unix()/secs)*secs, 0).UTC()
+}
+
+// nextBarCloseDelay returns the duration until the next interval boundary plus
+// the close grace period.
+func nextBarCloseDelay(now time.Time, periodSec int) time.Duration {
+	period := time.Duration(periodSec) * time.Second
+	next := barIntervalStart(now, periodSec).Add(period + barCloseGrace)
+	if !next.After(now) {
+		next = next.Add(period)
+	}
+	return time.Until(next)
 }
 
 // cutSymbol splits "BOARD:SECCODE".
