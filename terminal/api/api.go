@@ -73,6 +73,11 @@ type AgentAPI interface {
 	Backtests() []backtest.Result
 	Hints(ctx context.Context, symbol string, periodSec int) (agent.MarketHints, error)
 	Tools() []agent.ToolInfo
+	// Proposals/Approve/Reject are the human-in-the-loop approval surface of
+	// the mutating agent tools (R5).
+	Proposals() []agent.Proposal
+	Approve(ctx context.Context, id string) (agent.ToolCall, error)
+	Reject(id string) error
 }
 
 // Deps are the backend dependencies of the HTTP layer.
@@ -136,6 +141,7 @@ const (
 	codeUnavailable         = "unavailable"
 	codeLiveTradingDisabled = "live_trading_disabled"
 	codeNotImplemented      = "not_implemented"
+	codeProposalExpired     = "proposal_expired"
 	codeInternal            = "internal"
 )
 
@@ -209,6 +215,9 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/agent/autonomy", s.handleAutonomy)
 	mux.HandleFunc("GET /api/agent/autonomy/log", s.handleAutonomyLog)
 	mux.HandleFunc("GET /api/agent/backtests", s.handleAgentBacktests)
+	mux.HandleFunc("GET /api/agent/proposals", s.handleAgentProposals)
+	mux.HandleFunc("POST /api/agent/proposals/{id}/approve", s.handleApproveProposal)
+	mux.HandleFunc("POST /api/agent/proposals/{id}/reject", s.handleRejectProposal)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("/api/", s.handleAPINotFound)
 	mux.HandleFunc("/", s.handleSPA)

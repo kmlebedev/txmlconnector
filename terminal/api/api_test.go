@@ -192,20 +192,27 @@ func (f *fakeFeed) subscribers() []func(feed.Event) {
 
 // fakeAgent is an AgentAPI fake.
 type fakeAgent struct {
-	status     agent.Status
-	chat       agent.ChatResponse
-	chatErr    error
-	hints      agent.MarketHints
-	hintsErr   error
-	tools      []agent.ToolInfo
-	backtests  []backtest.Result
-	startErr   error
-	stopErr    error
-	started    bool
-	stopped    bool
-	startCfg   agent.AutonomyConfig
-	subs       []func(agent.Event)
-	autonomyID string
+	status        agent.Status
+	chat          agent.ChatResponse
+	chatErr       error
+	hints         agent.MarketHints
+	hintsErr      error
+	tools         []agent.ToolInfo
+	backtests     []backtest.Result
+	startErr      error
+	stopErr       error
+	started       bool
+	stopped       bool
+	startCfg      agent.AutonomyConfig
+	subs          []func(agent.Event)
+	autonomyID    string
+	proposals     []agent.Proposal
+	approveCall   agent.ToolCall
+	approveErr    error
+	rejectErr     error
+	approveCalled bool
+	rejectCalled  bool
+	rejectedID    string
 }
 
 func (f *fakeAgent) Chat(ctx context.Context, req agent.ChatRequest) (agent.ChatResponse, error) {
@@ -259,6 +266,47 @@ func (f *fakeAgent) Hints(ctx context.Context, symbol string, periodSec int) (ag
 }
 
 func (f *fakeAgent) Tools() []agent.ToolInfo { return f.tools }
+
+func (f *fakeAgent) Proposals() []agent.Proposal {
+	return append([]agent.Proposal(nil), f.proposals...)
+}
+
+func (f *fakeAgent) Approve(ctx context.Context, id string) (agent.ToolCall, error) {
+	if f.approveErr != nil {
+		return agent.ToolCall{}, f.approveErr
+	}
+	found := false
+	for i := range f.proposals {
+		if f.proposals[i].ID == id {
+			found = true
+			f.proposals[i].Status = agent.ProposalExecuted
+		}
+	}
+	if !found {
+		return agent.ToolCall{}, agent.ErrProposalNotFound
+	}
+	f.approveCalled = true
+	return f.approveCall, nil
+}
+
+func (f *fakeAgent) Reject(id string) error {
+	if f.rejectErr != nil {
+		return f.rejectErr
+	}
+	found := false
+	for i := range f.proposals {
+		if f.proposals[i].ID == id {
+			found = true
+			f.proposals[i].Status = agent.ProposalRejected
+		}
+	}
+	if !found {
+		return agent.ErrProposalNotFound
+	}
+	f.rejectCalled = true
+	f.rejectedID = id
+	return nil
+}
 
 // newTestServer builds a Server with fake deps, short SSE intervals and an
 // httptest server around Handler.
@@ -1784,5 +1832,137 @@ func TestAgentEventUTCOverSSE(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no agent event on the hub")
+	}
+}
+
+// proposalTestTime is the frozen instant of the proposal API tests.
+var proposalTestTime = time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+
+// TestAgentProposalsREST covers the approval REST surface of R5: the list, the
+// one-shot approve, reject and the 404/409/410 error mapping.
+func TestAgentProposalsREST(t *testing.T) {
+	deps, _, _, a := defaultDeps()
+	a.proposals = []agent.Proposal{{
+		ID:        "prop_000001",
+		Tool:      "place_order",
+		Args:      map[string]any{"symbol": "TQBR:SBER", "side": "buy", "qty": 10},
+		Summary:   "Купить 10 SBER по рынку",
+		CreatedAt: proposalTestTime,
+		ExpiresAt: proposalTestTime.Add(5 * time.Minute),
+		Status:    agent.ProposalPending,
+	}}
+	a.approveCall = agent.ToolCall{
+		Name:   "place_order",
+		Result: agent.OrderView{ID: "ord_000001", Symbol: "TQBR:SBER", Side: "buy", Qty: 10, Filled: 10, Status: "filled"},
+	}
+	_, ts := newTestServer(t, deps, Config{})
+
+	status, data := do(t, ts, http.MethodGet, "/api/agent/proposals", nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET proposals status = %d, body %s", status, data)
+	}
+	var list struct {
+		Proposals []agent.Proposal `json:"proposals"`
+	}
+	decode(t, data, &list)
+	if len(list.Proposals) != 1 || list.Proposals[0].ID != "prop_000001" || list.Proposals[0].Status != agent.ProposalPending {
+		t.Fatalf("proposals = %+v", list.Proposals)
+	}
+	if !list.Proposals[0].CreatedAt.Equal(proposalTestTime) {
+		t.Errorf("createdAt = %v, want %v", list.Proposals[0].CreatedAt, proposalTestTime)
+	}
+
+	status, data = do(t, ts, http.MethodPost, "/api/agent/proposals/prop_000001/approve", nil)
+	if status != http.StatusOK {
+		t.Fatalf("approve status = %d, body %s", status, data)
+	}
+	var approved struct {
+		Proposal agent.Proposal `json:"proposal"`
+		Result   agent.ToolCall `json:"result"`
+	}
+	decode(t, data, &approved)
+	if !a.approveCalled {
+		t.Error("agent Approve was not called")
+	}
+	if approved.Proposal.Status != agent.ProposalExecuted {
+		t.Errorf("proposal status = %q, want executed", approved.Proposal.Status)
+	}
+	if approved.Result.Name != "place_order" || approved.Result.Error != "" {
+		t.Errorf("result = %+v", approved.Result)
+	}
+
+	// Unknown proposal -> 404 not_found.
+	status, data = do(t, ts, http.MethodPost, "/api/agent/proposals/prop_missing/approve", nil)
+	if status != http.StatusNotFound || !strings.Contains(string(data), "not_found") {
+		t.Fatalf("unknown approve status = %d, body %s", status, data)
+	}
+	// Repeated approve -> 409 conflict.
+	a.approveErr = agent.ErrProposalHandled
+	status, data = do(t, ts, http.MethodPost, "/api/agent/proposals/prop_000001/approve", nil)
+	if status != http.StatusConflict || !strings.Contains(string(data), "conflict") {
+		t.Fatalf("repeat approve status = %d, body %s", status, data)
+	}
+	// Expired -> 410 proposal_expired.
+	a.approveErr = agent.ErrProposalExpired
+	status, data = do(t, ts, http.MethodPost, "/api/agent/proposals/prop_000001/approve", nil)
+	if status != http.StatusGone || !strings.Contains(string(data), "proposal_expired") {
+		t.Fatalf("expired approve status = %d, body %s", status, data)
+	}
+	a.approveErr = nil
+
+	// Reject -> 200 with the rejected proposal.
+	status, data = do(t, ts, http.MethodPost, "/api/agent/proposals/prop_000001/reject", nil)
+	if status != http.StatusOK {
+		t.Fatalf("reject status = %d, body %s", status, data)
+	}
+	var rejected struct {
+		Proposal agent.Proposal `json:"proposal"`
+	}
+	decode(t, data, &rejected)
+	if !a.rejectCalled || a.rejectedID != "prop_000001" {
+		t.Errorf("agent Reject called = %v id = %q", a.rejectCalled, a.rejectedID)
+	}
+	if rejected.Proposal.Status != agent.ProposalRejected {
+		t.Errorf("rejected proposal status = %q", rejected.Proposal.Status)
+	}
+	// Repeated reject -> 409 conflict.
+	a.rejectErr = agent.ErrProposalHandled
+	status, data = do(t, ts, http.MethodPost, "/api/agent/proposals/prop_000001/reject", nil)
+	if status != http.StatusConflict || !strings.Contains(string(data), "conflict") {
+		t.Fatalf("repeat reject status = %d, body %s", status, data)
+	}
+}
+
+// TestProposalSSEEvent checks that proposals travel as a top-level SSE event of
+// type "proposal" (not wrapped into the "agent" envelope) with UTC timestamps.
+func TestProposalSSEEvent(t *testing.T) {
+	msk := time.FixedZone("MSK", 3*3600)
+	at := time.Date(2026, 11, 5, 19, 30, 0, 0, msk)
+	deps, _, _, _ := defaultDeps()
+	srv, err := New(Config{}, deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer srv.Close()
+	ch, cancel := srv.hub.subscribe()
+	defer cancel()
+	srv.onAgentEvent(agent.Event{Type: "proposal", Data: agent.Proposal{
+		ID: "prop_000001", Tool: "place_order", Summary: "Купить 10 SBER по рынку",
+		CreatedAt: at, ExpiresAt: at.Add(5 * time.Minute), Status: agent.ProposalPending,
+	}})
+	select {
+	case ev := <-ch:
+		if ev.Type != "proposal" {
+			t.Fatalf("event type = %q, want top-level proposal", ev.Type)
+		}
+		proposal, ok := ev.Data.(agent.Proposal)
+		if !ok {
+			t.Fatalf("event data = %T, want agent.Proposal", ev.Data)
+		}
+		if !proposal.CreatedAt.Equal(at) || proposal.CreatedAt.Location() != time.UTC {
+			t.Fatalf("createdAt = %v (%v), want UTC instant %v", proposal.CreatedAt, proposal.CreatedAt.Location(), at)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no proposal event on the hub")
 	}
 }

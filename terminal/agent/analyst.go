@@ -148,6 +148,7 @@ func (e *Engine) localAnalyst(ctx context.Context, message string) (ChatResponse
 	// strategy, but never on a strategy that produced no trades.
 	var autonomy *AutonomyStatus
 	var autonomyErr string
+	var proposal *Proposal
 	autoStarted := false
 	if intent.Start && result.Metrics.Trades > 0 {
 		autoArgs := map[string]any{
@@ -171,11 +172,15 @@ func (e *Engine) localAnalyst(ctx context.Context, message string) (ChatResponse
 		} else if st, ok := autoCall.Result.(AutonomyStatus); ok {
 			autonomy = &st
 			autoStarted = true
+		} else if res, ok := autoCall.Result.(proposalResult); ok {
+			// R5: the mutating action became a proposal; the human confirms it.
+			p := res.Proposal
+			proposal = &p
 		}
 	}
 
 	launched := intent.Start && (autoStarted || e.Status().Autonomy.Running)
-	resp.Answer = e.formatAnalystAnswer(intent, chosen, result, hints, hintsOK, autonomy, autonomyErr, autoStarted, launched)
+	resp.Answer = e.formatAnalystAnswer(intent, chosen, result, hints, hintsOK, autonomy, autonomyErr, proposal, autoStarted, launched)
 	resp.ElapsedMs = e.now().Sub(started).Milliseconds()
 	return resp, nil
 }
@@ -438,7 +443,8 @@ func parseDecimal(raw string) (float64, bool) {
 // formatAnalystAnswer renders the Russian local-analyst answer with concrete
 // metrics, the technical picture and the risks.
 func (e *Engine) formatAnalystAnswer(intent analystIntent, strategy string, result backtest.Result,
-	hints MarketHints, hintsOK bool, autonomy *AutonomyStatus, autonomyErr string, autoStarted, launched bool) string {
+	hints MarketHints, hintsOK bool, autonomy *AutonomyStatus, autonomyErr string, proposal *Proposal,
+	autoStarted, launched bool) string {
 	var b strings.Builder
 	m := result.Metrics
 
@@ -482,6 +488,11 @@ func (e *Engine) formatAnalystAnswer(intent analystIntent, strategy string, resu
 		fmt.Fprintf(&b, "\nАвтономия запущена на бумажном счёте: %s, стратегия %s, бюджет %s ₽, скорость %.0f бар/с.",
 			intent.Symbol, strategy, money(autonomy.Config.Budget), autonomy.Config.Speed)
 		b.WriteString(" Остановить: запрос «останови автоторговлю» или POST /api/agent/autonomy {\"action\":\"stop\"}.")
+	case proposal != nil:
+		// R5: the explicit command produced a proposal instead of an immediate
+		// start; the action still needs a human confirmation.
+		fmt.Fprintf(&b, "\nПодготовил предложение: %s. Подтвердите или отклоните его в карточке предложений (GET /api/agent/proposals).",
+			proposal.Summary)
 	case intent.Start && m.Trades <= 0:
 		b.WriteString("\nАвтономию не запускаю: на этих данных стратегия не дала сделок — запуск не рекомендую.")
 	case strings.Contains(autonomyErr, "already running"):

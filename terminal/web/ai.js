@@ -56,6 +56,14 @@ const TOOL_TITLES = {
   get_backtest_history: 'История бэктестов',
 };
 
+const PROPOSAL_STATUS_TITLES = {
+  pending: 'ждёт подтверждения',
+  approved: 'подтверждено',
+  executed: 'выполнено',
+  rejected: 'отклонено',
+  expired: 'истекло',
+};
+
 const QUICK_PROMPTS = [
   'Протестируй лучшую стратегию на Сбербанке за месяц',
   'Запусти автоторговлю на SBER',
@@ -156,6 +164,16 @@ export class AIDrawer {
       }
       const stopAutonomy = target.closest('[data-autonomy-stop]');
       if (stopAutonomy) this.stopAutonomy();
+      const approveProposal = target.closest('[data-proposal-approve]');
+      if (approveProposal) {
+        this.resolveProposal(approveProposal.dataset.proposalApprove, true);
+        return;
+      }
+      const rejectProposal = target.closest('[data-proposal-reject]');
+      if (rejectProposal) {
+        this.resolveProposal(rejectProposal.dataset.proposalReject, false);
+        return;
+      }
     });
 
     this.root.addEventListener('submit', (event) => {
@@ -195,6 +213,7 @@ export class AIDrawer {
     if (tab) this.setTab(tab);
     this.renderQuickPrompts();
     this.renderChat();
+    this.refreshProposals();
     this.renderForm();
     this.renderAutonomyState();
     setTimeout(() => this.root.querySelector('#chatInput')?.focus(), 120);
@@ -237,6 +256,7 @@ export class AIDrawer {
     if ('autonomy' in patch || 'autonomyLog' in patch) this.scheduleAutonomyRender();
     if ('agentStatus' in patch) this.renderLlmChip();
     if ('chat' in patch || 'chatBusy' in patch || 'agentActivity' in patch) this.renderChat();
+    if ('proposals' in patch) this.renderChat();
     if ('strategies' in patch || 'instruments' in patch) this.renderForm();
     if ('backtests' in patch) this.renderAutonomyState();
     if (patch.ui && patch.ui.drawerOpen) {
@@ -302,6 +322,8 @@ export class AIDrawer {
           <div class="ai-body"><div class="typing-dots"><i></i><i></i><i></i></div></div>
         </div>`);
     }
+    const proposals = state.proposals || [];
+    if (proposals.length) log.insertAdjacentHTML('beforeend', this.renderProposals(proposals));
     const activity = this.root.querySelector('#agentActivity');
     if (activity) {
       if (state.agentActivity) {
@@ -513,6 +535,9 @@ export class AIDrawer {
       const nextChat = [...this.store.get().chat, assistant];
       this.store.set({ chat: nextChat, chatBusy: false, agentActivity: '' });
       this.afterArtifacts(assistant.artifacts || []);
+      for (const call of assistant.toolCalls) {
+        if (call && call.result && call.result.proposal) this.upsertProposal(call.result.proposal);
+      }
       this.scrollChatToLastAnswer();
     } catch (error) {
       const message = error && error.message ? error.message : 'Не удалось получить ответ агента';
@@ -613,6 +638,76 @@ export class AIDrawer {
         this.store.set({ backtests: [result, ...(this.store.get().backtests || [])] });
       }
     }
+  }
+
+  // ---- human-in-the-loop proposals (R5) --------------------------------
+
+  handleProposalEvent(proposal) {
+    if (!proposal || !proposal.id) return;
+    this.upsertProposal(proposal);
+    if (proposal.status === 'pending') {
+      this.onToast('info', `Нужно подтверждение: ${proposal.summary || proposal.tool}`);
+    }
+  }
+
+  upsertProposal(proposal) {
+    if (!proposal || !proposal.id) return;
+    const current = this.store.get().proposals || [];
+    const index = current.findIndex((row) => row.id === proposal.id);
+    const next = index >= 0
+      ? current.map((row, i) => (i === index ? Object.assign({}, row, proposal) : row))
+      : [...current, proposal];
+    this.store.set({ proposals: next.slice(-20) });
+  }
+
+  async refreshProposals() {
+    try {
+      const proposals = await this.api.agentProposals();
+      this.store.set({ proposals: proposals.slice(-20) });
+    } catch {
+      // The SSE "proposal" stream keeps the list fresh on its own.
+    }
+  }
+
+  async resolveProposal(id, approve) {
+    try {
+      const data = approve ? await this.api.approveProposal(id) : await this.api.rejectProposal(id);
+      const proposal = data && data.proposal;
+      if (proposal) this.upsertProposal(proposal);
+      if (approve && data && data.result) {
+        const result = data.result.result;
+        if (result && result.config && result.config.symbol) {
+          this.store.set({ autonomy: result, autonomyLog: result.log || [] });
+        }
+      }
+      const title = proposal ? (proposal.summary || proposal.tool) : id;
+      this.onToast(approve ? 'success' : 'info',
+        approve ? `Подтверждено и выполнено: ${title}` : 'Предложение отклонено');
+      this.renderChat();
+    } catch (error) {
+      this.onToast('error', `Не удалось обработать предложение: ${error.message || error}`);
+      if (error && error.code === 'proposal_expired') this.refreshProposals();
+    }
+  }
+
+  renderProposals(proposals) {
+    const rows = proposals.slice(-4).map((proposal) => {
+      const pending = proposal.status === 'pending';
+      const actions = pending
+        ? `<div class="auto-actions">
+            <button type="button" class="btn btn-ai btn-sm" data-proposal-approve="${esc(proposal.id)}">${icon('check', 13)} Подтвердить</button>
+            <button type="button" class="btn btn-danger-ghost btn-sm" data-proposal-reject="${esc(proposal.id)}">Отклонить</button>
+          </div>`
+        : `<span class="badge-${proposal.status === 'executed' ? 'live' : 'muted'}">${esc(PROPOSAL_STATUS_TITLES[proposal.status] || proposal.status)}</span>`;
+      return `
+        <div class="auto-artifact proposal-card" data-proposal-id="${esc(proposal.id)}">
+          <div class="auto-artifact-head">${icon('shield', 14)} Предложение агента ${pending ? '<span class="badge-live">ждёт подтверждения</span>' : ''}</div>
+          <div class="auto-artifact-row"><span>Действие</span><b>${esc(proposal.summary || proposal.tool || '')}</b></div>
+          <div class="auto-artifact-row"><span>Действует до</span><b>${isValidTime(proposal.expiresAt) ? fmtHM(proposal.expiresAt) : '—'}</b></div>
+          ${actions}
+        </div>`;
+    }).join('');
+    return `<div class="chat-proposals">${rows}</div>`;
   }
 
   // ---- autonomy panel ---------------------------------------------------

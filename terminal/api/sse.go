@@ -241,9 +241,14 @@ func (s *Server) onFeedEvent(ev feed.Event) {
 }
 
 // onAgentEvent forwards agent events to the SSE clients with the timestamps
-// rendered as RFC3339 UTC (§10.2).
+// rendered as RFC3339 UTC (§10.2). Proposals travel as a top-level "proposal"
+// SSE event (R5); every other agent event keeps the packed "agent" envelope.
 func (s *Server) onAgentEvent(ev agent.Event) {
 	ev.Data = normalizeEventTimes(ev.Data)
+	if ev.Type == "proposal" {
+		s.hub.publish(event{Type: "proposal", Data: ev.Data})
+		return
+	}
 	s.hub.publish(event{Type: "agent", Data: ev})
 }
 
