@@ -757,8 +757,11 @@ loopback-tcproxy (S), сырьё — только `.re-run/s/` (gitignored), в 
 - **OPTIONS**: первый прогон оборвался (`connected=false`, RQ_LOGOUT), затем прод перестал
   устанавливать сессию (`connected=error`, доходят только RQ_LOGIN/RQ_PWD) — похоже на лимит
   логинов/сессий (I); версия/гейт 0x45 и опционные формы — D/I до следующего окна.
-- **RE-4 на проде**: одиночная попытка (native server без Wine + gRPC sequence) была убита лимитом
-  harness-таймаута, результат inconclusive; один повтор — фоновым прогоном Lead.
+- **RE-4 на проде**: native server без Wine поднимается и слушает, но прод-соединение отдаёт
+  `connected="error": Ошибка подключения` (вероятно, тот же лимит сессий/логинов после S-серии).
+  После фикса `TC_RE4_SEQUENCE` (ожидание `connected=true`, `986b94a`) повторная попытка дала тот же
+  внешний блокер; RE-4 перенесён на демо (после открытия 09:50 MSK) — native gRPC backend +
+  `connect→get_securities→subscribe→disconnect` без Windows/Wine.
 
 **Гигиена:** прод-хост заменён плейсхолдером `transaq.example` в tracked-файлах (`6d6650e`;
 docs/alltrades.md и др.); в истории git значение остаётся (как и UID — решение пользователя не
