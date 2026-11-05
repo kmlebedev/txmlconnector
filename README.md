@@ -51,6 +51,10 @@ err = client.Run(ctx, native.RunOptions{RqDelay: 100 * time.Millisecond}, func(e
 
 ![AI Terminal — основной экран](docs/ai-terminal/screenshot-main.png)
 
+Терминал можно встроить в интерфейс DeepSeek Harness как основную панель — плагин
+[`dsh-ai-terminal`](dsh-ai-terminal/README.md) добавляет иконку в sidebar и проксирует терминал под
+origin Harness (`/ai-terminal/`).
+
 `cmd/terminal` — самодостаточный биржевой терминал-аналог Finam поверх `native.Client`:
 список инструментов, свечной график, стакан, портфель/заявки, тикет, а также встроенный AI-агент,
 который **без MCP** вызывает инструменты терминала (реальный бэктест на истории котировок,
