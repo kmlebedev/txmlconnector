@@ -17,7 +17,7 @@ STAGING_REMOTE_BIN  ?= $(STAGING_BIN_DIR)/txmlconnector-server.exe
 STAGING_UNIT_TMPL   ?= deploy/txmlconnector-server.service
 
 .PHONY: compile test vet verify server_build server queues_build queues client tgbot \
-	cabi cabi-so cabi-dylib cabi-test cabi-live-test \
+	cabi cabi-so cabi-dylib cabi-test cabi-live-test cabi-conformance \
 	staging-precheck staging-prepare deploy-staging deploy-staging-binary \
 	deploy-staging-dll deploy-staging-unit deploy-staging-smoke \
 	deploy-staging-status deploy-staging-logs deploy-staging-restart rollback-staging
@@ -142,6 +142,13 @@ cabi-live-test: cabi
 cabi-test: cabi
 	$(CC) -I cmd/connector/include -o bin/abi_test cmd/connector/testdata/abi_test.c $(CABI_TEST_LIBS)
 	$(CABI_TEST_ENV) ./bin/abi_test $(CABI_TEST_LIB)
+
+## C5 conformance: replay ordered local C-ABI scenarios (cmd/connector/testdata/
+## cabi_scenarios.json) against our c-shared library and compare the wrapper
+## texts/codes byte-for-byte with the reference DLL (docs/protocol/cabi.md).
+cabi-conformance: cabi
+	$(CC) -I cmd/connector/include -o bin/abi_conformance cmd/connector/testdata/abi_conformance.c
+	$(CABI_TEST_ENV) ./bin/abi_conformance $(CABI_TEST_LIB) cmd/connector/testdata/cabi_scenarios.json
 
 ## Deploy to palmshell via SSH. See deploy/README.md for paths and overrides.
 

@@ -1,9 +1,8 @@
 //go:build cgo
 
-// Package main builds the drop-in C ABI library (libtxmlconnector.so/.dylib/
-// txmlconnector64.dll) over native.Connector. The C signatures are the 9 exports
-// of txmlconnector64-6.47.2.26.4.dll; exact wrapper texts/codes for
-// InitializeEx/GetServiceInfo/SetLogLevel are pending RE-2 (task-70, marked I/TODO).
+// Package main builds the drop-in C ABI library over native.Connector. The
+// lifecycle texts and codes follow the O reference (docs/protocol/cabi.md,
+// cmd/connector/testdata/cabi-reference.json).
 package main
 
 /*
@@ -22,18 +21,16 @@ import "C"
 import (
 	"context"
 	"encoding/xml"
-	"fmt"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/kmlebedev/txmlconnector/native"
 )
 
-// version is the drop-in DLL version; override with TXC_VERSION or
-// -ldflags "-X main.defaultVersion=...".
 var defaultVersion = "6.47.2.26.4"
 
 func versionString() string {
@@ -43,46 +40,50 @@ func versionString() string {
 	return defaultVersion
 }
 
+const (
+	errAlreadyInit = "Не удалось инициализировать библиотеку. Библиотека уже инициализирована"
+	errNotInit     = "Библиотека не инициализирована"
+	errNotInitCmd  = "Библиотека не инициализована. Необходимо выполнить функцию Initialize()"
+)
+
+func errString(text string) *C.uchar { return cString("<error>" + text + "</error>") }
+
 type library struct {
 	conn *native.Connector
 	msgs chan string
 	stop chan struct{}
 	wg   sync.WaitGroup
-
-	mu       sync.Mutex
-	cb       C.txc_callback
-	cbEx     C.txc_callback_ex
-	user     unsafe.Pointer
-	logLevel int
-	logPath  string
 }
 
 var (
-	apiMu sync.Mutex // serializes Initialize/UnInitialize and the globals
+	apiMu sync.Mutex
 	lib   *library
+
+	cbMu sync.Mutex
+	cb   C.txc_callback
+	cbEx C.txc_callback_ex
+	user unsafe.Pointer
+
+	serviceMu       sync.Mutex
+	lastServiceCall time.Time
 )
 
-func cString(s string) *C.uchar {
-	return (*C.uchar)(unsafe.Pointer(C.CString(s)))
-}
+// serviceInfoRateLimit is 5000 ms in the DLL; variable for fast Go tests.
+var serviceInfoRateLimit = 5000 * time.Millisecond
 
-// freeCString is the inverse of C.CString for callback payloads and command
-// results; exposed as FreeMemory to C clients.
+func cString(s string) *C.uchar { return (*C.uchar)(unsafe.Pointer(C.CString(s))) }
+
 func freeCString(p *C.uchar) {
 	if p != nil {
 		C.free(unsafe.Pointer(p))
 	}
 }
 
-// startLocked creates the connector and the single callback thread. apiMu is
-// held by the caller.
-func startLocked(logPath string, logLevel int) *C.uchar {
-	l := &library{
-		msgs:     make(chan string, 1024),
-		stop:     make(chan struct{}),
-		logPath:  logPath,
-		logLevel: logLevel,
+func startLocked(logPath string) *C.uchar {
+	if logPath != "" {
+		_ = os.MkdirAll(logPath, 0o755)
 	}
+	l := &library{msgs: make(chan string, 1024), stop: make(chan struct{})}
 	l.conn = native.New(native.Config{Version: versionString()})
 	if err := l.conn.Start(func(message string) {
 		select {
@@ -90,24 +91,24 @@ func startLocked(logPath string, logLevel int) *C.uchar {
 		case <-l.stop:
 		}
 	}); err != nil {
-		return cString(err.Error())
+		return errString(err.Error())
 	}
 	l.wg.Add(1)
 	go func() {
 		defer l.wg.Done()
-		runtime.LockOSThread() // one callback OS thread, like the DLL
+		runtime.LockOSThread()
 		for {
 			select {
 			case <-l.stop:
 				return
 			case message := <-l.msgs:
-				l.mu.Lock()
-				f, fx, u := l.cb, l.cbEx, l.user
-				l.mu.Unlock()
-				p := cString(message) // the client frees it via FreeMemory
+				cbMu.Lock()
+				f, fx, u := cb, cbEx, user
+				cbMu.Unlock()
+				p := cString(message)
 				switch {
 				case fx != nil:
-					C.txc_invoke_ex(fx, p, u)
+					C.txc_invoke_ex(fx, p, u) // return value does not stop delivery
 				case f != nil:
 					C.txc_invoke(f, p)
 				default:
@@ -125,14 +126,15 @@ func Initialize(logPath *C.uchar, logLevel C.int) *C.uchar {
 	apiMu.Lock()
 	defer apiMu.Unlock()
 	if lib != nil {
-		// TODO(RE-2 task-70): exact DLL text for a second Initialize.
-		return cString("Already initialized (I)")
+		return errString(errAlreadyInit)
 	}
-	path := ""
-	if logPath != nil {
-		path = C.GoString((*C.char)(unsafe.Pointer(logPath)))
+	if logPath == nil {
+		return errString("Не удалось инициализировать библиотеку. Не указан путь к директории для хранения лог-файлов")
 	}
-	return startLocked(path, int(logLevel))
+	if logLevel < 1 || logLevel > 3 {
+		return errString("Не удалось инициализировать библиотеку. Wrong log level.")
+	}
+	return startLocked(C.GoString((*C.char)(unsafe.Pointer(logPath))))
 }
 
 //export InitializeEx
@@ -140,27 +142,28 @@ func InitializeEx(configXML *C.uchar) *C.uchar {
 	apiMu.Lock()
 	defer apiMu.Unlock()
 	if lib != nil {
-		return cString("Already initialized (I)")
+		return errString(errAlreadyInit)
 	}
 	if configXML == nil {
-		return cString("Empty initialization XML (I)")
+		return errString("Не удалось инициализировать библиотеку. параметр функции равен нулю")
 	}
-	cfg, err := parseInitXML(C.GoString((*C.char)(unsafe.Pointer(configXML))))
-	if err != nil {
-		return cString(err.Error())
+	cfg, msg := parseInitXML(C.GoString((*C.char)(unsafe.Pointer(configXML))))
+	if msg != "" {
+		return errString(msg)
 	}
-	return startLocked(cfg.LogPath, cfg.LogLevel)
+	return startLocked(cfg.LogPath)
 }
 
 //export UnInitialize
 func UnInitialize() *C.uchar {
 	apiMu.Lock()
 	l := lib
+	if l == nil {
+		apiMu.Unlock()
+		return errString(errNotInit)
+	}
 	lib = nil
 	apiMu.Unlock()
-	if l == nil {
-		return nil
-	}
 	_ = l.conn.Close()
 	close(l.stop)
 	l.wg.Wait()
@@ -169,27 +172,17 @@ func UnInitialize() *C.uchar {
 
 //export SetCallback
 func SetCallback(f C.txc_callback) C.bool {
-	apiMu.Lock()
-	defer apiMu.Unlock()
-	if lib == nil {
-		return false
-	}
-	lib.mu.Lock()
-	lib.cb, lib.cbEx, lib.user = f, nil, nil
-	lib.mu.Unlock()
+	cbMu.Lock()
+	cb, cbEx, user = f, nil, nil
+	cbMu.Unlock()
 	return true
 }
 
 //export SetCallbackEx
 func SetCallbackEx(f C.txc_callback_ex, userData unsafe.Pointer) C.bool {
-	apiMu.Lock()
-	defer apiMu.Unlock()
-	if lib == nil {
-		return false
-	}
-	lib.mu.Lock()
-	lib.cb, lib.cbEx, lib.user = nil, f, userData
-	lib.mu.Unlock()
+	cbMu.Lock()
+	cb, cbEx, user = nil, f, userData
+	cbMu.Unlock()
 	return true
 }
 
@@ -198,40 +191,66 @@ func SendCommand(commandXML *C.uchar) *C.uchar {
 	apiMu.Lock()
 	l := lib
 	apiMu.Unlock()
+	text := ""
+	if commandXML != nil {
+		text = C.GoString((*C.char)(unsafe.Pointer(commandXML)))
+	}
+	if strings.TrimSpace(text) == "" {
+		return errString("Error document empty.")
+	}
+	if msg := validateCommandXML(text); msg != "" {
+		return errString(msg)
+	}
 	if l == nil {
-		// TODO(RE-2 task-70): exact DLL <error> text/code for use before Initialize.
-		return cString("<error>Library is not initialized (I)</error>")
+		return errString(errNotInitCmd)
 	}
-	if commandXML == nil {
-		return cString("<error>Empty command (I)</error>")
-	}
-	result, err := l.conn.SendCommand(context.Background(), C.GoString((*C.char)(unsafe.Pointer(commandXML))))
+	result, err := l.conn.SendCommand(context.Background(), text)
 	if err != nil {
-		return cString("<error>" + xmlEscape(err.Error()) + "</error>")
+		return errString(err.Error())
 	}
 	return cString(result)
 }
 
+// validateCommandXML reproduces the DLL wrapper-level errors for non-<command>
+// and malformed XML (cabi.md §7).
+func validateCommandXML(text string) string {
+	trimmed := strings.TrimSpace(text)
+	dec := xml.NewDecoder(strings.NewReader(trimmed))
+	var root string
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			if strings.HasPrefix(trimmed, "<command") && !strings.Contains(trimmed, ">") {
+				if strings.Contains(trimmed, "=") {
+					return "Error parsing Element."
+				}
+				return "Failed to read Element name"
+			}
+			return "Error reading Element value."
+		}
+		if start, ok := tok.(xml.StartElement); ok && root == "" {
+			root = start.Name.Local
+		}
+		if end, ok := tok.(xml.EndElement); ok && root != "" && end.Name.Local == root {
+			break
+		}
+	}
+	if root != "command" {
+		return "Only &amp;lt;command&amp;gt; tags could be passed to SendCommand function"
+	}
+	return ""
+}
+
 //export FreeMemory
 func FreeMemory(p *C.uchar) C.bool {
-	if p == nil {
-		return false
-	}
-	C.free(unsafe.Pointer(p))
+	freeCString(p)
 	return true
 }
 
 //export SetLogLevel
 func SetLogLevel(level C.int) *C.uchar {
-	apiMu.Lock()
-	defer apiMu.Unlock()
 	if level < 1 || level > 3 {
-		// TODO(RE-2 task-70): exact DLL text is "Invalid log level. Should be in
-		// range [%d,%d]" (D); the range values are pending RE-2.
-		return cString(fmt.Sprintf("Invalid log level. Should be in range [1,3] (I, requested %d)", int(level)))
-	}
-	if lib != nil {
-		lib.logLevel = int(level)
+		return errString("Invalid log level. Should be in range [1,3]")
 	}
 	return nil
 }
@@ -239,28 +258,31 @@ func SetLogLevel(level C.int) *C.uchar {
 //export GetServiceInfo
 func GetServiceInfo(request *C.uchar, response **C.uchar) C.int {
 	if response == nil {
-		return 4 // TODO(RE-2 task-70): NULL response code is D/I.
+		return 5
 	}
 	*response = nil
 	if request == nil {
 		return 4
 	}
-	req, err := parseServiceInfoRequest(C.GoString((*C.char)(unsafe.Pointer(request))))
-	if err != nil {
-		return 2
+	text := C.GoString((*C.char)(unsafe.Pointer(request)))
+	if strings.TrimSpace(text) == "" {
+		return 4
 	}
-	info, ok := serviceInfoValue(req.Value, versionString())
-	if !ok {
+	serviceMu.Lock()
+	now := time.Now()
+	if !lastServiceCall.IsZero() && now.Sub(lastServiceCall) < serviceInfoRateLimit {
+		serviceMu.Unlock()
+		return 6
+	}
+	lastServiceCall = now
+	serviceMu.Unlock()
+	body, code := serviceInfoResponse(text, versionString())
+	if code != 0 {
+		*response = errString(body)
 		return 3
 	}
-	*response = cString(info)
+	*response = cString(body)
 	return 0
-}
-
-func xmlEscape(s string) string {
-	var b strings.Builder
-	_ = xml.EscapeText(&b, []byte(s))
-	return b.String()
 }
 
 func main() {}
