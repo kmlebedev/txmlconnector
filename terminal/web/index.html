@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>AI Terminal — торговый терминал MOEX</title>
+<meta name="description" content="AI Terminal — нативный торговый терминал MOEX с AI-агентом и бумажным счётом">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2323262b'/%3E%3Cpath d='M16 6.2l2.3 6.8 6.8 2.3-6.8 2.3L16 24.4l-2.3-6.8-6.8-2.3 6.8-2.3L16 6.2z' fill='%23ffcf33'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="app" id="app">
+  <header class="header" id="header">
+    <a class="brand" href="./" aria-label="AI Terminal — на главную">
+      <span class="brand-mark" id="brandMark"></span>
+      <span class="brand-text"><b>AI</b> Terminal</span>
+      <span class="brand-beta">beta</span>
+    </a>
+    <div class="header-search" id="headerSearch">
+      <span class="header-search-icon" id="searchIcon"></span>
+      <input id="globalSearch" type="search" placeholder="Поиск: тикер или название" aria-label="Поиск инструмента" autocomplete="off">
+      <kbd title="Быстрый поиск">/</kbd>
+    </div>
+    <div class="header-right">
+      <span class="mode-badge" id="modeBadge" title="Режим данных">…</span>
+      <span class="conn-state" id="connState" title="Соединение с сервером"><i class="dot"></i><span class="conn-text">соединение…</span></span>
+      <span class="srv-time" id="srvTime"><span class="srv-tz">МСК</span> <span class="srv-clock">--:--:--</span></span>
+      <button type="button" class="btn btn-ai" id="aiBtn" aria-haspopup="dialog">
+        <span class="btn-icon" id="aiBtnIcon"></span>AI-агент
+      </button>
+      <button type="button" class="icon-btn" id="notifBtn" aria-label="Уведомления" title="Уведомления — скоро"><span id="notifIcon"></span></button>
+      <button type="button" class="icon-btn" id="helpBtn" aria-label="Помощь" title="Помощь"><span id="helpIcon"></span></button>
+    </div>
+  </header>
+
+  <div class="app-main">
+    <nav class="rail" id="rail" aria-label="Разделы терминала"></nav>
+
+    <aside class="watchlist panel" id="watchlist" aria-label="Список инструментов">
+      <div class="watchlist-head" id="watchlistHead"></div>
+      <div class="watchlist-cols">
+        <span>Инструмент</span>
+        <span class="wl-col-price">Цена / Изм.</span>
+      </div>
+      <div class="watchlist-list" id="watchlistList" role="listbox" aria-label="Инструменты"></div>
+    </aside>
+
+    <div class="workspace">
+      <section class="center" id="center">
+        <div class="inst-header panel" id="instHeader"></div>
+        <div class="chart-panel panel" id="chartPanel">
+          <div class="chart-toolbar" id="chartToolbar"></div>
+          <div class="chart-ohlc" id="chartOhlc"></div>
+          <div class="chart-wrap" id="chartWrap">
+            <canvas id="chartCanvas" aria-label="График цены инструмента"></canvas>
+            <div class="chart-tooltip" id="chartTooltip" hidden></div>
+            <div class="chart-overlay-badge" id="chartOverlayBadge" hidden></div>
+            <div class="chart-loading" id="chartLoading" hidden>
+              <span class="spinner"></span>
+              <span>Загрузка истории…</span>
+            </div>
+            <div class="chart-empty" id="chartEmpty" hidden></div>
+          </div>
+        </div>
+        <aside class="right-tabs panel" id="rightTabs" aria-label="Стакан и торговля"></aside>
+      </section>
+
+      <section class="bottom panel" id="bottomPanel">
+        <div class="bottom-summary" id="bottomSummary"></div>
+        <div class="bottom-tabs" id="bottomTabs"></div>
+        <div class="bottom-body" id="bottomBody"></div>
+      </section>
+    </div>
+  </div>
+
+  <footer class="statusbar" id="statusbar">
+    <div class="status-left" id="statusLeft">AI Terminal</div>
+    <div class="status-hints" id="statusHints">
+      <span><kbd>/</kbd> поиск</span>
+      <span><kbd>Esc</kbd> закрыть</span>
+      <span class="status-disclaimer">Бумажный счёт · не инвестиционная рекомендация</span>
+    </div>
+    <div class="status-right" id="statusRight">Местное время —</div>
+  </footer>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+  <aside class="drawer" id="aiDrawer" aria-label="AI-агент" aria-hidden="true" role="dialog"></aside>
+</div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
