@@ -120,7 +120,7 @@ write-scope с карточками и фактические файлы с пл
   способ поднять gRPC-сервер без DLL.
 - `TC_BACKEND=dll make server` — явно Win32 DLL под Wine (нужен Windows amd64/Wine).
 - RE-4 сценарий без Wine: терминал 1 — `TC_BACKEND=native make server`; терминал 2 — клиент
-  `TC_TARGET=localhost:50051 go run ./examples/grpc-client` (connect выполняется самим клиентом);
+  `TC_TARGET=localhost:50051 TC_RE4_SEQUENCE=1 go run ./examples/grpc-client` (connect выполняет сам клиент, затем get_securities -> subscribe -> disconnect);
   дальнейшие команды (`get_securities`, `subscribe`, `disconnect`) отправляются gRPC-клиентом
   из UI/скрипта. Живой демо-сервер — только с согласия пользователя (утренняя S-серия).
 
