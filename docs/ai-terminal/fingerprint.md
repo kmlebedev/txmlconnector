@@ -130,9 +130,14 @@ VWAP-корреляции, `price_decline`. Параметры: `DBSCANEps = 0.4
 ## 5. Инструмент агента `detect_execution_algos`
 
 ```json
-{"symbol": "TQBR:SBER", "from": "2026-11-05T07:00:00Z", "to": "2026-11-05T07:10:00Z",
+{"symbol": "TQBR:SBER", "asOf": "2026-11-05T07:10:00Z",
+ "from": "2026-11-05T07:00:00Z", "to": "2026-11-05T07:10:00Z",
  "marginCallWindows": ["14:00-14:30"]}
 ```
+
+`asOf` обязателен (plan Task 18): это point-in-time, на который известны данные —
+события ленты с `ts` позже `asOf` не анализируются. Полный список отпечатков лежит в
+artifact `execution_algos`, компактная сводка называет его `artifactId`.
 
 Возвращает компактный для модели результат (до `maxExecutionFootprints` отпечатков: kind, side,
 from/to, confidence, evidence) и artifact `execution_algos` для UI. Источник ленты — необязательный

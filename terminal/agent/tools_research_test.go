@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest/rules"
@@ -409,6 +410,7 @@ func hasRuleWarningText(warnings []string, substr string) bool {
 func walkForwardArgs() map[string]any {
 	return map[string]any{
 		"symbol":    "TQBR:SBER",
+		"asOf":      testNow.Add(7 * 24 * time.Hour).Format(time.RFC3339),
 		"periodSec": int(300),
 		"count":     int(300),
 		"strategy":  "sma_cross",

@@ -27,8 +27,11 @@ const toolNameGetNews = "get_news"
 
 // Bounds of the get_news arguments.
 const (
-	// defaultNewsWindow is the since fallback: the last day of news.
+	// defaultNewsWindow is the since fallback: the last day before asOf.
 	defaultNewsWindow = 24 * time.Hour
+	// maxNewsLookback bounds the window behind asOf: a point-in-time request
+	// older than 30 days before asOf is clamped, so one tool call stays cheap.
+	maxNewsLookback = 30 * 24 * time.Hour
 	// defaultNewsLimit and maxNewsLimit bound the returned story count.
 	defaultNewsLimit = 50
 	maxNewsLimit     = 500
@@ -156,12 +159,14 @@ func getNewsToolInfo() ToolInfo {
 		Title: "Новости",
 		Description: "Новости TRANSAQ, записанные рекордером с моментом первого появления (point-in-time): " +
 			"источник, заголовок, время публикации и текст. Сортировка — от свежих к старым; since " +
-			"фильтрует по first_seen.",
+			"фильтрует по first_seen, asOf ограничивает окно моментом, на который известны данные " +
+			"(новости с first_seen позже asOf не возвращаются).",
 		Input: objSchema(map[string]any{
 			"symbol": strProp("Необязательный тикер: оставить новости, где он упоминается в заголовке или тексте"),
-			"since":  strProp("Начало окна: RFC3339, ГГГГ-ММ-ДД, ГГГГ-ММ-ДД ЧЧ:ММ:СС или длительность (24h); по умолчанию 24 часа"),
+			"asOf":   strProp("Момент, на который известны данные (point-in-time), RFC3339 UTC; обязателен"),
+			"since":  strProp("Начало окна: RFC3339, ГГГГ-ММ-ДД, ГГГГ-ММ-ДД ЧЧ:ММ:СС или длительность (24h); по умолчанию 24 часа до asOf"),
 			"limit":  intProp(fmt.Sprintf("Сколько новостей вернуть, 1..%d (по умолчанию %d)", maxNewsLimit, defaultNewsLimit)),
-		}),
+		}, "asOf"),
 	}
 }
 
@@ -177,7 +182,7 @@ func (e *Engine) invokeNewsTool(ctx context.Context, store NewsStore, name strin
 	if name != toolNameGetNews {
 		return nil, nil, false, nil
 	}
-	symbol, since, limit, err := e.parseNewsArgs(args)
+	symbol, asOf, since, limit, err := e.parseNewsArgs(args)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -191,12 +196,15 @@ func (e *Engine) invokeNewsTool(ctx context.Context, store NewsStore, name strin
 	if err != nil {
 		return nil, nil, true, err
 	}
-	return newsResult{Since: since, News: items}, nil, true, nil
+	items = newsAsOf(items, asOf)
+	full := newsResult{AsOf: asOf, Since: since, News: items}
+	full.ArtifactID = toolArtifacts.store("news", full)
+	return full, &Artifact{Kind: "news", Payload: full}, true, nil
 }
 
 // toolGetNews implements get_news on top of a NewsStore.
 func (e *Engine) toolGetNews(ctx context.Context, store NewsStore, args map[string]any) ([]NewsItem, error) {
-	symbol, since, limit, err := e.parseNewsArgs(args)
+	symbol, asOf, since, limit, err := e.parseNewsArgs(args)
 	if err != nil {
 		return nil, err
 	}
@@ -206,34 +214,50 @@ func (e *Engine) toolGetNews(ctx context.Context, store NewsStore, args map[stri
 	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
-	return store.News(ctx, symbol, since, limit)
+	items, err := store.News(ctx, symbol, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	return newsAsOf(items, asOf), nil
 }
 
 // parseNewsArgs validates the get_news arguments: an optional symbol text
-// filter, the first_seen window (RFC3339/date/time/duration, default 24 h) and
-// the row limit.
-func (e *Engine) parseNewsArgs(args map[string]any) (symbol string, since time.Time, limit int, err error) {
+// filter, the required point-in-time asOf, the first_seen window (RFC3339/date/
+// time/duration relative to asOf, default 24 h before asOf, clamped to
+// maxNewsLookback) and the row limit.
+func (e *Engine) parseNewsArgs(args map[string]any) (symbol string, asOf, since time.Time, limit int, err error) {
 	symbol = strings.TrimSpace(argString(args, "symbol"))
+	if asOf, err = toolAsOfArg(args); err != nil {
+		return "", time.Time{}, time.Time{}, 0, err
+	}
 	limitArg, err := argIntStrict(args, "limit", defaultNewsLimit, 1, maxNewsLimit)
 	if err != nil {
-		return "", time.Time{}, 0, err
+		return "", time.Time{}, time.Time{}, 0, err
 	}
-	since, err = parseNewsSince(argString(args, "since"), e.now())
-	if err != nil {
-		return "", time.Time{}, 0, err
+	if since, err = parseNewsSince(argString(args, "since"), asOf); err != nil {
+		return "", time.Time{}, time.Time{}, 0, err
 	}
-	return symbol, since, int(limitArg), nil
+	if earliest := asOf.Add(-maxNewsLookback); since.Before(earliest) {
+		since = earliest
+	}
+	if since.After(asOf) {
+		return "", time.Time{}, time.Time{}, 0, fmt.Errorf(
+			"%w: since (%s) must not be after asOf (%s)", errBadArgument,
+			since.Format(time.RFC3339), asOf.Format(time.RFC3339))
+	}
+	return symbol, asOf, since, int(limitArg), nil
 }
 
 // parseNewsSince parses the since argument: a relative duration is subtracted
-// from now, an absolute value is taken as UTC.
-func parseNewsSince(raw string, now time.Time) (time.Time, error) {
+// from asOf (the point-in-time anchor, not the wall clock), an absolute value is
+// taken as UTC.
+func parseNewsSince(raw string, asOf time.Time) (time.Time, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return now.Add(-defaultNewsWindow).UTC(), nil
+		return asOf.Add(-defaultNewsWindow).UTC(), nil
 	}
 	if duration, err := time.ParseDuration(raw); err == nil && duration > 0 {
-		return now.Add(-duration).UTC(), nil
+		return asOf.Add(-duration).UTC(), nil
 	}
 	for _, layout := range []string{
 		time.RFC3339Nano,
@@ -249,8 +273,25 @@ func parseNewsSince(raw string, now time.Time) (time.Time, error) {
 		errBadArgument, raw)
 }
 
-// newsResult is the get_news tool payload: the window and the stories.
+// newsResult is the get_news tool payload: the point-in-time anchor, the window
+// and the stories first seen inside it.
 type newsResult struct {
-	Since time.Time  `json:"since"`
-	News  []NewsItem `json:"news"`
+	AsOf       time.Time  `json:"asOf"`
+	Since      time.Time  `json:"since"`
+	News       []NewsItem `json:"news"`
+	ArtifactID string     `json:"artifactId,omitempty"`
+}
+
+// newsAsOf keeps only the stories first seen at or before the point-in-time
+// anchor: a story whose recorder row appeared after asOf was not known then, so a
+// point-in-time research request must not see it.
+func newsAsOf(items []NewsItem, asOf time.Time) []NewsItem {
+	out := make([]NewsItem, 0, len(items))
+	for _, item := range items {
+		if item.FirstSeen.After(asOf) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 	"time"
@@ -69,6 +70,9 @@ const maxVolBars = 5000
 // toolNameWalkForward is the agent tool name of the walk-forward grid search.
 const toolNameWalkForward = "walk_forward"
 
+// toolNameLOBBacktest is the agent tool name of the order-book replay backtest.
+const toolNameLOBBacktest = "lob_backtest"
+
 // maxBatchSymbols bounds one batch comparison so a single tool call cannot fan
 // out unbounded history requests.
 const maxBatchSymbols = 20
@@ -86,7 +90,10 @@ var errRulesStrategyNeedsSpec = fmt.Errorf(
 // researchToolCatalog returns the catalog of research tools added by phases
 // E–G, in catalog order.
 func researchToolCatalog() []ToolInfo {
-	return []ToolInfo{backtestRulesTool, batchBacktestTool, detectExecutionAlgosTool, walkForwardTool, volForecastTool, volEventsTool}
+	return []ToolInfo{
+		backtestRulesTool, batchBacktestTool, detectExecutionAlgosTool, lobBacktestTool,
+		walkForwardTool, volForecastTool, volEventsTool,
+	}
 }
 
 // backtestRulesTool is the backtest_rules tool description.
@@ -148,10 +155,11 @@ var detectExecutionAlgosTool = ToolInfo{
 		"Атрибуция вероятностная: у каждой находки есть Confidence и Evidence; обвинительных формулировок нет.",
 	Input: objSchema(map[string]any{
 		"symbol":            strProp("Тикер инструмента, например TQBR:SBER"),
+		"asOf":              strProp("Момент, на который известны данные (point-in-time), RFC3339 UTC; обязателен"),
 		"from":              strProp("Начало записанной ленты, RFC3339 (UTC), например 2026-11-05T07:00:00Z"),
 		"to":                strProp("Конец записанной ленты, RFC3339 (UTC)"),
 		"marginCallWindows": strArrayProp("Окна маржин-коллов МСК \"HH:MM-HH:MM\"; по умолчанию 14:00-14:30 и 18:00-18:30"),
-	}, "symbol", "from", "to"),
+	}, "symbol", "asOf", "from", "to"),
 }
 
 // LOBDataSource is the optional extension of DataSource for the order-book
@@ -241,6 +249,12 @@ func (e *Engine) invokeResearchTool(ctx context.Context, name string, args map[s
 			return nil, nil, true, err
 		}
 		return res, &Artifact{Kind: "vol_events", Payload: ui}, true, nil
+	case toolNameLOBBacktest:
+		res, ui, err := e.toolLOBBacktest(ctx, args)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return res, &Artifact{Kind: "lob_backtest", Payload: ui}, true, nil
 	}
 	return nil, nil, false, nil
 }
@@ -383,8 +397,10 @@ type executionAlgosResult struct {
 	Symbol     string                  `json:"symbol"`
 	From       time.Time               `json:"from"`
 	To         time.Time               `json:"to"`
+	AsOf       time.Time               `json:"asOf"`
 	Footprints []fingerprint.Footprint `json:"footprints"`
 	Warnings   []string                `json:"warnings,omitempty"`
+	ArtifactID string                  `json:"artifactId,omitempty"`
 }
 
 // executionAlgosArtifact is the UI payload of detect_execution_algos: the full
@@ -410,16 +426,9 @@ func (e *Engine) toolDetectExecutionAlgos(ctx context.Context, args map[string]a
 	if symbol == "" {
 		return empty, emptyArtifact, errors.New("agent: symbol is required")
 	}
-	from, err := toolTimeArg(args, "from")
+	window, err := parseLOBWindow(args)
 	if err != nil {
 		return empty, emptyArtifact, err
-	}
-	to, err := toolTimeArg(args, "to")
-	if err != nil {
-		return empty, emptyArtifact, err
-	}
-	if !to.After(from) {
-		return empty, emptyArtifact, fmt.Errorf("agent: to (%s) must be after from (%s)", to.Format(time.RFC3339), from.Format(time.RFC3339))
 	}
 	lob, ok := e.data.(LOBDataSource)
 	if !ok {
@@ -427,10 +436,12 @@ func (e *Engine) toolDetectExecutionAlgos(ctx context.Context, args map[string]a
 			"agent: источник ленты стакана не подключён: инструменту нужен LOBDataSource " +
 				"(md.book_events/md.trades); запись рынка подключается отдельной задачей, см. docs/ai-terminal/fingerprint.md")
 	}
-	events, err := lob.LOBEvents(ctx, symbol, from, to)
+	events, err := lob.LOBEvents(ctx, symbol, window.From, window.To)
 	if err != nil {
 		return empty, emptyArtifact, fmt.Errorf("agent: LOB events for %s: %w", symbol, err)
 	}
+	// Point-in-time: events recorded after asOf were not known yet.
+	events = eventsUpTo(events, window.AsOf)
 	cfg := fingerprint.DefaultConfig()
 	cfg.Symbol = symbol
 	if windows := argStringList(args, "marginCallWindows"); windows != nil {
@@ -442,15 +453,156 @@ func (e *Engine) toolDetectExecutionAlgos(ctx context.Context, args map[string]a
 		warnings = append(warnings,
 			"отпечатков не найдено: лента короткая или паттерны ниже порога уверенности")
 	}
-	artifact := executionAlgosArtifact{Symbol: symbol, From: from, To: to, Footprints: footprints}
+	artifact := executionAlgosArtifact{Symbol: symbol, From: window.From, To: window.To, Footprints: footprints}
+	artifactID := toolArtifacts.store("execution_algos", artifact)
 	if len(footprints) > maxExecutionFootprints {
 		warnings = append(warnings, fmt.Sprintf(
 			"в ответ модели попали первые %d отпечатков, полный список — в artifact", maxExecutionFootprints))
 		footprints = footprints[:maxExecutionFootprints]
 	}
 	return executionAlgosResult{
-		Symbol: symbol, From: from, To: to, Footprints: footprints, Warnings: warnings,
+		Symbol: symbol, From: window.From, To: window.To, AsOf: window.AsOf,
+		Footprints: footprints, Warnings: warnings, ArtifactID: artifactID,
 	}, artifact, nil
+}
+
+// lobWindow is the validated point-in-time window of an order-book tool: the
+// [from, to] recording range and the asOf anchor of the knowledge instant.
+type lobWindow struct {
+	From time.Time
+	To   time.Time
+	AsOf time.Time
+}
+
+// parseLOBWindow reads the window of an order-book research tool: asOf is
+// required (a research request has no implicit "now"), and it must not precede
+// the start of the recording range.
+func parseLOBWindow(args map[string]any) (lobWindow, error) {
+	asOf, err := toolAsOfArg(args)
+	if err != nil {
+		return lobWindow{}, err
+	}
+	from, err := toolTimeArg(args, "from")
+	if err != nil {
+		return lobWindow{}, err
+	}
+	to, err := toolTimeArg(args, "to")
+	if err != nil {
+		return lobWindow{}, err
+	}
+	if !to.After(from) {
+		return lobWindow{}, fmt.Errorf("%w: to (%s) must be after from (%s)",
+			errBadArgument, to.Format(time.RFC3339), from.Format(time.RFC3339))
+	}
+	if asOf.Before(from) {
+		return lobWindow{}, fmt.Errorf("%w: asOf (%s) is before from (%s): a point-in-time request cannot look at a window that starts after its knowledge instant",
+			errBadArgument, asOf.Format(time.RFC3339), from.Format(time.RFC3339))
+	}
+	return lobWindow{From: from, To: to, AsOf: asOf}, nil
+}
+
+// eventsUpTo returns the recorded events observed at or before asOf. The replay
+// order is preserved, so the point-in-time tape is a prefix of the recording.
+func eventsUpTo(events []lobreplay.Event, asOf time.Time) []lobreplay.Event {
+	out := make([]lobreplay.Event, 0, len(events))
+	for _, ev := range events {
+		if ev.TS.After(asOf) {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+// barsUpTo returns the closed bars with the open time at or before asOf.
+func barsUpTo(bars []backtest.Bar, asOf time.Time) []backtest.Bar {
+	out := make([]backtest.Bar, 0, len(bars))
+	for _, bar := range bars {
+		if bar.Time.After(asOf) {
+			continue
+		}
+		out = append(out, bar)
+	}
+	return out
+}
+
+// sliceEventSource replays an in-memory LOB tape through lobreplay.Run.
+type sliceEventSource struct {
+	events []lobreplay.Event
+	next   int
+}
+
+// Next returns the next recorded event or io.EOF at the end of the tape.
+func (s *sliceEventSource) Next() (lobreplay.Event, error) {
+	if s.next >= len(s.events) {
+		return lobreplay.Event{}, io.EOF
+	}
+	ev := s.events[s.next]
+	s.next++
+	return ev, nil
+}
+
+// Close releases the in-memory source (a no-op).
+func (s *sliceEventSource) Close() error { return nil }
+
+// lobImbalanceStrategy is the deterministic "imbalance" strategy of
+// lob_backtest: when the book imbalance over the best Window levels exceeds
+// Threshold it sends a market order of Qty units in that direction and aims to
+// hold at most MaxPosition units. The Strategy interface has no fill callback, so
+// the position is tracked on submitted orders; the reported metrics always come
+// from the real fills of lobreplay.
+type lobImbalanceStrategy struct {
+	window      int
+	threshold   float64
+	qty         int64
+	maxPosition int64
+	position    int64
+}
+
+// OnEvent implements lobreplay.Strategy.
+func (s *lobImbalanceStrategy) OnEvent(book *lobreplay.Book, ev lobreplay.Event) []lobreplay.Order {
+	bid, ask := book.Best()
+	if bid.Qty == 0 || ask.Qty == 0 {
+		return nil
+	}
+	imbalance := book.Imbalance(s.window)
+	switch {
+	case imbalance >= s.threshold && s.position < s.maxPosition:
+		qty := min(s.qty, s.maxPosition-s.position)
+		s.position += qty
+		return []lobreplay.Order{{Side: lobreplay.SideBuy, Type: lobreplay.OrderMarket, Qty: qty}}
+	case imbalance <= -s.threshold && s.position > -s.maxPosition:
+		qty := min(s.qty, s.position+s.maxPosition)
+		s.position -= qty
+		return []lobreplay.Order{{Side: lobreplay.SideSell, Type: lobreplay.OrderMarket, Qty: qty}}
+	}
+	return nil
+}
+
+// newLOBImbalanceStrategy builds the imbalance strategy from the tool params.
+func newLOBImbalanceStrategy(params map[string]float64) (*lobImbalanceStrategy, error) {
+	window := int(paramFloat(params, "window", 5))
+	threshold := paramFloat(params, "threshold", 0.35)
+	qty := int64(paramFloat(params, "qty", 10))
+	maxPosition := int64(paramFloat(params, "maxPosition", 100))
+	if window < 1 || window > 50 {
+		return nil, fmt.Errorf("%w: params.window=%d must be in 1..50", errBadArgument, window)
+	}
+	if threshold <= 0 || threshold > 1 {
+		return nil, fmt.Errorf("%w: params.threshold=%v must be in (0, 1]", errBadArgument, threshold)
+	}
+	if qty <= 0 || maxPosition <= 0 {
+		return nil, fmt.Errorf("%w: params.qty and params.maxPosition must be positive", errBadArgument)
+	}
+	return &lobImbalanceStrategy{window: window, threshold: threshold, qty: qty, maxPosition: maxPosition}, nil
+}
+
+// paramFloat returns one strategy parameter or the default.
+func paramFloat(params map[string]float64, key string, def float64) float64 {
+	if value, ok := params[key]; ok {
+		return value
+	}
+	return def
 }
 
 // toolTimeArg parses a tool timestamp: RFC3339 text (the documented tool
@@ -586,6 +738,7 @@ var walkForwardTool = ToolInfo{
 		"(поправка на число испытаний) и PBO (вероятность переобучения).",
 	Input: objSchema(map[string]any{
 		"symbol":      strProp("Тикер инструмента, например TQBR:SBER или SBER"),
+		"asOf":        strProp("Момент, на который известны данные (point-in-time), RFC3339 UTC; бары позже asOf не используются"),
 		"periodSec":   intProp("Период свечей в секундах: 60, 300, 900, 3600 или 86400"),
 		"count":       intProp(fmt.Sprintf("Сколько последних баров использовать, максимум %d", maxBacktestBars)),
 		"strategy":    strProp("ID каталоговой стратегии: sma_cross, rsi_reversion, donchian_breakout, momentum или trend_*"),
@@ -595,7 +748,7 @@ var walkForwardTool = ToolInfo{
 		"stepBars":    intProp("Сдвиг окна в барах (0 = testBars)"),
 		"feeBps":      numProp("Комиссия в базисных пунктах (по умолчанию 5)"),
 		"slippageBps": numProp("Проскальзывание в базисных пунктах (по умолчанию 1)"),
-	}, "symbol", "strategy", "trainBars", "testBars"),
+	}, "symbol", "asOf", "strategy", "trainBars", "testBars"),
 }
 
 // gridProp is the JSON Schema of the parameter grid argument.
@@ -617,6 +770,7 @@ type walkForwardView struct {
 	Symbol         string           `json:"symbol"`
 	Strategy       string           `json:"strategy"`
 	PeriodSec      int              `json:"periodSec"`
+	AsOf           time.Time        `json:"asOf"`
 	Trials         int              `json:"trials"`
 	Folds          int              `json:"folds"`
 	OOS            backtest.Metrics `json:"oos"`
@@ -624,6 +778,7 @@ type walkForwardView struct {
 	DeflatedSharpe float64          `json:"deflatedSharpe"`
 	PBO            float64          `json:"pbo"`
 	Warnings       []string         `json:"warnings,omitempty"`
+	ArtifactID     string           `json:"artifactId,omitempty"`
 }
 
 // argGrid decodes the grid tool argument: parameter name -> values. Both the
@@ -720,6 +875,10 @@ func (e *Engine) toolWalkForward(ctx context.Context, args map[string]any) (walk
 	if strategy == "" {
 		return empty, nil, errors.New("agent: strategy is required")
 	}
+	asOf, err := toolAsOfArg(args)
+	if err != nil {
+		return empty, nil, err
+	}
 	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
 	if err != nil {
 		return empty, nil, err
@@ -752,8 +911,12 @@ func (e *Engine) toolWalkForward(ctx context.Context, args map[string]any) (walk
 	if err != nil {
 		return empty, nil, fmt.Errorf("agent: history for %s: %w", symbol, err)
 	}
+	// Point-in-time: bars closing after asOf were not known yet.
+	bars = barsUpTo(bars, asOf)
 	if len(bars) < 2 {
-		return empty, nil, fmt.Errorf("agent: not enough history for %s (%d bars)", symbol, len(bars))
+		return empty, nil, fmt.Errorf(
+			"agent: not enough history for %s at asOf %s (%d bars up to asOf)",
+			symbol, asOf.Format(time.RFC3339), len(bars))
 	}
 	result, err := research.WalkForward(ctx, research.WalkForwardRequest{
 		Bars:        bars,
@@ -773,6 +936,7 @@ func (e *Engine) toolWalkForward(ctx context.Context, args map[string]any) (walk
 		Symbol:         symbol,
 		Strategy:       strategy,
 		PeriodSec:      period,
+		AsOf:           asOf,
 		Trials:         result.Trials,
 		Folds:          len(result.Folds),
 		OOS:            result.OOS,
@@ -786,6 +950,7 @@ func (e *Engine) toolWalkForward(ctx context.Context, args map[string]any) (walk
 	if result.IS.Trades == 0 && result.OOS.Trades == 0 {
 		view.Warnings = append(view.Warnings, "стратегия не дала сделок ни в одном окне")
 	}
+	view.ArtifactID = toolArtifacts.store("walk_forward", result)
 	return view, &Artifact{Kind: "walk_forward", Payload: result}, nil
 }
 
@@ -802,8 +967,8 @@ var volForecastTool = ToolInfo{
 		"periodSec": intProp("Период внутридневных баров в секундах: 900 по умолчанию, 300/900/3600"),
 		"count":     intProp(fmt.Sprintf("Сколько последних баров использовать, максимум %d", maxVolBars)),
 		"horizon":   strProp("Горизонт прогноза: длительность Go (8h, 90m) или число часов; по умолчанию 8h"),
-		"asOf":      strProp("Момент прогноза, RFC3339 UTC; по умолчанию текущее время. Обучение видит только данные до asOf"),
-	}, "symbol"),
+		"asOf":      strProp("Момент прогноза (point-in-time), RFC3339 UTC; обязателен. Обучение видит только данные до asOf"),
+	}, "symbol", "asOf"),
 }
 
 // volEventsTool is the vol_events tool description.
@@ -814,10 +979,11 @@ var volEventsTool = ToolInfo{
 		"в окне [from, to]: категории, страна, точность времени (Exact) и тональность новостей. " +
 		"Источник — винтажный слой ClickHouse (vintage.Store); без него инструмент сообщает, что источник не подключён.",
 	Input: objSchema(map[string]any{
+		"asOf":       strProp("Момент, на который известны данные (point-in-time), RFC3339 UTC; обязателен и не раньше from"),
 		"from":       strProp("Начало окна, RFC3339 UTC"),
 		"to":         strProp("Конец окна, RFC3339 UTC"),
 		"categories": strArrayProp("Необязательные категории релизов: cbr_rate, ru_cpi, ru_gdp, us_cpi, us_nfp, fomc"),
-	}, "from", "to"),
+	}, "asOf", "from", "to"),
 }
 
 // VolatilityDataSource is the optional extension of DataSource for the
@@ -852,6 +1018,7 @@ type volForecastResult struct {
 	QLIKE      float64             `json:"qlike,omitempty"`
 	QLIKEDays  int                 `json:"qlikeDays,omitempty"`
 	Warnings   []string            `json:"warnings,omitempty"`
+	ArtifactID string              `json:"artifactId,omitempty"`
 }
 
 // volForecastArtifact is the UI payload of vol_forecast: the full driver list,
@@ -871,17 +1038,20 @@ type volForecastArtifact struct {
 
 // volEventsResult is the compact model-facing payload of vol_events.
 type volEventsResult struct {
-	From     time.Time  `json:"from"`
-	To       time.Time  `json:"to"`
-	Events   []volEvent `json:"events"`
-	News     int        `json:"news"`
-	Positive int        `json:"newsPositive"`
-	Negative int        `json:"newsNegative"`
-	Warnings []string   `json:"warnings,omitempty"`
+	AsOf       time.Time  `json:"asOf"`
+	From       time.Time  `json:"from"`
+	To         time.Time  `json:"to"`
+	Events     []volEvent `json:"events"`
+	News       int        `json:"news"`
+	Positive   int        `json:"newsPositive"`
+	Negative   int        `json:"newsNegative"`
+	Warnings   []string   `json:"warnings,omitempty"`
+	ArtifactID string     `json:"artifactId,omitempty"`
 }
 
 // volEventsArtifact is the UI payload of vol_events: the release markers.
 type volEventsArtifact struct {
+	AsOf   time.Time  `json:"asOf"`
 	From   time.Time  `json:"from"`
 	To     time.Time  `json:"to"`
 	Events []volEvent `json:"events"`
@@ -918,12 +1088,9 @@ func (e *Engine) toolVolForecast(ctx context.Context, args map[string]any) (volF
 	if err != nil {
 		return empty, emptyArtifact, err
 	}
-	asOf := e.now().UTC()
-	if _, ok := args["asOf"]; ok {
-		asOf, err = toolTimeArg(args, "asOf")
-		if err != nil {
-			return empty, emptyArtifact, err
-		}
+	asOf, err := toolAsOfArg(args)
+	if err != nil {
+		return empty, emptyArtifact, err
 	}
 	vds, ok := e.data.(VolatilityDataSource)
 	if !ok {
@@ -935,8 +1102,10 @@ func (e *Engine) toolVolForecast(ctx context.Context, args map[string]any) (volF
 	if err != nil {
 		return empty, emptyArtifact, fmt.Errorf("agent: history for %s: %w", symbol, err)
 	}
+	// Point-in-time: the oracle trains on the closed bars up to asOf only.
+	bars = barsUpTo(bars, asOf)
 	if len(bars) == 0 {
-		return empty, emptyArtifact, fmt.Errorf("agent: no history for %s", symbol)
+		return empty, emptyArtifact, fmt.Errorf("agent: no history for %s up to asOf %s", symbol, asOf.Format(time.RFC3339))
 	}
 	historyFrom := bars[0].Time.UTC()
 	releases, err := vds.Releases(ctx, historyFrom, asOf)
@@ -1007,6 +1176,7 @@ func (e *Engine) toolVolForecast(ctx context.Context, args map[string]any) (volF
 		From:       historyFrom,
 		To:         asOf,
 	}
+	result.ArtifactID = toolArtifacts.store("vol_forecast", artifact)
 	return result, artifact, nil
 }
 
@@ -1018,6 +1188,10 @@ func (e *Engine) toolVolEvents(ctx context.Context, args map[string]any) (volEve
 	if err := contextErr(ctx); err != nil {
 		return empty, emptyArtifact, err
 	}
+	asOf, err := toolAsOfArg(args)
+	if err != nil {
+		return empty, emptyArtifact, err
+	}
 	from, err := toolTimeArg(args, "from")
 	if err != nil {
 		return empty, emptyArtifact, err
@@ -1027,7 +1201,15 @@ func (e *Engine) toolVolEvents(ctx context.Context, args map[string]any) (volEve
 		return empty, emptyArtifact, err
 	}
 	if !to.After(from) {
-		return empty, emptyArtifact, fmt.Errorf("agent: to (%s) must be after from (%s)", to.Format(time.RFC3339), from.Format(time.RFC3339))
+		return empty, emptyArtifact, fmt.Errorf("%w: to (%s) must be after from (%s)",
+			errBadArgument, to.Format(time.RFC3339), from.Format(time.RFC3339))
+	}
+	// The calendar is published in advance, so a point-in-time request may look
+	// at a window that starts before asOf but must not start after it.
+	if from.After(asOf) {
+		return empty, emptyArtifact, fmt.Errorf(
+			"%w: from (%s) is after asOf (%s): the request window starts after its knowledge instant",
+			errBadArgument, from.Format(time.RFC3339), asOf.Format(time.RFC3339))
 	}
 	vds, ok := e.data.(VolatilityDataSource)
 	if !ok {
@@ -1062,16 +1244,153 @@ func (e *Engine) toolVolEvents(ctx context.Context, args map[string]any) (volEve
 			negative++
 		}
 	}
+	artifact := volEventsArtifact{AsOf: asOf, From: from, To: to, Events: events}
 	result := volEventsResult{
-		From:     from,
-		To:       to,
-		Events:   events,
-		News:     len(news),
-		Positive: positive,
-		Negative: negative,
-		Warnings: warnings,
+		AsOf:       asOf,
+		From:       from,
+		To:         to,
+		Events:     events,
+		News:       len(news),
+		Positive:   positive,
+		Negative:   negative,
+		Warnings:   warnings,
+		ArtifactID: toolArtifacts.store("vol_events", artifact),
 	}
-	return result, volEventsArtifact{From: from, To: to, Events: events}, nil
+	return result, artifact, nil
+}
+
+// lobBacktestTool is the lob_backtest tool description.
+var lobBacktestTool = ToolInfo{
+	Name:  toolNameLOBBacktest,
+	Title: "Бэктест по ленте стакана",
+	Description: "Прогнать стратегию по записанной ленте стакана (md.book_events/md.trades): queue-aware " +
+		"исполнение лимитных заявок, задержка, комиссия; возвращает метрики в формате бэктеста, число " +
+		"исполнений и artifact с полной кривой эквити. Стратегия imbalance: рыночная заявка по дисбалансу стакана.",
+	Input: objSchema(map[string]any{
+		"symbol":     strProp("Тикер инструмента, например TQBR:SBER"),
+		"asOf":       strProp("Момент, на который известны данные (point-in-time), RFC3339 UTC; обязателен"),
+		"from":       strProp("Начало записанной ленты, RFC3339 UTC"),
+		"to":         strProp("Конец записанной ленты, RFC3339 UTC"),
+		"strategy":   strProp("Стратегия: imbalance (по дисбалансу стакана)"),
+		"params":     numMapProp("Параметры: window (5), threshold (0.35), qty (10), maxPosition (100)"),
+		"latencyMs":  intProp("Задержка заявки в миллисекундах (0)"),
+		"queueAhead": boolProp("true — лимитная заявка встаёт в очередь уровня (консервативно); по умолчанию true"),
+		"feeBps":     numProp("Комиссия в базисных пунктах (по умолчанию 5)"),
+	}, "symbol", "asOf", "from", "to", "strategy"),
+}
+
+// lobBacktestResult is the compact model-facing payload of lob_backtest: the
+// metrics in the backtest.Metrics format, the execution counters and the
+// artifactId of the full replay result (equity curve, fills, round trips).
+type lobBacktestResult struct {
+	Symbol      string           `json:"symbol"`
+	Strategy    string           `json:"strategy"`
+	AsOf        time.Time        `json:"asOf"`
+	From        time.Time        `json:"from"`
+	To          time.Time        `json:"to"`
+	Metrics     backtest.Metrics `json:"metrics"`
+	Events      int              `json:"events"`
+	Orders      int              `json:"orders"`
+	Fills       int              `json:"fills"`
+	RoundTrips  int              `json:"roundTrips"`
+	UnfilledQty int64            `json:"unfilledQty"`
+	Warnings    []string         `json:"warnings,omitempty"`
+	ArtifactID  string           `json:"artifactId,omitempty"`
+}
+
+// lobBacktestArtifact is the UI payload of lob_backtest: the full replay result
+// (equity curve, fills, closed round trips) behind the compact model payload.
+type lobBacktestArtifact struct {
+	Symbol   string           `json:"symbol"`
+	Strategy string           `json:"strategy"`
+	AsOf     time.Time        `json:"asOf"`
+	From     time.Time        `json:"from"`
+	To       time.Time        `json:"to"`
+	Result   lobreplay.Result `json:"result"`
+}
+
+// toolLOBBacktest implements lob_backtest: the recorded order-book tape is
+// replayed point-in-time (events after asOf are dropped) through a deterministic
+// strategy with the queue-aware fill model of terminal/lobreplay.
+func (e *Engine) toolLOBBacktest(ctx context.Context, args map[string]any) (lobBacktestResult, lobBacktestArtifact, error) {
+	empty := lobBacktestResult{}
+	emptyArtifact := lobBacktestArtifact{}
+	if err := contextErr(ctx); err != nil {
+		return empty, emptyArtifact, err
+	}
+	symbol := e.resolveSymbol(argString(args, "symbol"))
+	if symbol == "" {
+		return empty, emptyArtifact, errors.New("agent: symbol is required")
+	}
+	window, err := parseLOBWindow(args)
+	if err != nil {
+		return empty, emptyArtifact, err
+	}
+	strategyName := argString(args, "strategy")
+	if strategyName == "" {
+		return empty, emptyArtifact, fmt.Errorf("%w: strategy is required (supported: imbalance)", errBadArgument)
+	}
+	if strategyName != "imbalance" {
+		return empty, emptyArtifact, fmt.Errorf(
+			"%w: strategy %q is not supported (supported: imbalance)", errBadArgument, strategyName)
+	}
+	strategy, err := newLOBImbalanceStrategy(argFloatMap(args, "params"))
+	if err != nil {
+		return empty, emptyArtifact, err
+	}
+	latencyMs, err := argIntStrict(args, "latencyMs", 0, 0, 60_000)
+	if err != nil {
+		return empty, emptyArtifact, err
+	}
+	queueAhead := true
+	if raw, ok := args["queueAhead"]; ok && raw != nil {
+		queueAhead = argBool(args, "queueAhead")
+	}
+	lob, ok := e.data.(LOBDataSource)
+	if !ok {
+		return empty, emptyArtifact, errors.New(
+			"agent: источник ленты стакана не подключён: инструменту нужен LOBDataSource " +
+				"(md.book_events/md.trades); запись рынка подключается отдельной задачей, см. docs/ai-terminal/fingerprint.md")
+	}
+	events, err := lob.LOBEvents(ctx, symbol, window.From, window.To)
+	if err != nil {
+		return empty, emptyArtifact, fmt.Errorf("agent: LOB events for %s: %w", symbol, err)
+	}
+	// Point-in-time: a replay must not see the recorded events after asOf.
+	events = eventsUpTo(events, window.AsOf)
+	if len(events) == 0 {
+		return empty, emptyArtifact, fmt.Errorf(
+			"agent: no recorded LOB events for %s in [%s, %s] up to asOf %s",
+			symbol, window.From.Format(time.RFC3339), window.To.Format(time.RFC3339), window.AsOf.Format(time.RFC3339))
+	}
+	result, err := lobreplay.Run(ctx, &sliceEventSource{events: events}, strategy, lobreplay.FillModel{
+		LatencyMs:     int(latencyMs),
+		QueuePosition: queueAhead,
+		FeeBps:        argFloat(args, "feeBps", e.feeBps()),
+	})
+	if err != nil {
+		return empty, emptyArtifact, fmt.Errorf("agent: lob backtest %s on %s: %w", strategyName, symbol, err)
+	}
+	artifact := lobBacktestArtifact{
+		Symbol: symbol, Strategy: strategyName, AsOf: window.AsOf,
+		From: window.From, To: window.To, Result: result,
+	}
+	view := lobBacktestResult{
+		Symbol:      symbol,
+		Strategy:    strategyName,
+		AsOf:        window.AsOf,
+		From:        window.From,
+		To:          window.To,
+		Metrics:     result.Metrics,
+		Events:      result.Events,
+		Orders:      result.Orders,
+		Fills:       len(result.Fills),
+		RoundTrips:  len(result.RoundTrips),
+		UnfilledQty: result.UnfilledQty,
+		Warnings:    result.Warnings,
+		ArtifactID:  toolArtifacts.store("lob_backtest", artifact),
+	}
+	return view, artifact, nil
 }
 
 // volEventsOf maps the vintage releases onto the artifact markers.

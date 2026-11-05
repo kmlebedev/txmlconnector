@@ -83,6 +83,7 @@ func lobTestTape(t *testing.T) []lobreplay.Event {
 func detectExecutionArgs() map[string]any {
 	return map[string]any{
 		"symbol": "TQBR:SBER",
+		"asOf":   "2026-11-05T07:10:00Z",
 		"from":   "2026-11-05T07:00:00Z",
 		"to":     "2026-11-05T07:10:00Z",
 	}
