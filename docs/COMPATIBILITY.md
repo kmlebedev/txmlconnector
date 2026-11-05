@@ -127,6 +127,25 @@
 | Linux amd64/arm64 | `libtxmlconnector.so` | gcc/clang, zig, контейнер | у DLL нет Linux-аналога: «идентичность» — по XML (L3), ABI — тот же набор функций |
 | macOS arm64/amd64 | `libtxmlconnector.dylib` | Xcode clang | проверено прототипом; для распространения нужна подпись/нотаризация |
 
+
+### 5.1 CI-сборка (C3, 2026-11-05)
+
+Workflow [`.github/workflows/compat-release.yml`](../.github/workflows/compat-release.yml) собирает
+артефакты на нативных GitHub Actions runners:
+
+| Job | Runner | Артефакт | ABI-тест |
+|---|---|---|---|
+| linux-amd64 | ubuntu-latest | `libtxmlconnector.so` + `libtxmlconnector64.so` | да |
+| linux-arm64 | ubuntu-24.04-arm | `libtxmlconnector.so` + `libtxmlconnector64.so` | да |
+| windows-amd64 | windows-latest + msys2/mingw | `txmlconnector64.dll` | best-effort |
+| macos-arm64 | macos-14 | `libtxmlconnector.dylib` + `libtxmlconnector64.dylib` | да |
+| macos-amd64 | macos-13 | `libtxmlconnector.dylib` + `libtxmlconnector64.dylib` | да |
+
+Каждый job: `go test ./cmd/connector/...`, `go build -buildmode=c-shared -trimpath -buildvcs=false`,
+C ABI-тест, `SHA256SUMS`, `upload-artifact`. На тег `compat-v*` дополнительно публикуется GitHub
+Release (`softprops/action-gh-release`, `generate_release_notes`). Заголовок `txmlconnector.h`
+кладётся в каждый архив. Локально те же шаги: `make cabi` (текущая ОС), `make cabi-test`.
+
 Ограничения Go c-shared, которые надо учесть в дизайне:
 
 - В процессе может работать только один Go-рантайм. Две разные Go-библиотеки в одном процессе
@@ -151,8 +170,9 @@
    памяти, отсутствие утечек (ASan/Valgrind на Linux).
 4. **Windows вживую:** наша `.dll` подставляется вместо эталона в существующий `server/` (`TC_BACKEND=dll`)
    и в стороннего клиента (например, на C#). Прогоняются RE-4 и soak.
-5. **CI-матрица:** сборка под все цели из §5 + корпус на linux/amd64 и windows/amd64; Wine-сверка с
-   эталоном — отдельный job.
+5. **CI-матрица:** workflow `compat-release.yml` (§5.1) собирает все цели §5 и запускает C ABI-тест
+   на linux/macos; Windows ABI-тест — best-effort до C4. Проверка артефакта: `sha256sum -c SHA256SUMS`
+   внутри архива; заголовок — `txmlconnector.h`. Wine-сверка с эталоном — отдельный job (C5).
 
 Критерий релиза: L0–L3 зелёные на Windows x64 (главная цель) и на каждой заявленной платформе,
 открытых пунктов §3.2 уровня L0–L1 нет, оставшиеся L3–L4 перечислены в release notes.
@@ -161,9 +181,9 @@
 
 | Этап | Результат | Критерий готовности |
 |---|---|---|
-| **C1. ABI-слой** | пакет `cabi/` (cgo, `//export`) с 9 функциями; `Makefile`-цели `dll`/`so`/`dylib` | ABI-тест на C зелёный на macOS и linux/amd64 |
-| **C2. Жизненный цикл как у DLL** | тексты ошибок обёртки сняты с DLL (Wine) и повторены; `InitializeEx`, `GetServiceInfo`, `SetLogLevel`; один поток колбэков | сверка L1 с DLL под Wine побайтно |
-| **C3. Кросс-сборка** | тулчейн (zig или контейнер с mingw-w64) в репозитории; воспроизводимые артефакты под цели §5 | хеши совпадают при повторной сборке |
+| **C1. ABI-слой** | готово: `cmd/connector` (cgo, 9 экспортов), `include/txmlconnector.h`, `Makefile`-цели `cabi`/`cabi-so`/`cabi-dylib`/`cabi-test` | macOS ABI-тест PASS; linux — CI |
+| **C2. Жизненный цикл как у DLL** | тексты ошибок обёртки сняты с DLL (Wine) и повторены; `InitializeEx`, `GetServiceInfo`, `SetLogLevel`; один поток колбэков | `InitializeEx`/`GetServiceInfo`/`SetLogLevel` пока stubs с TODO RE-2; сверка L1 — в работе |
+| **C3. Кросс-сборка** | готово: `compat-release.yml` (нативные runners §5.1), артефакты + header + SHA256SUMS, release на `compat-v*` | первый CI-прогон после push; локально dylib+ABI PASS |
 | **C4. Windows x64 вживую** | наша DLL в `server/` и стороннем клиенте; RE-4 и soak на демо | как у эталона, без расхождений в корпусе |
 | **C5. Сверочный корпус** | golden-сценарии на все команды и записи, CI-job сверки с эталоном | 0 расхождений, кроме перечисленных в §8 |
 | **C6. Закрытие §3.2** | прокси, логи, портфели `united_*`, РПС-события, ветка без шаблона маржи | каждый пункт — S/O-сверка |

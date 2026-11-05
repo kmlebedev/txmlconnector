@@ -52,6 +52,25 @@ err = client.Run(ctx, native.RunOptions{RqDelay: 100 * time.Millisecond}, func(e
 встретил неизвестную запись. Долгий read-only soak (20 валидных бумаг TQBR, Stats/RSS/latency раз в 5 минут) —
 `go run ./tools/native-soak` при `TC_SOAK=1`; `TC_SOAK_DURATION` принимает `300` и `300s`; без env он завершается сразу.
 
+
+## C ABI библиотека (drop-in для DLL)
+
+`cmd/connector` собирает `libtxmlconnector.so`, `libtxmlconnector.dylib` или
+`txmlconnector64.dll` с 9 экспортами оригинальной DLL; клиент подключает её без изменения кода.
+
+```bash
+make cabi          # текущая ОС: dylib/so; артефакты и header — в bin/
+make cabi-test     # C ABI-тест: 9 экспортов, ошибки, callback, FreeMemory
+```
+
+Публичный заголовок — [`cmd/connector/include/txmlconnector.h`](cmd/connector/include/txmlconnector.h)
+(в `bin/` копируется как `txmlconnector.h`). Релизы под linux amd64/arm64, windows amd64,
+macOS arm64/amd64 собирает GitHub Actions workflow
+[`.github/workflows/compat-release.yml`](.github/workflows/compat-release.yml): на тег `compat-v*`
+публикуется Release с библиотеками, заголовком и `SHA256SUMS`. Версия drop-in — `6.47.2.26.4`
+(override `TXC_VERSION`); точные тексты `InitializeEx`/`GetServiceInfo`/`SetLogLevel` ещё
+снимаются с DLL (RE-2), до этого — явные заглушки с TODO.
+
 ## Architecture
 
 ```text
