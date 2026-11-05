@@ -426,6 +426,23 @@ type Result struct {
 func Run(req Request) (Result, error)
 ```
 
+JSON-ключи `Result` (заморожены, их использует UI и агент; теги в `types.go`):
+
+```jsonc
+{"symbol":"TQBR:SBER","strategy":"sma_cross","periodSec":300,"params":{"fast":10,"slow":30},
+ "metrics":{"initialCash":1000000,"finalEquity":1012345.6,"totalReturnPct":1.2345,
+   "benchmarkReturnPct":-0.45,"maxDrawdownPct":-1.8,"sharpe":1.2,"winRatePct":55.6,
+   "profitFactor":1.9,"avgTradePct":0.45,"exposurePct":62.3,"trades":9,"bars":700,
+   "from":"...","to":"..."},
+ "equity":[{"t":"...","value":1000000,"benchmark":1000000,"drawdownPct":0}],
+ "trades":[{"entryTime":"...","exitTime":"...","side":"long","entryPrice":293.2,
+   "exitPrice":294.1,"qty":100,"pnl":90,"pnlPct":0.3,"barsHeld":12,"reason":"signal"}],
+ "warnings":[]}
+```
+
+`equity[].t` — RFC3339 (на проводе Go `time.Time`), `value` — эквити, `benchmark` — buy&hold.
+
+
 Стратегии итерации 1 (id, параметры):
 
 1. `sma_cross` — `fast` (10), `slow` (30): long при пересечении fast>slow вверх, выход при
@@ -762,7 +779,8 @@ func (s *Server) Handler() http.Handler
 ```
 
 Коды: `bad_request` 400, `not_found` 404, `conflict` 409, `unavailable` 503,
-`live_trading_disabled` 403, `internal` 500.
+`live_trading_disabled` 403, `internal` 500. Маппинг ошибок агента: повторный `start` при
+работающем runner → 409 `conflict`; невалидный конфиг/`live=true` → 400; нереализованное → 503.
 
 ### 10.1 REST
 
@@ -845,6 +863,12 @@ data: {"type":"quote","data":{...}}
 | `agent` | `{type:"tool_call"\|"tool_result"\|"message"\|"autonomy"\|"log"\|"backtest", ...}` | по мере событий агента |
 | `status` | `{ok,mode,connected,message,serverTime}` | 5s |
 | `heartbeat` | `{}` | 15s |
+
+Событие агента — обёртка `{"type":"agent","data":{"type":"<agentEventType>","data":...}}`; для
+автономии в `data` приходит **частичный тик** прогресса, а не полный `AutonomyStatus`:
+`{"running":true,"symbol":"TQBR:SBER","periodSec":300,"time":"...","price":293.2,
+"position":100,"trades":1,"pnl":12.3,"pnlPct":0.01}`; полный статус (config/log/startedAt) — из
+`GET /api/agent/status`.
 
 Сервер: hub с буферизованными каналами (256), медленные клиенты отбрасываются, поддержка
 `r.Context().Done()`. CORS не нужен (same origin). `Cache-Control: no-store`.
