@@ -200,6 +200,9 @@ type ChatResponse struct {
 	ToolCalls []ToolCall `json:"toolCalls"`
 	Artifacts []Artifact `json:"artifacts"`
 	LLM       bool       `json:"llm"`
+	// ConversationID is the dialog id of the bounded history (§9.2): the
+	// request may carry it, and a request without one gets a generated id back.
+	ConversationID string `json:"conversationId,omitempty"`
 	// Partial marks an incomplete answer: the LLM failed after a mutating tool
 	// already ran, so the local fallback was skipped to avoid replaying the
 	// side effects. ToolCalls still lists what was executed.
