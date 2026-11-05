@@ -50,11 +50,14 @@ func ianaTimeZone(name string) string {
 	if name == "" {
 		return ""
 	}
-	if _, err := time.LoadLocation(name); err == nil {
-		return name
-	}
 	if iana, ok := windowsTimeZones[name]; ok {
 		return iana
+	}
+	if canonical, ok := canonicalIANA(name); ok {
+		return canonical
+	}
+	if _, err := time.LoadLocation(name); err == nil {
+		return name
 	}
 	// Windows names are case-insensitive in practice; be lenient about it.
 	lower := strings.ToLower(name)
@@ -64,6 +67,35 @@ func ianaTimeZone(name string) string {
 		}
 	}
 	return ""
+}
+
+// canonicalIANA resolves an IANA name written with a non-canonical case
+// ("europe/moscow"): zoneinfo lookups are case-sensitive on most systems, while
+// users and some servers are not. Each path segment is title-cased and loaded;
+// UTC is matched case-insensitively. The canonical spelling is returned so the
+// result does not depend on the host filesystem's case sensitivity.
+func canonicalIANA(name string) (string, bool) {
+	if strings.EqualFold(name, "UTC") {
+		return "UTC", true
+	}
+	parts := strings.Split(name, "/")
+	for i, part := range parts {
+		if part == "" {
+			return "", false
+		}
+		parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
+	}
+	candidate := strings.Join(parts, "/")
+	if candidate == name {
+		return "", false
+	}
+	if _, err := time.LoadLocation(candidate); err != nil {
+		// Canonical names with unusual segment casing (Port-au-Prince,
+		// GMT+3) do not survive naive title-casing; the exact lookup below
+		// still accepts them.
+		return "", false
+	}
+	return candidate, true
 }
 
 // exchangeZoneName is ianaTimeZone with a last-resort pass-through: an unknown

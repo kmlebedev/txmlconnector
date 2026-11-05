@@ -539,7 +539,7 @@ func TestIANATimeZoneMapping(t *testing.T) {
 		"UTC":                         "UTC",
 		"Coordinated Universal Time":  "UTC",
 		"Europe/Moscow":               "Europe/Moscow",
-		"europe/moscow":               "europe/moscow", // IANA lookup is case-sensitive, the value is passed through
+		"europe/moscow":               "Europe/Moscow", // canonicalised: zoneinfo lookups are case-sensitive, users are not
 		"":                            "",
 		"Unknown Time Zone":           "",
 		"Vladivostok Standard Time":   "Asia/Vladivostok",
