@@ -407,7 +407,183 @@ window.__ModuleLoader__.load({
         error ? h('div', { style: CARD.error }, error) : null);
     }
 
+
+    // --- Harness client surfaces (plan Task 10) ---------------------------
+    //
+    // A right-panel "AI terminal" tab (order book + positions), a session header
+    // action that inserts the visible chart as a ScreenContext JSON quote, and a
+    // selected-text interaction "Спросить о выделенном". The exact slots follow
+    // docs/ai-terminal/dsh-integration.md §3.3-3.5; the insertQuote path is the
+    // standard inputActions prop and falls back to the clipboard (status I).
+
+    const TERMINAL_TAB_ID = 'ai-terminal/terminal';
+    const TERMINAL_TAB_KIND = 'ai-terminal';
+    const SELECTION_INTERACTION_ID = 'ai-terminal-ask-selection';
+    const SCREEN_POLL_MS = 2_000;
+
+    /** Last known screen context of the embedded terminal SPA. */
+    let screenContext = { source: 'ai-terminal', url: TERMINAL_URL, activeTab: 'chart', symbol: '', periodSec: 0 };
+    /** The conversation input actions captured from a standard slot prop. */
+    let conversationInputActions = null;
+    /** Selected text captured by the text interaction. */
+    let selectedTextForSurface = '';
+
+    /** Capture the injected inputActions standard prop. */
+    function rememberInputActions(props) {
+      if (props && props.inputActions && typeof props.inputActions.insertQuote === 'function') {
+        conversationInputActions = props.inputActions;
+      }
+      return conversationInputActions;
+    }
+
+    /** Insert a quote into the conversation composer (clipboard fallback). */
+    function insertQuote(text) {
+      const actions = conversationInputActions;
+      if (actions && typeof actions.insertQuote === 'function') {
+        actions.insertQuote(text);
+        return true;
+      }
+      if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        void navigator.clipboard.writeText(text).catch(() => {});
+      }
+      return false;
+    }
+
+    /** Build the ScreenContext JSON quote of the visible chart (§9.6). */
+    function buildScreenContextQuote(context) {
+      const source = context && typeof context === 'object' ? context : {};
+      return JSON.stringify({
+        source: 'ai-terminal',
+        activeTab: typeof source.activeTab === 'string' && source.activeTab !== '' ? source.activeTab : 'chart',
+        symbol: typeof source.symbol === 'string' ? source.symbol : '',
+        periodSec: Number.isFinite(source.periodSec) ? source.periodSec : 0,
+        from: typeof source.from === 'string' ? source.from : '',
+        to: typeof source.to === 'string' ? source.to : '',
+        selection: source.selection && typeof source.selection === 'object' ? source.selection : null,
+      });
+    }
+
+    /** Build the quote of a selected chat text. */
+    function buildSelectionQuote(text) {
+      const value = typeof text === 'string' ? text.trim() : '';
+      return JSON.stringify({
+        source: 'ai-terminal',
+        activeTab: 'chat',
+        selection: { text: value.slice(0, 2000) },
+      });
+    }
+
+    /** Read the visible terminal screen from the same-origin iframe URL. */
+    function refreshScreenContext(frame) {
+      try {
+        const href = frame && frame.contentWindow && frame.contentWindow.location ? frame.contentWindow.location.href : '';
+        if (!href || href === 'about:blank') return;
+        const url = new URL(href);
+        screenContext = {
+          ...screenContext,
+          url: href,
+          symbol: url.searchParams.get('symbol') || screenContext.symbol,
+          periodSec: Number(url.searchParams.get('period')) || screenContext.periodSec,
+          activeTab: url.searchParams.get('tab') || screenContext.activeTab,
+        };
+      } catch {
+        // A cross-origin frame stays at the last known context.
+      }
+    }
+
+    /** Compact order-book rows for the right-panel tab. */
+    function bookRows(book) {
+      const bids = book && Array.isArray(book.bids) ? book.bids.slice(0, 5) : [];
+      const asks = book && Array.isArray(book.asks) ? book.asks.slice(0, 5) : [];
+      return { bids, asks };
+    }
+
+    /** Right-panel "AI terminal" tab: the terminal order book and positions. */
+    function TerminalPanelTabBody() {
+      const [state, setState] = React.useState({ loading: true, symbol: '', book: null, positions: [], error: '' });
+      React.useEffect(() => {
+        let live = true;
+        const load = async () => {
+          try {
+            const portfolio = await fetch('/ai-terminal/api/portfolio').then((response) => response.json());
+            const positions = portfolio && Array.isArray(portfolio.positions) ? portfolio.positions : [];
+            const symbol = positions.length > 0 && positions[0].symbol ? positions[0].symbol : '';
+            const book = symbol
+              ? await fetch('/ai-terminal/api/instruments/' + encodeURIComponent(symbol) + '/orderbook').then((response) => response.json())
+              : null;
+            if (live) setState({ loading: false, symbol, book, positions, error: '' });
+          } catch {
+            if (live) setState({ loading: false, symbol: '', book: null, positions: [], error: 'Терминал недоступен' });
+          }
+        };
+        void load();
+        return () => { live = false; };
+      }, []);
+      if (state.loading) return h('div', { style: CARD.note }, 'Загрузка терминала…');
+      if (state.error) return h('div', { style: CARD.error }, state.error);
+      const rows = bookRows(state.book);
+      const levels = rows.asks.slice().reverse().concat(rows.bids);
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px 12px', fontSize: '12px' } },
+        h('div', { style: CARD.title }, 'Стакан · ' + (state.symbol || '—')),
+        levels.length === 0
+          ? h('div', { style: CARD.note }, 'Нет данных стакана')
+          : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '2px' } },
+            levels.map((level, index) => h('div', {
+              key: 'level-' + index,
+              style: { display: 'flex', justifyContent: 'space-between', fontVariantNumeric: 'tabular-nums' },
+            },
+              h('span', null, cardNumber(level.price)),
+              h('span', { style: { color: COLORS.secondary } }, String(level.qty ?? ''))))),
+        h('div', { style: CARD.title }, 'Позиции'),
+        state.positions.length === 0
+          ? h('div', { style: CARD.note }, 'Позиций нет')
+          : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '2px' } },
+            state.positions.map((position, index) => h('div', {
+              key: 'position-' + index,
+              style: { display: 'flex', justifyContent: 'space-between' },
+            },
+              h('span', null, String(position.symbol || '')),
+              h('span', { style: { color: COLORS.secondary } }, String(position.qty ?? ''))))));
+    }
+
+    /** Session header action: insert the visible chart into the chat input. */
+    function SendChartQuoteAction(props) {
+      rememberInputActions(props);
+      const send = () => {
+        refreshScreenContext(null);
+        insertQuote(buildScreenContextQuote(screenContext));
+      };
+      return h('button', {
+        type: 'button',
+        style: styles.button(false),
+        title: 'Отправить график в чат',
+        'aria-label': 'Отправить график в чат',
+        onClick: send,
+      }, 'В чат');
+    }
+
+    /** Selected-text surface of the UiConversation interaction. */
+    function AskSelectionAction(props) {
+      rememberInputActions(props);
+      const text = selectedTextForSurface !== ''
+        ? selectedTextForSurface
+        : (props && typeof props.readText === 'function' ? props.readText() : '');
+      const ask = () => {
+        if (insertQuote(buildSelectionQuote(text)) && props && typeof props.dismiss === 'function') props.dismiss();
+      };
+      return h('button', {
+        type: 'button',
+        style: styles.button(false),
+        onClick: ask,
+      }, 'Спросить о выделенном');
+    }
+
     function TerminalPanel({ t }) {
+      const frameRef = React.useRef(null);
+      React.useEffect(() => {
+        const timer = setInterval(() => refreshScreenContext(frameRef.current), SCREEN_POLL_MS);
+        return () => clearInterval(timer);
+      }, []);
       const [status, setStatus] = React.useState({ phase: 'loading', message: '' });
       const [reloadKey, setReloadKey] = React.useState(0);
       const [busy, setBusy] = React.useState(false);
@@ -469,6 +645,7 @@ window.__ModuleLoader__.load({
         running
           ? h('iframe', {
             key: reloadKey,
+            ref: frameRef,
             src: TERMINAL_URL,
             title: text(t, 'title', 'AI terminal'),
             style: styles.frame,
@@ -521,6 +698,47 @@ window.__ModuleLoader__.load({
       // generic plan key for a proposal surfaced on its own.
       for (const key of ['terminal_proposal', 'terminal_place_order', 'terminal_cancel_order', 'terminal_start_autonomy']) {
         toolView(key, ProposalToolCard);
+      }
+
+      // Right-panel "AI terminal" tab (plan Task 10): the type is registered in
+      // ctx.sidebarRightTabs, its body through the sidebar.right.pane.tab slot.
+      if (ctx.sidebarRightTabs && typeof ctx.sidebarRightTabs.register === 'function') {
+        ctx.effect(() => ctx.sidebarRightTabs.register({
+          id: TERMINAL_TAB_ID,
+          kind: TERMINAL_TAB_KIND,
+          title: () => t('panel'),
+        }), 'ai-terminal: sidebar tab type');
+      }
+      ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+        name: 'sidebar.right.pane.tab',
+        key: TERMINAL_TAB_ID,
+        locale: NS,
+      }, TerminalPanelTabBody));
+
+      // Session header action: send the visible chart into the chat input.
+      ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+        name: 'conversation.session.header.actions',
+        id: 'ai-terminal-send-chart',
+        locale: NS,
+      }, SendChartQuoteAction));
+
+      // Selected text: "Ask about the selection" through the UiConversation
+      // text-interaction registry and its keyed surface slot.
+      if (ctx.uiConversation && ctx.uiConversation.interactions && typeof ctx.uiConversation.interactions.register === 'function') {
+        ctx.effect(() => ctx.uiConversation.interactions.register({
+          id: SELECTION_INTERACTION_ID,
+          onInteraction(gesture) {
+            const text = gesture && typeof gesture.readText === 'function' ? gesture.readText() : '';
+            if (!text || text.trim() === '') return;
+            selectedTextForSurface = text;
+            if (typeof gesture.open === 'function') gesture.open();
+          },
+        }), 'ai-terminal: selection interaction');
+        ctx.slots.inject('conversation.chat.text-interaction', () => ctx.slots.register({
+          name: 'conversation.chat.text-interaction',
+          key: SELECTION_INTERACTION_ID,
+          locale: NS,
+        }, AskSelectionAction));
       }
     }
 

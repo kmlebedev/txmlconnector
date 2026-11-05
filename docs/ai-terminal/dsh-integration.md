@@ -315,6 +315,41 @@ dsh-client-ui-conversation/lib/client.js:15340-15375.
 
 ### 3.5 Прочие Client-сервисы, нужные задачам 9–10
 
+Подтверждено реализацией T10 (2026-11-06, ветка plan/ai-terminal-a):
+
+- **Вкладка правой панели — двухступенчатая регистрация** (S:
+  dsh-client-ui-sidebar-right/README.md:82-92): тип объявляется
+  `ctx.sidebarRightTabs.register({ id, kind, patterns?, canOpen?, title, ... })` (возвращает
+  disposer; id уникален), тело — `ctx.slots.register({ name: 'sidebar.right.pane.tab', key: id }, Body)`;
+  открытие страницы по kind — `ctx.sidebarRight.openTab(kind, options?)`.
+- **Текстовые жесты** (S: dsh-client-ui-conversation/lib/client.js:3670-3720): плагин регистрирует
+  `ctx.uiConversation.interactions.register({ id, onInteraction(gesture) })`; в gesture есть
+  `sessionId`, `open()` (заявить поверхность), `preventDefault()`, доступ к DOM-выделению.
+  Поверхность рисуется keyed-слотом `conversation.chat.text-interaction` (S:
+  dsh-client-ui-chat/lib/client.js:3679-3690): компонент получает owner-props
+  `{ trigger, readText, dismiss, clearSelection }`. Плана-слот `contextMenu.*` для выделения не
+  используется — это отдельный механизм.
+- **Стандартный проп `inputActions`** (insertQuote) приходит в компоненты conversation-слотов;
+  header-действие и surface выделения используют его с fallback на clipboard (S метод по
+  dsh-client-ui-conversation/README.md:65,102; I — доступность пропа в конкретном слоте без
+  живого Harness не проверена).
+- **LLM-мост**: model из конфига плагина (llmProvider/llmModel) выигрывает у request.model;
+  OpenAI tool_calls[].function.arguments — строка; usage всегда заполняется (S:
+  dsh-llm/lib/typert.host.js:357,633 — FinishReasonMap и TokenUsage).
+- **MCP-сервер**: выбран минимальный transport — JSON-RPC 2.0 POST + application/json
+  (GET 405), protocolVersion из initialize или 2025-03-26; tools/call отдаёт
+  content:[{type:'text',text:<json>}] и isError для tool-ошибки. Это соответствует
+  streamable-HTTP (клиенту разрешён JSON-ответ) и плану; SSE-стрим не реализуется.
+- **MCP-клиент в bundle patch**: строка @deepseek-ai/dsh-mcp-client с url/headers из env
+  (DSH_AI_TERMINAL_MCP_URL/TOKEN), которые выставляет плагин в apply() до загрузки строки;
+  стартовая гонка «бэкенд ещё поднимается» закрывается reconnect-политикой клиента (S:
+  dsh-mcp-client/README.md:65-68 «connection failed; retrying»), но живой прогон не проверен (I).
+- **Провайдер навыков** (S: dsh-skill/lib/index.js:142-181, dsh-skill-filesystem/lib/index.js:48-145):
+  `ctx.skills.registerProvider(control => ({ name, async list(options), async get(candidate, options) }))`;
+  кандидат обязан нести `name/description/invocation{modelInvocable,userInvocable}/source/rank/provider`;
+  frontmatter — `name`, `description`, опциональные `whenToUse`, `disable-model-invocation`,
+  `user-invocable` — тот же формат, что у dsh-skill-filesystem и `npx skills add`.
+
 - ctx.contextMenus.register({ id, target, order, resolve }) — сервис Client-плагина для
   контекстных меню; useContextMenu().getTriggerProps(target, handlers?); слоты
   contextMenu.icon/contextMenu.content (S: dsh-client-ui-context-menu/README.md:29-55).
@@ -358,7 +393,33 @@ dsh-client-ui-conversation/lib/client.js:15340-15375.
   выполнялась** — нужен перезапуск Harness и живой LLM; скриншот не создавался. Для node-тестов
   клиентская половина поднимается с fake window.__ModuleLoader__ и stub React без Harness.
 
-### Task 10 — один LLM, навыки, панели, MCP
+### Task 10 — один LLM, навыки, панели, MCP (реализовано)
+
+Реализация T10 (состояние 2026-11-06, ветка plan/ai-terminal-a):
+
+- `dsh-ai-terminal/llm-bridge.js`: POST /ai-terminal-ctl/llm/v1/chat/completions —
+  OpenAI-совместимый не-стриминговый ответ внутри ctx.llm.stream; Bearer-токен (per-launch
+  randomUUID, constant-time compare), маппинг OpenAI messages/tools → Harness Message/ToolSchema и
+  сырых чанков (text-delta/tool-call-delta/usage/finish) → choices[0].message + finish_reason +
+  usage; ошибки 401/400/502 в OpenAI-формате. Бэкенд получает TERMINAL_LLM_BASE_URL и
+  TERMINAL_LLM_API_KEY через env (переопределяют ambient).
+- `dsh-ai-terminal/skills.js`: провайдер ai-terminal читает `<repo>/skills/trading-*`
+  и `<dataDir>/skills`; frontmatter SKILL.md — единый источник для Harness и npx skills add.
+- `terminal/mcp/server.go`: MCP streamable-HTTP (POST JSON-RPC 2.0: initialize, ping,
+  tools/list, tools/call; GET 405; batch), `NewServer(ToolInvoker)`, монтируется в
+  cmd/terminal/main.go на /mcp под api.Guard (guard.go теперь требует токен и для /mcp).
+- `cmd/terminal/main.go`: root mux `/` → API, `/mcp` → Guard+MCP.
+- `dsh-ai-terminal/client.js`: вкладка правой панели «Терминал» (ctx.sidebarRightTabs.register +
+  sidebar.right.pane.tab), действие в шапке сессии «В чат» (conversation.session.header.actions +
+  inputActions.insertQuote с ScreenContext JSON), «Спросить о выделенном»
+  (ctx.uiConversation.interactions + conversation.chat.text-interaction).
+- `dsh-ai-terminal/package.json`: files[] += tools.js/skills.js/llm-bridge.js; в
+  dsh.client.inject добавлены dsh-client-ui-sidebar-right/conversation/chat.
+  `cordis.patch.yml`: вторая строка @deepseek-ai/dsh-mcp-client (streamable-http на
+  http://127.0.0.1:<port>/mcp, X-Terminal-Token из env, failOnStartupError:false, reconnect).
+- **Ручные проверки НЕ выполнялись**: Step 5 (Claude Code `claude mcp add` + tools/list 14+,
+  живая DSH-сессия с карточками/вкладкой/цитатой) — нужны живой Harness/LLM и внешний клиент;
+  скриншоты не создавались.
 
 - **LLM-мост:** ctx.llm.stream({provider, model, messages, tools?, temperature?, maxTokens?});
   OpenAI-запрос → durable Message[], ответ собирать из чанков (text-delta, tool-call),
@@ -458,3 +519,10 @@ dsh-client-ui-conversation/lib/client.js:15340-15375.
   *.d.ts.
 - Полные страницы docs/subsystems/* (в asar отсутствуют), на которые ссылаются README.
 - Поведение провайдеров LLM с реальным ключом (только контракт сервиса).
+- T10 Step 5: живой MCP-клиент (Claude Code `claude mcp add --transport http terminal
+  http://127.0.0.1:8090/mcp --header "X-Terminal-Token: ..."`, tools/list 14+), живая
+  DSH-сессия с вкладкой «Терминал», кнопкой «В чат» и пунктом «Спросить о выделенном» —
+  **НЕ ПРОВЕРЕНО**; LLM-мост с реальным провайдером Harness — тоже (в node-тестах fake
+  ctx.llm.stream).
+- Стартовая гонка строки MCP-клиента (бэкенд поднимается после apply) проверена только по
+  reconnect-коду пакета (I); живого прогона нет.

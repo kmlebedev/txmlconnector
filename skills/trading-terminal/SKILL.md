@@ -117,3 +117,25 @@ RSI Уайлдера 14 в шкале 0–1; вход `rsi < 0.2`, выход `r
 - `docs/ai-terminal/ARCHITECTURE.md` — контракт API и инструментов агента.
 - `terminal/backtest/rules/` — исходники компилятора правил и индикаторов.
 - `terminal/backtest/rules/testdata/rsi_example.json` — пример из публикации.
+
+## 8. Работа из DeepSeek Harness и MCP
+
+Когда терминал подключён к Harness плагином `dsh-ai-terminal`, те же Go-инструменты доступны
+модели как нативные инструменты с префиксом `terminal_` (`terminal_run_backtest`,
+`terminal_backtest_rules`, `terminal_batch_backtest`, `terminal_get_quote`,
+`terminal_place_order` и остальные из каталога `GET /api/agent/tools`). Внешние агенты
+(Claude Code и другие MCP-клиенты) получают тот же каталог по HTTP на `/mcp`
+(JSON-RPC 2.0, заголовок `X-Terminal-Token` из окружения).
+
+Порядок «бэктест → walk-forward → предложение»:
+
+1. `terminal_run_backtest` или `terminal_backtest_rules` — одна гипотеза на одном инструменте;
+   проверь метрики и оговорки из §5.
+2. `terminal_batch_backtest` и walk-forward-инструменты — устойчивость на нескольких тикерах
+   и вне выборки; не подгоняй параметры под тестовый отрезок.
+3. Мутирующие инструменты (`terminal_place_order`, `terminal_cancel_order`,
+   `terminal_start_autonomy`) в режиме подтверждения возвращают
+   `{"proposal":{"id":...,"status":"pending"}}`, а **не** исполняют действие. Это не ошибка:
+   покажи пользователю сводку предложения и дождись подтверждения в карточке чата
+   (approve/reject). Никогда не утверждай, что заявка исполнена, если вернулся proposal.
+4. После подтверждения проверь статус заявки/автономии и снова напомни о рисках и paper-режиме.
