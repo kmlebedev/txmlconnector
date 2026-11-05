@@ -210,6 +210,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/backtest/strategies", s.handleStrategies)
 	mux.HandleFunc("POST /api/backtest", s.handleBacktest)
 	mux.HandleFunc("GET /api/agent/tools", s.handleAgentTools)
+	mux.HandleFunc("POST /api/agent/tools/{name}/invoke", s.handleInvokeTool)
 	mux.HandleFunc("POST /api/agent/chat", s.handleAgentChat)
 	mux.HandleFunc("GET /api/agent/status", s.handleAgentStatus)
 	mux.HandleFunc("POST /api/agent/autonomy", s.handleAutonomy)

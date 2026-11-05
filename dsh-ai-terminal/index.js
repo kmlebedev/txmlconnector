@@ -26,8 +26,10 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { createToolBridge } from './tools.js';
+
 /** Services required by the plugin; without them the row stays inactive. */
-export const inject = ['webServer'];
+export const inject = ['webServer', 'tools'];
 
 const MOUNT = '/ai-terminal';
 const CONTROL = '/ai-terminal-ctl';
@@ -167,7 +169,24 @@ class TerminalBackend {
   }
 
   set(phase, message, extra = {}) {
+    const previous = this.state.phase;
     this.state = { ...this.state, phase, message, ...extra };
+    if (phase === previous) return;
+    // The plugin registers its Harness tools only while the backend is up;
+    // every (re)start re-reads the Go tool catalog (plan Task 9).
+    if (phase === 'running' && typeof this.onRunning === 'function') {
+      try {
+        this.onRunning();
+      } catch {
+        // Tool registration is best-effort: the terminal itself still works.
+      }
+    } else if (previous === 'running' && typeof this.onStopped === 'function') {
+      try {
+        this.onStopped();
+      } catch {
+        // Nothing to unregister if the registry is already gone.
+      }
+    }
   }
 
   /** Raw health probe: any process answering /api/health, without the nonce check. */
@@ -399,6 +418,24 @@ export function apply(ctx, config) {
     return disposer;
   };
 
+  // Harness tool bridge (plan Task 9): the Go agent catalog becomes native
+  // terminal_<name> tools of the agents. The bridge is inert without the tool
+  // service, and it re-registers after every backend (re)start.
+  const toolService = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools;
+  const toolBridge = toolService && typeof toolService.register === 'function'
+    ? createToolBridge({ tools: toolService, port: cfg.port, token: backend.token })
+    : null;
+  backend.onRunning = () => {
+    if (!toolBridge) return;
+    toolBridge.refresh().catch((error) => {
+      console.warn('[ai-terminal] не удалось зарегистрировать инструменты Harness: '
+        + (error instanceof Error ? error.message : String(error)));
+    });
+  };
+  backend.onStopped = () => {
+    if (toolBridge) toolBridge.unregister();
+  };
+
   own(ctx.webServer.register({
     kind: 'exact',
     path: MOUNT,
@@ -461,8 +498,9 @@ export function apply(ctx, config) {
     for (const dispose of disposers.reverse()) {
       try { dispose(); } catch { /* registration already gone */ }
     }
+    if (toolBridge) toolBridge.close();
     void backend.dispose();
-  }, 'ai-terminal: routes and backend');
+  }, 'ai-terminal: routes, tools and backend');
 
   if (cfg.autoStart) {
     void backend.start();
