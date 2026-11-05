@@ -223,3 +223,14 @@ O: `tools/replay-server` + `tools/tcproxy` + DLL под Wine 11.21, dump `.re-ru
 
 Фикстуры: `native/records/testdata/news-{header,body}-live-inject.hex` + `*-live-dll.xml` +
 `news-getnews-{headers,body}-request.hex`; происхождение — `news-live-repro.md`.
+
+
+## Go-реализация T24 (S, 2026-11-05)
+
+- `Client.NewsBody` отправляет RQ_GETNEWS (73) mode 2; reply всегда пустой (S), поэтому успех —
+  факт отправки; тело приходит RQ_MAIN 0x36 flags=2, декодер `UnpackNewsBody` + CP1251→UTF-8
+  и эмиссия `<news_body><id>…</id><text><![CDATA[…]]></text></news_body>` (S-форма
+  `news-body-live-dll.xml`).
+- S-форма flags=2: после L id идёт неизвестное 4-байтовое поле, package = int32 uncompressed_size
+  + zlib до конца записи; при валидном явном package_len используется он (I-уточнение сохранено).
+- Тест `TestNewsBodyCallbackS` сверяет callback побайтно с `news-body-live-dll.xml`.

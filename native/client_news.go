@@ -10,11 +10,6 @@ import (
 	"github.com/kmlebedev/txmlconnector/native/wire"
 )
 
-// errNewsBodyI says the request was sent but the body reply/emit mechanics are
-// not recovered yet (news.md I). The Connector maps it to the DLL command
-// success (the O run shows no <news_body> callback).
-var errNewsBodyI = errors.New("news body reply is not recovered (I)")
-
 func (c *Client) newsPayload(from, to int64, count, mode byte) []byte {
 	var w wire.Writer
 	w.Int32(int32(from))
@@ -72,9 +67,9 @@ func (c *Client) OldNews(ctx context.Context, count int) error {
 	return nil
 }
 
-// NewsBody sends get_news_body (RQ_GETNEWS 73, mode 2). The request itself is
-// D+O, but the reply/emit path is not recovered (news.md I): after sending the
-// method returns errNewsBodyI, never a fabricated body.
+// NewsBody sends get_news_body (RQ_GETNEWS 73, mode 2). S: the reply is always
+// empty; the body arrives asynchronously as RQ_MAIN 0x36 flags=2 and is emitted
+// as <news_body>. The method returns success after the request is sent.
 func (c *Client) NewsBody(ctx context.Context, id int64) (model.NewsBody, error) {
 	if _, ok := c.newsHeader(id); !ok {
 		return model.NewsBody{}, fmt.Errorf("Header with id = %d not found", id)
@@ -86,5 +81,5 @@ func (c *Client) NewsBody(ctx context.Context, id int64) (model.NewsBody, error)
 	if _, err := conn.Request(ctx, session.RqGetNews, c.newsPayload(id, id, 1, 2)); err != nil {
 		return model.NewsBody{}, fmt.Errorf("RQ_GETNEWS: %w", err)
 	}
-	return model.NewsBody{}, errNewsBodyI
+	return model.NewsBody{ID: id}, nil
 }

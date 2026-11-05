@@ -112,10 +112,16 @@ func SkipNews(tag byte, r *wire.Reader) error {
 			if err != nil {
 				return fmt.Errorf("R_NEWS_UPLOAD package length: %w", err)
 			}
-			if size < 0 || int(size) > r.Len() {
-				return fmt.Errorf("R_NEWS_UPLOAD package length %d exceeds the payload", size)
+			if size >= 0 && int(size) <= r.Len() {
+				if _, err := r.Raw(int(size)); err != nil {
+					return fmt.Errorf("R_NEWS_UPLOAD package: %w", err)
+				}
+				return nil
 			}
-			if _, err := r.Raw(int(size)); err != nil {
+			// S body-only form: an unknown 4-byte field follows the id and the
+			// package occupies the rest of the record (news.md S, package_len
+			// decoding I). Consume the rest to stay aligned.
+			if _, err := r.Raw(r.Len()); err != nil {
 				return fmt.Errorf("R_NEWS_UPLOAD package: %w", err)
 			}
 		}
@@ -166,11 +172,17 @@ func ParseNewsUpload(body []byte) (NewsUpload, error) {
 		if err != nil {
 			return out, fmt.Errorf("R_NEWS_UPLOAD package length: %w", err)
 		}
-		if size < 0 || int(size) > r.Len() {
-			return out, fmt.Errorf("R_NEWS_UPLOAD package length %d exceeds the body (%d bytes left)", size, r.Len())
-		}
-		if out.Package, err = r.Raw(int(size)); err != nil {
-			return out, fmt.Errorf("R_NEWS_UPLOAD package: %w", err)
+		if size >= 0 && int(size) <= r.Len() {
+			if out.Package, err = r.Raw(int(size)); err != nil {
+				return out, fmt.Errorf("R_NEWS_UPLOAD package: %w", err)
+			}
+		} else {
+			// S body-only form: after the id there is an unknown 4-byte field
+			// and the package occupies the rest of the body (news.md S; the
+			// package_len decoding is I).
+			if out.Package, err = r.Raw(r.Len()); err != nil {
+				return out, fmt.Errorf("R_NEWS_UPLOAD package: %w", err)
+			}
 		}
 	}
 	if r.Len() > 0 {

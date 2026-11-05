@@ -22,3 +22,5 @@ type NewsBody struct {
 	ID   int64
 	Text string
 }
+
+func (*NewsBody) isEvent() {}
