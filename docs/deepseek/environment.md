@@ -1,9 +1,9 @@
 # Окружение: фактическое состояние
 
 **Дата проверки:** 2026-11-04 · **Хост:** macOS (darwin 25.6.0, Apple Silicon arm64) ·
-**Репозиторий:** `/Users/whitefox/GolandProjects/txmlconnector`, ветка `plan/native-client`, HEAD `181a268`
-(Фазы 0–1 влиты в `main` через PR #47/#48; Фаза 2 закрыта — см. [task-index.md](task-index.md) §13;
-текущая работа — Фаза 3, задачи 13–14).
+**Репозиторий:** `/Users/whitefox/GolandProjects/txmlconnector`, ветка `plan/native-client`, HEAD `eb4d126`
+(Фазы 0–8 влиты в `main` через PR #47/#48/#50; Фаза 9 — частично, см. [task-index.md](task-index.md)
+§13–§17; открытые внешние блокеры — RE-4 live, options S, full-day soak).
 **Кто проверял:** env-scout (task-1). Все факты ниже — результат реальных команд; там, где прогона не
 было, так и написано («не проверено»).
 

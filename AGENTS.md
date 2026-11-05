@@ -51,7 +51,16 @@ XML), `native/cryptoprofile`, `native/natsout`, `native.Client` (логин, к�
 RQ_SEC_SPEC после подписки), остальные живые записи снапшота (AmBOOK 0x5c, R_SYSPARAMS 0x5b, 0x05,
 strict R_WRAPPER; `UnknownRecords==0` на E07-хвосте). Новые RE-доки — `docs/protocol/records.md`,
 `positions.md`, `orders.md`; oracle-фикстуры в `native/{records,}/testdata`. Итог —
-`docs/deepseek/task-index.md` §13. Следующий шаг — **Фаза 3, задачи 13–14**.
+`docs/deepseek/task-index.md` §13.
+
+**Обновление 2026-11-05:** **Фазы 3–8 закрыты и влиты в `main` (PR #50)**, включая частичную
+Фазу 9: история/тики (RQ_MAIN 0x5a), RQ_TRANSACT, заявки/стопы/сделки/позиции/лимиты/портфели,
+margin (точная формула maxbuy/maxsell), новости/сообщения/change_pass, опционы, РПС/РЕПО; `native.Connector`
+— **45/45 команд**, `server.Backend dll|native` без Wine, `tools/native-soak` (short live-soak PASS:
+UnknownRecords=0, RSS стабилен), coverage-матрица. S-серия read-only на проде, демо-торговый цикл
+(neworder/cancelorder payloads S; активных заявок не осталось). Открытые внешние блокеры: RE-4 live
+(`connected=error`/duplicate login), options S (лимит сессий), full-day soak; I: makeordown/112,
+permissions/rates, RPS records, typed portfolio API. Сводки — `docs/deepseek/task-index.md` §14–§17.
 
 ## 2. Обязательные скиллы
 
@@ -369,12 +378,12 @@ RE-процедуры доступны или фикстуры уже сняты
 
 ## 10. Что делать прямо сейчас (стартовый порядок)
 
-1. **Фазы 0–2 закрыты** (задачи 1–12; ветка `plan/native-client`; Фазы 0–1 влиты в `main`, PR #47/#48).
-   Текущая — **Фаза 3 (задачи 13–14)**: история `<candles>` (RQ_HISTORY_EXT) и тики `<ticks>`
-   (RQ_SUBSCRIBE_TICKS; живые S-фикстуры — основная сессия 5 ноября после 10:00 МСК). Порядок —
-   полоса `native/xmlcompat/render.go`/`native/connector.go` (по одной карточке). RE-1…RE-4 доступны:
-   Ghidra-проект — `${TMPDIR:-/tmp}/txc-ghproj`, секреты — `~/re/demo.env`, согласие пользователя на
-   Wine+демо-сервер получено (торговые команды — только по отдельному согласию).
+1. **Фазы 0–8 закрыты** (задачи 1–28; Фазы 0–2 влиты PR #47/#48, Фазы 3–8 + частичная 9 — PR #50).
+   **Phase 9 — частично** (T29/T30): 45/45 команд, native backend без Wine, coverage, short live-soak PASS.
+   Остались внешние блокеры (RE-4 live `connected=error`, options S, full-day soak) и I-пункты
+   (makeordown/112, permissions/rates, RPS records, typed portfolio API) — см. task-index §17.
+   RE-1…RE-4 доступны: Ghidra-проект — `${TMPDIR:-/tmp}/txc-ghproj`, секреты — `~/re/demo.env`,
+   согласие пользователя на Wine+демо получено (торговые команды — только по отдельному согласию).
 2. Дальше — группы из [docs/deepseek/task-index.md](docs/deepseek/task-index.md) §6. Реальный
    параллелизм ограничен общими файлами: **полоса `native/xmlcompat/render.go` и `native/connector.go`
    (13 задач фаз 1–8) идёт строго по одной карточке**. Параллельно с ней можно вести только задачи,

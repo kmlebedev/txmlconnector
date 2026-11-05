@@ -812,3 +812,34 @@ docs/alltrades.md и др.); в истории git значение остаёт
 **T30 soak:** short live-run на demo.env PASS (`UnknownRecords=0`, `Duplicates=0`, `recoveries=0`,
 RSS 30 MiB, `maxGap` 662 мс, 5 мин, 2222–2393 polls, 5946–7523 trades; exit 0) — `820df86`.
 Full-day soak (10:00–23:50) в этой сессии не выполнялся — ограничение, зафиксировано.
+
+---
+
+## 17. Итог: Фазы 3–8 + частичная 9 влиты в `main` (2026-11-05)
+
+**PR #50** (`0f12a65..eb4d126`, merge-коммит `eb4d126`) влил в `main` Фазы 3–8 (задачи 13–28) и
+частичную Фазу 9 (T29/T30). Все карточки доски закрыты; ветка `plan/native-client` синхронизирована.
+
+**Состояние:**
+- `native.Connector` — **45/45 команд** (pending пуст), `server.Backend dll|native` без Wine,
+  `TC_BACKEND=native make server`; матрица/ошибки/set_csp/authenticate — `docs/protocol/{coverage,errors,commands}.md`.
+- S-серия read-only на проде: news (`<news_header>/<news_body>`), тики (RQ_MAIN `0x5a`), лимиты
+  (`<clientlimits>`), портфели (local render); демо-торговый цикл: payloads `neworder`/`cancelorder`/`moveorder`
+  (S, активных заявок не осталось); live-фиксы: статус-зависимые тела заявок + `R_RES 0x0f`.
+- **Live soak на демо PASS**: 5 мин, `UnknownRecords=0`, `Duplicates=0`, `recoveries=0`, RSS ~30 MiB,
+  `maxGap` 662 мс, exit 0 (полный день 10:00–23:50 не выполнялся — ограничение).
+- Прод-хост в tracked-файлах заменён плейсхолдером `transaq.example`; в git-истории значение остаётся
+  (как и UID — по решению пользователя историю не переписываем).
+
+**Оставшиеся внешние блокеры/ограничения (не код):**
+1. **RE-4 live** (native gRPC): direct `Client.Dial` OK, raw backend + connect XML даёт `connected=true`,
+   тест `TCClient` на testserver проходит; на живом демо/проде — `connected=error`/duplicate login
+   (серверная занятость сессии). Фикс live-load уже сделан; нужна свободная серверная сессия.
+2. **Options S** — на проде первый прогон оборвался, затем `connected=error` (лимит логинов); формы D/I,
+   нужна новая сессия.
+3. **Full-day soak** — не выполнялся (нужен длительный календарный прогон).
+4. **I-пункты:** `makeordown`/`RQ_MAKE_COND_OWN 112`, `permissions/rates` (`FUN_18001a700`),
+   RPS records/NegDeal/Report (не в Render), typed portfolio API, RQ_FORTS_FIRM_MONEY 47.
+
+**Проверки на `eb4d126`:** `make verify`/race, `server_build`/`queues_build` — зелёные;
+`check_env.sh --full` — окружение пригодно; независимые ревью (3 итерации) — P1/P2 исправлены.
