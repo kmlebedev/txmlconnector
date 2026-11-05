@@ -1,0 +1,10 @@
+{
+  "indicators": {
+    "rsi": {"kind": "rsi_wilder", "period": 14, "scale": 0.01},
+    "sma200": {"kind": "sma", "period": 200}
+  },
+  "entry": [{"left": "rsi", "op": "<", "right": "0.2"}],
+  "exit": [{"left": "rsi", "op": ">", "right": "0.8"}],
+  "filters": [{"left": "close", "op": ">", "right": "sma200"}],
+  "side": "long"
+}

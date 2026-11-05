@@ -394,7 +394,7 @@ func toolMessageContent(call ToolCall) string {
 // toolResultForLLM compacts tool results sent back to the model.
 func toolResultForLLM(name string, result any) any {
 	switch name {
-	case "run_backtest":
+	case "run_backtest", toolNameBacktestRules:
 		if res, ok := result.(backtest.Result); ok {
 			return compactBacktest(res)
 		}
