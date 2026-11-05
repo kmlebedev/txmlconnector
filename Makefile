@@ -16,7 +16,7 @@ STAGING_BIN         ?= bin/server.exe
 STAGING_REMOTE_BIN  ?= $(STAGING_BIN_DIR)/txmlconnector-server.exe
 STAGING_UNIT_TMPL   ?= deploy/txmlconnector-server.service
 
-.PHONY: compile test vet verify server_build server queues_build queues client tgbot \
+.PHONY: compile test vet verify terminal terminal_dev server_build server queues_build queues client tgbot \
 	cabi cabi-so cabi-dylib cabi-zig cabi-test cabi-live-test cabi-conformance \
 	staging-precheck staging-prepare deploy-staging deploy-staging-binary \
 	deploy-staging-dll deploy-staging-unit deploy-staging-smoke \
@@ -76,6 +76,13 @@ tgbot: ## Build and run telegram bot app.
 	mkdir -p bin
 	go build -ldflags "-s -w" -o bin/tgbot ./examples/telegram-bot
 	bin/tgbot
+
+terminal: ## Build the native AI trading terminal (offline demo: bin/terminal -mode offline).
+	mkdir -p bin
+	$(VERIFY_GOCACHE) go build -ldflags "-s -w" -o bin/terminal ./cmd/terminal
+
+terminal_dev: ## Run the AI trading terminal from source (offline seed; see docs/ai-terminal/README.md).
+	$(VERIFY_GOCACHE) go run ./cmd/terminal
 
 build:
 	docker build --no-cache -t kmlebedev/txmlconnector:local -f docker/Dockerfile.go_build .

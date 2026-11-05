@@ -47,6 +47,28 @@ err = client.Run(ctx, native.RunOptions{RqDelay: 100 * time.Millisecond}, func(e
 })
 ```
 
+## AI-терминал (нативный, без DLL) — `bin/terminal`
+
+![AI Terminal — основной экран](docs/ai-terminal/screenshot-main.png)
+
+Терминал можно встроить в интерфейс DeepSeek Harness как основную панель — плагин
+[`dsh-ai-terminal`](dsh-ai-terminal/README.md) добавляет иконку в sidebar и проксирует терминал под
+origin Harness (`/ai-terminal/`).
+
+`cmd/terminal` — самодостаточный биржевой терминал-аналог Finam поверх `native.Client`:
+список инструментов, свечной график, стакан, портфель/заявки, тикет, а также встроенный AI-агент,
+который **без MCP** вызывает инструменты терминала (реальный бэктест на истории котировок,
+технические подсказки, бумажные заявки) и умеет автономно вести стратегию на бумажном счёте.
+
+```bash
+make terminal && ./bin/terminal -mode offline   # http://127.0.0.1:8090, без сети и ключей
+```
+
+Офлайн-режим работает на встроенном снапшоте реальных данных демо-сервера TRANSAQ; live-режим
+подключается к TranSAQ/Finam через native-клиент (`TRANSAQ_ADDR/TRANSAQ_LOGIN/TRANSAQ_PASSWORD`).
+Подробности, скриншоты, LLM-настройка и ограничения — [docs/ai-terminal/README.md](docs/ai-terminal/README.md),
+контракты — [docs/ai-terminal/ARCHITECTURE.md](docs/ai-terminal/ARCHITECTURE.md).
+
 `Run` сам опрашивает RQ_MAIN, восстанавливает соединение после обрыва
 (`connected="true" recover="true"`) и отдаёт `model.UnknownRecord`, если
 встретил неизвестную запись. Долгий read-only soak (20 валидных бумаг TQBR, Stats/RSS/latency раз в 5 минут) —

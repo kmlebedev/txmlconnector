@@ -275,3 +275,42 @@ func readPlainText(t *testing.T, name string) string {
 	}
 	return string(raw)
 }
+
+// TestCandlesTimeUnitFollowsPeriod pins the P1 fix of the live demo run of
+// 05.11.2026: the wire time of a candle record is expressed in units of the
+// candle period, not always in Unix minutes. With period kind 2 (300 s) the
+// absolute value 5979680 is 05.11.2026 18:40 MSK, not a 1981 date; the 1-minute
+// fixtures keep matching Unix minutes because their period is 60 s.
+func TestCandlesTimeUnitFollowsPeriod(t *testing.T) {
+	payload := candleRecord(t, 26, 37, 2, 0, []records.Candle{
+		{Time: 5979680, Open: 2932200}, // newest: 18:40 MSK 05.11.2026
+		{Time: -1, Open: 2931300},      // 18:35 MSK
+	})
+	recs, err := records.Records(payload)
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+	part, err := records.ParseCandles(recs[0].Body)
+	if err != nil {
+		t.Fatalf("ParseCandles: %v", err)
+	}
+	catalog := oracle.LoadCatalog(t, "main1-demo.hex.gz")
+	bias := -180 * time.Minute
+	ev := part.Event(catalog, bias)
+	if len(ev.Items) != 2 {
+		t.Fatalf("items = %d, want 2", len(ev.Items))
+	}
+	if got := ev.Items[0].Time.UTC().Format("2006-01-02 15:04"); got != "2026-11-05 15:35" {
+		t.Fatalf("first candle = %s, want 2026-11-05 15:35Z (18:35 MSK)", got)
+	}
+	if got := ev.Items[1].Time.UTC().Format("2006-01-02 15:04"); got != "2026-11-05 15:40" {
+		t.Fatalf("last candle = %s, want 2026-11-05 15:40Z (18:40 MSK)", got)
+	}
+	got, ok := xmlcompat.Render(catalog, &ev, xmlcompat.Options{})
+	if !ok {
+		t.Fatal("no XML form")
+	}
+	if !strings.Contains(got, `date="05.11.2026 18:40:00"`) {
+		t.Fatalf("XML must render 05.11.2026 18:40:00, got %s", got)
+	}
+}

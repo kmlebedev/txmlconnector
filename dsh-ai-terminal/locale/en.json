@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "AI terminal",
+    "description": "Native MOEX/TRANSAQ trading terminal with an in-process AI agent: charts, order book, paper portfolio and autonomous strategy backtests, embedded as a main panel."
+  }
+}

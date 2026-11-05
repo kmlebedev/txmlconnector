@@ -11,11 +11,13 @@ import (
 // TagCandles is R_HISTORY (0x09), the <candles> data of gethistorydata.
 const TagCandles byte = 0x09
 
-// Candle is one wire candle: 7 packed ints (time delta in minutes, open,
-// close/high/low deltas to open, unknown field 6, volume), plus an extra value
-// per candle when the record flag is set (openinterest candidate, I).
+// Candle is one wire candle: 7 packed ints (time, open, close/high/low deltas to
+// open, unknown field 6, volume), plus an extra value per candle when the record
+// flag is set (openinterest candidate, I). The time is expressed in units of the
+// candle period (see Candles.Event): for 1-minute data that is Unix minutes, for
+// a 5-minute series it is 5-minute units, and so on.
 type Candle struct {
-	Time   int64 // Unix minutes (absolute for the first candle, delta afterwards)
+	Time   int64 // absolute for the first candle, a same-unit delta afterwards
 	Open   int64
 	Close  int64
 	High   int64
@@ -93,8 +95,9 @@ func ParseCandles(body []byte) (Candles, error) {
 }
 
 // Event builds the typed <candles> event: prices are absolute (open, open+deltas
-// for close/high/low) with the mode decimals, time is the accumulated Unix
-// minute, and the items are reversed to the DLL chronological order.
+// for close/high/low) with the mode decimals, time is the accumulated count of
+// candle periods (period seconds from <candlekinds>, 60 s fallback) converted to
+// a UTC instant, and the items are reversed to the DLL chronological order.
 func (c Candles) Event(cat *Catalog, bias time.Duration) model.Candles {
 	ev := model.Candles{SecID: c.SecID, Period: int(c.Period), Status: c.Status, ZoneBias: bias}
 	var decimals uint8
@@ -112,15 +115,30 @@ func (c Candles) Event(cat *Catalog, bias time.Duration) model.Candles {
 			}
 		}
 	}
-	minutes := int64(0)
+	// The wire time is in units of the candle period, not always minutes: the
+	// 1-minute fixtures match minutes because their period is 60 s. The demo's
+	// 5-minute history confirms the rule (raw*300 lands on the trade date) and
+	// docs/protocol/history.md records the evidence.
+	periodSeconds := int64(60)
+	if cat != nil {
+		if startup := cat.Startup(); startup != nil {
+			for _, kind := range startup.CandleKinds {
+				if int(kind.ID) == int(c.Period) && kind.Period > 0 {
+					periodSeconds = int64(kind.Period)
+					break
+				}
+			}
+		}
+	}
+	units := int64(0)
 	for i, item := range c.Items {
 		if i == 0 {
-			minutes = item.Time
+			units = item.Time
 		} else {
-			minutes += item.Time
+			units += item.Time
 		}
 		candle := model.Candle{
-			Time:   time.Unix(minutes*60, 0).UTC().Add(bias),
+			Time:   time.Unix(units*periodSeconds, 0).UTC().Add(bias),
 			Open:   model.Decimal{Units: item.Open, Scale: decimals},
 			Close:  model.Decimal{Units: item.Open + item.Close, Scale: decimals},
 			High:   model.Decimal{Units: item.Open + item.High, Scale: decimals},
