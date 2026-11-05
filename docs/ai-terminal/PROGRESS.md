@@ -42,3 +42,16 @@
 
 - Живые проверки Step 5 задач 11/12/22/24/26 требуют согласия пользователя и окна демо-сервера/ClickHouse.
 - PR фаз: план требует отдельный PR на фазу; push/PR выполняются только по команде пользователя.
+
+## Фаза B (в работе)
+
+- T6 память диалога — commit `d334f6e`, docs `2342aae`; карточка закрыта. JS-diff ревью Qwen 3.8 Flash (CHANGES): P2/P3 отклонены — `docs/ai-terminal/reviews/2026-11-06-t6-t24-frontend-qwen.md`.
+- T7 предложения-подтверждения — в работе (go-agent), после неё T8.
+
+## Фаза D/E (в работе)
+
+- T13 винтажи — в работе (go-native).
+- T17 отпечатки роботов — в работе (go-replay).
+- T15 walk-forward — в работе (go-rules, без vintage-части до T13).
+- T24 принята: commit `e55fded`, Qwen-ревью chart.js — все P1 отклонены триажем Lead (см. reviews).
+- T9-prep (docs/ai-terminal/dsh-integration.md) — в работе (go-api).
