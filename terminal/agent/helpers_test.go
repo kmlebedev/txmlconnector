@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -122,6 +123,28 @@ func syntheticBars(n int, start, step float64) []backtest.Bar {
 			High:   price + step,
 			Low:    price - step,
 			Close:  price + step/2,
+			Volume: int64(1000 + i),
+		}
+	}
+	return bars
+}
+
+// oscillatingBars builds a sinusoid OHLCV series (5m spacing) so that real
+// strategies actually produce round trips (monotonic data yields no closed
+// trades in the frozen backtest semantics).
+func oscillatingBars(n int) []backtest.Bar {
+	bars := make([]backtest.Bar, n)
+	for i := range bars {
+		open := 100 + 5*math.Sin(float64(i)*2*math.Pi/40)
+		closes := 100 + 5*math.Sin(float64(i+1)*2*math.Pi/40)
+		high := math.Max(open, closes) + 0.5
+		low := math.Min(open, closes) - 0.5
+		bars[i] = backtest.Bar{
+			Time:   testNow.Add(time.Duration(i) * 5 * time.Minute),
+			Open:   open,
+			High:   high,
+			Low:    low,
+			Close:  closes,
 			Volume: int64(1000 + i),
 		}
 	}
@@ -261,6 +284,12 @@ func fakeBacktestRun(req backtest.Request) (backtest.Result, error) {
 	if !ok {
 		return backtest.Result{}, fmt.Errorf("fake backtest: unknown strategy %q", req.Strategy)
 	}
+	return makeFakeResult(req, 3, totalReturn, 1.2, -2.4), nil
+}
+
+// makeFakeResult builds a deterministic backtest.Result for the seams. A
+// trades=0 result exercises the "strategy produced no signals" paths.
+func makeFakeResult(req backtest.Request, trades int, totalReturn, sharpe, maxDrawdown float64) backtest.Result {
 	initial := req.InitialCash
 	if initial <= 0 {
 		initial = defaultBacktestCash
@@ -274,7 +303,7 @@ func fakeBacktestRun(req backtest.Request) (backtest.Result, error) {
 		from = req.Bars[0].Time
 		to = req.Bars[len(req.Bars)-1].Time
 	}
-	return backtest.Result{
+	res := backtest.Result{
 		Symbol:    req.Symbol,
 		Strategy:  req.Strategy,
 		PeriodSec: req.PeriodSec,
@@ -284,13 +313,13 @@ func fakeBacktestRun(req backtest.Request) (backtest.Result, error) {
 			FinalEquity:        initial * (1 + totalReturn/100),
 			TotalReturnPct:     totalReturn,
 			BenchmarkReturnPct: 1.5,
-			MaxDrawdownPct:     -2.4,
-			Sharpe:             1.2,
+			MaxDrawdownPct:     maxDrawdown,
+			Sharpe:             sharpe,
 			WinRatePct:         60,
 			ProfitFactor:       1.5,
 			AvgTradePct:        1.1,
 			ExposurePct:        45,
-			Trades:             3,
+			Trades:             trades,
 			Bars:               len(req.Bars),
 			From:               from,
 			To:                 to,
@@ -299,12 +328,15 @@ func fakeBacktestRun(req backtest.Request) (backtest.Result, error) {
 			{Time: from, Equity: initial, Benchmark: initial},
 			{Time: to, Equity: initial * (1 + totalReturn/100), Benchmark: initial * 1.015},
 		},
-		Trades: []backtest.Trade{{
+	}
+	if trades > 0 {
+		res.Trades = []backtest.Trade{{
 			EntryTime: from, ExitTime: to, Side: "long",
 			EntryPrice: 100, ExitPrice: 101, Qty: 10,
 			PnL: 10, PnLPct: 1, BarsHeld: 2, Reason: "signal",
-		}},
-	}, nil
+		}}
+	}
+	return res
 }
 
 // scriptedStrategy returns predetermined actions per bar index.

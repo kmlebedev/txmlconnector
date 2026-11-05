@@ -68,6 +68,23 @@ func (e *Engine) localAnalyst(ctx context.Context, message string) (ChatResponse
 		return resp, nil
 	}
 	compare, _ := compareCall.Result.(compareResult)
+	if intent.Strategy == "" && compare.Best.Strategy == "" {
+		// Every strategy made zero trades: zero Sharpe/drawdown is meaningless,
+		// so there is no "best" strategy and no autonomy to start.
+		barsCount := 0
+		if len(compare.Ranked) > 0 {
+			barsCount = compare.Ranked[0].Metrics.Bars
+		}
+		label := intent.Symbol
+		if name := instrumentName(e.data.Instruments(), intent.Symbol); name != "" {
+			label = name + " (" + intent.Symbol + ")"
+		}
+		resp.Answer = fmt.Sprintf("%s, период %s, %d баров: ни одна стратегия не дала сделок — сигналов нет. "+
+			"Запускать автоторговлю не рекомендую: без сделок стратегию нельзя оценить. Не является инвестиционной рекомендацией.",
+			label, periodLabel(intent.PeriodSec), barsCount)
+		resp.ElapsedMs = e.now().Sub(started).Milliseconds()
+		return resp, nil
+	}
 	chosen := intent.Strategy
 	if chosen == "" {
 		chosen = compare.Best.Strategy
@@ -121,11 +138,12 @@ func (e *Engine) localAnalyst(ctx context.Context, message string) (ChatResponse
 		return resp, nil
 	}
 
-	// 4) "запусти/авто/торгуй" — start the paper autonomy on the tested strategy.
+	// 4) "запусти/стартуй/торгуй" — start the paper autonomy on the tested
+	// strategy, but never on a strategy that produced no trades.
 	var autonomy *AutonomyStatus
 	var autonomyErr string
 	autoStarted := false
-	if intent.Start {
+	if intent.Start && result.Metrics.Trades > 0 {
 		autoArgs := map[string]any{
 			"symbol":    intent.Symbol,
 			"periodSec": intent.PeriodSec,
@@ -169,7 +187,7 @@ func (e *Engine) parseIntent(message string) (analystIntent, error) {
 	intent := analystIntent{
 		Symbol:    e.matchInstrument(text, symbol),
 		PeriodSec: e.cfg.DefaultPeriodSec,
-		Count:     defaultMaxBars,
+		Count:     maxHistoryBars,
 	}
 	if period, ok := parsePeriodSec(text); ok {
 		intent.PeriodSec = period
@@ -179,10 +197,32 @@ func (e *Engine) parseIntent(message string) (analystIntent, error) {
 		intent.Capital = capital
 	}
 	intent.Strategy = parseStrategy(text)
+
+	// Autonomy is started only on an explicit imperative ("запусти",
+	// "запускай", "стартуй", "включи автоторговлю", "торгуй", ...). Questions
+	// ("стоит ли запускать", "запускать?"), negations ("не запускай") and
+	// hypotheticals must never start a real paper runner.
 	stopIntent := hasAny(text, "останов", "выключи", "stop auto", "stop_autonomy", "halt", "стоп авто")
-	startIntent := hasAny(text, "запусти", "запуск", "запустить", "торгуй", "торговлю", "start", "autotrade", "trade", "робот")
+	if hasAny(text, "не останов", "не выключай", "не стоп") {
+		stopIntent = false
+	}
+	startIntent := hasAny(text,
+		"запусти", "запускай", "стартуй", "стартани", "стартуем",
+		"включи автоторг", "включай автоторг", "включи торговлю",
+		"торгуй", "начни торговать", "начинай торговать",
+		"start trading", "start autonomy", "start auto", "run autonomy",
+	)
+	noStart := hasAny(text,
+		"не запускай", "не запускать", "не надо запускать", "не стоит запускать",
+		"не включай", "не включать", "не стартуй", "не начинай", "не торгуй",
+		"стоит ли", "запускать ли", "ли запускать", "запускать?",
+		"можно ли", "нужно ли", "надо ли", "should i", "should we",
+	) || strings.Contains(text, "?")
+	if noStart {
+		startIntent = false
+	}
 	intent.Stop = stopIntent
-	intent.Start = !stopIntent && (startIntent || hasAny(text, "авто", "auto"))
+	intent.Start = !stopIntent && startIntent
 	return intent, nil
 }
 
@@ -385,16 +425,24 @@ func (e *Engine) formatAnalystAnswer(intent analystIntent, strategy string, resu
 	fmt.Fprintf(&b, "Риски: просадка до %s%%, комиссия %s б.п., данные реальные, но не гарантируют полноту; "+
 		"прошлая доходность не гарантирует будущую. Не является инвестиционной рекомендацией.\n",
 		pct(m.MaxDrawdownPct), pct(e.feeBps()))
+	if m.Trades <= 0 {
+		b.WriteString("Стратегия не совершила сделок на этих данных — её результат не показателен.\n")
+	}
 
-	if autoStarted && autonomy != nil {
+	switch {
+	case autoStarted && autonomy != nil:
 		fmt.Fprintf(&b, "\nАвтономия запущена на бумажном счёте: %s, стратегия %s, бюджет %s ₽, скорость %.0f бар/с.",
 			intent.Symbol, strategy, money(autonomy.Config.Budget), autonomy.Config.Speed)
 		b.WriteString(" Остановить: запрос «останови автоторговлю» или POST /api/agent/autonomy {\"action\":\"stop\"}.")
-	} else if autonomyErr != "" {
+	case intent.Start && m.Trades <= 0:
+		b.WriteString("\nАвтономию не запускаю: на этих данных стратегия не дала сделок — запуск не рекомендую.")
+	case strings.Contains(autonomyErr, "already running"):
+		b.WriteString("\nАвтономия уже запущена — повторный запуск не требуется.")
+	case autonomyErr != "":
 		fmt.Fprintf(&b, "\nАвтономию запустить не удалось: %s", autonomyErr)
-	} else if intent.Start {
+	case intent.Start:
 		b.WriteString("\nАвтономию запустить не удалось.")
-	} else {
+	default:
 		b.WriteString("\nЧтобы запустить автоторговлю на бумажном счёте, напишите «запусти».")
 	}
 	return b.String()

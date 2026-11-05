@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 )
@@ -293,22 +292,14 @@ func parseCountRange(text string, periodSec int) int {
 		if periodSec == 86400 {
 			return 365
 		}
-		return defaultMaxBars
+		return maxHistoryBars
 	}
 	count := days * 86400 / periodSec
 	if count < 20 {
 		count = 20
 	}
-	if count > defaultMaxBars {
-		count = defaultMaxBars
+	if count > maxBacktestBars {
+		count = maxBacktestBars
 	}
 	return count
-}
-
-// asOfTime is a small helper for logs: nil time is replaced with now.
-func asOfTime(t time.Time, now time.Time) time.Time {
-	if t.IsZero() {
-		return now
-	}
-	return t
 }

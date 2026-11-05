@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,75 @@ func TestAutonomyReplayPnL(t *testing.T) {
 	}
 	if entryPrice != 103 {
 		t.Errorf("entry was not filled at the next bar open (103 ₽); log: %+v", status.Log)
+	}
+}
+
+// TestAutonomySynchronousStartStopStatus is the regression test for the
+// "lastActionAt = 0001-01-01" defect: StartAutonomy must expose Running,
+// StartedAt, LastActionAt and the start log entry synchronously before it
+// returns; StopAutonomy must set LastActionAt to the stop instant and add the
+// stop log entry before returning.
+func TestAutonomySynchronousStartStopStatus(t *testing.T) {
+	now := testNow
+	e := newTestEngineWith(t, Config{
+		DefaultSymbol: "TQBR:SBER",
+		Now:           func() time.Time { return now },
+	}, newFakeDataSource(), newFakeBroker(1_000_000))
+	e.stepDelay = func(float64) time.Duration { return 20 * time.Millisecond }
+
+	if err := e.StartAutonomy(context.Background(), AutonomyConfig{
+		Symbol: "TQBR:SBER", PeriodSec: 300, Strategy: "sma_cross",
+	}); err != nil {
+		t.Fatalf("StartAutonomy: %v", err)
+	}
+	// No polling: the status is filled synchronously by StartAutonomy.
+	started := e.Status().Autonomy
+	if !started.Running {
+		t.Error("Running = false right after StartAutonomy")
+	}
+	if !started.StartedAt.Equal(testNow) {
+		t.Errorf("StartedAt = %v, want %v", started.StartedAt, testNow)
+	}
+	if !started.LastActionAt.Equal(testNow) {
+		t.Errorf("LastActionAt = %v, want the start time %v", started.LastActionAt, testNow)
+	}
+	if len(started.Log) != 1 || started.Log[0].Kind != "start" {
+		t.Errorf("log right after StartAutonomy = %+v, want one start entry", started.Log)
+	}
+
+	now = now.Add(time.Minute)
+	if err := e.StopAutonomy(); err != nil {
+		t.Fatalf("StopAutonomy: %v", err)
+	}
+	stopped := e.Status().Autonomy
+	if stopped.Running {
+		t.Error("Running = true after StopAutonomy")
+	}
+	if !stopped.StartedAt.Equal(testNow) {
+		t.Errorf("StartedAt changed to %v on stop", stopped.StartedAt)
+	}
+	if !stopped.LastActionAt.Equal(now) {
+		t.Errorf("LastActionAt = %v, want the stop time %v", stopped.LastActionAt, now)
+	}
+	if last := stopped.Log[len(stopped.Log)-1]; last.Kind != "stop" {
+		t.Errorf("last log entry = %+v, want stop", last)
+	}
+}
+
+// TestAutonomyAlreadyRunningExportedError checks the exported 409 sentinel.
+func TestAutonomyAlreadyRunningExportedError(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	e.stepDelay = func(float64) time.Duration { return 10 * time.Millisecond }
+	cfg := AutonomyConfig{Symbol: "TQBR:SBER", PeriodSec: 300, Strategy: "sma_cross"}
+	if err := e.StartAutonomy(context.Background(), cfg); err != nil {
+		t.Fatalf("StartAutonomy: %v", err)
+	}
+	err := e.StartAutonomy(context.Background(), cfg)
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("second StartAutonomy error = %v, want ErrAlreadyRunning", err)
+	}
+	if err := e.StopAutonomy(); err != nil {
+		t.Fatalf("StopAutonomy: %v", err)
 	}
 }
 
@@ -222,8 +292,8 @@ func TestAutonomyRepeatedStartRejected(t *testing.T) {
 	}
 	time.Sleep(10 * time.Millisecond)
 	err := e.StartAutonomy(context.Background(), cfg)
-	if err == nil || !strings.Contains(err.Error(), "already running") {
-		t.Fatalf("second StartAutonomy error = %v, want already running", err)
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("second StartAutonomy error = %v, want ErrAlreadyRunning", err)
 	}
 	if err := e.StopAutonomy(); err != nil {
 		t.Fatalf("StopAutonomy: %v", err)

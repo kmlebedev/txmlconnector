@@ -10,6 +10,10 @@ import (
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 )
 
+// ErrAlreadyRunning is returned by StartAutonomy when a paper runner is
+// already active. It is exported so the HTTP API can map it to 409 conflict.
+var ErrAlreadyRunning = errors.New("agent: autonomy is already running")
+
 // autonomyRun is the mutable state of one paper replay run. The status is
 // guarded by mu so Status()/snapshot() are safe while the replay goroutine
 // updates PnL, trades and the log ring.
@@ -25,10 +29,11 @@ type autonomyRun struct {
 func newAutonomyRun(cfg AutonomyConfig, startedAt time.Time) *autonomyRun {
 	return &autonomyRun{
 		status: AutonomyStatus{
-			Running:   true,
-			Config:    cfg,
-			StartedAt: startedAt,
-			Log:       []LogEntry{},
+			Running:      true,
+			Config:       cfg,
+			StartedAt:    startedAt,
+			LastActionAt: startedAt,
+			Log:          []LogEntry{},
 		},
 		stop: make(chan struct{}),
 		done: make(chan struct{}),
@@ -77,16 +82,37 @@ func (e *Engine) StartAutonomy(ctx context.Context, cfg AutonomyConfig) error {
 	if err != nil {
 		return err
 	}
-	run := newAutonomyRun(cfg, e.now())
+	startedAt := e.now()
+	run := newAutonomyRun(cfg, startedAt)
 
 	e.mu.Lock()
 	prev := e.autonomy
 	if prev != nil && prev.isRunning() {
 		e.mu.Unlock()
-		return errors.New("agent: autonomy is already running")
+		return ErrAlreadyRunning
 	}
 	e.autonomy = run
 	e.mu.Unlock()
+
+	// Seed Running/StartedAt/LastActionAt and the "start" log entry
+	// synchronously: the API and the UI must see a started runner immediately
+	// after this method returns, not only when the replay goroutine wakes up.
+	startEntry := LogEntry{
+		Time: startedAt,
+		Kind: "start",
+		Message: fmt.Sprintf("автономия запущена: %s, стратегия %s, период %s, бюджет %.0f ₽, скорость %.0f бар/с",
+			cfg.Symbol, cfg.Strategy, periodLabel(cfg.PeriodSec), cfg.Budget, cfg.Speed),
+		Data: map[string]any{"strategy": cfg.Strategy, "params": cfg.Params, "budget": cfg.Budget, "speed": cfg.Speed},
+	}
+	run.appendLog(startEntry)
+	e.publish(Event{Type: "log", Data: startEntry})
+	e.publish(Event{Type: "autonomy", Data: autonomyTick{
+		Running:   true,
+		Symbol:    cfg.Symbol,
+		PeriodSec: cfg.PeriodSec,
+		Time:      startedAt,
+		Price:     bars[0].Close,
+	}})
 
 	go e.runAutonomy(run, bars, strategy)
 	return nil
@@ -185,14 +211,6 @@ func (e *Engine) runAutonomy(run *autonomyRun, bars []backtest.Bar, strategy bac
 
 	stopKind := "stop"
 	stopMessage := "replay исторических баров завершён"
-
-	e.logAutonomy(run, LogEntry{
-		Time: e.now(),
-		Kind: "start",
-		Message: fmt.Sprintf("автономия запущена: %s, стратегия %s, период %s, бюджет %.0f ₽, скорость %.0f бар/с",
-			cfg.Symbol, cfg.Strategy, periodLabel(cfg.PeriodSec), cfg.Budget, cfg.Speed),
-		Data: map[string]any{"strategy": cfg.Strategy, "params": cfg.Params, "budget": cfg.Budget, "speed": cfg.Speed},
-	})
 
 replay:
 	for i := 0; i < len(bars); i++ {
@@ -319,7 +337,9 @@ replay:
 		st.PnL = pnl
 		st.PnLPct = pnlPct
 		st.Trades = trades
-		st.LastActionAt = asOfTime(st.LastActionAt, e.now())
+		// The stop/finish instant is an action too: the UI shows it in
+		// lastActionAt right after StopAutonomy/autostop returns.
+		st.LastActionAt = e.now()
 	})
 	e.logAutonomy(run, LogEntry{Time: e.now(), Kind: stopKind, Message: stopMessage,
 		Data: map[string]any{"pnl": pnl, "pnlPct": pnlPct, "trades": trades, "cash": finalEquity}})

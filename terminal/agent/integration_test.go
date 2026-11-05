@@ -14,6 +14,8 @@ import (
 // compare_strategies and run_backtest through the real engine.
 func TestRealBacktestIntegration(t *testing.T) {
 	data := newFakeDataSource()
+	// Real strategies need price reversals to close round trips.
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{300: oscillatingBars(300)}
 	broker := newFakeBroker(1_000_000)
 	e, err := New(Config{
 		DefaultSymbol: "TQBR:SBER",
@@ -35,7 +37,7 @@ func TestRealBacktestIntegration(t *testing.T) {
 	}
 	btCall, ok := findToolCall(resp.ToolCalls, "run_backtest")
 	if !ok || btCall.Error != "" {
-		t.Fatalf("run_backtest = %+v", btCall)
+		t.Fatalf("run_backtest = %+v (answer=%q)", btCall, resp.Answer)
 	}
 	result, ok := btCall.Result.(backtest.Result)
 	if !ok {
