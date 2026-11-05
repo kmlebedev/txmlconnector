@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -127,6 +128,151 @@ func TestAutonomyAlreadyRunningExportedError(t *testing.T) {
 	}
 	if err := e.StopAutonomy(); err != nil {
 		t.Fatalf("StopAutonomy: %v", err)
+	}
+}
+
+// TestAutonomyDailyLossFillsAtNextOpen is the P2 regression test: the daily
+// loss decision is taken on the close of bar i, so the position must be closed
+// at open[i+1] (90.50), not at the triggering close (93.30).
+func TestAutonomyDailyLossFillsAtNextOpen(t *testing.T) {
+	e, data, _ := newTestEngine(t)
+	minute := time.Minute
+	bars := []backtest.Bar{
+		{Time: testNow, Open: 100, High: 100.5, Low: 99.5, Close: 100, Volume: 1},
+		{Time: testNow.Add(minute), Open: 100, High: 100.5, Low: 99.5, Close: 100, Volume: 1},
+		{Time: testNow.Add(2 * minute), Open: 100, High: 100.6, Low: 93.0, Close: 93.3, Volume: 1},
+		{Time: testNow.Add(3 * minute), Open: 90.5, High: 91.0, Low: 89.5, Close: 90.0, Volume: 1},
+		{Time: testNow.Add(4 * minute), Open: 90.0, High: 90.5, Low: 89.0, Close: 90.2, Volume: 1},
+	}
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{300: bars}
+	e.newStrategy = strategyScript(map[int]backtest.Action{0: backtest.Buy})
+	if err := e.StartAutonomy(context.Background(), AutonomyConfig{
+		Symbol: "TQBR:SBER", PeriodSec: 300, Strategy: "sma_cross", Speed: 60, Budget: 100_000,
+		StopLossPct: 90, TakeProfitPct: 90, DailyLossPct: 1,
+	}); err != nil {
+		t.Fatalf("StartAutonomy: %v", err)
+	}
+	status := waitAutonomy(t, e)
+	if status.Trades != 1 {
+		t.Errorf("Trades = %d, want 1 autostop exit", status.Trades)
+	}
+	var sellMessage string
+	foundRisk := false
+	for _, entry := range status.Log {
+		if strings.HasPrefix(entry.Message, "продажа") {
+			sellMessage = entry.Message
+		}
+		if entry.Kind == "stopped_by_risk" {
+			foundRisk = true
+		}
+	}
+	if !strings.Contains(sellMessage, "90.50") {
+		t.Errorf("autostop exit = %q, want fill at open of the next bar (90.50)", sellMessage)
+	}
+	if strings.Contains(sellMessage, "93.30") {
+		t.Errorf("autostop exit used the triggering close, not open[i+1]: %q", sellMessage)
+	}
+	if !foundRisk {
+		t.Errorf("no stopped_by_risk entry: %+v", status.Log)
+	}
+}
+
+// TestAutonomyNaturalFinishOpenPositionMTM is the P3 regression test: a
+// position left open at the natural end of the replay is valued
+// mark-to-market (no fictitious closing trade, no extra commission, Trades
+// unchanged).
+func TestAutonomyNaturalFinishOpenPositionMTM(t *testing.T) {
+	e, data, _ := newTestEngine(t)
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{300: syntheticBars(10, 100, 1)}
+	e.newStrategy = strategyScript(map[int]backtest.Action{0: backtest.Buy})
+	if err := e.StartAutonomy(context.Background(), AutonomyConfig{
+		Symbol: "TQBR:SBER", PeriodSec: 300, Strategy: "sma_cross", Speed: 60, Budget: 100_000,
+		StopLossPct: 90, TakeProfitPct: 90, // keep the position open until the replay ends
+	}); err != nil {
+		t.Fatalf("StartAutonomy: %v", err)
+	}
+	status := waitAutonomy(t, e)
+	if status.Trades != 0 {
+		t.Errorf("Trades = %d, want 0 (open position is not a closed round trip)", status.Trades)
+	}
+	if status.PnL <= 0 {
+		t.Errorf("PnL = %v, want a positive mark-to-market value on rising bars", status.PnL)
+	}
+	foundMTM := false
+	for _, entry := range status.Log {
+		if entry.Kind == "fill" {
+			t.Errorf("unexpected fictitious closing trade: %+v", entry)
+		}
+		if entry.Kind == "mark_to_market" {
+			foundMTM = true
+			data, ok := entry.Data.(map[string]any)
+			if !ok {
+				t.Fatalf("mark_to_market data = %T", entry.Data)
+			}
+			if unrealized, ok := data["unrealizedPnl"].(float64); !ok || unrealized <= 0 {
+				t.Errorf("unrealizedPnl = %v, want > 0", data["unrealizedPnl"])
+			}
+		}
+	}
+	if !foundMTM {
+		t.Fatalf("no mark_to_market log entry: %+v", status.Log)
+	}
+}
+
+// TestAutonomyEarlyStopFinalTickTime is the P3 regression test: after a kill
+// switch in the middle of the replay the final SSE tick must carry the time of
+// the last processed bar, not bars[len-1].Time.
+func TestAutonomyEarlyStopFinalTickTime(t *testing.T) {
+	e, data, _ := newTestEngine(t)
+	const totalBars = 60
+	bars := syntheticBars(totalBars, 100, 1)
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{300: bars}
+
+	var mu sync.Mutex
+	var ticks []autonomyTick
+	cancel := e.Subscribe(func(ev Event) {
+		if ev.Type != "autonomy" {
+			return
+		}
+		tick, ok := ev.Data.(autonomyTick)
+		if !ok {
+			return
+		}
+		mu.Lock()
+		ticks = append(ticks, tick)
+		mu.Unlock()
+	})
+	defer cancel()
+
+	e.stepDelay = func(float64) time.Duration { return 30 * time.Millisecond }
+	if err := e.StartAutonomy(context.Background(), AutonomyConfig{
+		Symbol: "TQBR:SBER", PeriodSec: 300, Strategy: "sma_cross", Speed: 60, Budget: 100_000,
+	}); err != nil {
+		t.Fatalf("StartAutonomy: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if err := e.StopAutonomy(); err != nil {
+		t.Fatalf("StopAutonomy: %v", err)
+	}
+
+	mu.Lock()
+	captured := append([]autonomyTick(nil), ticks...)
+	mu.Unlock()
+	var final *autonomyTick
+	for i := range captured {
+		if captured[i].Final {
+			final = &captured[i]
+		}
+	}
+	if final == nil {
+		t.Fatalf("no final autonomy tick in %d events", len(captured))
+	}
+	lastBarTime := bars[len(bars)-1].Time
+	if !final.Time.Before(lastBarTime) {
+		t.Errorf("final tick time = %v, must be before the unprocessed last bar %v", final.Time, lastBarTime)
+	}
+	if final.Time.Before(bars[0].Time) {
+		t.Errorf("final tick time = %v, before the first bar %v", final.Time, bars[0].Time)
 	}
 }
 

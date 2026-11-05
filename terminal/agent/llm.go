@@ -157,7 +157,7 @@ func (e *Engine) chatLLM(ctx context.Context, message string) (ChatResponse, err
 		{Role: "user", Content: message},
 	}
 	tools := e.llmTools()
-	resp := ChatResponse{LLM: true}
+	resp := ChatResponse{LLM: true, ToolCalls: []ToolCall{}, Artifacts: []Artifact{}}
 	answer := ""
 
 	for iteration := 0; iteration < maxToolIterations; iteration++ {

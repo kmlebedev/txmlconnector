@@ -9,6 +9,28 @@ import (
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 )
 
+// TestToolDescriptionsMatchLimits is the P3 regression test: the schema
+// descriptions must match the real bar limits (history 600, backtest/compare
+// up to 5000).
+func TestToolDescriptionsMatchLimits(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	byName := make(map[string]string, len(e.Tools()))
+	for _, tool := range e.Tools() {
+		byName[tool.Name] = string(tool.Input)
+	}
+	for _, name := range []string{"run_backtest", "compare_strategies"} {
+		if !strings.Contains(byName[name], "5000") {
+			t.Errorf("%s schema does not advertise the 5000-bar limit: %s", name, byName[name])
+		}
+		if strings.Contains(byName[name], "максимум 600") {
+			t.Errorf("%s schema still advertises the stale 600-bar limit: %s", name, byName[name])
+		}
+	}
+	if !strings.Contains(byName["get_history"], "600") {
+		t.Errorf("get_history schema lost its 600-bar limit: %s", byName["get_history"])
+	}
+}
+
 // TestToolRunBacktest executes the real (fake-seamed) backtest tool.
 func TestToolRunBacktest(t *testing.T) {
 	e, _, _ := newTestEngine(t)

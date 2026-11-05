@@ -75,7 +75,7 @@ func buildTools() []ToolInfo {
 				"initialCash": numProp("Стартовый капитал, ₽ (по умолчанию 1000000)"),
 				"feeBps":      numProp("Комиссия в базисных пунктах (по умолчанию 5)"),
 				"slippageBps": numProp("Проскальзывание в базисных пунктах (по умолчанию 1)"),
-				"count":       intProp("Сколько последних баров использовать, максимум 600"),
+				"count":       intProp(fmt.Sprintf("Сколько последних баров использовать, максимум %d", maxBacktestBars)),
 			}, "symbol", "strategy"),
 		},
 		{
@@ -85,7 +85,7 @@ func buildTools() []ToolInfo {
 			Input: objSchema(map[string]any{
 				"symbol":    strProp("Тикер инструмента"),
 				"periodSec": intProp("Период свечей в секундах"),
-				"count":     intProp("Сколько последних баров использовать, максимум 600"),
+				"count":     intProp(fmt.Sprintf("Сколько последних баров использовать, максимум %d", maxBacktestBars)),
 			}, "symbol"),
 		},
 		{
