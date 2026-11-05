@@ -71,15 +71,16 @@ func decodeNewsUpload(c *Client, body []byte) ([]model.Event, error) {
 		if parsed.Header != nil {
 			id = parsed.Header.ID
 		}
-		// The DLL drops a body whose header is not in the store
-		// ("Header with id = N not found").
 		if _, ok := c.news[id]; ok {
 			if c.newsBodies == nil {
 				c.newsBodies = map[int64]string{}
 			}
 			c.newsBodies[id] = string(text)
 		}
-		// No <news_body> event: the DLL emitter path is not confirmed (I).
+		// S (production): the body arrives as RQ_MAIN 0x36 flags=2 and is
+		// rendered as <news_body> (the reply RQ_GETNEWS 73 is empty).
+		body := model.NewsBody{ID: id, Text: records.DecodeCP1251(string(text))}
+		events = append(events, &body)
 	}
 	return events, nil
 }
