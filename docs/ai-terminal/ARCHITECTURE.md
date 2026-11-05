@@ -585,7 +585,7 @@ type Artifact struct {
 
 type ChatRequest struct {
 	Message string
-	ConversationID string // итерация 1: не сохраняем историю, поле для UI
+	ConversationID string // диалог; пустой -> сервер генерирует id и возвращает его в ответе
 }
 
 type ChatResponse struct {
@@ -593,6 +593,7 @@ type ChatResponse struct {
 	ToolCalls []ToolCall
 	Artifacts []Artifact
 	LLM bool
+	ConversationID string // id диалога для продолжения (сгенерирован, если запрос был без него)
 	ElapsedMs int64
 }
 
@@ -700,6 +701,13 @@ func (e *Engine) Hints(ctx context.Context, symbol string, periodSec int) (Marke
   автономию на бумажном счёте.
 - Ошибка LLM/сети/таймаута → fallback на локального аналитика, поле `LLM:false`, в ответ не
   возвращать текст ошибки с секретами (`"LLM недоступен: <class>"`).
+- **Память диалога.** История хранится per `conversationId` в bounded in-memory store:
+  LRU на 64 диалога, не более 12 ходов и 64 KiB на диалог. Пустой
+  `ChatRequest.ConversationID` → сервер генерирует id (`crypto/rand`) и возвращает его в
+  `ChatResponse.ConversationID`; UI хранит id и присылает его в следующем запросе. В историю
+  попадают только успешно завершённые ходы; результаты инструментов — только в сжатом виде
+  (`toolResultForLLM`); при вытеснении системный промпт сохраняется, пары
+  `assistant(tool_calls)`/`tool` не разрываются, самый новый ход остаётся всегда.
 - Без env — `LLM.enabled=false`, UI показывает «локальный аналитик».
 
 ### 9.3 Локальный аналитик (offline fallback и детерминированный демо-режим)
@@ -830,7 +838,7 @@ func (s *Server) Handler() http.Handler // mux, обёрнутый в Guard; п�
 | `GET /api/backtest/strategies` | — | `{strategies:[StrategyInfo]}` |
 | `POST /api/backtest` | `{symbol,periodSec,strategy,params?,initialCash?,feeBps?,slippageBps?,count?}` | `{result: backtest.Result}` |
 | `GET /api/agent/tools` | — | `{tools:[{name,title,description,input}]}` |
-| `POST /api/agent/chat` | `{message,conversationId?}` | `ChatResponse` |
+| `POST /api/agent/chat` | `{message,conversationId?}` | `ChatResponse`; если `conversationId` не передан, в ответе приходит сгенерированный id (§9.2) |
 | `GET /api/agent/status` | — | `agent.Status` + `{autonomy,llm}` |
 | `POST /api/agent/autonomy` | `{action:"start"\|"stop", config?}` | `{autonomy: AutonomyStatus}` |
 | `GET /api/agent/autonomy/log?limit=200` | — | `{log:[LogEntry]}` |
@@ -874,7 +882,8 @@ func (s *Server) Handler() http.Handler // mux, обёрнутый в Guard; п�
 
 // ChatResponse
 {"answer":"...","toolCalls":[{"name":"run_backtest","args":{},"result":{},"error":"",
- "durationMs":12}],"artifacts":[{"kind":"backtest","payload":{}}],"llm":false,"elapsedMs":42}
+ "durationMs":12}],"artifacts":[{"kind":"backtest","payload":{}}],"llm":false,
+ "conversationId":"a1b2c3...","elapsedMs":42}
 ```
 
 `time` во всех JSON — RFC3339 UTC. Цены — числа; UI форматирует с `decimals` инструмента.
