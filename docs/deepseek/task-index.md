@@ -727,6 +727,37 @@ T21 oracle `<clientlimits>`, T22 `portfolio_tplus/forts/united` S-формы, T1
 
 ---
 
+## 16. Демо-торговый цикл и live-фиксы (2026-11-05, demo.env)
+
+По согласию пользователя (только демо-счёт, 1 лот SBER, цена далеко от рынка, немедленная отмена)
+выполнен минимальный цикл; прод не использовался, активных заявок не осталось (все cancelled,
+`saldo=300000.0`).
+
+**S-факты (payloads RQ_TRANSACT type=14, закоммичены в `native/records/testdata/transact-*-live.hex`):**
+- `neworder` 24 Б: `B01,B00,W secid=26,W board=37,G client,B 'B',B00,L price(×100),L qty,нули`;
+  reply `00 <txid> <time> 00`. **Ценовой коридор:** цена 1 отклоняется (`(579)…не меньше 284.62`),
+  поэтому использована минимально-далёкая допустимая (285.50), заявка не исполнялась.
+- `cancelorder` 5 Б: `B02,B00,L txid,B00`; reply `00`; колбэк `<order status="cancelled">
+  <result>{42} Заявка снята.</result></order>`; работает и в новой сессии.
+- `moveorder` payload 5 Б: `B02,B01,L txid,B00` (снят для уже отменённых заявок); успешный сценарий
+  для активной заявки — **I**: DLL отвечает `{32} Недопустимое значение параметра 'TransactionID'…`
+  (D-валидации восстановлены: transactionid/price/moveflag 0..3/quantity для 1–2).
+- `makeordown`: transactionid — **атрибут**; `RQ_MAKE_COND_OWN(112)` payload — I,
+  O-текст `Cannot make specified transaction_id an own conditional order`.
+- Сообщения сервера после транзакций приходят RQ_MAIN **tag `0x0f`** (CP1251-тексты вида
+  `(160)…`, `(210)…`) — сплиттер их не знал.
+
+**Live-фиксы (в работе):**
+- `ParseOrderNew` для status=6 (cancelled)/removed/denied/rejected: тело короче линейной 52-чтение-схемы
+  -> short buffer при загрузке снапшота (7 записей демо); нужны статус-зависимые ветки/безопасный skip.
+- `records.Records`: поддержка tag `0x0f` (не падать на серверных текстовых сообщениях).
+- RE-4 native backend: direct `Client.Dial` на demo.env OK, raw backend+connect XML даёт
+  `connected="true"`, но `TCClient`-стрим закрывается сразу после статуса (EOF) — гонка
+  stream/dispatcher/Close, фикс в работе (прод-RE-4 остаётся внешне заблокирован `connected=error`).
+
+
+---
+
 ## 15. Живая S-серия на ПРОДЕ (2026-11-05, read-only)
 
 Пользователь открыл прод-сессию и передал доступ через `~/re/prod.env`; согласие на торговый цикл
