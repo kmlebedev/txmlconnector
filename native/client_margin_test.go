@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/session"
 	"github.com/kmlebedev/txmlconnector/native/wire"
@@ -428,5 +429,20 @@ func TestReloginResetsMarginRates(t *testing.T) {
 	c.mu.Unlock()
 	if c.marginRates != nil {
 		t.Fatalf("marginRates after reset = %v, want nil", c.marginRates)
+	}
+}
+
+// TestCrossUnknownRateFails: a non-zero cross position without R_SEC_RATE must
+// be an explicit failure (a zero cross term would inflate the result).
+func TestCrossUnknownRateFails(t *testing.T) {
+	c := &Client{secPositions: map[positionKey]model.SecPosition{
+		{client: 1, sym: 27}: {SaldoIn: 10},
+	}}
+	if bad, ok := c.crossUnknownRateLocked(1, 26); !ok || bad != 27 {
+		t.Fatalf("unknown cross rate = %d, %v; want 27, true", bad, ok)
+	}
+	c.marginRates = map[uint16]int64{27: 100}
+	if bad, ok := c.crossUnknownRateLocked(1, 26); ok {
+		t.Fatalf("known cross rate reported as unknown %d", bad)
 	}
 }
