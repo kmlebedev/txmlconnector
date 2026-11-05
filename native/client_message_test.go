@@ -42,7 +42,9 @@ func messageDLL(t *testing.T) string {
 func TestMessagesMatchDLL(t *testing.T) {
 	want := messageDLL(t)
 	srv := newRunServer(t)
-	messageRqTime(t, srv, 1762300000, 0)
+	// Real demo server time zone: Russian Standard Time (-180 min). The DLL
+	// still prints the WALL time (23:46:40), so this must match the O fixture.
+	messageRqTime(t, srv, 1762300000, -180)
 	srv.Snapshot = append(clientSnapshot(t), readOrderFixture(t, "message-inject.hex")...)
 	c := New(Config{Dial: srv.Dial})
 	rec := newRecorder()
@@ -88,11 +90,12 @@ func TestMessageBatchSingleCallback(t *testing.T) {
 	}
 }
 
-// TestMessageUrgentAndTimeBias: flags 0x01/0x08 -> Y, 0x00/0x02 -> N; the
-// RQ_TIME bias shifts the UTC instant and therefore the HH:MM:SS.
+// TestMessageUrgentAndTimeBias: flags 0x01/0x08 -> Y, 0x00/0x02 -> N; the XML
+// date is the WALL time and does not depend on the RQ_TIME bias (DLL prints the
+// wall clock; the UTC instant in model.Message differs, but is not rendered).
 func TestMessageUrgentAndTimeBias(t *testing.T) {
 	srv := newRunServer(t)
-	messageRqTime(t, srv, 1762300000, 180) // UTC = wall + 3h
+	messageRqTime(t, srv, 1762300000, 180)
 	srv.Snapshot = clientSnapshot(t)
 	c := New(Config{Dial: srv.Dial})
 	rec := newRecorder()
@@ -117,10 +120,10 @@ func TestMessageUrgentAndTimeBias(t *testing.T) {
 	srv.QueueMain(payload)
 	got := rec.next(t, "<messages")
 	want := "<messages>" +
-		"<message><date>02:46:40</date><urgent>N</urgent><from>TESTUSER</from><text><![CDATA[n0]]></text></message>" +
-		"<message><date>02:46:40</date><urgent>Y</urgent><from>TESTUSER</from><text><![CDATA[y1]]></text></message>" +
-		"<message><date>02:46:40</date><urgent>Y</urgent><from>TESTUSER</from><text><![CDATA[y8]]></text></message>" +
-		"<message><date>02:46:40</date><urgent>N</urgent><from>TESTUSER</from><text><![CDATA[n2]]></text></message>" +
+		"<message><date>23:46:40</date><urgent>N</urgent><from>TESTUSER</from><text><![CDATA[n0]]></text></message>" +
+		"<message><date>23:46:40</date><urgent>Y</urgent><from>TESTUSER</from><text><![CDATA[y1]]></text></message>" +
+		"<message><date>23:46:40</date><urgent>Y</urgent><from>TESTUSER</from><text><![CDATA[y8]]></text></message>" +
+		"<message><date>23:46:40</date><urgent>N</urgent><from>TESTUSER</from><text><![CDATA[n2]]></text></message>" +
 		"</messages>"
 	if got != want {
 		t.Fatalf("messages\n got %s\nwant %s", got, want)
@@ -129,7 +132,7 @@ func TestMessageUrgentAndTimeBias(t *testing.T) {
 
 // TestMessageRenderBatch checks the batch envelope and single-item form.
 func TestMessageRenderBatch(t *testing.T) {
-	item := model.Message{Time: time.Unix(1762300000, 0).UTC(), Urgent: true, From: "A", Text: "T"}
+	item := model.Message{Time: time.Unix(1762289200, 0).UTC(), WallTime: time.Unix(1762300000, 0).UTC(), Urgent: true, From: "A", Text: "T"}
 	want := "<messages><message><date>23:46:40</date><urgent>Y</urgent><from>A</from><text><![CDATA[T]]></text></message></messages>"
 	if got := xmlcompat.MessagesXML([]model.Message{item}); got != want {
 		t.Fatalf("MessagesXML = %s", got)
@@ -145,8 +148,8 @@ func TestMessageTimeBiasTable(t *testing.T) {
 		date string
 	}{
 		{"utc", 0, "23:46:40"},
-		{"plus3h", 180, "02:46:40"},
-		{"minus2h", -120, "21:46:40"},
+		{"plus3h", 180, "23:46:40"},
+		{"minus2h", -120, "23:46:40"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newRunServer(t)
@@ -172,7 +175,7 @@ func TestMessageTimeBiasTable(t *testing.T) {
 // TestMessageTextCDATA: text is wrapped in CDATA; we escape ]]> (DLL likely
 // inserts as-is - I) and check the escaped form.
 func TestMessageTextCDATA(t *testing.T) {
-	item := model.Message{Time: time.Unix(1762300000, 0).UTC(), From: "A", Text: "a]]>b"}
+	item := model.Message{Time: time.Unix(1762289200, 0).UTC(), WallTime: time.Unix(1762300000, 0).UTC(), From: "A", Text: "a]]>b"}
 	want := "<messages><message><date>23:46:40</date><urgent>N</urgent><from>A</from><text><![CDATA[a]]]]><![CDATA[>b]]></text></message></messages>"
 	if got := xmlcompat.MessagesXML([]model.Message{item}); got != want {
 		t.Fatalf("MessagesXML = %s, want %s", got, want)
