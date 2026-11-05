@@ -1,0 +1,362 @@
+{
+  "source": "reference DLL txmlconnector64-6.47.2.26.4 under Wine 11.21 (local ABI probe, no network, no live server)",
+  "dll_sha256": "a197e2625e53c0df453687ae1b20ef2ae1a05e034cd20c424a7014b0c9726342",
+  "dll_internal_name": "txmlconnector64.dll",
+  "calling_convention": "__stdcall (x64: Win64 ABI; same as plain x64 call)",
+  "exports": [
+    {
+      "ordinal": 2,
+      "name": "Initialize",
+      "resolved": true
+    },
+    {
+      "ordinal": 3,
+      "name": "InitializeEx",
+      "resolved": true
+    },
+    {
+      "ordinal": 8,
+      "name": "UnInitialize",
+      "resolved": true
+    },
+    {
+      "ordinal": 5,
+      "name": "SetCallback",
+      "resolved": true
+    },
+    {
+      "ordinal": 6,
+      "name": "SetCallbackEx",
+      "resolved": true
+    },
+    {
+      "ordinal": 4,
+      "name": "SendCommand",
+      "resolved": true
+    },
+    {
+      "ordinal": 0,
+      "name": "FreeMemory",
+      "resolved": true
+    },
+    {
+      "ordinal": 7,
+      "name": "SetLogLevel",
+      "resolved": true
+    },
+    {
+      "ordinal": 1,
+      "name": "GetServiceInfo",
+      "resolved": true
+    }
+  ],
+  "return_contract": {
+    "Initialize": "BYTE*: NULL on success, else <error>текст</error> (free with FreeMemory)",
+    "InitializeEx": "BYTE*: NULL on success, else <error>текст</error>",
+    "UnInitialize": "BYTE*: NULL on success, else <error>текст</error>",
+    "SetCallback": "bool: always true (1)",
+    "SetCallbackEx": "bool: always true (1)",
+    "SendCommand": "BYTE*: <result .../> or <error>текст</error> (free with FreeMemory)",
+    "FreeMemory": "bool: always true (1); accepts NULL",
+    "SetLogLevel": "BYTE*: NULL on success, else <error>текст</error>",
+    "GetServiceInfo": "int code; *response (when allocated) freed with FreeMemory"
+  },
+  "texts": [
+    {
+      "call": "SetLogLevel(0)",
+      "returns_error_string": true,
+      "text": "<error>Invalid log level. Should be in range [1,3]</error>"
+    },
+    {
+      "call": "SendCommand(NULL) preinit",
+      "returns_error_string": true,
+      "text": "<error>Error document empty.</error>"
+    },
+    {
+      "call": "SendCommand(<x/>) preinit",
+      "returns_error_string": true,
+      "text": "<error>Only &amp;lt;command&amp;gt; tags could be passed to SendCommand function</error>"
+    },
+    {
+      "call": "Initialize(NULL,1)",
+      "returns_error_string": true,
+      "text": "<error>Не удалось инициализировать библиотеку. Не указан путь к директории для хранения лог-файлов</error>"
+    },
+    {
+      "call": "Initialize(logs,2)",
+      "returns_error_string": true,
+      "text": "<NULL>"
+    },
+    {
+      "call": "InitializeEx(valid) while init",
+      "returns_error_string": true,
+      "text": "<error>Не удалось инициализировать библиотеку. Библиотека уже инициализирована</error>"
+    },
+    {
+      "call": "SendCommand(unknown_cmd)",
+      "returns_error_string": true,
+      "text": "<result success=\"false\"><message>Unknown command.</message></result>"
+    },
+    {
+      "call": "SendCommand(<x>)",
+      "returns_error_string": true,
+      "text": "<error>Error reading Element value.</error>"
+    },
+    {
+      "call": "SendCommand(<command)",
+      "returns_error_string": true,
+      "text": "<error>Failed to read Element name</error>"
+    },
+    {
+      "call": "SendCommand(version)",
+      "returns_error_string": true,
+      "text": "<result success=\"true\"/>"
+    },
+    {
+      "call": "GetServiceInfo(NULL request)",
+      "code": 4
+    },
+    {
+      "call": "UnInitialize",
+      "returns_error_string": true,
+      "text": "<NULL>"
+    },
+    {
+      "call": "UnInitialize again",
+      "returns_error_string": true,
+      "text": "<error>Библиотека не инициализирована</error>"
+    },
+    {
+      "call": "SendCommand after uninit",
+      "returns_error_string": true,
+      "text": "<error>Библиотека не инициализована. Необходимо выполнить функцию Initialize()</error>"
+    },
+    {
+      "call": "InitializeEx(NULL)",
+      "returns_error_string": true,
+      "text": "<error>Не удалось инициализировать библиотеку. параметр функции равен нулю</error>"
+    }
+  ],
+  "initialize_ex_variants": [
+    {
+      "mode": "NULL",
+      "text": "<error>Не удалось инициализировать библиотеку. параметр функции равен нулю</error>"
+    },
+    {
+      "mode": "empty",
+      "text": "<error>Не удалось инициализировать библиотеку. параметр функции равен нулю</error>"
+    },
+    {
+      "mode": "broken",
+      "text": "<error>Не удалось инициализировать библиотеку. Error reading Attributes.</error>"
+    },
+    {
+      "mode": "noinit",
+      "text": "<error>Не удалось инициализировать библиотеку. не найден элемент &lt;init&gt;</error>"
+    },
+    {
+      "mode": "emptyinit",
+      "text": "<error>Не удалось инициализировать библиотеку. не найден обязательный атрибут &lt;log_path&gt;</error>"
+    },
+    {
+      "mode": "nologpath",
+      "text": "<error>Не удалось инициализировать библиотеку. не найден обязательный атрибут &lt;log_path&gt;</error>"
+    },
+    {
+      "mode": "nologlevel",
+      "text": "<error>Не удалось инициализировать библиотеку. не найден обязательный атрибут &lt;log_level&gt;</error>"
+    },
+    {
+      "mode": "level4",
+      "text": "<error>Не удалось инициализировать библиотеку. Wrong log level.</error>"
+    },
+    {
+      "mode": "valid",
+      "text": "<NULL>"
+    }
+  ],
+  "service_info": [
+    {
+      "request": "NULL",
+      "code": 4,
+      "text": "<NULL>"
+    },
+    {
+      "request": "<request/>",
+      "code": 3,
+      "text": "<error>Empty request</error>"
+    },
+    {
+      "request": "<request><value></value></request>",
+      "code": 3,
+      "text": "<error>Empty value text</error>"
+    },
+    {
+      "request": "<request><value>unknown</value></request>",
+      "code": 3,
+      "text": "<error>Unknown parameter \"unknown\"</error>"
+    },
+    {
+      "request": "<request><value>version</value></request>",
+      "code": 0,
+      "text": "<service_info><version>6.47.2.26.4</version></service_info>"
+    },
+    {
+      "request": "<request><value>queue_size</value></request>",
+      "code": 0,
+      "text": "<service_info><queue_size>0</queue_size></service_info>"
+    },
+    {
+      "request": "<request><value>queue_mem_used</value></request>",
+      "code": 0,
+      "text": "<service_info><queue_mem_used>0</queue_mem_used></service_info>"
+    },
+    {
+      "request": "<request><value>version</value><value>queue_size</value></request>",
+      "code": 0,
+      "text": "<service_info><version>6.47.2.26.4</version><queue_size>0</queue_size></service_info>"
+    }
+  ],
+  "service_info_rate_limit": {
+    "rule": "code 6 when called again within 5000 ms (D: GetTickCount()-last<5000)",
+    "observed": [
+      "CALL GetServiceInfo   \"NULL#1\"                                                -> code=4 resp=\"<NULL>\"",
+      "CALL GetServiceInfo   \"version#2-immediate\"                                   -> code=6 resp=\"<NULL>\"",
+      "CALL GetServiceInfo   \"version#3-after5s\"                                     -> code=0 resp=\"<service_info><version>6.47.2.26.4</version></service_info>\"",
+      "CALL GetServiceInfo   \"queue_size#4\"                                          -> code=6 resp=\"<NULL>\"",
+      "CALL GetServiceInfo   \"queue_mem_used#5\"                                      -> code=0 resp=\"<service_info><queue_mem_used>0</queue_mem_used></service_info>\""
+    ]
+  },
+  "lifecycle": {
+    "initialize": {
+      "success": "NULL; creates <log_path>/<YYYYMMDD>_dsp.log and <YYYYMMDD>_xdf.log",
+      "null_log_path": "error (path required)",
+      "levels": {
+        "valid": [
+          1,
+          2,
+          3
+        ],
+        "invalid": [
+          0,
+          4,
+          -1
+        ],
+        "invalid_text": "Wrong log level."
+      },
+      "repeat": "already initialized error"
+    },
+    "initialize_ex": {
+      "xml": "<init log_path=\"...\" log_level=\"1..3\"/>",
+      "optional_attrs": [
+        "use_minidump (default false)",
+        "logfile_lifetime"
+      ],
+      "required": [
+        "<init> element",
+        "log_path attr",
+        "log_level attr"
+      ],
+      "mutual_exclusion": "Initialize and InitializeEx are mutually exclusive while initialized (both directions)"
+    },
+    "uninitialize": {
+      "before_init": "not initialized error",
+      "repeat": "not initialized error",
+      "success": "NULL",
+      "effect": "stops callback thread and queue; log: Finalizing... / Shutdown... / Waiting for callback thread... / Shutdown OK; no callbacks after return"
+    },
+    "set_callback": {
+      "returns": true,
+      "before_init": true,
+      "null_callback": true,
+      "last_registration_wins": true,
+      "set_callback_ex": "user data pointer delivered to callback; last of SetCallback/SetCallbackEx wins"
+    },
+    "set_log_level": {
+      "valid": [
+        1,
+        2,
+        3
+      ],
+      "invalid": [
+        0,
+        4,
+        -1
+      ],
+      "works_before_init": true
+    },
+    "send_command": {
+      "before_init": "not initialized error (see texts)",
+      "after_uninit": "same not initialized error",
+      "null_or_empty": "Error document empty.",
+      "non_command_root": "Only <command> tags ... (double-escaped)",
+      "malformed_xml": [
+        "Error parsing Element.",
+        "Failed to read Element name",
+        "Error reading Element value."
+      ],
+      "unknown_command": "<result success=false><message>Unknown command.</message></result>"
+    },
+    "free_memory": {
+      "returns": true,
+      "null_ok": true,
+      "foreign_and_double_free": "no crash under Wine (O caveat for real Windows)"
+    },
+    "get_service_info": {
+      "codes": {
+        "0": "success",
+        "3": "request/value error, response <error>…</error>",
+        "4": "request pointer NULL",
+        "5": "response pointer NULL",
+        "6": "rate limited (<5000 ms since last call)"
+      },
+      "values": [
+        "version",
+        "queue_size",
+        "queue_mem_used"
+      ],
+      "case_sensitive": true,
+      "works_without_initialize": true
+    }
+  },
+  "callbacks": {
+    "thread": "dedicated library thread, distinct from caller, same thread for all deliveries, joined by UnInitialize",
+    "delivery": "asynchronous relative to SendCommand return; FIFO order observed",
+    "return_value": "0 and 1 both continue delivery; DLL does not free the message (client frees via FreeMemory)",
+    "after_uninitialize": "none delivered"
+  },
+  "encoding": "UTF-8; SendCommand non-command error is double-escaped (&amp;lt;command&amp;gt;), InitializeEx attribute errors single-escaped (&lt;init&gt;)",
+  "observations": [
+    "CALL Initialize         NULL,0                                   -> 0x46559e80 str=\"<error>Не удалось инициализировать библиотеку. Не указан путь к директории для хранения лог-файлов</error>\"",
+    "CALL Initialize         NULL,4                                   -> 0x46559f50 str=\"<error>Не удалось инициализировать библиотеку. Не указан путь к директории для хранения лог-файлов</error>\"",
+    "CALL Initialize         logs,0                                   -> 0x465591a0 str=\"<error>Не удалось инициализировать библиотеку. Wrong log level.</error>\"",
+    "CALL InitializeEx       valid                                    -> 0x0 str=\"<NULL>\"",
+    "CALL Initialize         logs,2 while InitEx                      -> 0x4655ca80 str=\"<error>Не удалось инициализировать библиотеку. Библиотека уже инициализирована</error>\"",
+    "CALL UnInitialize       -                                        -> 0x0 str=\"<NULL>\"",
+    "CALL GetServiceInfo   resp=NULL -> code=5",
+    "CALL GetServiceInfo   \"version\"                                               -> code=0 resp=\"<service_info><version>6.47.2.26.4</version></service_info>\"",
+    "before send: 17:00:32.468",
+    "after send: 17:00:32.473 result: <result success=\"true\"/>",
+    "CB#1 17:00:32.473 thread=996 msg=\"<connector_version>6.47.2.26.4</connector_version>\"",
+    "cb count: 1",
+    "CB#1 17:00:33.076 thread=996 msg=\"<connector_version>6.47.2.26.4</connector_version>\"",
+    "after SetCallback: cb count: 1",
+    "CBEX#1 17:00:33.579 thread=996 user=0xabcd msg=\"<connector_version>6.47.2.26.4</connector_version>\"",
+    "after SetCallbackEx: cb count: 1",
+    "CB#1 17:00:34.082 thread=996 msg=\"<connector_version>6.47.2.26.4</connector_version>\"",
+    "after SetCallback again: cb count: 1",
+    "CALL UnInitialize       -                                        -> 0x0 str=\"<NULL>\"",
+    "CB#1 17:00:35.030 thread=1032 msg=\"<connector_version>6.47.2.26.4</connector_version>\"",
+    "CB#2 17:00:35.031 thread=1032 msg=\"<connector_version>6.47.2.26.4</connector_version>\"",
+    "CB#3 17:00:35.031 thread=1032 msg=\"<connector_version>6.47.2.26.4</connector_version>\"",
+    "CB#4 17:00:35.032 thread=1032 msg=\"<connector_version>6.47.2.26.4</connector_version>\"",
+    "CB#5 17:00:35.032 thread=1032 msg=\"<connector_version>6.47.2.26.4</connector_version>\"",
+    "burst cb count: 5",
+    "CALL UnInitialize       -                                        -> 0x0 str=\"<NULL>\"",
+    "UnInitialize took: 4ms",
+    "cb count at uninit return: 3 after 700ms: 3",
+    "CB#1 17:00:36.646 thread=1068 msg=\"<connector_version>6.47.2.26.4</connector_version>\"",
+    "CB#2 17:00:36.647 thread=1068 msg=\"<connector_version>6.47.2.26.4</connector_version>\"",
+    "CB#3 17:00:36.647 thread=1068 msg=\"<connector_version>6.47.2.26.4</connector_version>\""
+  ]
+}
