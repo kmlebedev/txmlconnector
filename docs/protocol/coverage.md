@@ -31,20 +31,20 @@
 | 11 | get_securities_info → sec_info | 2 | done | `native/client_secinfo.go`, `native/testdata/secinfo-*`, RQ_SEC_SPEC 15 |
 | 12 | Остальные записи снапшота | 2 | done | `records/records.go` splitter (AmBOOK, SYSPARAMS, wrapper, 0x05), `TestE07TailHasNoUnknownRecords` |
 | 13 | gethistorydata → candles | 3 | done | `client_history.go`, `records/candles.go`, `candles-*`; фиксы 8277d6f |
-| 14 | тики (subscribe_ticks) | 3 | **partial** | RQ_SUBSCRIBE_TICKS 120 + S payload board/secid; тики — RQ_MAIN 0x5a TICK (W secid,W board,G tradeno,L time,L price,L quantity,B period,B buysell,L X,L Y), `<ticks>` S-форма; RQ_TICKS(13) поллинг не используется (S опровергнут); живые S-фикстуры/тест есть |
+| 14 | тики (subscribe_ticks) | 3 | **done** | RQ_SUBSCRIBE_TICKS 120 + S payload board/secid; тики — RQ_MAIN 0x5a TICK (W secid,W board,G tradeno,L time,L price,L quantity,B period,B buysell,L X,L Y), `<ticks>` S-форма; RQ_TICKS(13) поллинг не используется (S опровергнут); живые S-фикстуры/тест есть |
 | 15 | RQ_TRANSACT 14 | 3 | done | `session/transact.go`, `transact-*`, `TestTransact*/LostReply/EmptyReply` |
 | 16 | neworder/cancelorder, orders | 3 | done | `client_orders.go`, `records/order.go`, `order-*`; фиксы c6a3143 |
 | 17 | trades (R_TRD 0x04) | 3 | done | `records/clienttrade.go`, `trade-*`; фиксы 177879c |
 | 18 | newcondorder/newstoporder/cancelstoporder, R_STOP | 3 | done | `client_stoporders.go`, `records/stoporder.go`, `stoporder-*`, `transact-*-payload.hex`; фикс 64e7f8b |
 | 19 | moveorder/makeordown | 4 | **none** (blocked) | нет payload без живой активной заявки; задача 44 RE; connector-ветки нет |
 | 20 | positions: деньги/бумаги/FORTS | 4 | done | `client_positions.go`, `records/positions.go`, `position-*` |
-| 21 | get_forts_positions/get_client_limits | 4 | **partial** | `client_positions.go`, `records/limits.go`, `session/limits.go`; oracle `<clientlimits>` ждёт; RQ_FORTS_FIRM_MONEY 47 не реализован (формат I) |
-| 22 | portfolio-команды | 4 | **partial** | `client_portfolio.go`, `records/portfolio.go`, `xmlcompat` local render; O-фикстуры `portfolio-currency/mc-dll.xml`; остальные формы/типы — I (5f3ef49, 5bd73dc) |
+| 21 | get_forts_positions/get_client_limits | 4 | **partial** | `client_positions.go`, `records/limits.go`, `session/limits.go`; S: get_client_limits успех + C>S 43 + `<clientlimits>` (без client — Client not specified.), O-эталон полей pending; RQ_FORTS_FIRM_MONEY 47 не реализован (формат I) |
+| 22 | portfolio-команды | 4 | **partial** | S: get_portfolio/get_united_portfolio/get_mc_portfolio — success+локальный рендер и callbacks; get_portfolio_mct — `{8} …szClient`, tplus/forts — Unknown command; `client_portfolio.go`, `records/portfolio.go`; остальные формы/типы — I |
 | 23 | max buy/sell, cln_sec_permissions, leverage | 5 | **partial** | local render 3 команд + `<marketord>`; точная формула по R_SEC_RATE 0x0a (a217bc1); relogin сбрасывает marginRates, неизвестный rate -> explicit I failure; permissions/rates — I (FUN_18001a700) |
 | 24 | news/get_old_news/get_news_body | 6 | **done** | 0x35/0x36 парсеры+splitter, S: reply 73 пуст, заголовки/тело RQ_MAIN 0x36, `<news_header>`/`<news_body>` S-формы, NewsBody() шлёт запрос и возвращает success; package_len S-форма supported (I уточнение); `<news_body>` callback |
 | 25 | messages (R_MSG 0x01) | 6 | **done** | unsized 0x01, batch одного RQ_MAIN, `<messages>` O-побайтно (73a4acc/6cb9697); `<date>` = WALL-время (fix после ревью) |
 | 26 | change_pass | 6 | **done** | RQ_CHANGE_PWD 3, payload/SHA-1, strict replies, fatal reply терминален (no recover, один connected=false), local texts; живьём не выполнялось (S-негатив) |
-| 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply (empty reply=failure, 00=success), 149 O e2e и exact DLL error text, dedup family callbacks (fix после ревью); гейт 0x45 только 153/151 — I, mapping/XML — D/I |
+| 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply (empty reply=failure, 00=success), 149 O e2e и exact DLL error text, dedup family callbacks (fix после ревью); S на проде — **негатив по доступу** (гейт 0x45/sys_ver, внешний блокер), 153/151 на записанной сессии — Unsupported request; mapping/XML — D/I |
 | 28 | RPS/REPO/отчёты | 8 | **partial** | payloads newrpsorder/newrepoorder/cancel O-побайтно, 6 команд, ошибки, D-literal XML (b9f305a); newrepoorder known fields (repoterm/reporate/discounts/block) encoded, value/refundrate/matchref/cpfirmid/settlecode — explicit I; newmrepoorder/newreport4, records/XML negdeal/report и RPS-специфичные reply-тексты — I |
 | 29 | XML-коннектор целиком, native backend | 9 | **partial** | `dllCommands` = 45 имён; matrix-тест и pending {moveorder,makeordown} (043d7c9/6aa832f); `server.Backend dll|native` + `TC_BACKEND`, `TC_BACKEND=native make server` без Wine (043d7c9/5aea9d5); TestServerErrorTexts + errors.md сделаны (6aa832f); RE-4 на демо — pending после S |
 | 30 | Матрица покрытия, soak, выпуск | 9 | **in progress** | этот документ; soak/выпуск — после 29 |
@@ -228,23 +228,19 @@ makeordown, moveorder (2 имени; T19 — ждут живую S-серию).
 
 ## 7. Открытые I-точки и блокеры
 
-1. **T14 ticks**: S-серия на проде подтвердила — тики приходят **RQ_MAIN `0x5a` TICK**
-   (`W secid, W board, G tradeno, L time, L price, L quantity, B period, B buysell, L X, L Y`,
-   накопление tradeno/time), `RQ_TICKS(13)` не используется; `subscribe_ticks` — board/seccode/tradeno,
-   `unsubscribe_ticks` — Unknown command. Осталось: rework T14 (декодер 0x5a, XML по S-форме, без
-   поллинга 13) — в работе.
+1. **T14 ticks**: S-серия на проде подтвердила RQ_MAIN `0x5a` TICK; rework сделан (декодер 0x5a,
+   `<ticks>` S-форма, RQ_TICKS(13) не используется, тест побайтно) — `204c7ba`.
 2. **T19 moveorder/makeordown**: payload — только живая активная заявка; ждёт демо-серию с торговым
    циклом (согласие есть).
 3. **T21 limits**: `get_client_limits` S-проверен (C>S 43 payload, `<clientlimits>`); O-фикстура — после
    S; `RQ_FORTS_FIRM_MONEY 47` не восстановлен (I).
-4. **T22 portfolios**: `get_portfolio`/`get_united_portfolio`/`get_mc_portfolio` — S-проверены
-   (local render), `get_portfolio_mct` — `{8}`, `get_portfolio_tplus/forts` — Unknown command; typed
-   client-API, формулы и остальные формы — I.
+4. **T22 portfolios**: S-подтверждено (local render, callbacks); `get_portfolio_mct` — `{8}`,
+   tplus/forts — Unknown command; остальные формы — I.
 5. **T23**: local render 3 команд + `<marketord>`; maxbuy/maxsell — точная формула (R_SEC_RATE 0x0a +
    open_balance/lots, a217bc1, побайтно margin-dll.xml). I: permissions/rates (FUN_18001a700 нет в RQ_MAIN),
    источник R и начальный V.
-6. **T24**: `news_header`/`news_body` **полностью S-сняты** (reply 73 пуст, 0x36 flags=1/2, lastId=MIN);
-   осталось: доработка кода news_body по S. **T25**: done O-побайтно (wall-время + bias).
+6. **T24**: `news_header`/`news_body` **полностью S-сняты** и реализованы (`204c7ba`/`dbace49`,
+   тест `<news_body>` побайтно). **T25**: done O-побайтно (wall-время + bias).
 7. **T26**: change_pass done (payload SHA-1, reply-коды); в работе ревью-P1 — терминальность fatal reply;
    I: политика conn+0x279. **T27**: 149 O, 151 payload D, гейт 153/151, XML D/I (O-форм нет).
    **T28**: 4 O-payload, D-XML I, `newmrepoorder`/`newreport4` — I.
