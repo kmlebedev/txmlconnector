@@ -1185,3 +1185,225 @@ func TestIntParam(t *testing.T) {
 		t.Fatal("c must be out of range")
 	}
 }
+
+// autonomyStatusDTO is the autonomy part of the POST /api/agent/autonomy
+// response (only the fields the tests assert on).
+type autonomyStatusDTO struct {
+	Running      bool       `json:"running"`
+	StartedAt    *time.Time `json:"startedAt"`
+	LastActionAt *time.Time `json:"lastActionAt"`
+	Config       struct {
+		Symbol   string `json:"symbol"`
+		Strategy string `json:"strategy"`
+	} `json:"config"`
+}
+
+// postAutonomy performs one POST /api/agent/autonomy call and decodes the
+// autonomy object.
+func postAutonomy(t *testing.T, ts *httptest.Server, body any) (int, []byte, *autonomyStatusDTO) {
+	t.Helper()
+	status, data := do(t, ts, http.MethodPost, "/api/agent/autonomy", body)
+	if status != http.StatusOK {
+		return status, data, nil
+	}
+	var resp struct {
+		Autonomy autonomyStatusDTO `json:"autonomy"`
+	}
+	decode(t, data, &resp)
+	return status, data, &resp.Autonomy
+}
+
+// TestAutonomyDuplicateStartIsConflict checks the P1 defect: a second start
+// while the runner is active is a 409 conflict with a Russian message, both
+// when detected from the engine status and when the engine returns the error.
+func TestAutonomyDuplicateStartIsConflict(t *testing.T) {
+	cfg := map[string]any{"symbol": "TQBR:SBER", "periodSec": 60, "strategy": "sma_cross", "speed": 5}
+
+	// Path 1: the API sees a running autonomy before calling the engine.
+	deps, _, _, a := defaultDeps()
+	a.status.Autonomy.Running = true
+	_, ts := newTestServer(t, deps, Config{})
+	status, data, _ := postAutonomy(t, ts, map[string]any{"action": "start", "config": cfg})
+	if status != http.StatusConflict {
+		t.Fatalf("running status start = %d, body %s", status, data)
+	}
+	if code := errorCode(t, data); code != codeConflict {
+		t.Fatalf("running status code = %q", code)
+	}
+	var env struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	decode(t, data, &env)
+	if env.Error.Message != autonomyAlreadyRunning {
+		t.Fatalf("conflict message = %q, want %q", env.Error.Message, autonomyAlreadyRunning)
+	}
+	if a.started {
+		t.Fatal("engine must not be started when the API already sees a run")
+	}
+
+	// Path 2: the start/check race — the engine reports the conflict.
+	deps2, _, _, a2 := defaultDeps()
+	a2.startErr = errors.New("agent: autonomy is already running")
+	_, ts2 := newTestServer(t, deps2, Config{})
+	status, data, _ = postAutonomy(t, ts2, map[string]any{"action": "start", "config": cfg})
+	if status != http.StatusConflict || errorCode(t, data) != codeConflict {
+		t.Fatalf("engine conflict = %d, body %s", status, data)
+	}
+}
+
+// TestAutonomyErrorMapping checks the mapping of start/stop failures to the
+// API error codes of §10.
+func TestAutonomyErrorMapping(t *testing.T) {
+	startCfg := map[string]any{"symbol": "TQBR:SBER", "periodSec": 60, "strategy": "sma_cross", "speed": 5}
+	cases := []struct {
+		name     string
+		action   string
+		startErr error
+		stopErr  error
+		status   int
+		code     string
+	}{
+		{"invalid strategy", "start", errors.New(`agent: strategy "nope": backtest: unknown strategy "nope"`), nil, http.StatusBadRequest, codeBadRequest},
+		{"missing strategy", "start", errors.New("agent: autonomy strategy is required"), nil, http.StatusBadRequest, codeBadRequest},
+		{"not enough history", "start", errors.New("agent: not enough history for TQBR:SBER (5 bars)"), nil, http.StatusBadRequest, codeBadRequest},
+		{"not implemented", "start", errors.New("agent: not implemented"), nil, http.StatusServiceUnavailable, codeUnavailable},
+		{"deadline", "start", context.DeadlineExceeded, nil, http.StatusServiceUnavailable, codeUnavailable},
+		{"unknown start error", "start", errors.New("boom"), nil, http.StatusInternalServerError, codeInternal},
+		{"unknown stop error", "stop", nil, errors.New("boom"), http.StatusInternalServerError, codeInternal},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _, _, a := defaultDeps()
+			a.startErr = tc.startErr
+			a.stopErr = tc.stopErr
+			_, ts := newTestServer(t, deps, Config{})
+			body := map[string]any{"action": tc.action}
+			if tc.action == "start" {
+				body["config"] = startCfg
+			}
+			status, data, _ := postAutonomy(t, ts, body)
+			if status != tc.status {
+				t.Fatalf("status = %d, want %d, body %s", status, tc.status, data)
+			}
+			if code := errorCode(t, data); code != tc.code {
+				t.Fatalf("code = %q, want %q, body %s", code, tc.code, data)
+			}
+		})
+	}
+}
+
+// TestAutonomyResponseTimestamps checks the P2 defect: a successful start/stop
+// always returns non-zero startedAt and lastActionAt even if the engine status
+// still carries zero times.
+func TestAutonomyResponseTimestamps(t *testing.T) {
+	deps, _, _, a := defaultDeps()
+	a.status.Autonomy.StartedAt = time.Time{}
+	a.status.Autonomy.LastActionAt = time.Time{}
+	_, ts := newTestServer(t, deps, Config{})
+
+	status, data, autonomy := postAutonomy(t, ts, map[string]any{
+		"action": "start",
+		"config": map[string]any{"symbol": "TQBR:SBER", "periodSec": 60, "strategy": "sma_cross", "speed": 5},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("start status = %d, body %s", status, data)
+	}
+	if !autonomy.Running {
+		t.Fatalf("autonomy must be running: %+v", autonomy)
+	}
+	if autonomy.StartedAt == nil || autonomy.StartedAt.IsZero() {
+		t.Fatalf("startedAt is zero in the start response: %s", data)
+	}
+	if autonomy.LastActionAt == nil || autonomy.LastActionAt.IsZero() {
+		t.Fatalf("lastActionAt is zero in the start response: %s", data)
+	}
+
+	// A fresh stop of a runner whose engine left lastActionAt unset must also
+	// carry a timestamp.
+	a.status.Autonomy.LastActionAt = time.Time{}
+	status, data, autonomy = postAutonomy(t, ts, map[string]any{"action": "stop"})
+	if status != http.StatusOK {
+		t.Fatalf("stop status = %d, body %s", status, data)
+	}
+	if autonomy.Running {
+		t.Fatalf("autonomy must be stopped: %+v", autonomy)
+	}
+	if autonomy.LastActionAt == nil || autonomy.LastActionAt.IsZero() {
+		t.Fatalf("lastActionAt is zero in the stop response: %s", data)
+	}
+}
+
+// TestAgentStatusLastActionFallback checks that a running autonomy with an
+// empty lastActionAt reports the start time instead of a zero time.
+func TestAgentStatusLastActionFallback(t *testing.T) {
+	started := time.Date(2026, 11, 5, 16, 30, 0, 0, time.UTC)
+	deps, _, _, a := defaultDeps()
+	a.status.Autonomy = agent.AutonomyStatus{Running: true, StartedAt: started}
+	_, ts := newTestServer(t, deps, Config{})
+	status, data := do(t, ts, http.MethodGet, "/api/agent/status", nil)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body %s", status, data)
+	}
+	var resp struct {
+		Autonomy struct {
+			StartedAt    time.Time `json:"startedAt"`
+			LastActionAt time.Time `json:"lastActionAt"`
+		} `json:"autonomy"`
+	}
+	decode(t, data, &resp)
+	if !resp.Autonomy.StartedAt.Equal(started) {
+		t.Fatalf("startedAt = %v", resp.Autonomy.StartedAt)
+	}
+	if !resp.Autonomy.LastActionAt.Equal(started) {
+		t.Fatalf("lastActionAt = %v, want start time %v", resp.Autonomy.LastActionAt, started)
+	}
+	// A never-started status keeps its zero times.
+	emptyDeps, _, _, emptyAgent := defaultDeps()
+	emptyAgent.status.Autonomy = agent.AutonomyStatus{}
+	_, emptyTS := newTestServer(t, emptyDeps, Config{})
+	status, data = do(t, emptyTS, http.MethodGet, "/api/agent/status", nil)
+	if status != http.StatusOK {
+		t.Fatalf("empty status = %d, body %s", status, data)
+	}
+	var empty struct {
+		Autonomy struct {
+			LastActionAt time.Time `json:"lastActionAt"`
+		} `json:"autonomy"`
+	}
+	decode(t, data, &empty)
+	if !empty.Autonomy.LastActionAt.IsZero() {
+		t.Fatalf("never-started lastActionAt = %v, want zero", empty.Autonomy.LastActionAt)
+	}
+}
+
+// TestStableAutonomyNormalizesUTC checks the autonomy timestamp normalization:
+// a missing lastActionAt of a running runner falls back to startedAt and all
+// times are rendered as UTC (§10.2), even if the engine uses the local zone.
+func TestStableAutonomyNormalizesUTC(t *testing.T) {
+	msk := time.FixedZone("MSK", 3*3600)
+	started := time.Date(2026, 11, 5, 19, 30, 0, 0, msk)
+	st := stableAutonomy(agent.AutonomyStatus{
+		Running:   true,
+		StartedAt: started,
+		Log:       []agent.LogEntry{{Time: started, Kind: "start", Message: "старт"}},
+	})
+	if _, offset := st.StartedAt.Zone(); offset != 0 {
+		t.Fatalf("startedAt zone offset = %d, want UTC", offset)
+	}
+	if !st.LastActionAt.Equal(started) {
+		t.Fatalf("lastActionAt = %v, want %v", st.LastActionAt, started)
+	}
+	if _, offset := st.LastActionAt.Zone(); offset != 0 {
+		t.Fatalf("lastActionAt zone offset = %d, want UTC", offset)
+	}
+	if _, offset := st.Log[0].Time.Zone(); offset != 0 {
+		t.Fatalf("log time zone offset = %d, want UTC", offset)
+	}
+	// A never-started status stays zero.
+	empty := stableAutonomy(agent.AutonomyStatus{})
+	if !empty.StartedAt.IsZero() || !empty.LastActionAt.IsZero() {
+		t.Fatalf("empty autonomy = %+v", empty)
+	}
+}
