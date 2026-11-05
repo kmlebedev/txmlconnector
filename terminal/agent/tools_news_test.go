@@ -130,6 +130,42 @@ func TestNewsToolCatalog(t *testing.T) {
 	}
 }
 
+// TestInvokeToolGetNewsDispatch checks the GAP-2 wiring: get_news is in the
+// tool catalog and invokeTool dispatches it to the NewsStore of the engine
+// config; without a store the tool is a clear configuration error.
+func TestInvokeToolGetNewsDispatch(t *testing.T) {
+	store := &fakeNewsStore{items: []NewsItem{{
+		ID: 3, FirstSeen: testNow.Add(-time.Minute), Published: testNow.Add(-2 * time.Minute), Title: "свежая",
+	}}}
+	engine := newTestEngineWith(t, Config{NewsStore: store}, newFakeDataSource(), nil)
+	found := false
+	for _, tool := range engine.Tools() {
+		if tool.Name == toolNameGetNews {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("get_news is missing from the tool catalog")
+	}
+	result, artifact, err := engine.invokeTool(context.Background(), toolInvocation{}, toolNameGetNews, map[string]any{})
+	if err != nil {
+		t.Fatalf("invokeTool(get_news): %v", err)
+	}
+	payload, ok := result.(newsResult)
+	if !ok || len(payload.News) != 1 || payload.News[0].ID != 3 {
+		t.Fatalf("get_news result = %#v", result)
+	}
+	if artifact != nil {
+		t.Fatalf("get_news artifact = %+v, want none", artifact)
+	}
+	// Without a configured store the dispatch reports the pipeline state.
+	bare := newTestEngineWith(t, Config{}, newFakeDataSource(), nil)
+	if _, _, err := bare.invokeTool(context.Background(), toolInvocation{}, toolNameGetNews, nil); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("get_news without a store error = %v", err)
+	}
+}
+
 // TestClickHouseNewsStoreQuery checks the md.news query: first_seen is the
 // point-in-time filter, the symbol is an optional case-insensitive text filter,
 // and the parameters travel as param_<name> bindings (no SQL interpolation).

@@ -199,6 +199,30 @@ func (s *Server) publishPaperState() {
 	s.publishPortfolio()
 }
 
+// newsEventData is the SSE "news" payload: the whole recorded story with the
+// point-in-time (firstSeen) and the exchange publication instant, both RFC3339
+// UTC like every API time (§10.2).
+type newsEventData struct {
+	ID        int64     `json:"id"`
+	Published time.Time `json:"published"`
+	FirstSeen time.Time `json:"firstSeen"`
+	Source    string    `json:"source"`
+	Title     string    `json:"title"`
+	Body      string    `json:"body,omitempty"`
+}
+
+// mkNewsEventData maps a feed news story to the SSE payload.
+func mkNewsEventData(news feed.News) newsEventData {
+	return newsEventData{
+		ID:        news.ID,
+		Published: utc(news.Published),
+		FirstSeen: utc(news.FirstSeen),
+		Source:    news.Source,
+		Title:     news.Title,
+		Body:      news.Body,
+	}
+}
+
 // onFeedEvent forwards feed events to the SSE clients. It runs on the feed
 // goroutine, so it only performs non-blocking hub publications.
 func (s *Server) onFeedEvent(ev feed.Event) {
@@ -206,6 +230,10 @@ func (s *Server) onFeedEvent(ev feed.Event) {
 	case "quote":
 		if quote, ok := ev.Data.(feed.Quote); ok {
 			s.hub.publish(event{Type: "quote", Data: mkQuoteEventData(quote)})
+		}
+	case "news":
+		if news, ok := ev.Data.(feed.News); ok {
+			s.hub.publish(event{Type: "news", Data: mkNewsEventData(news)})
 		}
 	case "status":
 		s.hub.publish(event{Type: "status", Data: s.statusEventData()})

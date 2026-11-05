@@ -61,6 +61,8 @@ Env:
 | `TERMINAL_LIVE_TRADING` | `1` — разрешить реальные заявки (вместе с флагом) |
 | `TERMINAL_API_TOKEN` | токен локального API: при заданном значении все `/api/*`, кроме `/api/health`, требуют `X-Terminal-Token` или cookie `terminal_token` (§10.4). Плагин DSH генерирует его на каждый запуск бэкенда |
 | `TERMINAL_INSTANCE_ID` | nonce запуска бэкенда: отдаётся в `/api/health` как `instanceId`; плагин DSH принимает бэкенд на порту только при совпадении (§10.4) |
+| `CLICKHOUSE_URL` | необязательный HTTP-endpoint ClickHouse: включает инструмент `get_news` (чтение `md.news`, пишет `cmd/md-recorder`); без него инструмент сообщает, что запись новостей выключена |
+| `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` | креды ClickHouse (fallback: `MD_CLICKHOUSE_USER`/`MD_CLICKHOUSE_PASSWORD`; `MD_CLICKHOUSE_URL` важнее `CLICKHOUSE_URL`) |
 
 Правила: значения секретов, токен API и nonce запуска никогда не печатать/не логировать/не
 коммитить. Все тесты — без сети, live-проверки только у Lead с согласия пользователя.
@@ -235,7 +237,7 @@ type Trade struct {
 }
 
 type Event struct {
-	Type string // "quote" | "orderbook" | "portfolio" | "orders" | "status"
+	Type string // "quote" | "orderbook" | "news" | "portfolio" | "orders" | "status"
 	Data any
 }
 
@@ -501,6 +503,9 @@ type Config struct {
 	FeeBps           float64
 	BacktestHistory  int // сколько последних бэктестов хранить, default 20
 	Now              func() time.Time
+	// NewsStore — необязательный источник записанных новостей (md.news,
+	// cmd/md-recorder) для инструмента get_news; nil — запись новостей выключена.
+	NewsStore NewsStore
 }
 
 type InstrumentRef struct {
@@ -676,6 +681,7 @@ func (e *Engine) Hints(ctx context.Context, symbol string, periodSec int) (Marke
 | `stop_autonomy` | `{}` | `AutonomyStatus` |
 | `get_agent_status` | `{}` | `Status` |
 | `get_backtest_history` | `{}` | `[backtest.Result]` (без bars/equity? equity нужна UI — оставить equity) |
+| `get_news` | `{symbol?, since?, limit?}` | `{since, news:[{id,published,firstSeen,source,title,body}]}` из `md.news`; `since` — по `first_seen` (RFC3339/дата/длительность, по умолчанию 24h), `symbol` — необязательный текстовый фильтр по заголовку/тексту |
 
 Артефакты для UI: `run_backtest`/`compare_strategies` добавляют
 `Artifact{Kind:"backtest", Payload: backtest.Result}`; `start_autonomy` —
@@ -888,6 +894,7 @@ data: {"type":"quote","data":{...}}
 | type | data | Частота |
 |---|---|---|
 | `quote` | `{symbol,last,change,changePct,bid,ask,volume,time}` | live: 1s / offline: 1s (последний бар) |
+| `news` | `{id,published,firstSeen,source,title,body?}` — новость TRANSAQ; `firstSeen` — момент первого появления (point-in-time), времена RFC3339 UTC | при получении заголовка/тела (live, опрос `get_old_news`) |
 | `portfolio` | `Portfolio` (полный, как GET) | при изменении/1s |
 | `orders` | `{orders:[Order]}` | при изменении |
 | `agent` | `{type:"tool_call"\|"tool_result"\|"message"\|"autonomy"\|"log"\|"backtest", ...}` | по мере событий агента |

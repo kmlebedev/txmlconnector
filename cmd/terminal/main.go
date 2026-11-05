@@ -102,9 +102,10 @@ func run(logger *log.Logger) error {
 	market := newFeedAdapter(feedSvc)
 	portfolio := newPaperAdapter(broker, feedSvc)
 	engine, err := agent.New(agent.Config{
-		LLM:      llmCfg,
-		Universe: feedSvc.Universe(),
-		FeeBps:   *feeBps,
+		LLM:       llmCfg,
+		Universe:  feedSvc.Universe(),
+		FeeBps:    *feeBps,
+		NewsStore: newsStoreFromEnv(),
 	}, market, portfolio)
 	if err != nil {
 		_ = feedSvc.Close()

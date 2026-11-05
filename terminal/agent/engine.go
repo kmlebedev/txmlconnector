@@ -40,6 +40,9 @@ type Engine struct {
 
 	// conversations keeps the bounded history of the chat dialogs (§9.2).
 	conversations ConversationStore
+	// news is the optional recorded-news source of the get_news tool (md.news);
+	// nil means the recording pipeline is not configured.
+	news NewsStore
 
 	// Seams over the frozen backtest package: production wiring points them at
 	// the real functions, package tests replace them with deterministic fakes.
@@ -69,6 +72,7 @@ func New(cfg Config, data DataSource, broker Broker) (*Engine, error) {
 		data:          data,
 		broker:        broker,
 		conversations: newMemoryConversations(defaultConversationTurns, defaultConversationBytes),
+		news:          cfg.NewsStore,
 		llmHTTPClient: &http.Client{Timeout: cfg.LLM.Timeout},
 		backtestRun:   backtest.Run,
 		newStrategy:   backtest.NewStrategy,

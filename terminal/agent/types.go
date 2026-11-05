@@ -45,6 +45,11 @@ type Config struct {
 	FeeBps           float64          `json:"feeBps"`
 	BacktestHistory  int              `json:"backtestHistory"`
 	Now              func() time.Time `json:"-"`
+	// NewsStore is the optional recorded-news source of the get_news tool: the
+	// md.news table written by cmd/md-recorder. It is not part of the JSON
+	// contract; nil means the news recording pipeline is off and get_news
+	// reports a clear configuration error.
+	NewsStore NewsStore `json:"-"`
 }
 
 // InstrumentRef is the agent's view of a tradable instrument.

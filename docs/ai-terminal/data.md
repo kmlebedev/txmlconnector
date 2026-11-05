@@ -181,12 +181,18 @@ func Run(ctx context.Context, cl *native.Client, sink Sink, symbols []string) er
     фильтр ищет тикер в заголовке/тексте без учёта регистра
     (`positionCaseInsensitiveUTF8(concat(title,' ',body), ...)`).
   Код — [`terminal/agent/tools_news.go`](../../terminal/agent/tools_news.go): `NewsStore`,
-  `ClickHouseNewsStore`, `get_news`-дескриптор и хук `invokeNewsTool`. **Проводка в
-  `terminal/agent/tools.go` намеренно не сделана** (файл занят параллельной задачей): владельцу
-  каталога нужно добавить `newsToolCatalog()` в `buildTools()` и вызвать
-  `e.invokeNewsTool(ctx, store, name, args)` в диспетчере, передав `NewClickHouseNewsStore(...)`
-  из wiring. Тесты инструмента: `TestGetNewsToolFiltersBySince`, `TestNewsToolCatalog`,
-  `TestClickHouseNewsStoreQuery` (httptest).
+  `ClickHouseNewsStore`, `get_news`-дескриптор и хук `invokeNewsTool`. Инструмент подключён:
+  `newsToolCatalog()` добавлен в `buildTools()`, `toolNameGetNews` — в `toolCatalogNames`,
+  `invokeTool()` вызывает `e.invokeNewsTool(ctx, e.news, ...)`, а store приходит из
+  `agent.Config.NewsStore`; `cmd/terminal/wiring.go` строит `ClickHouseNewsStore` из
+  `CLICKHOUSE_URL`/`MD_CLICKHOUSE_*` (без URL инструмент отвечает понятной ошибкой «recording is
+  off»). Тесты инструмента: `TestGetNewsToolFiltersBySince`, `TestNewsToolCatalog`,
+  `TestInvokeToolGetNewsDispatch`, `TestClickHouseNewsStoreQuery` (httptest), плюс
+  `TestNewsStoreFromEnv` в `cmd/terminal`.
+- **UI.** Новость приходит в SSE как `event: message`, `{"type":"news","data":{id,published,firstSeen,
+  source,title,body?}}` (RFC3339 UTC): `terminal/api/sse.go onFeedEvent` пробрасывает
+  `feed.Event{Type:"news"}` в hub (тест `TestFeedNewsForwarding`). Контракт зафиксирован в
+  [ARCHITECTURE.md](ARCHITECTURE.md) §6 (тип `Event`) и §10.3 (тип `news` SSE).
 
 ## 5. Команда `cmd/md-recorder`
 

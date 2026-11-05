@@ -15,14 +15,12 @@ import (
 // the TRANSAQ news recorded by terminal/recorder into md.news, where first_seen
 // is the point-in-time of the story.
 //
-// The tool follows the tools_research.go hook pattern and is deliberately NOT
-// wired into terminal/agent/tools.go yet (that file is owned by the parallel
-// task): the frozen-catalog owner appends newsToolCatalog() to buildTools() and
-// calls e.invokeNewsTool(ctx, newsStore, name, args) before the core dispatch
-// switch, passing the NewsStore from the command wiring:
-
-//   store := NewClickHouseNewsStore(chstore.New(...))
-//   tool, artifact, handled, err := e.invokeNewsTool(ctx, store, name, args)
+// The tool follows the tools_research.go hook pattern: newsToolCatalog() is
+// appended to buildTools(), invokeNewsTool() is called from invokeTool() before
+// the core dispatch switch, and the NewsStore comes from agent.Config.NewsStore
+// (cmd/terminal builds the ClickHouseNewsStore from CLICKHOUSE_URL/MD_CLICKHOUSE_*
+// in cmd/terminal/wiring.go). A nil store means the recording pipeline is off:
+// the tool reports a clear configuration error instead of failing the terminal.
 
 // toolNameGetNews is the agent tool name of the recorded TRANSAQ news.
 const toolNameGetNews = "get_news"
