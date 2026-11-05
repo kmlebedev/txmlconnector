@@ -1775,17 +1775,18 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout, rqD
 	for _, account := range client.Accounts() {
 		c.emit(xmlcompat.ClientXML(account))
 	}
+	// Orders decoded during the load are not in the Run event stream: the DLL
+	// reports them in ONE <orders> right after <client>, before <positions>
+	// (S: demo, 4 cancelled orders of the day, A8). Grouping across several
+	// RQ_MAIN replies of the load is I.
+	if orders := client.Orders(); len(orders) > 0 {
+		c.emit(xmlcompat.OrdersXML(orders))
+	}
 	for _, pos := range client.SecPositions() {
 		c.emit(xmlcompat.SecPositionXML(pos))
 	}
 	if positions := client.MoneyPositions(); len(positions) > 0 {
 		c.emit(xmlcompat.PositionsXML(positions, req.MicexRegisters))
-	}
-	// Orders decoded during the load are not in the Run event stream: the DLL
-	// reports them at the end of the load, so emit them here (I for the exact
-	// place relative to <positions>).
-	for _, order := range client.Orders() {
-		c.emit(xmlcompat.OrdersXML([]model.Order{order}))
 	}
 	// A non-empty union is not in the live capture (the demo union is empty):
 	// the DLL position is inferred, so the callbacks go right after
