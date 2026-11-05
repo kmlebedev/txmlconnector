@@ -20,13 +20,15 @@ func decodeMessage(c *Client, body []byte) ([]model.Event, error) {
 	}
 	// Decoders run under Client.mu; the RQ_TIME bias converts the server wall
 	// seconds to UTC (UTC = wall + bias, messages.md D).
-	instant := time.Unix(parsed.Date, 0).Add(c.bias).UTC()
+	wall := time.Unix(parsed.Date, 0).UTC()
+	instant := wall.Add(c.bias).UTC()
 	message := model.Message{
-		Time:   instant,
-		Urgent: parsed.Flags&1 != 0 || parsed.Flags&8 != 0,
-		From:   parsed.From,
-		Text:   parsed.Text,
-		Flags:  parsed.Flags,
+		Time:     instant,
+		WallTime: wall,
+		Urgent:   parsed.Flags&1 != 0 || parsed.Flags&8 != 0,
+		From:     parsed.From,
+		Text:     parsed.Text,
+		Flags:    parsed.Flags,
 	}
 	return []model.Event{&message}, nil
 }

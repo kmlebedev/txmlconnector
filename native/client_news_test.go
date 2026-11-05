@@ -69,6 +69,7 @@ func TestOldNewsPayloadMatchesDLL(t *testing.T) {
 	}{
 		{"mixed", append(clientSnapshot(t), newsFixture(t)...), "713e913e0201"},
 		{"uploadOnly", append(clientSnapshot(t), uploadOnly...), "017d217d0201"},
+		{"minID", append(append(clientSnapshot(t), uploadHeaderRecord(t, 1001)...), uploadHeaderRecord(t, 1500)...), "713e913e0201"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newRunServer(t)
@@ -95,7 +96,7 @@ func TestOldNewsPayloadMatchesDLL(t *testing.T) {
 
 // TestNewsHeadersMatchDLL: the 0x35/0x36 headers arriving in the load stream are
 // rendered byte-exactly against the O fixture.
-func TestNewsHeadersMatchDLL(t *testing.T) {
+func TestNewsMatchDLL(t *testing.T) {
 	want := newsDLL(t)
 	if len(want) != 2 {
 		t.Fatalf("news-dll.xml lines = %d", len(want))
@@ -239,4 +240,18 @@ func TestOldNewsEmptyStorePayload(t *testing.T) {
 	if got := hex.EncodeToString(get()); got != "00f4ffffff070201" {
 		t.Fatalf("empty-store payload = %s, want 00f4ffffff070201", got)
 	}
+}
+
+// uploadHeaderRecord builds a 0x36 header-only record (flags=1) in the O
+// variable-C-string layout.
+func uploadHeaderRecord(t *testing.T, id int64) []byte {
+	t.Helper()
+	var w wire.Writer
+	w.Byte(1) // flags: header only
+	w.Int32(int32(id))
+	w.Int32(1762300000)
+	w.String("TESTNEWSSOURCE", 16)
+	w.String("Header only", 128)
+	w.Byte(0)
+	return append([]byte{records.TagNewsUpload}, w.Bytes()...)
 }

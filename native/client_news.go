@@ -32,27 +32,25 @@ func (c *Client) newsHeader(id int64) (model.NewsHeader, bool) {
 	return header, ok
 }
 
-// newsRange implements the RQ_GETNEWS from/to rule of news.md: the last 0x35 id
-// is the anchor when present, otherwise the last stored header (0x36-only run);
-// an empty store sends 0..0x7fffffff. The mixed-store rule is I.
+// newsRange implements the RQ_GETNEWS from/to rule of news.md: the anchor is the
+// MINIMUM stored header id (D: std::map first node; O: {1001,1500} -> 999/1001).
+// An empty store sends 0..0x7fffffff.
 func (c *Client) newsRange(count int) (from, to int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	switch {
-	case c.newsLastOld > 0:
-		to = c.newsLastOld
-		from = to - int64(count)
-		if from < 0 {
-			from = 0
+	if len(c.news) == 0 {
+		return 0, 0x7fffffff
+	}
+	first := true
+	for id := range c.news {
+		if first || id < to {
+			to = id
+			first = false
 		}
-	case len(c.newsOrder) > 0:
-		to = c.newsOrder[len(c.newsOrder)-1]
-		from = to - int64(count)
-		if from < 0 {
-			from = 0
-		}
-	default:
-		from, to = 0, 0x7fffffff
+	}
+	from = to - int64(count)
+	if from < 0 {
+		from = 0
 	}
 	return from, to
 }

@@ -100,12 +100,13 @@ type Client struct {
 	// marginRates is the R_SEC_RATE (0x0a) price P per secid (lot cost in
 	// kopecks) used by the local max-buy/sell formula (task 23/52).
 	marginRates map[uint16]int64
-	// news is the header store of get_old_news/get_news_body; newsLastOld is the
-	// last 0x35 id (the RQ_GETNEWS from/to rule is I, see docs/protocol/news.md).
-	news        map[int64]model.NewsHeader
-	newsOrder   []int64
-	newsLastOld int64
-	newsBodies  map[int64]string
+	// news is the header store of get_old_news/get_news_body. The RQ_GETNEWS
+	// from/to rule uses the MINIMUM stored id (news.md D+O, task-56).
+	news      map[int64]model.NewsHeader
+	newsOrder []int64
+	// newsBodies keeps the unpacked 0x36 body only when the header is known; the
+	// DLL emitter path for <news_body> is not recovered (I).
+	newsBodies map[int64]string
 	// Options state (task 27): families/strikes end-of-family records are D-only;
 	// the XML forms are I until the S series.
 	optionFamilies map[uint16][]model.OptionFamily
@@ -321,21 +322,28 @@ func (c *Client) Poll(ctx context.Context) (events []model.Event, more bool, err
 		events = append(events, evs...)
 	}
 	// The DLL batches all R_MSG records of one RQ_MAIN reply into one
-	// <messages> callback (messages.md, O).
+	// <messages> callback (messages.md, O); the batch takes the position of the
+	// first message in the wire order.
 	var messages []model.Message
+	batchAt := -1
 	if len(events) > 0 {
-		kept := events[:0]
+		kept := make([]model.Event, 0, len(events))
 		for _, ev := range events {
 			if message, ok := ev.(*model.Message); ok {
+				if batchAt < 0 {
+					batchAt = len(kept)
+				}
 				messages = append(messages, *message)
 				continue
 			}
 			kept = append(kept, ev)
 		}
+		if len(messages) > 0 {
+			kept = append(kept, nil)
+			copy(kept[batchAt+1:], kept[batchAt:])
+			kept[batchAt] = &model.Messages{Items: messages}
+		}
 		events = kept
-	}
-	if len(messages) > 0 {
-		events = append(events, &model.Messages{Items: messages})
 	}
 	if unknown != nil {
 		events = append(events, model.UnknownRecord{
