@@ -1,0 +1,96 @@
+{
+ "totalValue": 2101548.8,
+ "cash": 412350.8,
+ "dayChange": 6535.0,
+ "dayChangePct": 0.31,
+ "realizedPnl": 12480.0,
+ "fees": 186.42,
+ "marginPct": 148.5,
+ "positions": [
+  {
+   "symbol": "TQBR:SBER",
+   "name": "Сбербанк",
+   "qty": 400,
+   "avgPrice": 289.4,
+   "price": 293.22,
+   "value": 117288.0,
+   "dayChangePct": 0.36,
+   "profit": 1528.0,
+   "profitPct": 1.32,
+   "realizedPnl": 0
+  },
+  {
+   "symbol": "TQBR:GAZP",
+   "name": "Газпром",
+   "qty": 1000,
+   "avgPrice": 132.1,
+   "price": 128.46,
+   "value": 128460.0,
+   "dayChangePct": -1.15,
+   "profit": -3640.0,
+   "profitPct": -2.76,
+   "realizedPnl": 0
+  },
+  {
+   "symbol": "TQBR:LKOH",
+   "name": "Лукойл",
+   "qty": 60,
+   "avgPrice": 6980.0,
+   "price": 7152.0,
+   "value": 429120.0,
+   "dayChangePct": 0.82,
+   "profit": 10320.0,
+   "profitPct": 2.46,
+   "realizedPnl": 0
+  },
+  {
+   "symbol": "TQBR:PLZL",
+   "name": "Полюс",
+   "qty": 20,
+   "avgPrice": 15990.0,
+   "price": 16480.0,
+   "value": 329600.0,
+   "dayChangePct": 2.1,
+   "profit": 9800.0,
+   "profitPct": 3.06,
+   "realizedPnl": 0
+  },
+  {
+   "symbol": "TQBR:T",
+   "name": "Т-Технологии",
+   "qty": 100,
+   "avgPrice": 2640.0,
+   "price": 2684.5,
+   "value": 268450.0,
+   "dayChangePct": 1.24,
+   "profit": 4450.0,
+   "profitPct": 1.69,
+   "realizedPnl": 0
+  },
+  {
+   "symbol": "TQBR:YDEX",
+   "name": "Яндекс",
+   "qty": 40,
+   "avgPrice": 4420.0,
+   "price": 4312.0,
+   "value": 172480.0,
+   "dayChangePct": -0.68,
+   "profit": -4320.0,
+   "profitPct": -2.44,
+   "realizedPnl": 0
+  },
+  {
+   "symbol": "TQBR:OZON",
+   "name": "Озон",
+   "qty": 50,
+   "avgPrice": 5020.0,
+   "price": 4876.0,
+   "value": 243800.0,
+   "dayChangePct": -1.92,
+   "profit": -7200.0,
+   "profitPct": -2.87,
+   "realizedPnl": 0
+  }
+ ],
+ "updatedAt": "2026-11-05T15:40:00Z"
+}

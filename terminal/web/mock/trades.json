@@ -1,0 +1,92 @@
+{
+ "trades": [
+  {
+   "id": "trd_000031",
+   "orderId": "ord_000014",
+   "symbol": "TQBR:SBER",
+   "side": "buy",
+   "qty": 100,
+   "price": 293.18,
+   "fee": 14.66,
+   "time": "2026-11-05T07:42:11Z",
+   "source": "ui"
+  },
+  {
+   "id": "trd_000032",
+   "orderId": "ord_000011",
+   "symbol": "TQBR:LKOH",
+   "side": "buy",
+   "qty": 20,
+   "price": 7118.5,
+   "fee": 71.19,
+   "time": "2026-11-05T07:12:44Z",
+   "source": "ui"
+  },
+  {
+   "id": "trd_000033",
+   "orderId": "ord_000009",
+   "symbol": "TQBR:PLZL",
+   "side": "buy",
+   "qty": 20,
+   "price": 15990.0,
+   "fee": 159.9,
+   "time": "2026-11-05T06:58:02Z",
+   "source": "agent"
+  },
+  {
+   "id": "trd_000034",
+   "orderId": "ord_000008",
+   "symbol": "TQBR:T",
+   "side": "buy",
+   "qty": 100,
+   "price": 2640.0,
+   "fee": 13.2,
+   "time": "2026-11-05T06:44:51Z",
+   "source": "agent"
+  },
+  {
+   "id": "trd_000035",
+   "orderId": "ord_000007",
+   "symbol": "TQBR:YDEX",
+   "side": "buy",
+   "qty": 40,
+   "price": 4420.0,
+   "fee": 88.4,
+   "time": "2026-11-05T06:31:16Z",
+   "source": "ui"
+  },
+  {
+   "id": "trd_000036",
+   "orderId": "ord_000018",
+   "symbol": "TQBR:OZON",
+   "side": "buy",
+   "qty": 50,
+   "price": 5020.4,
+   "fee": 125.51,
+   "time": "2026-11-05T09:10:18Z",
+   "source": "autonomy"
+  },
+  {
+   "id": "trd_000037",
+   "orderId": "ord_000005",
+   "symbol": "TQBR:GAZP",
+   "side": "sell",
+   "qty": 500,
+   "price": 130.2,
+   "fee": 32.55,
+   "time": "2026-11-05T06:20:07Z",
+   "source": "ui"
+  },
+  {
+   "id": "trd_000038",
+   "orderId": "ord_000004",
+   "symbol": "TQBR:SBER",
+   "side": "sell",
+   "qty": 200,
+   "price": 295.1,
+   "fee": 29.51,
+   "time": "2026-11-05T06:12:39Z",
+   "source": "ui"
+  }
+ ]
+}

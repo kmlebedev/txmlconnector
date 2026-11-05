@@ -1,0 +1,2913 @@
+{
+ "results": [
+  {
+   "symbol": "TQBR:SBER",
+   "strategy": "sma_cross",
+   "periodSec": 300,
+   "params": {
+    "fast": 10,
+    "slow": 30
+   },
+   "metrics": {
+    "initialCash": 1000000.0,
+    "finalEquity": 1123500.0,
+    "totalReturnPct": 12.35,
+    "benchmarkReturnPct": 4.86,
+    "maxDrawdownPct": -6.12,
+    "sharpe": 1.42,
+    "winRatePct": 62.5,
+    "profitFactor": 1.74,
+    "avgTradePct": 1.12,
+    "exposurePct": 48.3,
+    "trades": 16,
+    "bars": 1150,
+    "from": "2026-10-22T07:00:00Z",
+    "to": "2026-11-05T14:25:00Z"
+   },
+   "equity": [
+    {
+     "time": "2026-10-22T07:00:00Z",
+     "equity": 1000000.0,
+     "benchmark": 1000000.0,
+     "drawdownPct": 0.0
+    },
+    {
+     "time": "2026-10-22T07:30:00Z",
+     "equity": 990344.65,
+     "benchmark": 995500.23,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T08:00:00Z",
+     "equity": 994549.64,
+     "benchmark": 994070.06,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T08:30:00Z",
+     "equity": 999642.3,
+     "benchmark": 999115.94,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T09:00:00Z",
+     "equity": 1012649.08,
+     "benchmark": 997974.81,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T09:30:00Z",
+     "equity": 1011970.65,
+     "benchmark": 1004384.17,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T10:00:00Z",
+     "equity": 1007825.16,
+     "benchmark": 1001343.68,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T10:30:00Z",
+     "equity": 1003673.07,
+     "benchmark": 1004407.99,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T11:00:00Z",
+     "equity": 1008150.45,
+     "benchmark": 1006814.32,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T11:30:00Z",
+     "equity": 1010764.55,
+     "benchmark": 1010201.63,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T12:00:00Z",
+     "equity": 1004433.36,
+     "benchmark": 1014779.51,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T12:30:00Z",
+     "equity": 1010568.62,
+     "benchmark": 1017153.49,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T13:00:00Z",
+     "equity": 1017274.23,
+     "benchmark": 1021452.71,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T13:30:00Z",
+     "equity": 1016552.03,
+     "benchmark": 1030784.59,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T14:00:00Z",
+     "equity": 1018459.55,
+     "benchmark": 1029344.78,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T14:30:00Z",
+     "equity": 1019989.48,
+     "benchmark": 1024802.31,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T15:00:00Z",
+     "equity": 1026410.67,
+     "benchmark": 1020123.57,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-22T15:30:00Z",
+     "equity": 1021883.1,
+     "benchmark": 1016905.18,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-23T07:10:00Z",
+     "equity": 1025202.86,
+     "benchmark": 1017895.59,
+     "drawdownPct": -0.97
+    },
+    {
+     "time": "2026-10-23T07:40:00Z",
+     "equity": 1015064.47,
+     "benchmark": 1015985.96,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T08:10:00Z",
+     "equity": 1018821.0,
+     "benchmark": 1017400.26,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T08:40:00Z",
+     "equity": 1022909.29,
+     "benchmark": 1021028.27,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T09:10:00Z",
+     "equity": 1021663.7,
+     "benchmark": 1023171.24,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T09:40:00Z",
+     "equity": 1020608.27,
+     "benchmark": 1023247.25,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T10:10:00Z",
+     "equity": 1021324.69,
+     "benchmark": 1022593.83,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T10:40:00Z",
+     "equity": 1023353.8,
+     "benchmark": 1022504.89,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T11:10:00Z",
+     "equity": 1022910.05,
+     "benchmark": 1020054.99,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T11:40:00Z",
+     "equity": 1022680.03,
+     "benchmark": 1020408.1,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T12:10:00Z",
+     "equity": 1021075.15,
+     "benchmark": 1021971.64,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T12:40:00Z",
+     "equity": 1020672.71,
+     "benchmark": 1026001.84,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T13:10:00Z",
+     "equity": 1021733.33,
+     "benchmark": 1020216.38,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T13:40:00Z",
+     "equity": 1023142.65,
+     "benchmark": 1024428.24,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T14:10:00Z",
+     "equity": 1024344.43,
+     "benchmark": 1022423.4,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T14:40:00Z",
+     "equity": 1028654.89,
+     "benchmark": 1021663.1,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T15:10:00Z",
+     "equity": 1023028.3,
+     "benchmark": 1019539.25,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-23T15:40:00Z",
+     "equity": 1022333.24,
+     "benchmark": 1029093.87,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T07:20:00Z",
+     "equity": 1021444.02,
+     "benchmark": 1025306.46,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T07:50:00Z",
+     "equity": 1026299.99,
+     "benchmark": 1030270.85,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T08:20:00Z",
+     "equity": 1034136.87,
+     "benchmark": 1031248.88,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T08:50:00Z",
+     "equity": 1028817.22,
+     "benchmark": 1033437.69,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T09:20:00Z",
+     "equity": 1035091.15,
+     "benchmark": 1031566.45,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T09:50:00Z",
+     "equity": 1028163.59,
+     "benchmark": 1030711.95,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T10:20:00Z",
+     "equity": 1028981.51,
+     "benchmark": 1029019.96,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T10:50:00Z",
+     "equity": 1033687.55,
+     "benchmark": 1034982.83,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T11:20:00Z",
+     "equity": 1034571.01,
+     "benchmark": 1036295.95,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T11:50:00Z",
+     "equity": 1042832.52,
+     "benchmark": 1039526.04,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T12:20:00Z",
+     "equity": 1044280.84,
+     "benchmark": 1043211.93,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T12:50:00Z",
+     "equity": 1046399.51,
+     "benchmark": 1037949.08,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T13:20:00Z",
+     "equity": 1044368.98,
+     "benchmark": 1034110.86,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T13:50:00Z",
+     "equity": 1039442.26,
+     "benchmark": 1031291.06,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T14:20:00Z",
+     "equity": 1053591.95,
+     "benchmark": 1036621.19,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T14:50:00Z",
+     "equity": 1052841.99,
+     "benchmark": 1038681.89,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-26T15:20:00Z",
+     "equity": 1048071.93,
+     "benchmark": 1033855.63,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T07:00:00Z",
+     "equity": 1053972.81,
+     "benchmark": 1033666.46,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T07:30:00Z",
+     "equity": 1057907.45,
+     "benchmark": 1038511.82,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T08:00:00Z",
+     "equity": 1060351.95,
+     "benchmark": 1038769.61,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T08:30:00Z",
+     "equity": 1060254.73,
+     "benchmark": 1038425.47,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T09:00:00Z",
+     "equity": 1061689.23,
+     "benchmark": 1035190.22,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T09:30:00Z",
+     "equity": 1059319.84,
+     "benchmark": 1035692.38,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T10:00:00Z",
+     "equity": 1060646.06,
+     "benchmark": 1033379.26,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T10:30:00Z",
+     "equity": 1058744.11,
+     "benchmark": 1038212.13,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T11:00:00Z",
+     "equity": 1057858.06,
+     "benchmark": 1035137.9,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T11:30:00Z",
+     "equity": 1065672.0,
+     "benchmark": 1039724.06,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T12:00:00Z",
+     "equity": 1062810.11,
+     "benchmark": 1039493.95,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T12:30:00Z",
+     "equity": 1065864.8,
+     "benchmark": 1043842.23,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T13:00:00Z",
+     "equity": 1069787.79,
+     "benchmark": 1040604.46,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T13:30:00Z",
+     "equity": 1068105.0,
+     "benchmark": 1043317.89,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T14:00:00Z",
+     "equity": 1067753.12,
+     "benchmark": 1038559.87,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T14:30:00Z",
+     "equity": 1066408.15,
+     "benchmark": 1037658.41,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T15:00:00Z",
+     "equity": 1067289.54,
+     "benchmark": 1038116.43,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-27T15:30:00Z",
+     "equity": 1064088.91,
+     "benchmark": 1035567.44,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-28T07:10:00Z",
+     "equity": 1059671.22,
+     "benchmark": 1033500.88,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-28T07:40:00Z",
+     "equity": 1062761.21,
+     "benchmark": 1030525.42,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-28T08:10:00Z",
+     "equity": 1062975.37,
+     "benchmark": 1036207.92,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-28T08:40:00Z",
+     "equity": 1061658.26,
+     "benchmark": 1033788.31,
+     "drawdownPct": -1.11
+    },
+    {
+     "time": "2026-10-28T09:10:00Z",
+     "equity": 1054932.27,
+     "benchmark": 1033847.53,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T09:40:00Z",
+     "equity": 1055279.29,
+     "benchmark": 1033435.4,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T10:10:00Z",
+     "equity": 1058692.24,
+     "benchmark": 1029939.63,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T10:40:00Z",
+     "equity": 1067043.32,
+     "benchmark": 1028682.11,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T11:10:00Z",
+     "equity": 1069237.88,
+     "benchmark": 1035219.58,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T11:40:00Z",
+     "equity": 1075295.17,
+     "benchmark": 1034667.14,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T12:10:00Z",
+     "equity": 1073937.3,
+     "benchmark": 1033614.85,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T12:40:00Z",
+     "equity": 1074905.13,
+     "benchmark": 1026226.99,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T13:10:00Z",
+     "equity": 1073696.2,
+     "benchmark": 1024187.87,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T13:40:00Z",
+     "equity": 1061873.77,
+     "benchmark": 1020436.31,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T14:10:00Z",
+     "equity": 1066412.95,
+     "benchmark": 1019843.56,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T14:40:00Z",
+     "equity": 1069965.39,
+     "benchmark": 1015357.86,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T15:10:00Z",
+     "equity": 1074867.89,
+     "benchmark": 1016738.03,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-28T15:40:00Z",
+     "equity": 1078029.29,
+     "benchmark": 1013880.26,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T07:20:00Z",
+     "equity": 1079811.62,
+     "benchmark": 1017456.85,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T07:50:00Z",
+     "equity": 1083885.17,
+     "benchmark": 1014810.33,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T08:20:00Z",
+     "equity": 1079769.29,
+     "benchmark": 1013563.09,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T08:50:00Z",
+     "equity": 1074225.71,
+     "benchmark": 1018339.68,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T09:20:00Z",
+     "equity": 1078102.15,
+     "benchmark": 1019048.53,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T09:50:00Z",
+     "equity": 1081259.99,
+     "benchmark": 1016946.84,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T10:20:00Z",
+     "equity": 1077501.62,
+     "benchmark": 1015567.15,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T10:50:00Z",
+     "equity": 1080665.1,
+     "benchmark": 1015244.1,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T11:20:00Z",
+     "equity": 1084319.79,
+     "benchmark": 1016231.05,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T11:50:00Z",
+     "equity": 1091134.21,
+     "benchmark": 1015365.32,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T12:20:00Z",
+     "equity": 1091810.87,
+     "benchmark": 1011284.5,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T12:50:00Z",
+     "equity": 1095068.63,
+     "benchmark": 1011904.74,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T13:20:00Z",
+     "equity": 1093514.89,
+     "benchmark": 1007351.62,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T13:50:00Z",
+     "equity": 1086014.14,
+     "benchmark": 1007874.5,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T14:20:00Z",
+     "equity": 1087413.96,
+     "benchmark": 1006024.81,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T14:50:00Z",
+     "equity": 1082397.96,
+     "benchmark": 1012602.22,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-29T15:20:00Z",
+     "equity": 1080024.38,
+     "benchmark": 1013025.45,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-30T07:00:00Z",
+     "equity": 1081497.63,
+     "benchmark": 1014928.9,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-30T07:30:00Z",
+     "equity": 1079404.78,
+     "benchmark": 1012207.89,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T08:00:00Z",
+     "equity": 1085742.72,
+     "benchmark": 1011906.93,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T08:30:00Z",
+     "equity": 1080982.3,
+     "benchmark": 1010749.4,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T09:00:00Z",
+     "equity": 1091851.24,
+     "benchmark": 1003257.25,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T09:30:00Z",
+     "equity": 1087202.28,
+     "benchmark": 998208.0,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T10:00:00Z",
+     "equity": 1086366.99,
+     "benchmark": 1003434.93,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T10:30:00Z",
+     "equity": 1086475.53,
+     "benchmark": 1007029.8,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T11:00:00Z",
+     "equity": 1080331.18,
+     "benchmark": 1007492.36,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T11:30:00Z",
+     "equity": 1080891.85,
+     "benchmark": 1007258.03,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T12:00:00Z",
+     "equity": 1088528.56,
+     "benchmark": 1012890.27,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T12:30:00Z",
+     "equity": 1096894.46,
+     "benchmark": 1006602.52,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T13:00:00Z",
+     "equity": 1091379.09,
+     "benchmark": 1007752.31,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T13:30:00Z",
+     "equity": 1086533.56,
+     "benchmark": 1013086.29,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T14:00:00Z",
+     "equity": 1097265.38,
+     "benchmark": 1013723.2,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T14:30:00Z",
+     "equity": 1097974.61,
+     "benchmark": 1021191.47,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T15:00:00Z",
+     "equity": 1098177.87,
+     "benchmark": 1022333.25,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-10-30T15:30:00Z",
+     "equity": 1101532.08,
+     "benchmark": 1019265.28,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-11-02T07:10:00Z",
+     "equity": 1102699.69,
+     "benchmark": 1019106.81,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-11-02T07:40:00Z",
+     "equity": 1114357.33,
+     "benchmark": 1020985.21,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-11-02T08:10:00Z",
+     "equity": 1114472.38,
+     "benchmark": 1022532.33,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-11-02T08:40:00Z",
+     "equity": 1115152.41,
+     "benchmark": 1016953.78,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-11-02T09:10:00Z",
+     "equity": 1116899.98,
+     "benchmark": 1011993.16,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-11-02T09:40:00Z",
+     "equity": 1118801.72,
+     "benchmark": 1021471.58,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-11-02T10:10:00Z",
+     "equity": 1122051.41,
+     "benchmark": 1027142.96,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-11-02T10:40:00Z",
+     "equity": 1117631.59,
+     "benchmark": 1032731.32,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-11-02T11:10:00Z",
+     "equity": 1109947.03,
+     "benchmark": 1036459.04,
+     "drawdownPct": -1.43
+    },
+    {
+     "time": "2026-11-02T11:40:00Z",
+     "equity": 1104553.32,
+     "benchmark": 1035268.4,
+     "drawdownPct": -1.56
+    },
+    {
+     "time": "2026-11-02T12:10:00Z",
+     "equity": 1112288.31,
+     "benchmark": 1041083.77,
+     "drawdownPct": -1.56
+    },
+    {
+     "time": "2026-11-02T12:40:00Z",
+     "equity": 1107632.3,
+     "benchmark": 1038251.83,
+     "drawdownPct": -1.56
+    },
+    {
+     "time": "2026-11-02T13:10:00Z",
+     "equity": 1103284.36,
+     "benchmark": 1037916.29,
+     "drawdownPct": -1.67
+    },
+    {
+     "time": "2026-11-02T13:40:00Z",
+     "equity": 1101729.6,
+     "benchmark": 1032551.55,
+     "drawdownPct": -1.81
+    },
+    {
+     "time": "2026-11-02T14:10:00Z",
+     "equity": 1098443.05,
+     "benchmark": 1035140.63,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-02T14:40:00Z",
+     "equity": 1101683.42,
+     "benchmark": 1036332.43,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-02T15:10:00Z",
+     "equity": 1103665.24,
+     "benchmark": 1034961.36,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-02T15:40:00Z",
+     "equity": 1104168.87,
+     "benchmark": 1032542.51,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T07:20:00Z",
+     "equity": 1105235.46,
+     "benchmark": 1037263.91,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T07:50:00Z",
+     "equity": 1106046.95,
+     "benchmark": 1039325.48,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T08:20:00Z",
+     "equity": 1108018.43,
+     "benchmark": 1035063.55,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T08:50:00Z",
+     "equity": 1108033.85,
+     "benchmark": 1035335.52,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T09:20:00Z",
+     "equity": 1107480.8,
+     "benchmark": 1036749.14,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T09:50:00Z",
+     "equity": 1116716.16,
+     "benchmark": 1038854.15,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T10:20:00Z",
+     "equity": 1112763.29,
+     "benchmark": 1037609.78,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T10:50:00Z",
+     "equity": 1103376.31,
+     "benchmark": 1032438.47,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T11:20:00Z",
+     "equity": 1107690.24,
+     "benchmark": 1026997.18,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T11:50:00Z",
+     "equity": 1107917.41,
+     "benchmark": 1025395.12,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T12:20:00Z",
+     "equity": 1111418.44,
+     "benchmark": 1029004.7,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T12:50:00Z",
+     "equity": 1115734.4,
+     "benchmark": 1025115.38,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T13:20:00Z",
+     "equity": 1116884.12,
+     "benchmark": 1029902.25,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T13:50:00Z",
+     "equity": 1124964.34,
+     "benchmark": 1034709.17,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T14:20:00Z",
+     "equity": 1128598.59,
+     "benchmark": 1033437.19,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T14:50:00Z",
+     "equity": 1123095.51,
+     "benchmark": 1032819.12,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-03T15:20:00Z",
+     "equity": 1132393.19,
+     "benchmark": 1031960.0,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T07:00:00Z",
+     "equity": 1134931.02,
+     "benchmark": 1031178.55,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T07:30:00Z",
+     "equity": 1145260.94,
+     "benchmark": 1032452.43,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T08:00:00Z",
+     "equity": 1144783.88,
+     "benchmark": 1034687.54,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T08:30:00Z",
+     "equity": 1141146.62,
+     "benchmark": 1034158.49,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T09:00:00Z",
+     "equity": 1135387.68,
+     "benchmark": 1035760.8,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T09:30:00Z",
+     "equity": 1134899.84,
+     "benchmark": 1039871.59,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T10:00:00Z",
+     "equity": 1139600.17,
+     "benchmark": 1044624.98,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T10:30:00Z",
+     "equity": 1130636.56,
+     "benchmark": 1046753.74,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T11:00:00Z",
+     "equity": 1128957.83,
+     "benchmark": 1045753.05,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T11:30:00Z",
+     "equity": 1125883.8,
+     "benchmark": 1045775.77,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T12:00:00Z",
+     "equity": 1134486.53,
+     "benchmark": 1044831.51,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T12:30:00Z",
+     "equity": 1134296.07,
+     "benchmark": 1041644.76,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T13:00:00Z",
+     "equity": 1135653.05,
+     "benchmark": 1041018.27,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T13:30:00Z",
+     "equity": 1135424.66,
+     "benchmark": 1035413.72,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T14:00:00Z",
+     "equity": 1136679.26,
+     "benchmark": 1031433.42,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T14:30:00Z",
+     "equity": 1136394.35,
+     "benchmark": 1033422.84,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T15:00:00Z",
+     "equity": 1142113.62,
+     "benchmark": 1030946.28,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-04T15:30:00Z",
+     "equity": 1142340.4,
+     "benchmark": 1029292.26,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T07:10:00Z",
+     "equity": 1134295.57,
+     "benchmark": 1034174.69,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T07:40:00Z",
+     "equity": 1138254.93,
+     "benchmark": 1029878.84,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T08:10:00Z",
+     "equity": 1135389.73,
+     "benchmark": 1029097.54,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T08:40:00Z",
+     "equity": 1127866.1,
+     "benchmark": 1027513.47,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T09:10:00Z",
+     "equity": 1123749.42,
+     "benchmark": 1030775.13,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T09:40:00Z",
+     "equity": 1122897.8,
+     "benchmark": 1026581.51,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T10:10:00Z",
+     "equity": 1129625.17,
+     "benchmark": 1036251.62,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T10:40:00Z",
+     "equity": 1126120.73,
+     "benchmark": 1044595.28,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T11:10:00Z",
+     "equity": 1131369.29,
+     "benchmark": 1043932.65,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T11:40:00Z",
+     "equity": 1127625.04,
+     "benchmark": 1039237.38,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T12:10:00Z",
+     "equity": 1121472.37,
+     "benchmark": 1039588.75,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T12:40:00Z",
+     "equity": 1124530.15,
+     "benchmark": 1038353.09,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T13:10:00Z",
+     "equity": 1122686.08,
+     "benchmark": 1041738.84,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T13:40:00Z",
+     "equity": 1125157.45,
+     "benchmark": 1049145.46,
+     "drawdownPct": -2.1
+    },
+    {
+     "time": "2026-11-05T14:10:00Z",
+     "equity": 1116151.49,
+     "benchmark": 1045086.46,
+     "drawdownPct": -2.54
+    }
+   ],
+   "trades": [
+    {
+     "entryTime": "2026-10-22T07:10:00Z",
+     "exitTime": "2026-10-22T07:20:00Z",
+     "side": "long",
+     "entryPrice": 305.65,
+     "exitPrice": 305.9,
+     "qty": 1090,
+     "pnl": 277.61,
+     "pnlPct": 0.08,
+     "barsHeld": 2,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-10-22T12:25:00Z",
+     "exitTime": "2026-10-22T12:55:00Z",
+     "side": "long",
+     "entryPrice": 305.29,
+     "exitPrice": 305.28,
+     "qty": 1091,
+     "pnl": 62.13,
+     "pnlPct": 0.02,
+     "barsHeld": 6,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-23T08:50:00Z",
+     "exitTime": "2026-10-23T09:20:00Z",
+     "side": "long",
+     "entryPrice": 306.16,
+     "exitPrice": 306.28,
+     "qty": 1088,
+     "pnl": 130.53,
+     "pnlPct": 0.04,
+     "barsHeld": 6,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-23T14:05:00Z",
+     "exitTime": "2026-10-23T14:40:00Z",
+     "side": "long",
+     "entryPrice": 304.53,
+     "exitPrice": 304.42,
+     "qty": 1094,
+     "pnl": 247.02,
+     "pnlPct": 0.07,
+     "barsHeld": 7,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-10-26T10:30:00Z",
+     "exitTime": "2026-10-26T10:40:00Z",
+     "side": "long",
+     "entryPrice": 304.37,
+     "exitPrice": 304.24,
+     "qty": 1095,
+     "pnl": 281.36,
+     "pnlPct": 0.08,
+     "barsHeld": 2,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-26T15:45:00Z",
+     "exitTime": "2026-10-27T07:30:00Z",
+     "side": "long",
+     "entryPrice": 304.77,
+     "exitPrice": 304.62,
+     "qty": 1093,
+     "pnl": 321.98,
+     "pnlPct": 0.1,
+     "barsHeld": 7,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-27T12:10:00Z",
+     "exitTime": "2026-10-27T12:30:00Z",
+     "side": "long",
+     "entryPrice": 297.85,
+     "exitPrice": 297.11,
+     "qty": 1119,
+     "pnl": 1369.78,
+     "pnlPct": 0.41,
+     "barsHeld": 4,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-10-28T08:35:00Z",
+     "exitTime": "2026-10-28T08:55:00Z",
+     "side": "long",
+     "entryPrice": 295.5,
+     "exitPrice": 294.67,
+     "qty": 1128,
+     "pnl": 1548.59,
+     "pnlPct": 0.46,
+     "barsHeld": 4,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-28T13:50:00Z",
+     "exitTime": "2026-10-28T14:05:00Z",
+     "side": "long",
+     "entryPrice": 293.42,
+     "exitPrice": 293.3,
+     "qty": 1136,
+     "pnl": 255.76,
+     "pnlPct": 0.08,
+     "barsHeld": 3,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-29T10:15:00Z",
+     "exitTime": "2026-10-29T10:40:00Z",
+     "side": "long",
+     "entryPrice": 289.31,
+     "exitPrice": 288.7,
+     "qty": 1152,
+     "pnl": 1159.7,
+     "pnlPct": 0.35,
+     "barsHeld": 5,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-10-29T15:30:00Z",
+     "exitTime": "2026-10-30T07:10:00Z",
+     "side": "long",
+     "entryPrice": 287.0,
+     "exitPrice": 286.9,
+     "qty": 1161,
+     "pnl": -113.58,
+     "pnlPct": -0.03,
+     "barsHeld": 6,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-30T11:55:00Z",
+     "exitTime": "2026-10-30T12:20:00Z",
+     "side": "long",
+     "entryPrice": 287.44,
+     "exitPrice": 288.27,
+     "qty": 1159,
+     "pnl": -1255.65,
+     "pnlPct": -0.38,
+     "barsHeld": 5,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-11-02T08:20:00Z",
+     "exitTime": "2026-11-02T08:45:00Z",
+     "side": "long",
+     "entryPrice": 289.59,
+     "exitPrice": 289.14,
+     "qty": 1151,
+     "pnl": -525.07,
+     "pnlPct": -0.16,
+     "barsHeld": 5,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-11-02T13:35:00Z",
+     "exitTime": "2026-11-02T14:00:00Z",
+     "side": "long",
+     "entryPrice": 286.14,
+     "exitPrice": 286.23,
+     "qty": 1164,
+     "pnl": -181.39,
+     "pnlPct": -0.05,
+     "barsHeld": 5,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-11-03T10:00:00Z",
+     "exitTime": "2026-11-03T10:15:00Z",
+     "side": "long",
+     "entryPrice": 287.68,
+     "exitPrice": 288.53,
+     "qty": 1158,
+     "pnl": -1283.9,
+     "pnlPct": -0.39,
+     "barsHeld": 3,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-11-03T15:15:00Z",
+     "exitTime": "2026-11-03T15:25:00Z",
+     "side": "long",
+     "entryPrice": 293.74,
+     "exitPrice": 293.68,
+     "qty": 1134,
+     "pnl": -61.95,
+     "pnlPct": -0.02,
+     "barsHeld": 2,
+     "reason": "пересечение SMA вниз"
+    }
+   ],
+   "warnings": []
+  },
+  {
+   "symbol": "TQBR:GAZP",
+   "strategy": "donchian_breakout",
+   "periodSec": 900,
+   "params": {
+    "period": 20
+   },
+   "metrics": {
+    "initialCash": 1000000.0,
+    "finalEquity": 1087100.0,
+    "totalReturnPct": 8.71,
+    "benchmarkReturnPct": -3.21,
+    "maxDrawdownPct": -9.43,
+    "sharpe": 0.96,
+    "winRatePct": 54.5,
+    "profitFactor": 1.38,
+    "avgTradePct": 0.71,
+    "exposurePct": 39.8,
+    "trades": 22,
+    "bars": 620,
+    "from": "2026-10-08T07:00:00Z",
+    "to": "2026-11-02T08:45:00Z"
+   },
+   "equity": [
+    {
+     "time": "2026-10-08T07:00:00Z",
+     "equity": 1000000.0,
+     "benchmark": 1000000.0,
+     "drawdownPct": 0.0
+    },
+    {
+     "time": "2026-10-08T07:45:00Z",
+     "equity": 995147.73,
+     "benchmark": 1000025.65,
+     "drawdownPct": -0.49
+    },
+    {
+     "time": "2026-10-08T08:30:00Z",
+     "equity": 1000604.65,
+     "benchmark": 1000661.48,
+     "drawdownPct": -0.49
+    },
+    {
+     "time": "2026-10-08T09:15:00Z",
+     "equity": 1005020.66,
+     "benchmark": 998301.87,
+     "drawdownPct": -0.49
+    },
+    {
+     "time": "2026-10-08T10:00:00Z",
+     "equity": 1000954.64,
+     "benchmark": 1000189.04,
+     "drawdownPct": -0.49
+    },
+    {
+     "time": "2026-10-08T10:45:00Z",
+     "equity": 1003639.28,
+     "benchmark": 998007.14,
+     "drawdownPct": -0.49
+    },
+    {
+     "time": "2026-10-08T11:30:00Z",
+     "equity": 997757.57,
+     "benchmark": 994884.49,
+     "drawdownPct": -0.72
+    },
+    {
+     "time": "2026-10-08T12:15:00Z",
+     "equity": 996002.85,
+     "benchmark": 993026.36,
+     "drawdownPct": -0.9
+    },
+    {
+     "time": "2026-10-08T13:00:00Z",
+     "equity": 993645.61,
+     "benchmark": 989743.67,
+     "drawdownPct": -1.13
+    },
+    {
+     "time": "2026-10-08T13:45:00Z",
+     "equity": 995798.97,
+     "benchmark": 989345.05,
+     "drawdownPct": -1.13
+    },
+    {
+     "time": "2026-10-08T14:30:00Z",
+     "equity": 993842.65,
+     "benchmark": 987511.52,
+     "drawdownPct": -1.13
+    },
+    {
+     "time": "2026-10-08T15:15:00Z",
+     "equity": 995581.64,
+     "benchmark": 992233.77,
+     "drawdownPct": -1.13
+    },
+    {
+     "time": "2026-10-09T07:00:00Z",
+     "equity": 992642.86,
+     "benchmark": 991150.91,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-09T07:45:00Z",
+     "equity": 994715.14,
+     "benchmark": 990339.81,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-09T08:30:00Z",
+     "equity": 998721.96,
+     "benchmark": 989954.55,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-09T09:15:00Z",
+     "equity": 998713.94,
+     "benchmark": 989669.62,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-09T10:00:00Z",
+     "equity": 998564.68,
+     "benchmark": 989561.94,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-09T10:45:00Z",
+     "equity": 996807.76,
+     "benchmark": 993869.09,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-09T11:30:00Z",
+     "equity": 999710.47,
+     "benchmark": 996713.29,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-09T12:15:00Z",
+     "equity": 1005278.9,
+     "benchmark": 998725.21,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-09T13:00:00Z",
+     "equity": 1008218.49,
+     "benchmark": 998629.73,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-09T13:45:00Z",
+     "equity": 1010987.29,
+     "benchmark": 992410.78,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-09T14:30:00Z",
+     "equity": 1012471.18,
+     "benchmark": 993384.79,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-09T15:15:00Z",
+     "equity": 1005520.8,
+     "benchmark": 992824.0,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T07:00:00Z",
+     "equity": 1007782.63,
+     "benchmark": 993845.66,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T07:45:00Z",
+     "equity": 1008523.87,
+     "benchmark": 996168.47,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T08:30:00Z",
+     "equity": 1009734.02,
+     "benchmark": 998092.76,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T09:15:00Z",
+     "equity": 1012041.14,
+     "benchmark": 995192.98,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T10:00:00Z",
+     "equity": 1012860.22,
+     "benchmark": 995554.47,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T10:45:00Z",
+     "equity": 1013617.77,
+     "benchmark": 995428.15,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T11:30:00Z",
+     "equity": 1017791.85,
+     "benchmark": 997122.01,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T12:15:00Z",
+     "equity": 1024189.74,
+     "benchmark": 997277.24,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T13:00:00Z",
+     "equity": 1029404.23,
+     "benchmark": 999127.03,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T13:45:00Z",
+     "equity": 1030101.82,
+     "benchmark": 1001018.32,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T14:30:00Z",
+     "equity": 1034855.57,
+     "benchmark": 997878.76,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-12T15:15:00Z",
+     "equity": 1029038.91,
+     "benchmark": 999681.52,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T07:00:00Z",
+     "equity": 1031650.12,
+     "benchmark": 1002187.36,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T07:45:00Z",
+     "equity": 1029581.58,
+     "benchmark": 998303.91,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T08:30:00Z",
+     "equity": 1032590.99,
+     "benchmark": 995672.94,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T09:15:00Z",
+     "equity": 1034011.77,
+     "benchmark": 996635.77,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T10:00:00Z",
+     "equity": 1031017.45,
+     "benchmark": 998752.86,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T10:45:00Z",
+     "equity": 1028644.18,
+     "benchmark": 1001955.66,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T11:30:00Z",
+     "equity": 1025750.77,
+     "benchmark": 1000285.59,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T12:15:00Z",
+     "equity": 1027490.43,
+     "benchmark": 996613.18,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T13:00:00Z",
+     "equity": 1029014.44,
+     "benchmark": 993406.38,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T13:45:00Z",
+     "equity": 1031103.33,
+     "benchmark": 995028.5,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T14:30:00Z",
+     "equity": 1032505.95,
+     "benchmark": 994129.56,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-13T15:15:00Z",
+     "equity": 1030487.02,
+     "benchmark": 993959.82,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T07:00:00Z",
+     "equity": 1029149.76,
+     "benchmark": 992693.14,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T07:45:00Z",
+     "equity": 1028609.15,
+     "benchmark": 988697.91,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T08:30:00Z",
+     "equity": 1026997.3,
+     "benchmark": 988042.03,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T09:15:00Z",
+     "equity": 1024947.93,
+     "benchmark": 987863.5,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T10:00:00Z",
+     "equity": 1022958.29,
+     "benchmark": 984013.42,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T10:45:00Z",
+     "equity": 1024981.08,
+     "benchmark": 979562.3,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T11:30:00Z",
+     "equity": 1025048.53,
+     "benchmark": 977707.14,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T12:15:00Z",
+     "equity": 1024982.97,
+     "benchmark": 977840.51,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T13:00:00Z",
+     "equity": 1024202.53,
+     "benchmark": 975021.87,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T13:45:00Z",
+     "equity": 1024518.67,
+     "benchmark": 974274.58,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T14:30:00Z",
+     "equity": 1022859.59,
+     "benchmark": 970613.97,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-14T15:15:00Z",
+     "equity": 1023824.34,
+     "benchmark": 974383.39,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T07:00:00Z",
+     "equity": 1025317.04,
+     "benchmark": 976141.3,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T07:45:00Z",
+     "equity": 1029669.57,
+     "benchmark": 975608.77,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T08:30:00Z",
+     "equity": 1035452.71,
+     "benchmark": 972216.32,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T09:15:00Z",
+     "equity": 1037648.33,
+     "benchmark": 973139.31,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T10:00:00Z",
+     "equity": 1037906.01,
+     "benchmark": 976788.48,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T10:45:00Z",
+     "equity": 1043011.08,
+     "benchmark": 979195.33,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T11:30:00Z",
+     "equity": 1038506.57,
+     "benchmark": 977450.07,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T12:15:00Z",
+     "equity": 1038424.73,
+     "benchmark": 978057.26,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T13:00:00Z",
+     "equity": 1041623.25,
+     "benchmark": 978666.9,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T13:45:00Z",
+     "equity": 1040414.65,
+     "benchmark": 979191.24,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T14:30:00Z",
+     "equity": 1040765.06,
+     "benchmark": 980326.3,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-15T15:15:00Z",
+     "equity": 1048383.53,
+     "benchmark": 975678.29,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T07:00:00Z",
+     "equity": 1052108.93,
+     "benchmark": 978389.63,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T07:45:00Z",
+     "equity": 1050898.71,
+     "benchmark": 976902.87,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T08:30:00Z",
+     "equity": 1053001.13,
+     "benchmark": 979209.74,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T09:15:00Z",
+     "equity": 1051711.06,
+     "benchmark": 982144.17,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T10:00:00Z",
+     "equity": 1051788.57,
+     "benchmark": 985568.7,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T10:45:00Z",
+     "equity": 1053644.57,
+     "benchmark": 988250.2,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T11:30:00Z",
+     "equity": 1050794.02,
+     "benchmark": 987220.23,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T12:15:00Z",
+     "equity": 1052962.4,
+     "benchmark": 985637.61,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T13:00:00Z",
+     "equity": 1053573.06,
+     "benchmark": 985676.85,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T13:45:00Z",
+     "equity": 1049729.31,
+     "benchmark": 987563.57,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T14:30:00Z",
+     "equity": 1047814.45,
+     "benchmark": 983465.49,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-16T15:15:00Z",
+     "equity": 1045896.18,
+     "benchmark": 981357.01,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-19T07:00:00Z",
+     "equity": 1043943.71,
+     "benchmark": 984247.7,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-19T07:45:00Z",
+     "equity": 1042601.69,
+     "benchmark": 982519.51,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-19T08:30:00Z",
+     "equity": 1043005.85,
+     "benchmark": 983297.07,
+     "drawdownPct": -1.23
+    },
+    {
+     "time": "2026-10-19T09:15:00Z",
+     "equity": 1039692.48,
+     "benchmark": 983827.74,
+     "drawdownPct": -1.32
+    },
+    {
+     "time": "2026-10-19T10:00:00Z",
+     "equity": 1039959.88,
+     "benchmark": 984287.7,
+     "drawdownPct": -1.32
+    },
+    {
+     "time": "2026-10-19T10:45:00Z",
+     "equity": 1038951.9,
+     "benchmark": 986097.6,
+     "drawdownPct": -1.39
+    },
+    {
+     "time": "2026-10-19T11:30:00Z",
+     "equity": 1038887.27,
+     "benchmark": 989660.91,
+     "drawdownPct": -1.4
+    },
+    {
+     "time": "2026-10-19T12:15:00Z",
+     "equity": 1039523.62,
+     "benchmark": 989730.78,
+     "drawdownPct": -1.4
+    },
+    {
+     "time": "2026-10-19T13:00:00Z",
+     "equity": 1037898.71,
+     "benchmark": 992756.75,
+     "drawdownPct": -1.49
+    },
+    {
+     "time": "2026-10-19T13:45:00Z",
+     "equity": 1042711.84,
+     "benchmark": 989956.94,
+     "drawdownPct": -1.49
+    },
+    {
+     "time": "2026-10-19T14:30:00Z",
+     "equity": 1039124.24,
+     "benchmark": 991087.63,
+     "drawdownPct": -1.49
+    },
+    {
+     "time": "2026-10-19T15:15:00Z",
+     "equity": 1043144.22,
+     "benchmark": 989272.18,
+     "drawdownPct": -1.49
+    },
+    {
+     "time": "2026-10-20T07:00:00Z",
+     "equity": 1046482.86,
+     "benchmark": 987882.67,
+     "drawdownPct": -1.49
+    },
+    {
+     "time": "2026-10-20T07:45:00Z",
+     "equity": 1045383.37,
+     "benchmark": 989764.13,
+     "drawdownPct": -1.49
+    },
+    {
+     "time": "2026-10-20T08:30:00Z",
+     "equity": 1046160.53,
+     "benchmark": 988985.0,
+     "drawdownPct": -1.49
+    },
+    {
+     "time": "2026-10-20T09:15:00Z",
+     "equity": 1042257.18,
+     "benchmark": 988603.04,
+     "drawdownPct": -1.49
+    },
+    {
+     "time": "2026-10-20T10:00:00Z",
+     "equity": 1039450.87,
+     "benchmark": 986901.1,
+     "drawdownPct": -1.49
+    },
+    {
+     "time": "2026-10-20T10:45:00Z",
+     "equity": 1036324.95,
+     "benchmark": 983698.88,
+     "drawdownPct": -1.64
+    },
+    {
+     "time": "2026-10-20T11:30:00Z",
+     "equity": 1035360.02,
+     "benchmark": 986259.16,
+     "drawdownPct": -1.74
+    },
+    {
+     "time": "2026-10-20T12:15:00Z",
+     "equity": 1039392.12,
+     "benchmark": 991176.75,
+     "drawdownPct": -1.74
+    },
+    {
+     "time": "2026-10-20T13:00:00Z",
+     "equity": 1040333.91,
+     "benchmark": 991337.75,
+     "drawdownPct": -1.74
+    },
+    {
+     "time": "2026-10-20T13:45:00Z",
+     "equity": 1039494.43,
+     "benchmark": 989940.03,
+     "drawdownPct": -1.74
+    },
+    {
+     "time": "2026-10-20T14:30:00Z",
+     "equity": 1037107.95,
+     "benchmark": 988027.01,
+     "drawdownPct": -1.74
+    },
+    {
+     "time": "2026-10-20T15:15:00Z",
+     "equity": 1036181.98,
+     "benchmark": 984310.74,
+     "drawdownPct": -1.74
+    },
+    {
+     "time": "2026-10-21T07:00:00Z",
+     "equity": 1036446.7,
+     "benchmark": 986272.85,
+     "drawdownPct": -1.74
+    },
+    {
+     "time": "2026-10-21T07:45:00Z",
+     "equity": 1040228.92,
+     "benchmark": 982621.49,
+     "drawdownPct": -1.74
+    },
+    {
+     "time": "2026-10-21T08:30:00Z",
+     "equity": 1039171.28,
+     "benchmark": 981589.62,
+     "drawdownPct": -1.74
+    },
+    {
+     "time": "2026-10-21T09:15:00Z",
+     "equity": 1041492.77,
+     "benchmark": 979927.65,
+     "drawdownPct": -1.74
+    },
+    {
+     "time": "2026-10-21T10:00:00Z",
+     "equity": 1036335.02,
+     "benchmark": 980542.49,
+     "drawdownPct": -1.74
+    },
+    {
+     "time": "2026-10-21T10:45:00Z",
+     "equity": 1033409.32,
+     "benchmark": 982563.61,
+     "drawdownPct": -1.92
+    },
+    {
+     "time": "2026-10-21T11:30:00Z",
+     "equity": 1030016.73,
+     "benchmark": 983304.1,
+     "drawdownPct": -2.24
+    },
+    {
+     "time": "2026-10-21T12:15:00Z",
+     "equity": 1029161.07,
+     "benchmark": 979984.39,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-21T13:00:00Z",
+     "equity": 1036296.8,
+     "benchmark": 978375.44,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-21T13:45:00Z",
+     "equity": 1036007.93,
+     "benchmark": 978050.35,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-21T14:30:00Z",
+     "equity": 1038441.33,
+     "benchmark": 974840.41,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-21T15:15:00Z",
+     "equity": 1042988.0,
+     "benchmark": 972078.85,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T07:00:00Z",
+     "equity": 1035285.78,
+     "benchmark": 968756.59,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T07:45:00Z",
+     "equity": 1039480.14,
+     "benchmark": 966407.26,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T08:30:00Z",
+     "equity": 1038518.07,
+     "benchmark": 966615.29,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T09:15:00Z",
+     "equity": 1044455.78,
+     "benchmark": 968398.42,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T10:00:00Z",
+     "equity": 1045823.73,
+     "benchmark": 971370.61,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T10:45:00Z",
+     "equity": 1043824.68,
+     "benchmark": 971735.24,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T11:30:00Z",
+     "equity": 1047725.77,
+     "benchmark": 967591.59,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T12:15:00Z",
+     "equity": 1047038.75,
+     "benchmark": 967772.08,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T13:00:00Z",
+     "equity": 1049735.83,
+     "benchmark": 964730.87,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T13:45:00Z",
+     "equity": 1054594.02,
+     "benchmark": 963530.75,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T14:30:00Z",
+     "equity": 1061750.14,
+     "benchmark": 963696.16,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-22T15:15:00Z",
+     "equity": 1060101.34,
+     "benchmark": 961275.7,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T07:00:00Z",
+     "equity": 1066018.28,
+     "benchmark": 961075.84,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T07:45:00Z",
+     "equity": 1061595.27,
+     "benchmark": 959806.85,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T08:30:00Z",
+     "equity": 1066084.78,
+     "benchmark": 956357.13,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T09:15:00Z",
+     "equity": 1068666.93,
+     "benchmark": 955453.9,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T10:00:00Z",
+     "equity": 1072019.56,
+     "benchmark": 952633.56,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T10:45:00Z",
+     "equity": 1069317.37,
+     "benchmark": 950769.64,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T11:30:00Z",
+     "equity": 1071049.41,
+     "benchmark": 951878.8,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T12:15:00Z",
+     "equity": 1073825.45,
+     "benchmark": 952318.16,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T13:00:00Z",
+     "equity": 1077185.24,
+     "benchmark": 955800.62,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T13:45:00Z",
+     "equity": 1079542.57,
+     "benchmark": 951456.94,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T14:30:00Z",
+     "equity": 1074028.26,
+     "benchmark": 950550.7,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-23T15:15:00Z",
+     "equity": 1070154.49,
+     "benchmark": 955641.2,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T07:00:00Z",
+     "equity": 1073041.12,
+     "benchmark": 953375.14,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T07:45:00Z",
+     "equity": 1072479.69,
+     "benchmark": 951645.96,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T08:30:00Z",
+     "equity": 1071896.36,
+     "benchmark": 953990.28,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T09:15:00Z",
+     "equity": 1069834.84,
+     "benchmark": 950873.56,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T10:00:00Z",
+     "equity": 1073203.81,
+     "benchmark": 954283.17,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T10:45:00Z",
+     "equity": 1070934.33,
+     "benchmark": 955569.31,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T11:30:00Z",
+     "equity": 1074749.7,
+     "benchmark": 955545.04,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T12:15:00Z",
+     "equity": 1075875.36,
+     "benchmark": 950338.78,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T13:00:00Z",
+     "equity": 1071993.31,
+     "benchmark": 948640.25,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T13:45:00Z",
+     "equity": 1071348.01,
+     "benchmark": 952967.74,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T14:30:00Z",
+     "equity": 1068413.81,
+     "benchmark": 954178.78,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-26T15:15:00Z",
+     "equity": 1063191.94,
+     "benchmark": 954242.71,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T07:00:00Z",
+     "equity": 1064592.55,
+     "benchmark": 953245.3,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T07:45:00Z",
+     "equity": 1070114.63,
+     "benchmark": 953388.03,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T08:30:00Z",
+     "equity": 1069660.77,
+     "benchmark": 952208.51,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T09:15:00Z",
+     "equity": 1073037.49,
+     "benchmark": 949917.12,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T10:00:00Z",
+     "equity": 1071682.55,
+     "benchmark": 948412.95,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T10:45:00Z",
+     "equity": 1071864.34,
+     "benchmark": 947158.49,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T11:30:00Z",
+     "equity": 1069277.06,
+     "benchmark": 951784.28,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T12:15:00Z",
+     "equity": 1064497.44,
+     "benchmark": 952589.66,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T13:00:00Z",
+     "equity": 1067754.15,
+     "benchmark": 955409.08,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T13:45:00Z",
+     "equity": 1068051.33,
+     "benchmark": 959085.38,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T14:30:00Z",
+     "equity": 1061150.51,
+     "benchmark": 956169.91,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-27T15:15:00Z",
+     "equity": 1065258.62,
+     "benchmark": 954803.22,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T07:00:00Z",
+     "equity": 1063382.08,
+     "benchmark": 954153.59,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T07:45:00Z",
+     "equity": 1066119.33,
+     "benchmark": 952244.86,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T08:30:00Z",
+     "equity": 1065155.94,
+     "benchmark": 953984.4,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T09:15:00Z",
+     "equity": 1068929.56,
+     "benchmark": 951274.98,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T10:00:00Z",
+     "equity": 1070817.17,
+     "benchmark": 948682.78,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T10:45:00Z",
+     "equity": 1068365.17,
+     "benchmark": 948394.05,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T11:30:00Z",
+     "equity": 1072365.25,
+     "benchmark": 950191.07,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T12:15:00Z",
+     "equity": 1076333.82,
+     "benchmark": 950689.02,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T13:00:00Z",
+     "equity": 1075200.17,
+     "benchmark": 951135.78,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T13:45:00Z",
+     "equity": 1074328.04,
+     "benchmark": 949824.77,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T14:30:00Z",
+     "equity": 1076419.74,
+     "benchmark": 954479.38,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-28T15:15:00Z",
+     "equity": 1074646.08,
+     "benchmark": 955740.59,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T07:00:00Z",
+     "equity": 1078551.77,
+     "benchmark": 957209.76,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T07:45:00Z",
+     "equity": 1077989.33,
+     "benchmark": 957412.94,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T08:30:00Z",
+     "equity": 1084629.03,
+     "benchmark": 958627.09,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T09:15:00Z",
+     "equity": 1086247.48,
+     "benchmark": 957013.46,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T10:00:00Z",
+     "equity": 1085477.52,
+     "benchmark": 957273.18,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T10:45:00Z",
+     "equity": 1085166.96,
+     "benchmark": 955282.73,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T11:30:00Z",
+     "equity": 1086066.73,
+     "benchmark": 955565.08,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T12:15:00Z",
+     "equity": 1088296.97,
+     "benchmark": 960174.11,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T13:00:00Z",
+     "equity": 1093411.36,
+     "benchmark": 960874.59,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T13:45:00Z",
+     "equity": 1099303.59,
+     "benchmark": 966013.7,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T14:30:00Z",
+     "equity": 1102291.4,
+     "benchmark": 963061.83,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-29T15:15:00Z",
+     "equity": 1102243.99,
+     "benchmark": 962052.23,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T07:00:00Z",
+     "equity": 1099082.82,
+     "benchmark": 959581.12,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T07:45:00Z",
+     "equity": 1095584.76,
+     "benchmark": 958518.28,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T08:30:00Z",
+     "equity": 1096128.71,
+     "benchmark": 963134.51,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T09:15:00Z",
+     "equity": 1098643.3,
+     "benchmark": 958319.6,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T10:00:00Z",
+     "equity": 1094547.11,
+     "benchmark": 960992.52,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T10:45:00Z",
+     "equity": 1092301.29,
+     "benchmark": 963856.62,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T11:30:00Z",
+     "equity": 1093059.84,
+     "benchmark": 967162.67,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T12:15:00Z",
+     "equity": 1093897.91,
+     "benchmark": 967831.47,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T13:00:00Z",
+     "equity": 1093003.37,
+     "benchmark": 965024.05,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T13:45:00Z",
+     "equity": 1090136.39,
+     "benchmark": 966687.72,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T14:30:00Z",
+     "equity": 1089660.96,
+     "benchmark": 968911.17,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-10-30T15:15:00Z",
+     "equity": 1086683.95,
+     "benchmark": 967102.28,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-11-02T07:00:00Z",
+     "equity": 1089024.75,
+     "benchmark": 967998.02,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-11-02T07:45:00Z",
+     "equity": 1086839.4,
+     "benchmark": 967112.99,
+     "drawdownPct": -2.32
+    },
+    {
+     "time": "2026-11-02T08:30:00Z",
+     "equity": 1085132.47,
+     "benchmark": 969658.38,
+     "drawdownPct": -2.32
+    }
+   ],
+   "trades": [
+    {
+     "entryTime": "2026-10-08T07:30:00Z",
+     "exitTime": "2026-10-08T08:30:00Z",
+     "side": "long",
+     "entryPrice": 128.9,
+     "exitPrice": 128.64,
+     "qty": 2586,
+     "pnl": 1125.17,
+     "pnlPct": 0.34,
+     "barsHeld": 4,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-10-08T13:45:00Z",
+     "exitTime": "2026-10-08T14:45:00Z",
+     "side": "long",
+     "entryPrice": 128.9,
+     "exitPrice": 129.19,
+     "qty": 2585,
+     "pnl": 748.28,
+     "pnlPct": 0.22,
+     "barsHeld": 4,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-09T11:00:00Z",
+     "exitTime": "2026-10-09T12:45:00Z",
+     "side": "long",
+     "entryPrice": 130.78,
+     "exitPrice": 130.69,
+     "qty": 2548,
+     "pnl": 406.56,
+     "pnlPct": 0.12,
+     "barsHeld": 7,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-12T08:15:00Z",
+     "exitTime": "2026-10-12T08:45:00Z",
+     "side": "long",
+     "entryPrice": 130.39,
+     "exitPrice": 129.97,
+     "qty": 2556,
+     "pnl": 1755.7,
+     "pnlPct": 0.53,
+     "barsHeld": 2,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-10-12T14:30:00Z",
+     "exitTime": "2026-10-12T15:30:00Z",
+     "side": "long",
+     "entryPrice": 130.48,
+     "exitPrice": 130.8,
+     "qty": 2554,
+     "pnl": 826.83,
+     "pnlPct": 0.25,
+     "barsHeld": 4,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-13T11:45:00Z",
+     "exitTime": "2026-10-13T13:00:00Z",
+     "side": "long",
+     "entryPrice": 130.08,
+     "exitPrice": 129.89,
+     "qty": 2562,
+     "pnl": 804.96,
+     "pnlPct": 0.24,
+     "barsHeld": 5,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-14T09:00:00Z",
+     "exitTime": "2026-10-14T09:45:00Z",
+     "side": "long",
+     "entryPrice": 128.97,
+     "exitPrice": 129.15,
+     "qty": 2584,
+     "pnl": 477.77,
+     "pnlPct": 0.14,
+     "barsHeld": 3,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-10-14T15:15:00Z",
+     "exitTime": "2026-10-15T07:30:00Z",
+     "side": "long",
+     "entryPrice": 129.9,
+     "exitPrice": 129.88,
+     "qty": 2566,
+     "pnl": 138.35,
+     "pnlPct": 0.04,
+     "barsHeld": 5,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-15T12:30:00Z",
+     "exitTime": "2026-10-15T13:45:00Z",
+     "side": "long",
+     "entryPrice": 129.22,
+     "exitPrice": 129.42,
+     "qty": 2579,
+     "pnl": 514.66,
+     "pnlPct": 0.15,
+     "barsHeld": 5,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-16T09:45:00Z",
+     "exitTime": "2026-10-16T10:45:00Z",
+     "side": "long",
+     "entryPrice": 129.15,
+     "exitPrice": 128.53,
+     "qty": 2580,
+     "pnl": 2603.7,
+     "pnlPct": 0.78,
+     "barsHeld": 4,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-10-19T07:00:00Z",
+     "exitTime": "2026-10-19T08:15:00Z",
+     "side": "long",
+     "entryPrice": 129.12,
+     "exitPrice": 129.55,
+     "qty": 2581,
+     "pnl": 1102.54,
+     "pnlPct": 0.33,
+     "barsHeld": 5,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-19T13:15:00Z",
+     "exitTime": "2026-10-19T14:15:00Z",
+     "side": "long",
+     "entryPrice": 128.31,
+     "exitPrice": 128.52,
+     "qty": 2597,
+     "pnl": 546.79,
+     "pnlPct": 0.16,
+     "barsHeld": 4,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-20T10:30:00Z",
+     "exitTime": "2026-10-20T11:45:00Z",
+     "side": "long",
+     "entryPrice": 128.37,
+     "exitPrice": 127.9,
+     "qty": 2596,
+     "pnl": -1214.04,
+     "pnlPct": -0.36,
+     "barsHeld": 5,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-10-21T07:45:00Z",
+     "exitTime": "2026-10-21T08:30:00Z",
+     "side": "long",
+     "entryPrice": 127.61,
+     "exitPrice": 127.35,
+     "qty": 2612,
+     "pnl": -655.27,
+     "pnlPct": -0.2,
+     "barsHeld": 3,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-21T14:00:00Z",
+     "exitTime": "2026-10-21T14:45:00Z",
+     "side": "long",
+     "entryPrice": 127.99,
+     "exitPrice": 127.93,
+     "qty": 2604,
+     "pnl": -147.62,
+     "pnlPct": -0.04,
+     "barsHeld": 3,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-22T11:15:00Z",
+     "exitTime": "2026-10-22T12:45:00Z",
+     "side": "long",
+     "entryPrice": 128.0,
+     "exitPrice": 128.1,
+     "qty": 2604,
+     "pnl": -351.14,
+     "pnlPct": -0.11,
+     "barsHeld": 6,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-10-23T08:30:00Z",
+     "exitTime": "2026-10-23T09:00:00Z",
+     "side": "long",
+     "entryPrice": 128.43,
+     "exitPrice": 128.72,
+     "qty": 2595,
+     "pnl": -982.25,
+     "pnlPct": -0.29,
+     "barsHeld": 2,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-23T14:45:00Z",
+     "exitTime": "2026-10-23T15:45:00Z",
+     "side": "long",
+     "entryPrice": 129.94,
+     "exitPrice": 130.11,
+     "qty": 2565,
+     "pnl": -594.25,
+     "pnlPct": -0.18,
+     "barsHeld": 4,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-26T12:00:00Z",
+     "exitTime": "2026-10-26T13:30:00Z",
+     "side": "long",
+     "entryPrice": 129.63,
+     "exitPrice": 129.17,
+     "qty": 2571,
+     "pnl": -1178.1,
+     "pnlPct": -0.35,
+     "barsHeld": 6,
+     "reason": "пересечение SMA вниз"
+    },
+    {
+     "entryTime": "2026-10-27T09:15:00Z",
+     "exitTime": "2026-10-27T10:15:00Z",
+     "side": "long",
+     "entryPrice": 129.82,
+     "exitPrice": 129.85,
+     "qty": 2567,
+     "pnl": -138.16,
+     "pnlPct": -0.04,
+     "barsHeld": 4,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-27T15:30:00Z",
+     "exitTime": "2026-10-28T07:15:00Z",
+     "side": "long",
+     "entryPrice": 129.39,
+     "exitPrice": 129.09,
+     "qty": 2576,
+     "pnl": -782.35,
+     "pnlPct": -0.23,
+     "barsHeld": 3,
+     "reason": "пересечение SMA вверх"
+    },
+    {
+     "entryTime": "2026-10-28T12:45:00Z",
+     "exitTime": "2026-10-28T14:00:00Z",
+     "side": "long",
+     "entryPrice": 128.27,
+     "exitPrice": 128.72,
+     "qty": 2598,
+     "pnl": -1495.0,
+     "pnlPct": -0.45,
+     "barsHeld": 5,
+     "reason": "пересечение SMA вниз"
+    }
+   ],
+   "warnings": []
+  }
+ ]
+}

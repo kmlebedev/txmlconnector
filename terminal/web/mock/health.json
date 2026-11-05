@@ -1,0 +1,19 @@
+{
+ "ok": true,
+ "version": "0.1.0-mock",
+ "mode": "offline",
+ "connected": true,
+ "message": "мок-данные (бэкенд не подключён)",
+ "serverTime": "2026-11-05T15:40:00Z",
+ "exchangeTZ": "Europe/Moscow",
+ "seedGeneratedAt": "2026-11-05T16:40:00Z",
+ "llm": {
+  "enabled": false,
+  "model": "",
+  "note": "локальный аналитик (мок)"
+ },
+ "trading": {
+  "paper": true,
+  "live": false
+ }
+}

@@ -946,7 +946,9 @@ left rail `#23262b`, радиус панелей 8–10px, плотные таб
    PnL; отобразить equity/сделки на графике; портфель/заявки/история обновляются.
 4. `curl /api/instruments` — реальные цены; `curl -X POST /api/backtest` — реальная история.
 5. Live read-only: `-mode live` с env биржи → те же UI-данные; реальная торговля выключена.
-6. Проверки: `gofmt -l $(git ls-files '*.go')`, `go vet ./...`, `go build ./...`,
+6. Deep links демо (проверено): `/?view=ai`, `/?view=ai&ask=<urlencoded>`, `/?tab=analytics`,
+   `/?symbol=TQBR:SBER` — детерминированные состояния UI для демонстрации и скриншотов.
+7. Проверки: `gofmt -l $(git ls-files '*.go')`, `go vet ./...`, `go build ./...`,
    `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...`, `CGO_ENABLED=0 GOOS=darwin
    GOARCH=arm64 go build ./...`, `go test -race ./...`, `node --check` для JS, headless-Chrome
    скриншоты 1680×1050 (Lead).
