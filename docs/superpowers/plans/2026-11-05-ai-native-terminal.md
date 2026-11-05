@@ -25,7 +25,9 @@
 - ревью PR #60 (findings R1–R10 ниже);
 - постановка пользователя от 2026-11-05 (этот документ, раздел «Постановка»);
 - обзор API Harness `docs/ai-terminal/dsh-integration.md` — создаётся в задаче 9 из отчёта по `app.asar/dsh/node_modules/@deepseek-ai/*/README.md`;
-- `docs/ai-terminal/ARCHITECTURE.md` (контракт итерации 1).
+- `docs/ai-terminal/ARCHITECTURE.md` (контракт итерации 1);
+- публикация Финама «Бот на RSI за несколько промптов» (smart-lab, 29.10.2026, https://smart-lab.ru/mobile/topic/1368304/) и комментарий к ней — идеи Фазы G;
+- Finam Trade API: proto из `finam-trade-api/proto/grpc/tradeapi/v1/` — REST-шлюз `POST /v1/sessions`, `GET /v1/instruments/{symbol}/bars`, `TimeFrame` `TIME_FRAME_M1…TIME_FRAME_MN`.
 
 ## Постановка (кратко)
 
@@ -37,12 +39,27 @@
 6. Автономный режим через DSH: расписание, workflow, бюджет токенов, kill-switch.
 7. По итогам бэктеста на стакане агент сам пишет SKILL-паттерны. Для повторяющихся вычислений он пишет задачи на автоматизацию: статические и ML-модели, MCP-инструменты.
 8. Модели отпечатков роботов: исполнение заявок крупных фондов (TWAP/VWAP/айсберг) и брокерские роботы принудительного закрытия по маржин-коллу.
+9. Идеи из публикации Финама:
+   - навыки ставятся одной командой `npx skills add` в любой агент (Cursor, Claude Code, Qwen Code, Codex), а не только в DSH;
+   - стратегия собирается из промпта без написания кода;
+   - сравнение нескольких тикеров с buy & hold одной таблицей;
+   - график входов и выходов с периодами в позиции и панелью индикатора;
+   - токен — только в `.env`, никогда в чат;
+   - необработанная (незакрытая) свеча не участвует в сигнале.
+
+   Из комментария к публикации:
+   - история не короче 5 лет;
+   - комиссии и проскальзывание обязательны.
+
+   Finam Trade API — второй источник длинной истории.
 
 ## Global Constraints
 
 - Реальная маршрутизация заявок остаётся выключенной. Всё исполнение — бумажный брокер или replay; задача, которая включает live, вне этого плана.
 - `native/...` не меняется, кроме задачи 5; новых зависимостей в `go.mod` нет. ClickHouse — через `net/http`, MCP — собственный JSON-RPC на stdlib.
-- Секреты только из окружения: `TC_LOGIN`, `TC_PASSWORD`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `MD_CLICKHOUSE_URL`, `TERMINAL_API_TOKEN`. В логах, фикстурах, SKILL-файлах и коммитах их нет.
+- Секреты только из окружения: `TC_LOGIN`, `TC_PASSWORD`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `MD_CLICKHOUSE_URL`, `TERMINAL_API_TOKEN`, `FINAM_SECRET_KEY` (синоним `TRADE_API_SECRET`, как в Finam Skill). В логах, фикстурах, SKILL-файлах и коммитах их нет. Навыки прямо запрещают агенту просить токен в чате.
+- Бэктест по умолчанию считает комиссию (`FeeBps=5`) и проскальзывание (`SlippageBps=1`). Нулевые значения допустимы только явно и дают предупреждение `no_costs` в `Result.Warnings`.
+- Сигналы считаются только по закрытым барам: незакрытый последний бар живой истории отбрасывается или помечается `Bar.Partial=true` и стратегиям не передаётся.
 - Время — `time.Time` в UTC на границах API. Торговый день и расписания — `Europe/Moscow` через `feed.MoscowLocation()`.
 - Каждый исследовательский запрос к данным принимает `asOf time.Time`. Данные, опубликованные позже `asOf`, не используются; это проверяется тестом.
 - Тесты не ходят в сеть: ClickHouse и LLM подменяются `httptest.Server`; живые прогоны — под `TERMINAL_IT_CLICKHOUSE=1` с `t.Skip`.
@@ -57,6 +74,8 @@
 3. **Разрыв записи стакана при переподключении.** После reconnect рекордер пишет маркер `gap`, а replay не склеивает книги до и после разрыва. Тест `TestRecorderMarksGapOnReconnect` — задача 11; `TestReplayResetsBookAfterGap` — задача 14.
 4. **Переобученный паттерн.** SKILL не переходит в `validated` без out-of-sample окна и минимального числа сделок. Тест `TestSkillPromotionRequiresOOS` — задача 19.
 5. **Вызов инструмента из Harness при упавшем бэкенде и при отмене.** Инструмент возвращает понятную ошибку, а `exec.signal` прерывает HTTP-запрос к бэкенду. Тест `tool bridge aborts upstream on signal` — задача 9.
+6. **Две сделки за 90 дней (как в примере Финама).** Результат не выдаётся за значимый: ответ содержит предупреждение `small_sample` (меньше 30 сделок или меньше 5 лет на дневках) и не может стать основой SKILL. Тест `TestBatchBacktestFlagsSmallSample` — задача 24.
+7. **Незакрытая свеча в живой истории.** RSI на последнем часе не меняется после закрытия часа, сигналы бэктеста и живой ленты совпадают. Тест `TestRulesIgnorePartialBar` — задача 23.
 
 ---
 
@@ -70,10 +89,17 @@
 | D. Данные | 11–14 | запись стакана, сделок и новостей в ClickHouse; винтажный доступ; replay стакана |
 | E. Исследования | 15–18 | walk-forward трендовых стратегий, оракул волатильности, отпечатки роботов |
 | F. Самообучающийся контур | 19–21 | SKILL-паттерны, задачи на автоматизацию ради экономии токенов, автономный ночной цикл |
+| G. Идеи Финама | 22–25 | история из Finam Trade API, стратегия из промпта, сравнение тикеров с графиком, переносимые навыки `npx skills add` |
 | X. Внешние репозитории | X1–X3 | ALFRED-винтажи и календарь FOMC, исправление схемы `transaq_quotes` |
 
-Зависимости: A → B → C. D зависит только от A. E зависит от D (задачи 13–14) и B (задача 7). F зависит от C и E.
-Параллельно можно вести C и D, затем E15/E16/E17 между собой.
+Зависимости:
+- A → B → C.
+- D зависит только от A.
+- E зависит от D (задачи 13–14) и B (задача 7).
+- F зависит от C и E.
+- G: задачи 22–24 зависят только от A, задача 25 — от C (задача 10). Задачу 15 удобно делать после 23: трендовые стратегии можно описать правилами.
+
+Параллельно можно вести C, D и G22–G24, затем E15/E16/E17 между собой.
 
 ## Карта файлов
 
@@ -101,7 +127,10 @@
 | `dsh-ai-terminal/skills.js` | провайдер навыков |
 | `dsh-ai-terminal/autonomy.js` | workflow и расписание автономного цикла |
 | `dsh-ai-terminal/workflows/nightly-research.js` | скрипт workflow |
-| `.dsh/skills/trading-*/SKILL.md` | ручные навыки исследования (в репозитории) |
+| `skills/trading-*/SKILL.md` | ручные навыки исследования (в репозитории); один источник для DSH и для `npx skills add` |
+| `terminal/feed/finam.go` | история баров из Finam Trade API (REST, stdlib) |
+| `terminal/backtest/rules/` | декларативные стратегии из промпта: индикаторы, условия, фильтры |
+| `terminal/research/batch.go` | пакетный бэктест по тикерам с buy & hold и проверкой выборки |
 | `docs/ai-terminal/{dsh-integration,data,research}.md` | документация фаз C–E |
 
 ---
@@ -343,7 +372,7 @@
 **Files:**
 - Create: `dsh-ai-terminal/llm-bridge.js`, `dsh-ai-terminal/skills.js`, `dsh-ai-terminal/test/llm-bridge.test.mjs`
 - Create: `terminal/mcp/server.go`, `terminal/mcp/server_test.go`
-- Create: `.dsh/skills/trading-terminal/SKILL.md` (как пользоваться терминалом из Harness: порядок «бэктест → walk-forward → предложение»)
+- Create: `skills/trading-terminal/SKILL.md` (как пользоваться терминалом из Harness: порядок «бэктест → walk-forward → предложение»)
 - Modify: `dsh-ai-terminal/index.js`, `dsh-ai-terminal/client.js`, `dsh-ai-terminal/package.json` (`dsh.bundle.patch` + строка MCP-клиента), `cmd/terminal/main.go`
 
 **Interfaces:**
@@ -355,7 +384,7 @@
   - `func NewServer(invoker ToolInvoker) http.Handler` — MCP streamable-http (`initialize`, `tools/list`, `tools/call`).
   - Монтируется на `/mcp` и защищён `Guard`.
   - `type ToolInvoker interface { Tools() []agent.ToolInfo; Invoke(ctx context.Context, name string, args map[string]any) (agent.ToolCall, *agent.Artifact) }`
-- Produces: провайдер навыков `ai-terminal`. Он отдаёт навыки из `<repo>/.dsh/skills/trading-*` и из каталога сгенерированных паттернов `<dataDir>/skills` (задача 19).
+- Produces: провайдер навыков `ai-terminal`. Он отдаёт навыки из `<repo>/skills/trading-*` и из каталога сгенерированных паттернов `<dataDir>/skills` (задача 19).
 - Produces: клиентские поверхности:
   - вкладка правой панели «Терминал» (`sidebar.right.pane.tab`) со стаканом и позицией;
   - действие в шапке сессии «Отправить график в чат» — `insertQuote` с `ScreenContext` в виде JSON-цитаты;
@@ -605,7 +634,7 @@
 
 **Files:**
 - Create: `terminal/skills/{pattern.go,writer.go,promote.go,skills_test.go}`
-- Create: `.dsh/skills/trading-pattern-author/SKILL.md` — как агент формулирует паттерн, какие доказательства прикладывает и чего не делает.
+- Create: `skills/trading-pattern-author/SKILL.md` — как агент формулирует паттерн, какие доказательства прикладывает и чего не делает.
 - Modify: `terminal/agent/tools_research.go` (инструменты `draft_skill_pattern`, `list_skill_patterns`), `dsh-ai-terminal/skills.js`
 
 **Interfaces:**
@@ -630,7 +659,7 @@
 
 **Files:**
 - Create: `terminal/automation/{backlog.go,backlog_test.go}`
-- Create: `.dsh/skills/trading-automation-author/SKILL.md`
+- Create: `skills/trading-automation-author/SKILL.md`
 - Modify: `terminal/agent/tools_research.go` (инструмент `propose_automation`)
 
 **Interfaces:**
@@ -678,6 +707,134 @@
 - [ ] **Step 2–4:** red → implement → `node --test dsh-ai-terminal/test/ && make verify`.
 - [ ] **Step 5: Manual check.** Ручной запуск workflow из Harness на офлайн-данных. В сессии появляется сводка, в `<dataDir>/skills` — черновики, в `automation-backlog.md` — задачи. Скриншот в `docs/ai-terminal/`.
 - [ ] **Step 6: Commit** `feat(dsh-plugin): scheduled autonomous research workflow with token budget`
+
+---
+
+## Фаза G. Идеи из публикации Финама
+
+Публикация показывает сценарий «навык + Trade API + промпт → бэктест → бот» в Cursor. Терминал повторяет его нативно:
+- то же делается без генерации Python на каждый запрос;
+- со стоимостью сделок, проверкой выборки и walk-forward;
+- с теми же навыками, доступными в любом агенте.
+
+### Task 22: Длинная история из Finam Trade API
+
+**Files:**
+- Create: `terminal/feed/finam.go`, `terminal/feed/finam_test.go`
+- Modify: `terminal/feed/feed.go` (выбор источника истории), `cmd/terminal/main.go` (флаг `-history-source=transaq|finam|auto`), `docs/ai-terminal/data.md`
+
+**Interfaces:**
+- Produces:
+  - `type HistorySource interface { Bars(ctx context.Context, symbol string, periodSec int, from, to time.Time) ([]backtest.Bar, error) }`
+  - `func NewFinamHistory(baseURL, secret string, hc *http.Client) HistorySource`
+  - Базовый URL по умолчанию — `https://api.finam.ru`; проверяется на первом живом прогоне, статус в `data.md`.
+- Протокол (из proto `finam-trade-api`, статус **D** до живой проверки):
+  - `POST /v1/sessions` с `{secret}` → JWT; кешируется до истечения, обновляется при 401.
+  - `GET /v1/instruments/{symbol}/bars?timeframe=TIME_FRAME_H1&interval.start_time=…&interval.end_time=…`
+- Символы:
+  - `TQBR:SBER` ↔ `SBER@MISX` (таблица board→MIC в `finam.go`: `TQBR`, `TQTF`, `TQCB`, `TQOB` → `MISX`; `SPBFUT` → `RTSX`, статус **I**).
+  - Период: `periodSec` → `TimeFrame` (60→M1, 300→M5, 900→M15, 3600→H1, 86400→D).
+- Длинные интервалы режутся на окна по лимиту сервера; лимит — константа с пометкой **I** до проверки.
+- `auto`: Finam для запросов глубже, чем отдаёт TRANSAQ, TRANSAQ — для свежего хвоста; склейка по времени без дублей.
+
+- [ ] **Step 1: Write the failing tests** (`httptest`):
+  - `TestFinamAuthCachesJWTAndRefreshesOn401`
+  - `TestFinamBarsPagesLongInterval`: 5 лет дневок → несколько запросов, бары без дублей и по возрастанию.
+  - `TestFinamSymbolMapping`
+  - `TestFinamSecretNeverLogged`: ни в ошибке, ни в логе нет секрета.
+  - `TestAutoHistoryStitchesWithoutDuplicates`
+- [ ] **Step 2:** `go test ./terminal/feed -run Finam -v` → FAIL.
+- [ ] **Step 3: Implement** на `net/http` + `encoding/json`, без SDK Финама (запрет новых зависимостей).
+- [ ] **Step 4:** `make verify` → exit 0.
+- [ ] **Step 5: Live check** (с согласия пользователя, демо-счёт Финама): `GAZP@MISX` H1 за 90 дней совпадает по числу баров с примером публикации ± выходные. Результат — в `data.md` (**S**).
+- [ ] **Step 6: Commit** `feat(feed): long bar history from the Finam Trade API`
+
+### Task 23: Стратегия из промпта — декларативные правила
+
+**Files:**
+- Create: `terminal/backtest/rules/{spec.go,indicators.go,eval.go,rules_test.go}`
+- Modify: `terminal/backtest/strategies.go` (стратегия `rules` в каталоге), `terminal/agent/tools_research.go` (инструмент `backtest_rules`), `skills/trading-terminal/SKILL.md` (как переводить промпт в правила)
+
+**Interfaces:**
+- Produces:
+  - `type Spec struct { Indicators map[string]Indicator; Entry, Exit []Condition; Filters []Condition; Side string; StopLossPct, TakeProfitPct float64 }` — `Side` пока только `long`.
+  - `type Indicator struct { Kind string; Period int; Source string; Scale float64 }`
+    - `Kind`: `rsi_wilder|sma|ema|atr|donchian_high|donchian_low|roc`.
+    - `Source`: `close|high|low|volume`.
+    - `Scale=0.01` переводит RSI в шкалу 0–1, как в публикации.
+  - `type Condition struct { Left, Op, Right string }`
+    - `Op`: `<|<=|>|>=|cross_above|cross_below`.
+    - `Left`/`Right` — имя индикатора, `close` или число.
+  - `func Compile(spec Spec) (backtest.Strategy, error)` — валидирует имена и периоды; ошибка понятна модели.
+  - `backtest.Bar.Partial bool` (`json:"partial,omitempty"`). Живая лента (`feed`) ставит его последнему незакрытому бару. `backtest.Run` и `rules` такие бары не передают стратегии — это реализация Global Constraint о закрытых барах.
+- Пример из публикации как фикстура `testdata/rsi_finam.json`: `rsi_wilder(14, scale 0.01)`, вход `rsi < 0.2`, выход `rsi > 0.8`, фильтр-расширение `close > sma(200)`.
+- Агент присылает JSON-правила вместо кода: это экономит токены и даёт воспроизводимость (`Spec` сохраняется в `Result.Params` как хеш и в истории бэктестов целиком).
+
+- [ ] **Step 1: Write the failing tests:**
+  - `TestRSIWilderMatchesReference`: эталонные значения RSI(14) Уайлдера на фиксированном ряде, допуск 1e-9.
+  - `TestRulesFinamExampleSignals`: фикстура генерирует входы только при `rsi<0.2` без позиции и выходы при `rsi>0.8`.
+  - `TestRulesIgnorePartialBar` (Review Focus 7)
+  - `TestCompileRejectsUnknownIndicator`
+  - `TestRulesNoLookahead`: значение условия на баре i не зависит от баров > i (мутация будущих баров не меняет сигнал).
+- [ ] **Step 2–4:** red → implement → `make verify`.
+- [ ] **Step 5: Commit** `feat(backtest): declarative rule strategies composed from prompts`
+
+### Task 24: Сравнение тикеров с buy & hold, проверка выборки и график сделок
+
+**Files:**
+- Create: `terminal/research/{batch.go,batch_test.go}`
+- Modify:
+  - `terminal/backtest/metrics.go` (предупреждения `small_sample`, `no_costs`);
+  - `terminal/agent/tools_research.go` (инструмент `batch_backtest`);
+  - `terminal/web/chart.js` (заливка периодов в позиции, панель индикатора с уровнями);
+  - `dsh-ai-terminal/client.js` (карточка `terminal_batch_backtest` в `tool.call.toolview`: таблица + мини-график).
+
+**Interfaces:**
+- Consumes: задача 22 (`HistorySource`), задача 23 (`rules.Spec`), `research.WalkForward` (задача 15, если уже есть; иначе только in-sample с предупреждением `in_sample_only`).
+- Produces:
+  - `type BatchRequest struct { Symbols []string; PeriodSec int; From, To time.Time; Strategy string; Params map[string]float64; Rules *rules.Spec; FeeBps, SlippageBps float64 }`
+  - `type BatchRow struct { Symbol string; Trades int; ReturnPct, BuyHoldPct, MaxDrawdownPct, Sharpe float64; Warnings []string }`
+  - `func Batch(ctx context.Context, hs feed.HistorySource, req BatchRequest) ([]BatchRow, error)` — тикеры параллельно, не больше `GOMAXPROCS`.
+- Правила выборки:
+  - `small_sample`: `Trades < 30`, или период меньше 5 лет для `periodSec >= 86400`, или меньше 1 года для внутридневных;
+  - `no_costs`: `FeeBps == 0 && SlippageBps == 0`.
+- Артефакт для графика: `Result.Trades` + ряд индикатора `Series map[string][]float64` для панели.
+
+- [ ] **Step 1: Write the failing tests:**
+  - `TestBatchBacktestFlagsSmallSample` (Review Focus 6)
+  - `TestBatchBuyHoldMatchesFirstLastClose`
+  - `TestBatchWarnsNoCosts`
+  - `TestBatchContinuesOnOneSymbolError`: ошибка одного тикера — строка с `Warnings:["error: …"]`, остальные посчитаны.
+- [ ] **Step 2–4:** red → implement → `make verify`.
+- [ ] **Step 5: Manual check.** Промпт из публикации («RSI 14 на GAZP, LKOH, SBER, сравни с buy & hold») в DSH-чате даёт таблицу, графики с заливкой и предупреждения выборки. Скриншот в `docs/ai-terminal/`.
+- [ ] **Step 6: Commit** `feat(research): multi-symbol backtests against buy-and-hold with sample checks`
+
+### Task 25: Переносимые навыки — `npx skills add` для любого агента
+
+**Files:**
+- Modify: `skills/trading-terminal/SKILL.md`, `skills/trading-pattern-author/SKILL.md`, `skills/trading-automation-author/SKILL.md` (frontmatter совместим и с DSH, и с форматом agent skills)
+- Create: `skills/trading-terminal/scripts/terminal.sh`, `skills/README.md`, `skills/skills_test.go`
+- Modify: `dsh-ai-terminal/skills.js` (читает тот же каталог `skills/`), `README.md` (раздел установки)
+
+**Interfaces:**
+- Consumes: задача 10 (MCP `/mcp`, провайдер навыков).
+- Produces: установка в Cursor, Claude Code, Qwen Code и Codex — `npx skills add github.com/kmlebedev/txmlconnector --skill trading-terminal`.
+  - Навык описывает два способа работы: MCP-сервер терминала (если запущен) и `scripts/terminal.sh` — curl к REST API с токеном из `.env`.
+  - В DSH тот же навык приходит от провайдера плагина: один источник, без копий.
+- Правила в тексте навыков:
+  - токен только в `.env` (`FINAM_SECRET_KEY` или `TRADE_API_SECRET`, `TERMINAL_API_TOKEN`), никогда в чат;
+  - реальные заявки недоступны;
+  - перед выводами — проверка выборки и стоимости сделок.
+
+- [ ] **Step 1: Write the failing test** `TestSkillsFrontmatterValid`. Каждый `skills/*/SKILL.md`:
+  - имеет `name`, равный имени каталога, и `description` короче 1024 символов;
+  - не содержит строк, похожих на токены (`[A-Za-z0-9_-]{32,}`);
+  - все упомянутые скрипты существуют и исполняемы.
+- [ ] **Step 2:** `go test ./skills -v` → FAIL.
+- [ ] **Step 3: Implement** навыки, скрипт и раздел README.
+- [ ] **Step 4:** `make verify` → exit 0.
+- [ ] **Step 5: Manual check.** `npx skills add <локальный путь репозитория> --skill trading-terminal` в чистом каталоге Claude Code. Затем промпт «покажи котировку SBER из терминала» выполняется через навык.
+- [ ] **Step 6: Commit** `feat(skills): portable trading skills installable with npx skills add`
 
 ---
 
