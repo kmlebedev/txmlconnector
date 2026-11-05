@@ -27,6 +27,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createAutonomy } from './autonomy.js';
+import { createBackendBotTransport, createBotRelay } from './bot-relay.js';
 import { createLLMBridge } from './llm-bridge.js';
 import { createSkillProvider } from './skills.js';
 import { createToolBridge } from './tools.js';
@@ -38,7 +39,7 @@ import { createToolBridge } from './tools.js';
  * docs/ai-terminal/dsh-integration.md §2.4-2.6/2.8); the plan's "storage" name
  * is the storageDomain service.
  */
-export const inject = ['webServer', 'tools', 'workflowEngine', 'schedule', 'sessionController', 'storageDomain'];
+export const inject = ['webServer', 'tools', 'workflowEngine', 'schedule', 'sessionController', 'storageDomain', 'agents'];
 
 const MOUNT = '/ai-terminal';
 const CONTROL = '/ai-terminal-ctl';
@@ -67,6 +68,12 @@ const DEFAULTS = {
     tokenBudget: 200_000,
     maxWallMinutes: 60,
     approvalMode: 'confirm',
+  },
+  // Bot relay (plan Task 26): how many significant bot events per hour reach
+  // the session agent directly; the excess is batched into one summary.
+  relay: {
+    maxAgentEventsPerHour: 12,
+    summaryBatch: 5,
   },
 };
 
@@ -109,7 +116,7 @@ function backendEnv(token, instanceId, overrides = {}) {
 
 /** Read and validate the row config, ignoring unknown keys. */
 function normalizeConfig(config) {
-  const cfg = { ...DEFAULTS, autonomy: { ...DEFAULTS.autonomy } };
+  const cfg = { ...DEFAULTS, autonomy: { ...DEFAULTS.autonomy }, relay: { ...DEFAULTS.relay } };
   if (!config || typeof config !== 'object') return cfg;
   if (typeof config.mode === 'string' && ['offline', 'live', 'auto'].includes(config.mode)) cfg.mode = config.mode;
   if (Number.isInteger(config.port) && config.port >= 1024 && config.port <= 65535) cfg.port = config.port;
@@ -124,6 +131,14 @@ function normalizeConfig(config) {
     if (Number.isInteger(config.autonomy.tokenBudget) && config.autonomy.tokenBudget >= 0) cfg.autonomy.tokenBudget = config.autonomy.tokenBudget;
     if (Number.isInteger(config.autonomy.maxWallMinutes) && config.autonomy.maxWallMinutes > 0) cfg.autonomy.maxWallMinutes = config.autonomy.maxWallMinutes;
     if (config.autonomy.approvalMode === 'confirm' || config.autonomy.approvalMode === 'auto') cfg.autonomy.approvalMode = config.autonomy.approvalMode;
+  }
+  if (config.relay && typeof config.relay === 'object') {
+    if (Number.isInteger(config.relay.maxAgentEventsPerHour) && config.relay.maxAgentEventsPerHour >= 0) {
+      cfg.relay.maxAgentEventsPerHour = config.relay.maxAgentEventsPerHour;
+    }
+    if (Number.isInteger(config.relay.summaryBatch) && config.relay.summaryBatch > 0) {
+      cfg.relay.summaryBatch = config.relay.summaryBatch;
+    }
   }
   return cfg;
 }
@@ -619,6 +634,33 @@ export function apply(ctx, config) {
     console.warn('[ai-terminal] расписание ночного исследования не создано: '
       + (error instanceof Error ? error.message : String(error)));
   });
+
+  // --- Bot control room relay (plan Task 26) ----------------------------
+  //
+  // The relay subscribes to the backend SSE "bot" events and injects only
+  // significant ones into the DSH session that created the bot. The bot id to
+  // session mapping comes from the terminal_bot_* tool calls: exec.agent.id is
+  // the session id of the Harness agent registry (docs/ai-terminal/
+  // dsh-integration.md §2.7). Without a live agent the relay falls back to
+  // ctx.sessionController.prompt with the same content.
+  const logLine = (level, message) => {
+    const line = '[ai-terminal] ' + message;
+    if (level === 'warn') console.warn(line);
+    else console.log(line);
+  };
+  const botRelay = createBotRelay({
+    agents: resolveService('agents'),
+    sessionController: resolveService('sessionController'),
+    transport: createBackendBotTransport({ port: cfg.port, token: backend.token, log: logLine }),
+    log: logLine,
+    maxEventsPerHour: cfg.relay.maxAgentEventsPerHour,
+    summaryBatch: cfg.relay.summaryBatch,
+  });
+  own(() => botRelay.dispose());
+  if (toolBridge && typeof toolBridge.setToolResultHook === 'function') {
+    toolBridge.setToolResultHook((name, args, exec, reply) => botRelay.trackToolResult(name, args, exec, reply));
+  }
+  botRelay.start();
 
   own(ctx.webServer.register({
     kind: 'exact',

@@ -87,6 +87,36 @@ Host-половина поднимает workflow **`ai-terminal-nightly`** и �
   `POST /ai-terminal-ctl/autonomy/run` (202, не блокирует), `POST /ai-terminal-ctl/autonomy/stop`
   (отменяет workflow и вызывает бэкендовый `stop_autonomy`).
 
+### Пульт бота (`relay`, план Task 26)
+
+Host-реле связывает роботов терминала с DSH-сессией, в которой их создали:
+
+- **Подписка.** SSE бэкенда `/api/events` (с `X-Terminal-Token`, напрямую к loopback) — событие
+  `{"type":"bot","data":{"botId","entry"}}`. При обрыве/перезапуске бэкенда реле переподключается и
+  догоняет журнал каждого бота через `GET /api/bots/{id}/journal?after=<lastSeq>`, дедуп по
+  `entry.seq` — ни потерь, ни дублей.
+- **Кому.** Значимые события уходят агенту сессии, создавшей бота: маппинг `botId → sessionId`
+  берётся из вызовов `terminal_bot_*` (`exec.agent.id` — это id сессии в реестре агентов Harness;
+  при отсутствии живого агента — fallback `ctx.sessionController.prompt` с тем же содержимым).
+- **Что.** `signal`, `order`, `fill`, `risk_check`-отказ, `reconnect`, `error`, `stage`;
+  `closed_bar` без сигнала в агента **не** идёт — только в карточку. Лимит
+  `relay.maxAgentEventsPerHour` (по умолчанию 12) на сессию в час; избыток копится и уходит одной
+  сводкой при `relay.summaryBatch` (по умолчанию 5) событиях.
+- **Клиентские поверхности.** Карточки `terminal_bot_*` (`tool.call.toolview`); у карточки
+  бэктеста — кнопки «Проверить» / «Dry-run» / «На бумагу» (та же REST: `POST /api/bots`,
+  `/{id}/check`, `/{id}/start`, `/{id}/promote` → proposal «Подтвердить/Отклонить»); живая
+  карточка бота в `conversation.chat.turnTail` (стадия, последняя закрытая свеча МСК, индикаторы,
+  сигнал, мини-график по 100 барам, журнал с фильтром по `kind`); мини-версия в
+  `conversation.input.dock`; kill-switch «Стоп всех ботов» в `conversation.session.header.actions`
+  (виден, только пока есть бот не в `stopped`); вкладка правой панели «Боты».
+- **Ограничение сборки.** Клиентский bundle плагина — один `client.js` (Harness client-modules
+  раздаёт только пакетный `./client`), поэтому `bot-ui.js` — Host-side view-model (карточки
+  `tools.js`, комментарии реле, тесты), а Client рендерит те же структуры в `client.js`.
+- **Проверено:** `node --test dsh-ai-terminal/test/` — 39 тестов, включая `test/bot-relay.test.mjs`
+  (доставка signal агенту, closed_bar не тратит токены, батчинг сверх лимита, реконнект с afterSeq
+  без дублей, kill-switch). **НЕ ПРОВЕРЕНО (Step 5):** живой сценарий из 7 шагов в DSH-сессии,
+  реальные SSE/агент-комментарии, скриншоты — требуют живого Harness и LLM; скриншоты не создавались.
+
 **Расхождения с планом Task 21 (зафиксированы, план не переписывался):**
 
 - план: `timing:{kind:'cron', expr:'30 0 * * 2-6'}` → факт: селектор cron
