@@ -209,3 +209,196 @@ func TestBacktestRulesResultCompactForLLM(t *testing.T) {
 		t.Fatalf("model payload lost the metrics: %s", content)
 	}
 }
+
+// batchArgs is a valid batch_backtest argument for the fake data source.
+func batchArgs() map[string]any {
+	return map[string]any{
+		"symbols":     []any{"TQBR:SBER", "TQBR:GAZP"},
+		"periodSec":   int(300),
+		"count":       int(300),
+		"strategy":    "sma_cross",
+		"params":      map[string]any{"fast": 2, "slow": 3},
+		"feeBps":      5,
+		"slippageBps": 1,
+	}
+}
+
+// TestBatchBacktestTool runs the multi-symbol tool through the core dispatch.
+func TestBatchBacktestTool(t *testing.T) {
+	e, data, _ := newTestEngine(t)
+	for _, symbol := range []string{"TQBR:SBER", "TQBR:GAZP"} {
+		data.histories[symbol] = map[int][]backtest.Bar{300: oscillatingBars(300)}
+	}
+	result, artifact, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameBatchBacktest, batchArgs())
+	if err != nil {
+		t.Fatalf("batch_backtest: %v", err)
+	}
+	res, ok := result.(batchBacktestResult)
+	if !ok {
+		t.Fatalf("result type = %T, want batchBacktestResult", result)
+	}
+	if len(res.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(res.Rows))
+	}
+	if res.Rows[0].Symbol != "TQBR:SBER" || res.Rows[1].Symbol != "TQBR:GAZP" {
+		t.Fatalf("rows are not in the requested order: %+v", res.Rows)
+	}
+	for _, row := range res.Rows {
+		if row.BacktestID == "" || row.From.IsZero() || row.To.IsZero() {
+			t.Fatalf("row is not filled: %+v", row)
+		}
+	}
+	if res.Best == "" {
+		t.Fatalf("best = %q, want a traded ticker", res.Best)
+	}
+
+	if artifact == nil || artifact.Kind != "batch_backtest" {
+		t.Fatalf("artifact = %+v, want kind batch_backtest", artifact)
+	}
+	ui, ok := artifact.Payload.(batchBacktestArtifact)
+	if !ok {
+		t.Fatalf("artifact payload type = %T, want batchBacktestArtifact", artifact.Payload)
+	}
+	if len(ui.Rows) != 2 || len(ui.Charts) != 2 {
+		t.Fatalf("artifact rows/charts = %d/%d, want 2/2", len(ui.Rows), len(ui.Charts))
+	}
+	for index, chart := range ui.Charts {
+		if chart.Symbol != res.Rows[index].Symbol {
+			t.Fatalf("chart[%d].Symbol = %q, want %q", index, chart.Symbol, res.Rows[index].Symbol)
+		}
+		if chart.Bars != 300 {
+			t.Fatalf("%s: bars = %d, want 300", chart.Symbol, chart.Bars)
+		}
+		if len(chart.Trades) != res.Rows[index].Trades {
+			t.Fatalf("%s: chart trades = %d, row trades = %d",
+				chart.Symbol, len(chart.Trades), res.Rows[index].Trades)
+		}
+	}
+	if got := len(e.Backtests()); got != 2 {
+		t.Fatalf("recorded backtests = %d, want 2", got)
+	}
+}
+
+// TestBatchBacktestRulesCharts proves the rules path returns the indicator
+// series for the chart panel and keeps the model payload compact.
+func TestBatchBacktestRulesCharts(t *testing.T) {
+	e, data, _ := newTestEngine(t)
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{300: oscillatingBars(300)}
+	args := map[string]any{
+		"symbols":   []any{"TQBR:SBER"},
+		"periodSec": int(300),
+		"count":     int(300),
+		"rules": map[string]any{
+			"indicators": map[string]any{"sma3": map[string]any{"kind": "sma", "period": 3}},
+			"entry":      []any{map[string]any{"left": "close", "op": "cross_above", "right": "sma3"}},
+			"exit":       []any{map[string]any{"left": "close", "op": "cross_below", "right": "sma3"}},
+		},
+		"feeBps":      5,
+		"slippageBps": 1,
+	}
+	result, artifact, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameBatchBacktest, args)
+	if err != nil {
+		t.Fatalf("batch_backtest: %v", err)
+	}
+	res, ok := result.(batchBacktestResult)
+	if !ok {
+		t.Fatalf("result type = %T, want batchBacktestResult", result)
+	}
+	if len(res.Rows) != 1 || res.Rows[0].Trades <= 0 {
+		t.Fatalf("rules row = %+v, want trades", res.Rows)
+	}
+	ui, ok := artifact.Payload.(batchBacktestArtifact)
+	if !ok || len(ui.Charts) != 1 {
+		t.Fatalf("artifact = %+v", artifact)
+	}
+	chart := ui.Charts[0]
+	series, ok := chart.Series["sma3"]
+	if !ok {
+		t.Fatalf("chart series = %v, want sma3", chart.Series)
+	}
+	if len(series) != chart.Bars {
+		t.Fatalf("series length = %d, want %d bars", len(series), chart.Bars)
+	}
+	if len(chart.Trades) != res.Rows[0].Trades {
+		t.Fatalf("chart trades = %d, want %d", len(chart.Trades), res.Rows[0].Trades)
+	}
+
+	// The model payload must stay compact: no equity, series or trade details.
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal compact result: %v", err)
+	}
+	for _, forbidden := range []string{"series", "entryTime", "exitTime", "equity"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("model payload carries %q: %s", forbidden, raw)
+		}
+	}
+}
+
+// TestBatchBacktestToolErrors checks the model-facing errors and the explicit
+// zero-cost warning.
+func TestBatchBacktestToolErrors(t *testing.T) {
+	e, data, _ := newTestEngine(t)
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{300: oscillatingBars(300)}
+
+	cases := []struct {
+		name   string
+		mutate func(map[string]any)
+		want   string
+	}{
+		{"missing symbols", func(args map[string]any) { delete(args, "symbols") }, "symbols are required"},
+		{"fractional count", func(args map[string]any) { args["count"] = 0.5 }, "count"},
+		{"missing strategy and rules", func(args map[string]any) { delete(args, "strategy") }, "strategy or rules are required"},
+		{"strategy and rules", func(args map[string]any) {
+			args["rules"] = map[string]any{
+				"entry": []any{map[string]any{"left": "close", "op": ">", "right": "0"}},
+				"exit":  []any{map[string]any{"left": "close", "op": "<", "right": "0"}},
+			}
+		}, "not both"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := batchArgs()
+			tc.mutate(args)
+			if _, _, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameBatchBacktest, args); err == nil ||
+				!strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to mention %q", err, tc.want)
+			}
+		})
+	}
+
+	tooMany := batchArgs()
+	symbols := make([]any, 0, maxBatchSymbols+1)
+	for i := 0; i <= maxBatchSymbols; i++ {
+		symbols = append(symbols, "TQBR:SBER")
+	}
+	tooMany["symbols"] = symbols
+	if _, _, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameBatchBacktest, tooMany); err == nil ||
+		!strings.Contains(err.Error(), "too many symbols") {
+		t.Fatalf("too many symbols error = %v", err)
+	}
+
+	// Explicit zero costs produce a truthful no_costs warning in the rows.
+	zero := batchArgs()
+	zero["feeBps"] = 0
+	zero["slippageBps"] = 0
+	zero["symbols"] = []any{"TQBR:SBER"}
+	result, _, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameBatchBacktest, zero)
+	if err != nil {
+		t.Fatalf("zero-cost batch: %v", err)
+	}
+	rows := result.(batchBacktestResult).Rows
+	if len(rows) != 1 || !hasRuleWarningText(rows[0].Warnings, backtest.WarningNoCosts) {
+		t.Fatalf("rows = %+v, want the %s warning", rows, backtest.WarningNoCosts)
+	}
+}
+
+// hasRuleWarningText reports whether any warning contains substr.
+func hasRuleWarningText(warnings []string, substr string) bool {
+	for _, warning := range warnings {
+		if strings.Contains(warning, substr) {
+			return true
+		}
+	}
+	return false
+}

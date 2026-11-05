@@ -1,6 +1,15 @@
 // chart.js — dependency-free canvas rendering: candles + volume + grid + axes +
 // crosshair + last-price marker for the main chart, equity curves for backtest
 // cards, and tiny sparklines for the watchlist.
+//
+// Backtest overlay contract (setOverlay(result)):
+//   result.equity  [{t|time, value|equity, benchmark}] - equity/benchmark lines;
+//   result.trades  [{entryTime, exitTime, pnl}]        - markers and the
+//                                                         "in position" shading;
+//   result.series  {name: number[]}  (optional)        - indicator panel data,
+//                                                         aligned with candles,
+//                                                         NaN/null on warm-up;
+//   result.levels  {name: number[]}  (optional)        - indicator thresholds.
 
 import {
   clamp, fmtDate, fmtDayMonth, fmtHM, fmtNum, fmtPrice, fmtVolume,
@@ -20,6 +29,9 @@ const COLORS = {
   overlayDark: '#1b1f24',
   benchmark: '#9aa2ac',
   bg: '#ffffff',
+  positionFill: 'rgba(15, 157, 107, 0.10)',
+  indicator: '#3b82f6',
+  indicatorLevel: '#a9b6c6',
 };
 
 function dpr() {
@@ -198,12 +210,17 @@ export class CandleChart {
     const plotBottom = this.height - padBottom;
     const plotWidth = Math.max(10, plotRight - plotLeft);
     const plotHeight = Math.max(40, plotBottom - plotTop);
+    const indicator = this.indicatorPanel();
     const volumeHeight = Math.round(plotHeight * 0.18);
-    const priceHeight = plotHeight - volumeHeight - 8;
+    const indicatorHeight = indicator ? Math.max(34, Math.round(plotHeight * 0.16)) : 0;
+    const priceHeight = plotHeight - volumeHeight - 8 - (indicatorHeight ? indicatorHeight + 8 : 0);
     const priceTop = plotTop;
     const priceBottom = plotTop + priceHeight;
     const volumeTop = priceBottom + 8;
-    const volumeBottom = plotBottom;
+    const volumeBottom = volumeTop + volumeHeight;
+    const indicatorTop = indicator ? volumeBottom + 8 : 0;
+    const indicatorBottom = plotBottom;
+    const axisBottom = indicator ? indicatorBottom : volumeBottom;
 
     let high = -Infinity;
     let low = Infinity;
@@ -224,6 +241,7 @@ export class CandleChart {
     this.layout = {
       plotLeft, plotRight, plotTop, plotBottom, plotWidth, plotHeight,
       priceTop, priceBottom, stepX, count: n, high, low, decimals,
+      volumeTop, volumeBottom, indicatorTop, indicatorBottom,
     };
 
     const yPrice = (price) => priceTop + ((high - price) / fullRange) * priceHeight;
@@ -261,7 +279,7 @@ export class CandleChart {
       const x = crisp(plotLeft + (i + 0.5) * stepX);
       ctx.beginPath();
       ctx.moveTo(x, plotTop);
-      ctx.lineTo(x, volumeBottom);
+      ctx.lineTo(x, axisBottom);
       ctx.stroke();
       const dayKey = fmtDayMonth(this.candles[i].t * 1000);
       if (twoLineAxis) {
@@ -277,6 +295,9 @@ export class CandleChart {
       }
       previousDay = dayKey;
     }
+
+    // position shading: entry..exit intervals behind the candles
+    this.drawPositionBands(ctx, { n, stepX, plotLeft, priceTop, priceBottom });
 
     // volume bars
     for (let i = 0; i < n; i += 1) {
@@ -339,6 +360,13 @@ export class CandleChart {
       const width = Math.max(1, bodyWidth);
       ctx.fillRect(x - width / 2, bodyTop, width, bodyHeight);
     }
+    }
+
+    // indicator panel of a rules backtest (or any overlay with a series)
+    if (indicator) {
+      this.drawIndicatorPanel(ctx, indicator, {
+        n, stepX, plotLeft, plotRight, indicatorTop, indicatorBottom,
+      });
     }
 
     // last price marker + dashed line
@@ -428,6 +456,125 @@ export class CandleChart {
     }
   }
 
+  /**
+   * First indicator series of the overlay, or null. The data contract is
+   * documented at the top of this file: overlay.series maps an indicator name to
+   * values aligned with this.candles; overlay.levels maps the same name to
+   * optional threshold values.
+   */
+  indicatorPanel() {
+    const series = this.overlay && this.overlay.series;
+    if (!series || typeof series !== 'object') return null;
+    for (const name of Object.keys(series)) {
+      const values = series[name];
+      if (!Array.isArray(values) || !values.length) continue;
+      const levelSource = this.overlay.levels;
+      const levels = levelSource && Array.isArray(levelSource[name])
+        ? levelSource[name].filter((value) => Number.isFinite(Number(value))).map(Number)
+        : [];
+      return { name, values, levels };
+    }
+    return null;
+  }
+
+  /** Fills the entry..exit intervals of the overlay trades behind the candles. */
+  drawPositionBands(ctx, { n, stepX, plotLeft, priceTop, priceBottom }) {
+    const trades = (this.overlay && this.overlay.trades) || [];
+    if (!trades.length || n < 1) return;
+    const startTime = this.candles[0].t;
+    const endTime = this.candles[n - 1].t;
+    const span = endTime - startTime || 1;
+    const mapIndex = (timeIso) => {
+      const seconds = (Date.parse(timeIso) || 0) / 1000;
+      return clamp((seconds - startTime) / span, 0, 1) * (n - 1);
+    };
+    ctx.save();
+    ctx.fillStyle = COLORS.positionFill;
+    for (const trade of trades) {
+      if (!trade.entryTime || !trade.exitTime) continue;
+      const from = Math.round(mapIndex(trade.entryTime));
+      const to = Math.round(mapIndex(trade.exitTime));
+      const left = plotLeft + Math.min(from, to) * stepX;
+      const width = Math.max(stepX, (Math.abs(to - from) + 1) * stepX);
+      ctx.fillRect(left, priceTop, width, priceBottom - priceTop);
+    }
+    ctx.restore();
+  }
+
+  /** Draws one indicator line with its optional threshold lines in the panel. */
+  drawIndicatorPanel(ctx, indicator, { n, stepX, plotLeft, plotRight, indicatorTop, indicatorBottom }) {
+    const values = indicator.values;
+    const offset = Math.max(0, n - values.length);
+    let high = -Infinity;
+    let low = Infinity;
+    for (let i = 0; i < values.length; i += 1) {
+      const value = Number(values[i]);
+      if (!Number.isFinite(value)) continue;
+      if (value > high) high = value;
+      if (value < low) low = value;
+    }
+    for (const level of indicator.levels) {
+      if (level > high) high = level;
+      if (level < low) low = level;
+    }
+    if (!Number.isFinite(high) || !Number.isFinite(low)) return;
+    const range = high - low || Math.abs(high) * 0.01 || 1;
+    high += range * 0.08;
+    low -= range * 0.08;
+    const fullRange = high - low || 1;
+    const yOf = (value) => indicatorBottom - ((value - low) / fullRange) * (indicatorBottom - indicatorTop);
+    ctx.save();
+    ctx.strokeStyle = COLORS.indicator;
+    ctx.lineWidth = 1.4;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < values.length; i += 1) {
+      const value = Number(values[i]);
+      if (!Number.isFinite(value)) {
+        started = false;
+        continue;
+      }
+      const x = plotLeft + (offset + i + 0.5) * stepX;
+      const y = yOf(value);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+    if (indicator.levels.length) {
+      ctx.strokeStyle = COLORS.indicatorLevel;
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1;
+      for (const level of indicator.levels) {
+        const y = crisp(yOf(level));
+        ctx.beginPath();
+        ctx.moveTo(plotLeft, y);
+        ctx.lineTo(plotRight, y);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+    let last = NaN;
+    for (let i = values.length - 1; i >= 0; i -= 1) {
+      const value = Number(values[i]);
+      if (Number.isFinite(value)) {
+        last = value;
+        break;
+      }
+    }
+    ctx.fillStyle = COLORS.axisText;
+    ctx.font = '9.5px ui-monospace, SFMono-Regular, Menlo, "Segoe UI", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const label = Number.isFinite(last) ? indicator.name + ' ' + fmtNum(last, 2) : indicator.name;
+    ctx.fillText(label, plotLeft + 2, indicatorTop + 2);
+    ctx.restore();
+  }
+
   drawOverlay(ctx, { n, stepX, plotLeft, priceTop, priceBottom, high, low, yPrice }) {
     const points = this.overlay.equity || [];
     if (points.length < 2) return;
@@ -506,6 +653,9 @@ export class CandleChart {
       { label: 'equity', color: COLORS.overlay, dash: [] },
       { label: 'бенчмарк', color: COLORS.benchmark, dash: [4, 4] },
     ];
+    if ((this.overlay.trades || []).length) {
+      legend.push({ label: 'в позиции', fill: COLORS.positionFill });
+    }
     ctx.save();
     ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     ctx.textAlign = 'left';
@@ -513,14 +663,19 @@ export class CandleChart {
     let x = plotLeft + 8;
     const y = priceTop + 4;
     for (const item of legend) {
-      ctx.strokeStyle = item.color;
-      ctx.lineWidth = 2;
-      ctx.setLineDash(item.dash);
-      ctx.beginPath();
-      ctx.moveTo(x, y + 5);
-      ctx.lineTo(x + 14, y + 5);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      if (item.fill) {
+        ctx.fillStyle = COLORS.positionFill;
+        ctx.fillRect(x, y + 1, 14, 9);
+      } else {
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash(item.dash);
+        ctx.beginPath();
+        ctx.moveTo(x, y + 5);
+        ctx.lineTo(x + 14, y + 5);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       ctx.fillStyle = COLORS.axisText;
       ctx.fillText(item.label, x + 18, y);
       x += 18 + ctx.measureText(item.label).width + 14;

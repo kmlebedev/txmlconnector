@@ -475,3 +475,74 @@ func TestRunSkipsUnfundedEntries(t *testing.T) {
 		t.Fatalf("final equity = %v, want untouched initial cash %v", res.Metrics.FinalEquity, res.Metrics.InitialCash)
 	}
 }
+
+// TestRunExplicitZeroCosts pins the explicit-cost mode of the research batch: a
+// zero FeeBps/SlippageBps with ExplicitCosts is a true zero-cost backtest and
+// carries the no_costs warning, while the default mode keeps substituting the
+// documented 5/1 bps (plan Task 24).
+func TestRunExplicitZeroCosts(t *testing.T) {
+	bars := closeSeries(knownCrossCloses())
+	const initialCash = 100000.0
+	entryIdx, exitIdx := 6, 13
+	req := Request{
+		Symbol:        "TEST",
+		PeriodSec:     300,
+		Bars:          bars,
+		Strategy:      "sma_cross",
+		Params:        map[string]float64{"fast": 2, "slow": 3},
+		InitialCash:   initialCash,
+		ExplicitCosts: true,
+	}
+	res, err := Run(req)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Trades) != 1 {
+		t.Fatalf("trades = %d, want 1", len(res.Trades))
+	}
+	trade := res.Trades[0]
+	if trade.EntryPrice != bars[entryIdx].Open {
+		t.Fatalf("entry price = %v, want the open %v without slippage", trade.EntryPrice, bars[entryIdx].Open)
+	}
+	if trade.ExitPrice != bars[exitIdx].Open {
+		t.Fatalf("exit price = %v, want the open %v without slippage", trade.ExitPrice, bars[exitIdx].Open)
+	}
+	wantQty := int64(math.Floor(initialCash / bars[entryIdx].Open))
+	if trade.Qty != wantQty {
+		t.Fatalf("qty = %d, want %d without commission", trade.Qty, wantQty)
+	}
+	wantPnL := float64(wantQty) * (bars[exitIdx].Open - bars[entryIdx].Open)
+	assertClose(t, "explicit zero pnl", trade.PnL, wantPnL)
+	if !hasWarning(res.Warnings, WarningNoCosts) {
+		t.Fatalf("warnings = %v, want %s", res.Warnings, WarningNoCosts)
+	}
+
+	// Default mode keeps the documented costs and does not warn.
+	defaults := req
+	defaults.ExplicitCosts = false
+	defaultRes, err := Run(defaults)
+	if err != nil {
+		t.Fatalf("Run defaults: %v", err)
+	}
+	if hasWarning(defaultRes.Warnings, WarningNoCosts) {
+		t.Fatalf("default-mode warnings = %v, unbidden %s", defaultRes.Warnings, WarningNoCosts)
+	}
+	if defaultRes.Trades[0].Qty >= trade.Qty {
+		t.Fatalf("default qty %d is not below the explicit zero-cost qty %d", defaultRes.Trades[0].Qty, trade.Qty)
+	}
+
+	// Explicit costs that are not both zero are literal but silent.
+	feeOnly := req
+	feeOnly.FeeBps = 5
+	feeOnly.SlippageBps = 0
+	feeRes, err := Run(feeOnly)
+	if err != nil {
+		t.Fatalf("Run fee-only: %v", err)
+	}
+	if hasWarning(feeRes.Warnings, WarningNoCosts) {
+		t.Fatalf("fee-only warnings = %v, unbidden %s", feeRes.Warnings, WarningNoCosts)
+	}
+	if feeRes.Trades[0].EntryPrice != bars[entryIdx].Open {
+		t.Fatalf("fee-only slippage applied: entry %v != open %v", feeRes.Trades[0].EntryPrice, bars[entryIdx].Open)
+	}
+}
