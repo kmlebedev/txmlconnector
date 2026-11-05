@@ -459,3 +459,5 @@ echo ok
 - `Connector` `moveorder` parses the XML elements/attrs; `makeordown` parses `transactionid` as an
   **attribute** and returns the explicit `RQ_MAKE_COND_OWN payload is not recovered (I)` error —
   the command is processed, not "not implemented".
+
+- Task-67 live-load fix: cancelled/removed/denied/rejected R_ORD_NEW bodies are shorter than the linear 52-read scheme; `ParseOrderNew` marks them `Short` and the event decoder skips them (I) instead of failing the load. R_RES 0x0f parsing added per RE-2 task-68.

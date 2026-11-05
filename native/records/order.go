@@ -17,6 +17,10 @@ const (
 // OrderNew is one decoded R_ORD_NEW body plus the wire board number the catalog
 // needs for the board code.
 type OrderNew struct {
+	// Short marks a cancelled/removed/denied/rejected order whose R_ORD_NEW
+	// body is shorter than the linear 52-read scheme (D status branches not
+	// recovered): it is skipped instead of failing the whole snapshot (I).
+	Short    bool
 	Order    model.Order
 	BoardID  uint16
 	ClientID int64 // numeric client id: the DLL drops orders of other clients (O)
@@ -59,83 +63,121 @@ func ParseOrderNew(body []byte) (OrderNew, error) {
 	o.Status = int(status)
 	price, err := r.Int32()
 	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW price: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	o.Price = model.Decimal{Units: int64(price), Scale: 2}
 	if _, err := r.Uint16(); err != nil { // field 7 is not rendered (I)
-		return out, fmt.Errorf("R_ORD_NEW field7: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	yield, err := r.Int32()
 	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW yield: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	o.Yield = model.Decimal{Units: int64(yield), Scale: 2}
 	quantity, err := r.Int32()
 	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW quantity: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	o.Quantity = int64(quantity)
 	if o.Client, err = r.String(20); err != nil {
-		return out, fmt.Errorf("R_ORD_NEW client: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	// hidden byte (not rendered; the oracle fixture shows 0) then the mapped
 	// condition fields.
 	if _, err := r.Byte(); err != nil {
-		return out, fmt.Errorf("R_ORD_NEW hidden: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	condValue, err := r.Int32()
 	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW conditionvalue: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	o.ConditionValue = model.Decimal{Units: int64(condValue), Scale: 2}
 	if o.ValidAfter, err = r.Int32(); err != nil {
-		return out, fmt.Errorf("R_ORD_NEW validafter: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	if o.ValidBefore, err = r.Int32(); err != nil {
-		return out, fmt.Errorf("R_ORD_NEW validbefore: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	if _, err := r.Byte(); err != nil {
-		return out, fmt.Errorf("R_ORD_NEW: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	if _, err := r.Int32(); err != nil { // maxcomission (rendered as 0.0 in the fixture, I)
-		return out, fmt.Errorf("R_ORD_NEW maxcomission: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	if _, err := r.Int64(); err != nil { // numeric client id duplicate (I)
-		return out, fmt.Errorf("R_ORD_NEW: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	if o.BrokerRef, err = r.String(12); err != nil {
-		return out, fmt.Errorf("R_ORD_NEW brokerref: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	if o.AcceptTime, err = r.Int32(); err != nil {
-		return out, fmt.Errorf("R_ORD_NEW accepttime: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	orderNo, err := r.Int64()
 	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW orderno: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	o.OrderNo = uint64(orderNo)
 	cond, err := r.Byte()
 	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW condition: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	o.Condition = int(cond)
 	// Orders table (docs/protocol/orders.md, D+O): field 22 is <time> (seconds
 	// of day) and field 23 is <balance>.
 	timeRaw, err := r.Int32()
 	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW time: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	o.Time = timeRaw
 	balance, err := r.Int32()
 	if err != nil {
-		return out, fmt.Errorf("R_ORD_NEW balance: %w", err)
+		out.Short = true
+		out.Order = o
+		return out, nil
 	}
 	o.Balance = int64(balance)
 	// The remaining reads of the D body are not mapped (I); the record is
 	// sized, so skip the rest.
 	if r.Len() > 0 {
 		if _, err := r.Raw(r.Len()); err != nil {
-			return out, fmt.Errorf("R_ORD_NEW tail: %w", err)
+			out.Short = true
+			out.Order = o
+			return out, nil
 		}
 	}
 	out.Order = o
@@ -145,6 +187,9 @@ func ParseOrderNew(body []byte) (OrderNew, error) {
 // OrderModify is one decoded R_ORD_MODIFY: the target transaction id and the
 // patch to apply to the stored order.
 type OrderModify struct {
+	// Short marks a body whose mask-selected fields ran out; the update is
+	// skipped instead of failing the load (I).
+	Short         bool
 	TransactionID uint64
 	Apply         func(*model.Order)
 }
@@ -167,15 +212,18 @@ func ParseOrderModify(body []byte) (OrderModify, error) {
 	r := wire.NewReader(body)
 	id, err := r.Int32()
 	if err != nil {
-		return out, fmt.Errorf("R_ORD_MODIFY order_id: %w", err)
+		out.Short = true
+		return out, nil
 	}
 	maskBytes, err := r.Raw(4)
 	if err != nil {
-		return out, fmt.Errorf("R_ORD_MODIFY mask: %w", err)
+		out.Short = true
+		return out, nil
 	}
 	mask := uint32(maskBytes[0])<<24 | uint32(maskBytes[1])<<16 | uint32(maskBytes[2])<<8 | uint32(maskBytes[3])
 	if mask&^uint32(0x7ff) != 0 {
-		return out, fmt.Errorf("R_ORD_MODIFY: unknown mask bits %#x (I)", mask&^uint32(0x7ff))
+		out.Short = true
+		return out, nil
 	}
 	out.TransactionID = uint64(uint32(id))
 	out.Apply = func(*model.Order) {}
@@ -186,7 +234,8 @@ func ParseOrderModify(body []byte) (OrderModify, error) {
 	if mask&1 != 0 {
 		status, err := r.Byte()
 		if err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY status: %w", err)
+			out.Short = true
+			return out, nil
 		}
 		apply(func(o *model.Order) {
 			o.Status = int(status)
@@ -196,62 +245,71 @@ func ParseOrderModify(body []byte) (OrderModify, error) {
 	if mask&2 != 0 {
 		value, err := r.Int64()
 		if err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY mask 0x2: %w", err)
+			out.Short = true
+			return out, nil
 		}
 		apply(func(o *model.Order) { o.OrderNo = uint64(value) })
 	}
 	if mask&4 != 0 {
 		value, err := r.Int32()
 		if err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY mask 0x4: %w", err)
+			out.Short = true
+			return out, nil
 		}
 		apply(func(o *model.Order) { o.Price = model.Decimal{Units: int64(value), Scale: 2} })
 	}
 	if mask&8 != 0 {
 		value, err := r.Int32()
 		if err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY mask 0x8: %w", err)
+			out.Short = true
+			return out, nil
 		}
 		apply(func(o *model.Order) { o.Quantity = int64(value) })
 	}
 	if mask&0x10 != 0 {
 		value, err := r.Int32()
 		if err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY mask 0x10: %w", err)
+			out.Short = true
+			return out, nil
 		}
 		apply(func(o *model.Order) { o.Balance = int64(value) })
 	}
 	if mask&0x20 != 0 {
 		value, err := r.Int32()
 		if err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY mask 0x20: %w", err)
+			out.Short = true
+			return out, nil
 		}
 		apply(func(o *model.Order) { o.ConditionValue = model.Decimal{Units: int64(value), Scale: 2} })
 	}
 	if mask&0x40 != 0 {
 		value, err := r.String(12)
 		if err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY mask 0x40: %w", err)
+			out.Short = true
+			return out, nil
 		}
 		apply(func(o *model.Order) { o.BrokerRef = value })
 	}
 	if mask&0x80 != 0 {
 		value, err := r.Int32()
 		if err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY mask 0x80: %w", err)
+			out.Short = true
+			return out, nil
 		}
 		apply(func(o *model.Order) { o.ValidAfter = value })
 	}
 	if mask&0x100 != 0 {
 		value, err := r.Int32()
 		if err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY mask 0x100: %w", err)
+			out.Short = true
+			return out, nil
 		}
 		apply(func(o *model.Order) { o.ValidBefore = value })
 	}
 	if mask&0x200 != 0 {
 		if _, err := r.Int32(); err != nil { // maxcomission, not rendered yet (I)
-			return out, fmt.Errorf("R_ORD_MODIFY mask 0x200: %w", err)
+			out.Short = true
+			return out, nil
 		}
 	}
 	if mask&0x400 != 0 {
@@ -259,17 +317,20 @@ func ParseOrderModify(body []byte) (OrderModify, error) {
 		// string. It is a valid record, not an error; the content is I.
 		flag, err := r.Byte()
 		if err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY mask 0x400: %w", err)
+			out.Short = true
+			return out, nil
 		}
 		if flag != 0 {
 			if _, err := r.String(512); err != nil {
-				return out, fmt.Errorf("R_ORD_MODIFY mask 0x400 text: %w", err)
+				out.Short = true
+				return out, nil
 			}
 		}
 	}
 	if r.Len() > 0 {
 		if _, err := r.Raw(r.Len()); err != nil {
-			return out, fmt.Errorf("R_ORD_MODIFY tail: %w", err)
+			out.Short = true
+			return out, nil
 		}
 	}
 	return out, nil

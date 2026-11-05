@@ -235,3 +235,90 @@ func TestKnownUnseenTagReturnsUnknownRecord(t *testing.T) {
 		}
 	}
 }
+
+// TestServerMessage0x0f: R_RES record fields (type/status/text/txid) and the
+// full inject payload splits 0x0f + 0x3b x2 + 0x03 without UnknownRecord.
+func TestServerMessage0x0f(t *testing.T) {
+	read := func(name string) []byte {
+		raw, err := os.ReadFile("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := hex.DecodeString(strings.TrimSpace(string(raw)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	record := read("server-msg-0f-record.hex")
+	recs, err := records.Records(record)
+	if err != nil || len(recs) != 1 || recs[0].Tag != records.TagServerMessage {
+		t.Fatalf("record split = %+v, %v", recs, err)
+	}
+	msg, err := records.ParseServerMessage(recs[0].Body)
+	if err != nil {
+		t.Fatalf("ParseServerMessage: %v", err)
+	}
+	if msg.Type != 1 || msg.Status != 1 || msg.TransactionID != 90 || !strings.Contains(msg.Text, "(160)") {
+		t.Fatalf("message = %+v", msg)
+	}
+	rejected, err := records.Records(read("server-msg-0f-rejected.hex"))
+	if err != nil || len(rejected) != 1 {
+		t.Fatalf("rejected split = %+v, %v", rejected, err)
+	}
+	rmsg, err := records.ParseServerMessage(rejected[0].Body)
+	if err != nil || rmsg.Status != 2 || !strings.Contains(rmsg.Text, "(579)") {
+		t.Fatalf("rejected = %+v, %v", rmsg, err)
+	}
+	all, err := records.Records(read("server-msg-0f-inject.hex"))
+	if err != nil {
+		t.Fatalf("inject split: %v", err)
+	}
+	var tags []byte
+	for _, rec := range all {
+		tags = append(tags, rec.Tag)
+	}
+	want := []byte{records.TagServerMessage, 0x3b, 0x3b, records.TagOrderNew, 0x0a}
+	if string(tags) != string(want) {
+		t.Fatalf("inject tags = %x, want %x", tags, want)
+	}
+}
+
+// TestSoakMaskedSliceLoads runs the whole masked demo RQ_MAIN slice through the
+// splitter and the order parser (the live-soak failure regression). It skips
+// when the gitignored capture is absent.
+func TestSoakMaskedSliceLoads(t *testing.T) {
+	files := []string{"../../.re-run/soak/demo-main-masked.hex", "../../.re-run/soak/demo-main2-masked.hex"}
+	seen := 0
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		seen++
+		for n, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			payload, err := hex.DecodeString(line)
+			if err != nil {
+				continue
+			}
+			recs, err := records.Records(payload)
+			if err != nil {
+				t.Fatalf("%s line %d split: %v", path, n+1, err)
+			}
+			for _, rec := range recs {
+				if rec.Tag == records.TagOrderNew {
+					if _, err := records.ParseOrderNew(rec.Body); err != nil {
+						t.Fatalf("%s line %d order: %v", path, n+1, err)
+					}
+				}
+			}
+		}
+	}
+	if seen == 0 {
+		t.Skip("no masked soak capture")
+	}
+}

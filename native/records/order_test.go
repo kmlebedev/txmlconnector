@@ -1,6 +1,7 @@
 package records_test
 
 import (
+	"encoding/hex"
 	"os"
 	"strings"
 	"testing"
@@ -122,10 +123,32 @@ func TestOrderParseShortBodies(t *testing.T) {
 	if _, err := records.ParseOrderNew([]byte{0x10}); err == nil {
 		t.Fatal("ParseOrderNew(short) did not fail")
 	}
-	if _, err := records.ParseOrderModify(nil); err == nil {
-		t.Fatal("ParseOrderModify(nil) did not fail")
+	// Short modify bodies are skipped (Short=true) instead of aborting the
+	// live load; malformed bodies may also keep the old error.
+	if out, err := records.ParseOrderModify(nil); err == nil && !out.Short {
+		t.Fatal("ParseOrderModify(nil) neither failed nor marked Short")
 	}
-	if _, err := records.ParseOrderModify([]byte{0x10, 0x00, 0x00}); err == nil {
-		t.Fatal("ParseOrderModify(short mask) did not fail")
+	if out, err := records.ParseOrderModify([]byte{0x10, 0x00, 0x00}); err == nil && !out.Short {
+		t.Fatal("ParseOrderModify(short mask) neither failed nor marked Short")
+	}
+}
+
+// TestOrderShortCancelledLive: status=6 (cancelled) bodies are shorter than the
+// linear 52-read scheme; ParseOrderNew returns Short (load must not fail).
+func TestOrderShortCancelledLive(t *testing.T) {
+	raw, err := os.ReadFile("testdata/order-short-cancelled-live.hex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := hex.DecodeString(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := records.ParseOrderNew(body)
+	if err != nil {
+		t.Fatalf("ParseOrderNew short: %v", err)
+	}
+	if !out.Short {
+		t.Fatalf("short order = %+v", out)
 	}
 }

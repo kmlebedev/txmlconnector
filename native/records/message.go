@@ -62,3 +62,7 @@ func SkipMessage(r *wire.Reader) error {
 	}
 	return nil
 }
+
+// TagServerMessage is R_SRVMSG (0x0f): server text messages in CP1251
+// (RE-2 capture; the exact tail fields are I).
+const TagServerMessage byte = 0x0f
