@@ -1976,8 +1976,12 @@ func (c *Connector) statusLocked(connected bool) string {
 func connectErrorXML(err error) string {
 	message := msgConnectFailed
 	var le *session.LoginError
-	if errors.As(err, &le) && le.Message != "" {
-		message = records.DecodeCP1251(le.Message)
+	if errors.As(err, &le) {
+		if le.Message != "" {
+			message = records.DecodeCP1251(le.Message)
+		} else if text := session.LoginErrorText(le.Code); text != "" {
+			message = text
+		}
 	}
 	return `<server_status connected="error">` + escapeText(message) + `</server_status>`
 }

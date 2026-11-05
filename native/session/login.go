@@ -125,20 +125,68 @@ type Info struct {
 	Text7      string
 }
 
-// LoginError is a non-zero RQ_PWD status or a rejecting RQ_LOGIN flag.
+// LoginError is a non-zero RQ_PWD status, a rejecting RQ_LOGIN flag or the
+// reason byte of a BYE that answers RQ_PWD. Message is the server's CP1251
+// text (status 0x0e); other codes are described by LoginErrorText.
 type LoginError struct {
 	Code    int
 	Message string
+	// Err is the underlying error, ErrBye when the server hung up.
+	Err error
 }
 
 func (e *LoginError) Error() string {
-	if e.Message != "" {
-		return fmt.Sprintf("transaq login failed: code %d: %s", e.Code, e.Message)
+	text := e.Message
+	if text == "" {
+		text = LoginErrorText(e.Code)
+	}
+	if text != "" {
+		return fmt.Sprintf("transaq login failed: code %d: %s", e.Code, text)
 	}
 	return fmt.Sprintf("transaq login failed: code %d", e.Code)
 }
 
+func (e *LoginError) Unwrap() error { return e.Err }
+
+// loginErrorTexts is the DLL's login error table (FUN_1801043f0, switch on the
+// code; texts at 0x18082e610..0x18082e860). Code 14 (0x0e) is the server's own
+// text, 0x753a and up are local socket/connector errors.
+var loginErrorTexts = map[int]string{
+	1:  "Ошибка подключения",
+	2:  "Неверный идентификатор, пароль или Touch Memory",
+	3:  "Вы не имеете прав на подключение к данному серверу",
+	4:  "Пользователь с таким идентификатором уже подключен к серверу",
+	5:  "Unpermitted IP address",
+	6:  "На данный момент исчерпаны все лицензии на подключение к черверу. Обратись в службу поддержки брокера.",
+	7:  "Ваша версия программы критично устарела. Установите новую версию.",
+	8:  "Сервер не доступен",
+	9:  "Ошибка криптосистемы",
+	10: "Истек или не начался период действия ключа ЭЦП",
+	11: "Не найден или неверный сертификат ключа ЭЦП",
+	12: "Не найден сертификат для ключа обмена",
+	13: "Данный тип криптопровайдера не поддерживается сервером",
+}
+
+// LoginErrorText returns the DLL text for a login error code (UTF-8, typos
+// kept as in the DLL), or "" when the DLL has none for it.
+func LoginErrorText(code int) string { return loginErrorTexts[code] }
+
 var ErrBye = errors.New("transaq: connection closed by server (BYE)")
+
+// ByeError is a BYE frame; Payload is what the server put in it (a one-byte
+// reason after RQ_PWD). It matches ErrBye with errors.Is.
+type ByeError struct {
+	Payload []byte
+}
+
+func (e *ByeError) Error() string {
+	if len(e.Payload) > 0 {
+		return fmt.Sprintf("%v: reason %x", ErrBye, e.Payload)
+	}
+	return ErrBye.Error()
+}
+
+func (e *ByeError) Is(target error) bool { return target == ErrBye }
 
 // Conn is an authenticated TRANSAQ connection. Requests are serialized.
 type Conn struct {
@@ -200,6 +248,12 @@ func Login(ctx context.Context, nc net.Conn, cfg Config) (*Conn, *Info, error) {
 	}
 	reply, err = c.Request(ctx, RqPwd, payload)
 	if err != nil {
+		// A refused login after the password check arrives as BYE with the
+		// reason code (S, production: 04 for a login already connected).
+		var bye *ByeError
+		if errors.As(err, &bye) && len(bye.Payload) > 0 && bye.Payload[0] != 0 {
+			err = &LoginError{Code: int(bye.Payload[0]), Err: err}
+		}
 		return nil, nil, fmt.Errorf("RQ_PWD: %w", err)
 	}
 	info, key, sync, err := parsePwdReply(pwKey, reply)
@@ -439,7 +493,7 @@ func (c *Conn) exchange(ctx context.Context, typ byte, payload []byte, wait bool
 	}
 	switch {
 	case f.Kind() == wire.KindBye:
-		return wire.Frame{}, ErrBye
+		return wire.Frame{}, &ByeError{Payload: f.Payload}
 	case f.Kind() != wire.KindReply || f.Type != typ:
 		return wire.Frame{}, fmt.Errorf("incorrect server response: flags %#x type %#x", f.Flags, f.Type)
 	}

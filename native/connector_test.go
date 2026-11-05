@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
+	"github.com/kmlebedev/txmlconnector/native/session"
 	"github.com/kmlebedev/txmlconnector/native/testserver"
 	"github.com/kmlebedev/txmlconnector/native/wire"
 	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
@@ -806,4 +808,12 @@ func TestE07TailHasNoUnknownRecordsAfterLoad(t *testing.T) {
 	}
 	cancel()
 	<-runDone
+}
+
+func TestConnectErrorUsesLoginErrorTable(t *testing.T) {
+	err := fmt.Errorf("RQ_PWD: %w", &session.LoginError{Code: 4})
+	want := `<server_status connected="error">Пользователь с таким идентификатором уже подключен к серверу</server_status>`
+	if got := connectErrorXML(err); got != want {
+		t.Fatalf("got %s\nwant %s", got, want)
+	}
 }
