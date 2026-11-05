@@ -40,8 +40,10 @@ func Synthesize(kind string, base []lobreplay.Event, params map[string]float64, 
 
 ## 2. Признаки и детекторы
 
-Все цены — `model.Decimal` в scaled units `Decimal64(6)`; ни один признак не переводит цену в
-`float64` (float появляется только в dimensionless-метриках: доли, энтропия, корреляции).
+Все цены — `model.Decimal` в scaled units `Decimal64(6)`. Цена конвертируется в `float64`
+только для вычисления безразмерных признаков/evidence (доли, энтропия, корреляции, расстояния в
+тиках) и никогда не возвращается на провод: заявки, fills и round trips остаются `int64` scaled
+Decimal. `float64` в структурах — только эти метрики и evidence.
 
 ### 2.1 TWAP — `twap`
 - **Клипы:** мода размера сделки на стороне агрессора, `modeShare = modeCount / trades`,
@@ -140,7 +142,10 @@ VWAP-корреляции, `price_decline`. Параметры: `DBSCANEps = 0.4
 artifact `execution_algos`, компактная сводка называет его `artifactId`.
 
 Возвращает компактный для модели результат (до `maxExecutionFootprints` отпечатков: kind, side,
-from/to, confidence, evidence) и artifact `execution_algos` для UI. Источник ленты — необязательный
-интерфейс `agent.LOBDataSource` (реализуется на `e.data`): пока проводка
-`md.book_events`/`md.trades` в `cmd/terminal` не сделана (**I**, отложено на T18/T26), инструмент
-возвращает понятную ошибку конфигурации; в тестах используется фейк. Живой источник не проверялся.
+from/to, confidence — **без** карты `evidence`) и artifact `execution_algos` для UI. С T18 сжатие
+ответа убирает `evidence` из хода модели (бюджет 2 КБ), полная карта остаётся в artifact, на
+который ссылается `artifactId`. Источник ленты — необязательный интерфейс `agent.LOBDataSource`
+(реализуется на `e.data`): проводки `md.book_events`/`md.trades` в `cmd/terminal` по-прежнему нет
+(**I**) — T18 вышел и добавил компактные ответы, но LOB-источник в виринге так и не появился,
+поэтому инструмент возвращает понятную ошибку конфигурации; в тестах используется фейк. Живой
+источник не проверялся.

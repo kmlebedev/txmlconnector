@@ -171,12 +171,16 @@ func Run(ctx context.Context, cl *native.Client, sink Sink, symbols []string) er
   `Body` (пусто, пока не пришло тело). Тело, пришедшее позже, обновляет кэш и публикует событие, но
   `FirstSeen` не меняет. Доступ — `feed.Service.News(since, limit)` (свежие первыми, кольцо на 200
   новостей). Offline-режим новостей не имеет (в seed их нет).
-- **Инструмент агента `get_news(symbol?, since, limit)`** (Phase D, plan Task 12) читает
-  **`md.news`** через `chstore`, т.е. записанные рекордером новости с точным `first_seen`:
+- **Инструмент агента `get_news(symbol?, since?, limit?, asOf)`** (Phase D, plan Task 12; с T18 —
+  обязательный `asOf`) читает **`md.news`** через `chstore`, т.е. записанные рекордером новости с
+  точным `first_seen`:
+  - `asOf` — обязательный point-in-time (RFC3339 UTC, T18): новости с `first_seen` позже `asOf`
+    не возвращаются, окно `since` отсчитывается от `asOf`, а не от текущего времени; без `asOf` —
+    ошибка аргумента (см. [research.md](research.md) §8);
   - `since` — начало окна по `first_seen`: RFC3339, `ГГГГ-ММ-ДД`, `ГГГГ-ММ-ДД ЧЧ:ММ:СС` или
-    длительность (`24h`); по умолчанию последние 24 часа;
-  - `limit` — 1..500, по умолчанию 50; результат — `{since, news:[{id,published,firstSeen,source,title,body}]}`,
-    от свежих к старым;
+    длительность (`24h`); по умолчанию последние 24 часа **до `asOf`**;
+  - `limit` — 1..500, по умолчанию 50; ответ модели компактный (`{asOf, since, count, news:[...]}`
+    + `artifactId`), полный список — в артефакте `news`, от свежих к старым;
   - `symbol` — необязательный текстовый фильтр: на проводе новость не привязана к бумаге, поэтому
     фильтр ищет тикер в заголовке/тексте без учёта регистра
     (`positionCaseInsensitiveUTF8(concat(title,' ',body), ...)`).

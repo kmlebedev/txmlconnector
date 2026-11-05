@@ -14,9 +14,11 @@
 //     across a break.
 //
 // Prices are model.Decimal everywhere. The replay computes at the Decimal64(6)
-// scale of the md schema and never converts a price to float64: the float64
-// fields of backtest.Metrics are the only place where money becomes a float, at
-// the result boundary. All timestamps are UTC.
+// scale of the md schema and never puts a float price on the wire: orders, fills
+// and round trips keep int64 scaled Decimals. Money becomes a float in exactly
+// two places that do not affect the wire: the commission rate
+// (FillModel.FeeBps) applied by the fill model, and the aggregate metric fields
+// of backtest.Metrics at the result boundary. All timestamps are UTC.
 //
 // The replay is deterministic: it reads no clock, no network and no randomness,
 // so the same Source, Strategy and FillModel produce the same Result.
