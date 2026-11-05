@@ -110,7 +110,9 @@ type Client struct {
 	// Options state (task 27): families/strikes end-of-family records are D-only;
 	// the XML forms are I until the S series.
 	optionFamilies map[uint16][]model.OptionFamily
-	optionStrikes  map[[2]int64]model.OptionStrikes
+	// optionStrikes is kept for the D-only R_STRIKES state; it is not rendered by
+	// a confirmed XML form yet (I).
+	optionStrikes map[[2]int64]model.OptionStrikes
 }
 
 // Dial logs in, loads the dictionaries and the initial snapshot (RQ_TIME,

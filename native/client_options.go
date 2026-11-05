@@ -56,8 +56,8 @@ func (c *Client) FamilyStrikes(ctx context.Context, family string) ([]model.Stri
 }
 
 // Options is get_options: RQ_CERTAIN_OPTIONS 151 with the Z25 opt_code list
-// (D). The option records themselves are D/I, so only the request/result is
-// modelled; the returned list is empty until RE/S fills it.
+// (D). The option data records are D/I, so only the request/result is modelled;
+// the returned list is empty until RE/S fills it (I, not dead code).
 func (c *Client) Options(ctx context.Context, req model.OptionsRequest) ([]model.Option, error) {
 	if len(req.OptCodes) == 0 {
 		return nil, fmt.Errorf("No seccodes found")
