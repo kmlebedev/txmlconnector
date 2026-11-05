@@ -7,11 +7,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/connector"
+	nativeconnector "github.com/kmlebedev/txmlconnector/native"
 	pb "github.com/kmlebedev/txmlconnector/proto"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -23,7 +26,46 @@ type Config struct {
 	Address          string
 	SubscriberBuffer int
 	ShutdownTimeout  time.Duration
-	Connector        connector.Config
+	// Backend selects the connector implementation: "dll" (vendor Win32 DLL) or
+	// "native" (pure-Go client, no Wine). Empty means the platform default:
+	// dll on windows/amd64, native elsewhere.
+	Backend   string
+	Connector connector.Config
+	// Native configures the pure-Go backend (dialing, version, client info).
+	Native nativeconnector.Config
+}
+
+// defaultBackend is the platform default: the vendor DLL is Windows-only, so
+// every other platform runs the pure-Go native client.
+func defaultBackend() string {
+	if runtime.GOOS == "windows" {
+		return "dll"
+	}
+	return "native"
+}
+
+func backendFromEnv() string {
+	if value := strings.TrimSpace(os.Getenv("TC_BACKEND")); value != "" {
+		return value
+	}
+	return defaultBackend()
+}
+
+// newBackend builds the configured connector. The injected config keeps the
+// native backend testable without Wine/DLL.
+func newBackend(config Config) (connector.Connector, error) {
+	backend := strings.ToLower(strings.TrimSpace(config.Backend))
+	if backend == "" {
+		backend = defaultBackend()
+	}
+	switch backend {
+	case "dll":
+		return connector.New(config.Connector)
+	case "native":
+		return nativeconnector.New(config.Native), nil
+	default:
+		return nil, fmt.Errorf("unknown TC_BACKEND %q (want dll or native)", config.Backend)
+	}
 }
 
 func ConfigFromEnv() Config {
@@ -35,7 +77,9 @@ func ConfigFromEnv() Config {
 		Address:          address,
 		SubscriberBuffer: subscriberBufferFromEnv(),
 		ShutdownTimeout:  10 * time.Second,
+		Backend:          backendFromEnv(),
 		Connector:        connector.ConfigFromEnv(),
+		Native:           nativeconnector.Config{},
 	}
 }
 
@@ -64,7 +108,7 @@ func RunContext(ctx context.Context, config Config) error {
 	if config.Address == "" {
 		config.Address = defaultAddress
 	}
-	native, err := connector.New(config.Connector)
+	backend, err := newBackend(config)
 	if err != nil {
 		return err
 	}
@@ -73,10 +117,10 @@ func RunContext(ctx context.Context, config Config) error {
 		return fmt.Errorf("listen on %s: %w", config.Address, err)
 	}
 	defer listener.Close()
-	return Serve(ctx, listener, native, config)
+	return Serve(ctx, listener, backend, config)
 }
 
-// Serve wires the native adapter to the transport. The injected connector and
+// Serve wires the connector backend to the transport. The injected connector and
 // listener make the application lifecycle testable without a DLL or real port.
 func Serve(ctx context.Context, listener net.Listener, native connector.Connector, config Config) error {
 	if listener == nil {

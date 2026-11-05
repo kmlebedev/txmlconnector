@@ -1,6 +1,7 @@
 package xmlcompat
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -47,6 +48,28 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return SecInfoXML(*e), true
 	case *model.Candles:
 		return CandlesXML(*e), true
+	case *model.Order:
+		return OrdersXML([]model.Order{*e}), true
+	case *model.ClientTrade:
+		return TradesXML([]model.ClientTrade{*e}), true
+	case *model.MarketOrd:
+		return MarketOrdXML(*e), true
+	case *model.NewsHeader:
+		return NewsHeaderXML(*e), true
+	case *model.NewsBody:
+		return NewsBodyXML(*e), true
+	case *model.Messages:
+		return MessagesXML(e.Items), true
+	case *model.Tick:
+		return TicksXML([]model.Tick{*e}), true
+	case *model.Ticks:
+		return TicksXML(e.Items), true
+	case *model.OptionFamily:
+		return OptionFamiliesXML([]model.OptionFamily{*e}), true
+	case *model.OptionStrikes:
+		return FamilyStrikesXML(*e), true
+	case *model.EndOfFamily:
+		return OptionsFailedXML(*e), true
 	}
 	return "", false
 }
@@ -439,7 +462,9 @@ func CandlesXML(candles model.Candles) string {
 	b.WriteString(" seccode=" + quoteAttr(candles.Symbol.SecCode) + " period=" + quoteAttr(strconv.Itoa(candles.Period)))
 	b.WriteString(" status=" + quoteAttr(strconv.Itoa(candles.Status)) + "> ")
 	for _, candle := range candles.Items {
-		b.WriteString("<candle date=" + quoteAttr(candle.Time.Format("02.01.2006 15:04:05")))
+		// The items are UTC; the DLL prints the server wall clock.
+		wall := candle.Time.Add(-candles.ZoneBias)
+		b.WriteString("<candle date=" + quoteAttr(wall.Format("02.01.2006 15:04:05")))
 		b.WriteString(" open=" + quoteAttr(candle.Open.String()))
 		b.WriteString(" close=" + quoteAttr(candle.Close.String()))
 		b.WriteString(" high=" + quoteAttr(candle.High.String()))
@@ -447,5 +472,644 @@ func CandlesXML(candles model.Candles) string {
 		b.WriteString(" volume=" + quoteAttr(strconv.FormatInt(candle.Volume, 10)) + "/> ")
 	}
 	b.WriteString("</candles>")
+	return b.String()
+}
+
+// OrdersXML renders one <orders> callback of the order feed (D+O form of
+// docs/protocol/orders.md; the element order is the oracle-confirmed one).
+func OrdersXML(orders []model.Order) string {
+	var b strings.Builder
+	b.WriteString("<orders>")
+	for _, order := range orders {
+		b.WriteString(OrderXML(order))
+	}
+	b.WriteString("</orders>")
+	return b.String()
+}
+
+// OrderXML renders one <order transactionid> element.
+func OrderXML(order model.Order) string {
+	timeOfDay := func(sec int32) string {
+		return fmt.Sprintf("%02d:%02d:%02d", sec/3600, (sec%3600)/60, sec%60)
+	}
+	var b strings.Builder
+	b.WriteString("<order transactionid=" + quoteAttr(strconv.FormatUint(order.TransactionID, 10)) + ">")
+	b.WriteString("<orderno>" + strconv.FormatUint(order.OrderNo, 10) + "</orderno>")
+	b.WriteString("<secid>" + strconv.Itoa(int(order.SecID)) + "</secid>")
+	b.WriteString("<union>" + escape(order.Union) + "</union>")
+	b.WriteString("<board>" + escape(order.Board) + "</board>")
+	b.WriteString("<seccode>" + escape(order.SecCode) + "</seccode>")
+	b.WriteString("<client>" + escape(order.Client) + "</client>")
+	b.WriteString("<status>" + orderStatusName(order.Status) + "</status>")
+	b.WriteString("<buysell>" + escape(string(order.BuySell)) + "</buysell>")
+	b.WriteString("<time>" + timeOfDay(order.Time) + "</time>")
+	b.WriteString("<accepttime>" + timeOfDay(order.AcceptTime) + "</accepttime>")
+	b.WriteString("<brokerref>" + escape(order.BrokerRef) + "</brokerref>")
+	b.WriteString("<value>0.0</value><accruedint>0.0</accruedint><settlecode></settlecode>")
+	b.WriteString("<balance>" + strconv.FormatInt(order.Balance, 10) + "</balance>")
+	b.WriteString("<price>" + orderAmount(order.Price) + "</price>")
+	b.WriteString("<quantity>" + strconv.FormatInt(order.Quantity, 10) + "</quantity>")
+	b.WriteString("<hidden>0</hidden>")
+	b.WriteString("<yield>" + orderAmount(order.Yield) + "</yield>")
+	b.WriteString("<withdrawtime>0</withdrawtime>")
+	b.WriteString("<condition>" + orderConditionName(order.Condition) + "</condition>")
+	b.WriteString("<conditionvalue>" + orderAmount(order.ConditionValue) + "</conditionvalue>")
+	b.WriteString("<validafter>" + timeOfDay(order.ValidAfter) + "</validafter>")
+	b.WriteString("<validbefore>" + timeOfDay(order.ValidBefore) + "</validbefore>")
+	b.WriteString("<maxcomission>0.0</maxcomission><within_pos>true</within_pos>")
+	b.WriteString("<result>" + escape(order.Result) + "</result>")
+	b.WriteString("</order>")
+	return b.String()
+}
+
+// orderAmount prints the DLL order amount style: the Decimal trimmed, but with
+// at least one fractional digit (100.00 -> 100.0, 5.55 -> 5.55, 0 -> 0.0).
+func orderAmount(d model.Decimal) string {
+	text := d.String()
+	if !strings.Contains(text, ".") {
+		text += ".0"
+	}
+	return text
+}
+
+// orderStatusName maps the DLL order status enum (only 1/2 are oracle-proven).
+func orderStatusName(status int) string {
+	switch status {
+	case 0:
+		return "none"
+	case 1:
+		return "watching"
+	case 2:
+		return "disabled"
+	default:
+		return strconv.Itoa(status)
+	}
+}
+
+// orderConditionName maps the condition enum (Bid is oracle-confirmed).
+func orderConditionName(condition int) string {
+	switch condition {
+	case 1:
+		return "Bid"
+	case 3:
+		return "Ask"
+	case 0:
+		return ""
+	default:
+		return strconv.Itoa(condition)
+	}
+}
+
+// TradesXML renders one client <trades> callback (PDF 4.11, oracle-confirmed
+// order of elements in docs/protocol/orders.md).
+func TradesXML(trades []model.ClientTrade) string {
+	var b strings.Builder
+	b.WriteString("<trades>")
+	for _, trade := range trades {
+		b.WriteString(TradeXML(trade))
+	}
+	b.WriteString("</trades>")
+	return b.String()
+}
+
+// TradeXML renders one <trade> element.
+func TradeXML(trade model.ClientTrade) string {
+	timeOfDay := func(sec int64) string {
+		return fmt.Sprintf("%02d:%02d:%02d", sec/3600, (sec%3600)/60, sec%60)
+	}
+	var b strings.Builder
+	b.WriteString("<trade>")
+	b.WriteString("<secid>" + strconv.Itoa(int(trade.SecID)) + "</secid>")
+	b.WriteString("<tradeno>" + strconv.FormatUint(trade.TradeNo, 10) + "</tradeno>")
+	b.WriteString("<orderno>" + strconv.FormatUint(trade.OrderNo, 10) + "</orderno>")
+	b.WriteString("<board>" + escape(trade.Board) + "</board>")
+	b.WriteString("<seccode>" + escape(trade.SecCode) + "</seccode>")
+	b.WriteString("<client>" + escape(trade.Client) + "</client>")
+	// The DLL prints the buysell byte as-is (the O fixture shows \x01).
+	b.WriteString("<buysell>" + string([]byte{trade.BuySell}) + "</buysell>")
+	b.WriteString("<union>" + escape(trade.Union) + "</union>")
+	b.WriteString("<time>" + timeOfDay(trade.Time) + "</time>")
+	b.WriteString("<brokerref>" + escape(trade.BrokerRef) + "</brokerref>")
+	b.WriteString("<value>" + orderAmount(trade.Value) + "</value>")
+	b.WriteString("<comission>" + orderAmount(trade.Comission) + "</comission>")
+	b.WriteString("<price>" + orderAmount(trade.Price) + "</price>")
+	b.WriteString("<quantity>" + strconv.FormatInt(trade.Quantity, 10) + "</quantity>")
+	b.WriteString("<items>" + strconv.FormatInt(trade.Items, 10) + "</items>")
+	b.WriteString("<yield>0.0</yield>")
+	b.WriteString("<currentpos>" + strconv.FormatInt(trade.CurrentPos, 10) + "</currentpos>")
+	b.WriteString("<accruedint>" + orderAmount(trade.AccruedInt) + "</accruedint>")
+	b.WriteString("<tradetype>" + escape(string(trade.TradeType)) + "</tradetype>")
+	b.WriteString("<settlecode>" + escape(trade.SettleCode) + "</settlecode>")
+	b.WriteString("<bypass>" + strconv.Itoa(int(trade.Bypass)) + "</bypass>")
+	b.WriteString("</trade>")
+	return b.String()
+}
+
+// SecPositionXML renders one <positions><sec_position> callback (O).
+func SecPositionXML(pos model.SecPosition) string {
+	var b strings.Builder
+	b.WriteString("<positions><sec_position>")
+	b.WriteString("<client>" + escape(pos.Client) + "</client>")
+	b.WriteString("<union>" + escape(pos.Union) + "</union>")
+	b.WriteString("<secid>" + strconv.Itoa(int(pos.SecID)) + "</secid>")
+	b.WriteString("<market>" + strconv.Itoa(pos.Market) + "</market>")
+	b.WriteString("<shortname>" + escape(pos.ShortName) + "</shortname>")
+	b.WriteString("<seccode>" + escape(pos.SecCode) + "</seccode>")
+	b.WriteString("<saldoin>" + strconv.FormatInt(pos.SaldoIn, 10) + "</saldoin>")
+	b.WriteString("<saldomin>" + strconv.FormatInt(pos.SaldoMin, 10) + "</saldomin>")
+	b.WriteString("<bought>" + strconv.FormatInt(pos.Bought, 10) + "</bought>")
+	b.WriteString("<sold>" + strconv.FormatInt(pos.Sold, 10) + "</sold>")
+	b.WriteString("<saldo>" + strconv.FormatInt(pos.Saldo, 10) + "</saldo>")
+	b.WriteString("<ordbuy>" + strconv.FormatInt(pos.OrdBuy, 10) + "</ordbuy>")
+	b.WriteString("<ordsell>" + strconv.FormatInt(pos.OrdSell, 10) + "</ordsell>")
+	b.WriteString("</sec_position></positions>")
+	return b.String()
+}
+
+// FortsPositionsXML renders the get_forts_positions callback: one
+// <forts_position> per record and the aggregated <forts_money> (O).
+func FortsPositionsXML(positions []model.FortsPosition, money *model.FortsMoney) string {
+	var b strings.Builder
+	b.WriteString("<positions>")
+	for _, pos := range positions {
+		b.WriteString("<forts_position>")
+		b.WriteString("<client>" + escape(pos.Client) + "</client>")
+		b.WriteString("<secid>" + strconv.Itoa(int(pos.SecID)) + "</secid>")
+		b.WriteString("<union>" + escape(pos.Union) + "</union>")
+		b.WriteString("<seccode>" + escape(pos.SecCode) + "</seccode>")
+		b.WriteString("<markets><market>" + strconv.Itoa(pos.Market) + "</market></markets>")
+		b.WriteString("<startnet>" + strconv.FormatInt(pos.StartNet, 10) + "</startnet>")
+		b.WriteString("<openbuys>" + strconv.FormatInt(pos.OpenBuys, 10) + "</openbuys>")
+		b.WriteString("<opensells>" + strconv.FormatInt(pos.OpenSells, 10) + "</opensells>")
+		b.WriteString("<totalnet>" + strconv.FormatInt(pos.TotalNet, 10) + "</totalnet>")
+		b.WriteString("<todaybuy>" + strconv.FormatInt(pos.TodayBuy, 10) + "</todaybuy>")
+		b.WriteString("<todaysell>" + strconv.FormatInt(pos.TodaySell, 10) + "</todaysell>")
+		b.WriteString("<optmargin>" + orderAmount(pos.OptMargin) + "</optmargin>")
+		b.WriteString("<varmargin>" + orderAmount(pos.VarMargin) + "</varmargin>")
+		b.WriteString("<expirationpos>" + strconv.FormatInt(pos.ExpirationPos, 10) + "</expirationpos>")
+		b.WriteString("</forts_position>")
+	}
+	if money != nil {
+		b.WriteString("<forts_money>")
+		b.WriteString("<client>" + escape(money.Client) + "</client>")
+		b.WriteString("<union>" + escape(money.Union) + "</union>")
+		b.WriteString("<markets><market>" + strconv.Itoa(money.Market) + "</market></markets>")
+		b.WriteString("<shortname>" + escape(money.ShortName) + "</shortname>")
+		b.WriteString("<blocked>" + orderAmount(money.Blocked) + "</blocked>")
+		b.WriteString("<varmargin>" + orderAmount(money.VarMargin) + "</varmargin>")
+		b.WriteString("<current>" + orderAmount(money.Current) + "</current>")
+		b.WriteString("<free>" + orderAmount(money.Free) + "</free>")
+		b.WriteString("</forts_money>")
+	}
+	b.WriteString("</positions>")
+	return b.String()
+}
+
+// ClientLimitsXML renders <clientlimits client="…"> (limits.md, D): the DLL
+// emits only non-zero fields in this fixed order, keeps the </cpblused> typo of
+// the cbplused element and prints the money fields with two decimals, coverage
+// raw and liquidity_c with five decimals.
+func ClientLimitsXML(l model.ClientLimits) string {
+	var b strings.Builder
+	b.WriteString("<clientlimits client=" + quoteAttr(l.Client) + ">")
+	money := func(name string, d model.Decimal, typo bool) {
+		if d.Units == 0 {
+			return
+		}
+		closeTag := name
+		if typo {
+			closeTag = "cpblused"
+		}
+		b.WriteString("<" + name + ">" + fixedDecimal(d) + "</" + closeTag + ">")
+	}
+	money("cbplimit", l.CBPLimit, false)
+	money("cbplused", l.CBPLUsed, true)
+	money("cbplplanned", l.CBPLPlanned, false)
+	money("fob_varmargin", l.FobVarMargin, false)
+	if l.Coverage != 0 {
+		b.WriteString("<coverage>" + strconv.Itoa(int(l.Coverage)) + "</coverage>")
+	}
+	if l.LiquidityC.Units != 0 {
+		b.WriteString("<liquidity_c>" + fixedDecimal(l.LiquidityC) + "</liquidity_c>")
+	}
+	for _, field := range []struct {
+		name string
+		d    model.Decimal
+	}{
+		{"profit", l.Profit}, {"money_current", l.MoneyCurrent}, {"money_reserve", l.MoneyReserve},
+		{"money_free", l.MoneyFree}, {"options_premium", l.OptionsPremium}, {"exchange_fee", l.ExchangeFee},
+		{"forts_varmargin", l.FortsVarMargin}, {"varmargin", l.VarMargin}, {"pclmargin", l.PCLMargin},
+		{"options_vm", l.OptionsVM}, {"spot_buy_limit", l.SpotBuyLimit}, {"used_spot_buy_limit", l.UsedSpotBuyLimit},
+		{"collat_current", l.CollatCurrent}, {"collat_blocked", l.CollatBlocked}, {"collat_free", l.CollatFree},
+	} {
+		money(field.name, field.d, false)
+	}
+	b.WriteString("</clientlimits>")
+	return b.String()
+}
+
+// UnitedLimitsXML renders the D-only <united_limits union="…"> callback.
+func UnitedLimitsXML(l model.UnitedLimits) string {
+	var b strings.Builder
+	b.WriteString("<united_limits union=" + quoteAttr(l.Union) + ">")
+	for _, field := range []struct {
+		name string
+		d    model.Decimal
+	}{
+		{"open_equity", l.OpenEquity}, {"equity", l.Equity}, {"requirements", l.Requirements},
+		{"free", l.Free}, {"vm", l.VM}, {"finres", l.FinRes}, {"go", l.GO},
+	} {
+		if field.d.Units == 0 {
+			continue
+		}
+		b.WriteString("<" + field.name + ">" + fixedDecimal(field.d) + "</" + field.name + ">")
+	}
+	b.WriteString("</united_limits>")
+	return b.String()
+}
+
+// StopOrdersXML renders the R_STOP callback: the DLL uses the <orders> envelope
+// with one <stoporder transactionid> element (orders.md, O).
+func StopOrdersXML(orders []model.StopOrder) string {
+	var b strings.Builder
+	b.WriteString("<orders>")
+	for _, order := range orders {
+		b.WriteString("<stoporder transactionid=" + quoteAttr(strconv.FormatUint(order.TransactionID, 10)) + ">")
+		// Only the fields the record actually carries (mask-aware): a status-only
+		// update must not print a NUL buysell or a zero secid (D).
+		if order.HasSec {
+			b.WriteString("<secid>" + strconv.Itoa(int(order.SecID)) + "</secid>")
+		}
+		b.WriteString("<union>" + escape(order.Union) + "</union>")
+		if order.HasBoard {
+			b.WriteString("<board>" + escape(order.Board) + "</board>")
+		}
+		if order.HasSec {
+			b.WriteString("<seccode>" + escape(order.SecCode) + "</seccode>")
+		}
+		if order.HasClient {
+			b.WriteString("<client>" + escape(order.Client) + "</client>")
+		}
+		if order.HasBuySell {
+			b.WriteString("<buysell>" + escape(string(order.BuySell)) + "</buysell>")
+		}
+		b.WriteString("<author>" + escape(order.Author) + "</author>")
+		b.WriteString("<status>" + stopOrderStatusName(order.Status) + "</status>")
+		b.WriteString("<withdrawtime>" + strconv.FormatInt(order.WithdrawTime, 10) + "</withdrawtime>")
+		b.WriteString("<result>" + escape(order.Result) + "</result>")
+		b.WriteString("</stoporder>")
+	}
+	b.WriteString("</orders>")
+	return b.String()
+}
+
+// stopOrderStatusName maps the R_STOP status codes (only none is O-confirmed).
+func stopOrderStatusName(status int) string {
+	switch status {
+	case 0:
+		return "none"
+	default:
+		return strconv.Itoa(status)
+	}
+}
+
+// The portfolio XML literals below are the only D-known forms: the element
+// schemas/field names are not recovered yet (portfolios.md, I), so these
+// helpers emit the literal envelope without fabricating data and are NOT wired
+// into Render until the oracle fixtures exist.
+
+// PortfoliosXML wraps the portfolio callbacks in the <portfolios> literal.
+func PortfoliosXML(inner string) string { return "<portfolios>" + inner + "</portfolios>" }
+
+// PortfolioTPlusXML is the literal <portfolio_tplus/> skeleton (fields I).
+func PortfolioTPlusXML() string { return "<portfolio_tplus/>" }
+
+// UnitedPortfolioXML is the literal <united_portfolio/> skeleton (fields I).
+func UnitedPortfolioXML() string { return "<united_portfolio/>" }
+
+// portfolioCurrencyName maps the wire currency to the DLL <currency> literal.
+// Only the demo RUR->RUB mapping is confirmed (I for the rest).
+func portfolioCurrencyName(currency string) string {
+	if currency == "RUR" {
+		return "RUB"
+	}
+	return currency
+}
+
+// fixed2 renders a money Decimal with exactly two digits (the portfolio forms
+// keep the trailing zeros: 300000.00).
+func fixed2(d model.Decimal) string {
+	return fixedDecimal(model.Decimal{Units: rescaleMoneyUnits(d), Scale: 2})
+}
+
+func rescaleMoneyUnits(d model.Decimal) int64 {
+	units := d.Units
+	if d.Scale > 2 {
+		for i := uint8(2); i < d.Scale; i++ {
+			units /= 10
+		}
+	}
+	for i := d.Scale; i < 2; i++ {
+		units *= 10
+	}
+	return units
+}
+
+// zero2 is the DLL zero for the derived portfolio numbers (I formulas).
+var zero2 = model.Decimal{Units: 0, Scale: 2}
+
+// PortfolioCurrencyXML renders one <portfolio_currency> of get_portfolio (O).
+// equity/cover are rendered from the stored balance; the derived formulas are
+// I (the demo fixture has all of them equal to the balance).
+func PortfolioCurrencyXML(p model.MoneyPosition) string {
+	var b strings.Builder
+	b.WriteString("<portfolio_currency currency=" + quoteAttr(portfolioCurrencyName(p.Currency)) + ">")
+	b.WriteString("<cross_rate>1</cross_rate>")
+	b.WriteString("<open_balance>" + fixed2(p.SaldoIn) + "</open_balance>")
+	b.WriteString("<balance>" + fixed2(p.Saldo) + "</balance>")
+	b.WriteString("<equity>" + fixed2(p.Saldo) + "</equity>")
+	b.WriteString("<cover>" + fixed2(p.Saldo) + "</cover>")
+	b.WriteString("<init_req>" + fixed2(zero2) + "</init_req>")
+	b.WriteString("<maint_req>" + fixed2(zero2) + "</maint_req>")
+	b.WriteString("<unrealized_pnl>" + fixed2(zero2) + "</unrealized_pnl>")
+	b.WriteString("</portfolio_currency>")
+	return b.String()
+}
+
+// MCPortfolioXML renders one <mc_portfolio client> with the nested
+// <portfolio_currency>, the demo <money> block and its <value_part register>.
+// The money name is the demo literal; balance_prc is 0.0000 in the fixture (I).
+func MCPortfolioXML(client string, p model.MoneyPosition) string {
+	var b strings.Builder
+	b.WriteString("<mc_portfolio client=" + quoteAttr(client) + ">")
+	b.WriteString("<open_equity>" + fixed2(p.Saldo) + "</open_equity>")
+	b.WriteString("<equity>" + fixed2(p.Saldo) + "</equity>")
+	b.WriteString("<pl>" + fixed2(zero2) + "</pl>")
+	b.WriteString("<go>" + fixed2(zero2) + "</go>")
+	b.WriteString("<cover>" + fixed2(p.Saldo) + "</cover>")
+	b.WriteString("<init_req>" + fixed2(zero2) + "</init_req>")
+	b.WriteString("<maint_req>" + fixed2(zero2) + "</maint_req>")
+	b.WriteString("<unrealized_pnl>" + fixed2(zero2) + "</unrealized_pnl>")
+	b.WriteString(PortfolioCurrencyXML(p))
+	b.WriteString("<money name=" + quoteAttr("Фондовый рынок МБ") + " currency=" + quoteAttr(portfolioCurrencyName(p.Currency)) + ">")
+	b.WriteString("<balance_prc>0.0000</balance_prc>")
+	b.WriteString("<open_balance>" + fixed2(p.SaldoIn) + "</open_balance>")
+	b.WriteString("<bought>" + fixed2(p.Bought) + "</bought>")
+	b.WriteString("<sold>" + fixed2(p.Sold) + "</sold>")
+	b.WriteString("<balance>" + fixed2(p.Saldo) + "</balance>")
+	b.WriteString("<blocked>" + fixed2(zero2) + "</blocked>")
+	b.WriteString("<estimated>" + fixed2(zero2) + "</estimated>")
+	b.WriteString("<fee>" + fixed2(zero2) + "</fee>")
+	b.WriteString("<vm>" + fixed2(zero2) + "</vm>")
+	b.WriteString("<finres>" + fixed2(zero2) + "</finres>")
+	b.WriteString("<cover>" + fixed2(p.Saldo) + "</cover>")
+	b.WriteString("<value_part register=" + quoteAttr(p.Register) + ">")
+	b.WriteString("<open_balance>" + fixed2(p.SaldoIn) + "</open_balance>")
+	b.WriteString("<bought>" + fixed2(p.Bought) + "</bought>")
+	b.WriteString("<sold>" + fixed2(p.Sold) + "</sold>")
+	b.WriteString("<balance>" + fixed2(p.Saldo) + "</balance>")
+	b.WriteString("<blocked>" + fixed2(zero2) + "</blocked>")
+	b.WriteString("<estimated>" + fixed2(zero2) + "</estimated>")
+	b.WriteString("</value_part></money></mc_portfolio>")
+	return b.String()
+}
+
+// maxBuySellItemsXML renders the <security secid> items of both max_buy_sell
+// forms: identity from the catalog, integer maxbuy/maxsell (margin.md, D/O).
+func maxBuySellItemsXML(items []model.MaxBuySell) string {
+	var b strings.Builder
+	for _, item := range items {
+		b.WriteString("<security secid=" + quoteAttr(strconv.Itoa(int(item.SecID))) + ">")
+		b.WriteString("<market>" + strconv.Itoa(item.Market) + "</market>")
+		b.WriteString("<seccode>" + escape(item.SecCode) + "</seccode>")
+		b.WriteString("<maxbuy>" + strconv.FormatInt(item.MaxBuy, 10) + "</maxbuy>")
+		b.WriteString("<maxsell>" + strconv.FormatInt(item.MaxSell, 10) + "</maxsell>")
+		b.WriteString("</security>")
+	}
+	return b.String()
+}
+
+// MaxBuySellTPlusXML renders <max_buy_sell_tplus client="…"> (O).
+func MaxBuySellTPlusXML(client string, items []model.MaxBuySell) string {
+	return "<max_buy_sell_tplus client=" + quoteAttr(client) + ">" + maxBuySellItemsXML(items) + "</max_buy_sell_tplus>"
+}
+
+// MaxBuySellXML renders <max_buy_sell client="…"> or <max_buy_sell union="…">
+// depending on which selector the command carries (O).
+func MaxBuySellXML(client, union string, items []model.MaxBuySell) string {
+	root := "<max_buy_sell"
+	if client != "" {
+		root += " client=" + quoteAttr(client)
+	} else {
+		root += " union=" + quoteAttr(union)
+	}
+	return root + ">" + maxBuySellItemsXML(items) + "</max_buy_sell>"
+}
+
+// fixed2Decimal renders a Decimal with exactly two digits.
+func fixed2Decimal(d model.Decimal) string {
+	if d.Scale != 2 {
+		units := d.Units
+		if d.Scale > 2 {
+			for i := uint8(2); i < d.Scale; i++ {
+				units /= 10
+			}
+		}
+		for i := d.Scale; i < 2; i++ {
+			units *= 10
+		}
+		d = model.Decimal{Units: units, Scale: 2}
+	}
+	return fixedDecimal(d)
+}
+
+// ClnSecPermissionsXML renders <cln_sec_permissions>: client/union are
+// attributes here (unlike the command where they are elements), the security is
+// an element, then the rights and the rate branch (margin.md, D/O).
+func ClnSecPermissionsXML(p model.SecPermissions) string {
+	var b strings.Builder
+	b.WriteString("<cln_sec_permissions")
+	if p.Client != "" {
+		b.WriteString(" client=" + quoteAttr(p.Client))
+	}
+	if p.Union != "" {
+		b.WriteString(" union=" + quoteAttr(p.Union))
+	}
+	b.WriteString(" secid=" + quoteAttr(strconv.Itoa(int(p.SecID))) + ">")
+	b.WriteString("<security><seccode>" + escape(p.SecCode) + "</seccode>")
+	b.WriteString("<market>" + strconv.Itoa(p.Market) + "</market>")
+	b.WriteString("<board>" + escape(p.Board) + "</board></security>")
+	b.WriteString("<tradeable>" + strconv.FormatBool(p.Tradeable) + "</tradeable>")
+	b.WriteString("<marketable>" + strconv.FormatBool(p.Marketable) + "</marketable>")
+	b.WriteString("<longable>" + strconv.FormatBool(p.Longable) + "</longable>")
+	b.WriteString("<shortable>" + strconv.FormatBool(p.Shortable) + "</shortable>")
+	if p.RiskRateLong == nil {
+		b.WriteString("<regratelong>" + fixed2Decimal(p.RegRateLong) + "</regratelong>")
+		b.WriteString("<regrateshort>" + fixed2Decimal(p.RegRateShort) + "</regrateshort>")
+	} else {
+		if p.RiskRateLong != nil {
+			b.WriteString("<riskrate_long>" + fixed2Decimal(*p.RiskRateLong) + "</riskrate_long>")
+		}
+		if p.ReserateLong != nil {
+			b.WriteString("<reserate_long>" + fixed2Decimal(*p.ReserateLong) + "</reserate_long>")
+		}
+		if p.RiskRateShort != nil {
+			b.WriteString("<riskrate_short>" + fixed2Decimal(*p.RiskRateShort) + "</riskrate_short>")
+		}
+		if p.ReserateShort != nil {
+			b.WriteString("<reserate_short>" + fixed2Decimal(*p.ReserateShort) + "</reserate_short>")
+		}
+	}
+	b.WriteString("</cln_sec_permissions>")
+	return b.String()
+}
+
+// MarketOrdXML renders the <marketord secid permit seccode/> callback (O).
+func MarketOrdXML(m model.MarketOrd) string {
+	permit := "no"
+	if m.Permit {
+		permit = "yes"
+	}
+	return "<marketord secid=" + quoteAttr(strconv.Itoa(int(m.SecID))) + " permit=" + quoteAttr(permit) + " seccode=" + quoteAttr(m.SecCode) + "/>"
+}
+
+// cdata escapes the text of an XML CDATA section (the DLL wraps the news
+// source/title/text in CDATA, news.md D/O).
+func cdata(s string) string {
+	return strings.ReplaceAll(s, "]]>", "]]]]><![CDATA[>")
+}
+
+// NewsHeaderXML renders <news_header> (news.md, D + O fixture). The O fixture
+// prints the timestamp as UTC (the capture machine printed UTC); the exact
+// time source of the DLL is I, so UTC keeps the fixture byte-exact.
+func NewsHeaderXML(h model.NewsHeader) string {
+	return "<news_header><id>" + strconv.FormatInt(h.ID, 10) + "</id><timestamp>" +
+		h.Time.UTC().Format("02.01.2006 15:04:05") + "</timestamp><source><![CDATA[" + cdata(h.Source) +
+		"]]></source><title><![CDATA[" + cdata(h.Title) + "]]></title></news_header>"
+}
+
+// NewsBodyXML renders the S <news_body> form.
+func NewsBodyXML(b model.NewsBody) string {
+	return "<news_body><id>" + strconv.FormatInt(b.ID, 10) + "</id><text><![CDATA[" + cdata(b.Text) + "]]></text></news_body>"
+}
+
+// MessageXML renders one <message> item (messages.md D/O): only HH:MM:SS of the
+// WALL time (Time - bias; the machine-local conversion is I), Y/N urgency and
+// CDATA text.
+func MessageXML(m model.Message) string {
+	urgent := "N"
+	if m.Urgent {
+		urgent = "Y"
+	}
+	wall := m.WallTime
+	if wall.IsZero() {
+		wall = m.Time
+	}
+	return "<message><date>" + wall.UTC().Format("15:04:05") + "</date><urgent>" + urgent +
+		"</urgent><from>" + escape(m.From) + "</from><text><![CDATA[" + cdata(m.Text) + "]]></text></message>"
+}
+
+// MessagesXML renders the batch of one RQ_MAIN reply in record order (O).
+func MessagesXML(messages []model.Message) string {
+	var b strings.Builder
+	b.WriteString("<messages>")
+	for _, m := range messages {
+		b.WriteString(MessageXML(m))
+	}
+	b.WriteString("</messages>")
+	return b.String()
+}
+
+// The option XML forms are D literals only (options.md): no O fixture exists,
+// so the element meaning/order is I. MatDate is the R_FAMILY first L (semantics
+// I; rendered empty when 0), LotSize is the second L (I).
+func OptionFamiliesXML(families []model.OptionFamily) string {
+	var b strings.Builder
+	b.WriteString("<option_families>")
+	for _, family := range families {
+		b.WriteString("<family>")
+		// MatDate is the raw R_FAMILY first L; its meaning/format is not
+		// recovered (options.md I), so the element is intentionally empty rather
+		// than formatting a possibly bogus Unix date.
+		b.WriteString("<mat_date></mat_date>")
+		b.WriteString("<lot_size>" + strconv.FormatInt(family.LotSize, 10) + "</lot_size>")
+		b.WriteString("</family>")
+	}
+	b.WriteString("</option_families>")
+	return b.String()
+}
+
+// FamilyStrikesXML renders the D literal <family_strikes> (order/attrs are I).
+func FamilyStrikesXML(strikes model.OptionStrikes) string {
+	var b strings.Builder
+	b.WriteString("<family_strikes>")
+	for _, strike := range strikes.Items {
+		b.WriteString("<strike><opt_code>" + escape(strike.OptCode) + "</opt_code>")
+		b.WriteString("<price>" + strconv.FormatInt(strike.Price, 10) + "</price>")
+		b.WriteString("<cp>" + escape(string([]byte{strike.CP})) + "</cp></strike>")
+	}
+	b.WriteString("</family_strikes>")
+	return b.String()
+}
+
+// OptionsFailedXML renders the D literal <options_failed> (trigger semantics I).
+func OptionsFailedXML(end model.EndOfFamily) string {
+	return "<options_failed><option opt_code=" + quoteAttr(end.OptCode) + " error=" + quoteAttr(end.Text) + "/></options_failed>"
+}
+
+// NegDealXML renders the D-literal <negdeal> (rps.md): no O capture exists, so
+// the order/attribute details are I. It is NOT wired into Render: there is no
+// RQ_MAIN record decoder for the PDF 5.7 event yet (I).
+func NegDealXML(deal model.RPSTradeForExecution) string {
+	var b strings.Builder
+	b.WriteString("<negdeal transactionid=" + quoteAttr(strconv.FormatUint(deal.TransactionID, 10)) + ">")
+	b.WriteString("<secid>" + strconv.Itoa(int(deal.SecID)) + "</secid>")
+	b.WriteString("<union>" + escape(deal.Union) + "</union>")
+	b.WriteString("<client>" + escape(deal.Client) + "</client>")
+	b.WriteString("<board>" + escape(deal.Board) + "</board>")
+	b.WriteString("<seccode>" + escape(deal.SecCode) + "</seccode>")
+	b.WriteString("<buysell>" + escape(string([]byte{deal.BuySell})) + "</buysell>")
+	b.WriteString("<price>" + deal.Price.String() + "</price>")
+	b.WriteString("<volume>" + strconv.FormatInt(deal.Volume, 10) + "</volume>")
+	b.WriteString("<repoterm>" + strconv.FormatInt(deal.RepoTerm, 10) + "</repoterm>")
+	b.WriteString("<reporate>" + deal.RepoRate.String() + "</reporate>")
+	b.WriteString("<repovalue>" + deal.RepoValue.String() + "</repovalue>")
+	b.WriteString("<repo2value>" + deal.Repo2Value.String() + "</repo2value>")
+	b.WriteString("</negdeal>")
+	return b.String()
+}
+
+// ReportXML renders the D-literal <report> (PDF 5.8); O form is I and it is NOT
+// wired into Render (no PDF 5.8 record decoder yet).
+func ReportXML(report model.ExecutionReport) string {
+	var b strings.Builder
+	b.WriteString("<report transactionid=" + quoteAttr(strconv.FormatUint(report.TransactionID, 10)) + ">")
+	b.WriteString("<reportno>" + strconv.FormatInt(report.ReportNo, 10) + "</reportno>")
+	b.WriteString("<reportkind>" + strconv.Itoa(report.ReportKind) + "</reportkind>")
+	b.WriteString("<reporttype>" + strconv.Itoa(report.ReportType) + "</reporttype>")
+	b.WriteString("<repotradeno>" + strconv.FormatInt(report.RepoTradeNo, 10) + "</repotradeno>")
+	b.WriteString("<repovalue>" + report.RepoValue.String() + "</repovalue>")
+	b.WriteString("<repo2value>" + report.Repo2Value.String() + "</repo2value>")
+	b.WriteString("</report>")
+	return b.String()
+}
+
+// TicksXML renders the S form <ticks><tick>...</tick></ticks> (production S
+// capture; RQ_TICKS polling does not exist on prod).
+func TicksXML(ticks []model.Tick) string {
+	var b strings.Builder
+	b.WriteString("<ticks>")
+	for _, tick := range ticks {
+		b.WriteString("<tick><secid>" + strconv.Itoa(int(tick.SecID)) + "</secid>")
+		b.WriteString("<board>" + escape(tick.Symbol.Board) + "</board>")
+		b.WriteString("<seccode>" + escape(tick.Symbol.SecCode) + "</seccode>")
+		b.WriteString("<tradeno>" + strconv.FormatInt(tick.TradeNo, 10) + "</tradeno>")
+		b.WriteString("<tradetime>" + tick.Time.UTC().Format("02.01.2006 15:04:05") + "</tradetime>")
+		b.WriteString("<price>" + tick.Price.String() + "</price>")
+		b.WriteString("<quantity>" + strconv.FormatInt(tick.Quantity, 10) + "</quantity>")
+		b.WriteString("<period>" + escape(string([]byte{tick.Period})) + "</period>")
+		b.WriteString("<buysell>" + escape(string([]byte{tick.BuySell})) + "</buysell></tick>")
+	}
+	b.WriteString("</ticks>")
 	return b.String()
 }

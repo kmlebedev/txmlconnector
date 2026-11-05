@@ -95,8 +95,8 @@ func ParseCandles(body []byte) (Candles, error) {
 // Event builds the typed <candles> event: prices are absolute (open, open+deltas
 // for close/high/low) with the mode decimals, time is the accumulated Unix
 // minute, and the items are reversed to the DLL chronological order.
-func (c Candles) Event(cat *Catalog) model.Candles {
-	ev := model.Candles{SecID: c.SecID, Period: int(c.Period), Status: c.Status}
+func (c Candles) Event(cat *Catalog, bias time.Duration) model.Candles {
+	ev := model.Candles{SecID: c.SecID, Period: int(c.Period), Status: c.Status, ZoneBias: bias}
 	var decimals uint8
 	if cat != nil {
 		if sec, ok := cat.Security(c.SecID); ok {
@@ -120,7 +120,7 @@ func (c Candles) Event(cat *Catalog) model.Candles {
 			minutes += item.Time
 		}
 		candle := model.Candle{
-			Time:   time.Unix(minutes*60, 0).UTC(),
+			Time:   time.Unix(minutes*60, 0).UTC().Add(bias),
 			Open:   model.Decimal{Units: item.Open, Scale: decimals},
 			Close:  model.Decimal{Units: item.Open + item.Close, Scale: decimals},
 			High:   model.Decimal{Units: item.Open + item.High, Scale: decimals},
@@ -142,21 +142,23 @@ func (c Candles) Event(cat *Catalog) model.Candles {
 // CombineCandles merges the multipart history replies (status 2 parts followed
 // by the final status) into the single chronological <candles> callback of the
 // DLL: items are concatenated in arrival order and then reversed.
-func CombineCandles(parts []Candles, cat *Catalog) model.Candles {
+func CombineCandles(parts []Candles, cat *Catalog, bias time.Duration) model.Candles {
 	var out model.Candles
 	if len(parts) == 0 {
 		return out
 	}
 	for _, part := range parts {
-		ev := part.Event(cat)
+		ev := part.Event(cat, bias)
 		out.Symbol = ev.Symbol
 		out.SecID = ev.SecID
 		out.Period = ev.Period
 		out.Status = ev.Status
-		out.Items = append(out.Items, ev.Items...)
-	}
-	for i, j := 0, len(out.Items)-1; i < j; i, j = i+1, j-1 {
-		out.Items[i], out.Items[j] = out.Items[j], out.Items[i]
+		out.ZoneBias = ev.ZoneBias
+		// Each Event is already chronological (oldest first) and the parts
+		// arrive newest part first (status 2 parts before the final one), so
+		// concatenate the parts in reverse arrival order and never reverse the
+		// candles themselves.
+		out.Items = append(ev.Items, out.Items...)
 	}
 	return out
 }

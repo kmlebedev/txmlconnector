@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/session"
 	"github.com/kmlebedev/txmlconnector/native/wire"
@@ -187,6 +188,9 @@ func (c *Client) Reconnect(ctx context.Context) error {
 
 // shortRecover makes one DLL short-recovery attempt on a fresh TCP connection.
 func (c *Client) shortRecover(ctx context.Context) error {
+	if err := c.fatalError(); err != nil {
+		return err
+	}
 	conn := c.connection()
 	if conn == nil {
 		return errors.New("transaq: session connection is gone")
@@ -206,12 +210,17 @@ func (c *Client) shortRecover(ctx context.Context) error {
 // client state on it: catalog, securities callbacks and subscriptions. It is the
 // explicit Client.Reconnect path.
 func (c *Client) relogin(ctx context.Context) error {
-	nc, err := c.cfg.Dial(ctx, c.cfg.Address)
+	// An explicit Reconnect starts a new session and clears a previous fatal.
+	c.clearFatal()
+	c.mu.Lock()
+	cfg := c.cfg
+	c.mu.Unlock()
+	nc, err := cfg.Dial(ctx, cfg.Address)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
 	conn, info, err := session.Login(ctx, nc, session.Config{
-		Login: c.cfg.Login, Password: c.cfg.Password, Client: c.cfg.Client, RequestTimeout: c.cfg.RequestTimeout,
+		Login: cfg.Login, Password: cfg.Password, Client: cfg.Client, RequestTimeout: cfg.RequestTimeout,
 	})
 	if err != nil {
 		nc.Close()
@@ -247,7 +256,11 @@ func (c *Client) relogin(ctx context.Context) error {
 	c.mu.Lock()
 	c.resetAccountsLocked()
 	c.secSpecs = map[uint16]records.SecSpec{}
+	c.failHistoryParts(errors.New("transaq: connection was recovered"))
 	c.history = map[historyKey]*historyCollector{}
+	c.orders = map[uint64]*model.Order{}
+	c.pendingOrders = nil
+	c.orderOrder = nil
 	c.mu.Unlock()
 	// load re-runs the ClientConfig.OnDictionaries/OnSecurities callbacks, so
 	// the Connector emits the dictionary and securities callbacks again after a

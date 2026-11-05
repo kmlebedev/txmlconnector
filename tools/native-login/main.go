@@ -2,7 +2,7 @@
 // RQ_TIME, RQ_STARTUP, RQ_MAIN polling until the server queue is drained,
 // then RQ_LOGOUT. It prints the session fields and load statistics.
 //
-//	TC_LOGIN=... TC_PASSWORD=... native-login -addr tr1.finam.ru:3900
+//	TC_LOGIN=... TC_PASSWORD=... native-login -addr transaq.example:3900
 package main
 
 import (

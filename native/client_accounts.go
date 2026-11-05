@@ -44,6 +44,13 @@ func (c *Client) resetAccountsLocked() {
 	c.positionOrder = nil
 	c.unions = nil
 	c.overnight = model.Overnight{}
+	c.secPositions = map[positionKey]model.SecPosition{}
+	c.secPositionOrder = nil
+	// R_SEC_RATE prices are per-secid and must not leak into a new session.
+	c.marginRates = nil
+	c.tickTradeNos = nil
+	c.tickTimes = nil
+	c.newsBodyRequest = 0
 }
 
 func decodeClientNew(c *Client, body []byte) ([]model.Event, error) {
@@ -66,7 +73,9 @@ func decodeClientNew(c *Client, body []byte) ([]model.Event, error) {
 		c.accountOrder = append(c.accountOrder, raw.ID)
 	}
 	c.accounts[raw.ID] = &accountState{account: account, raw: raw}
-	return []model.Event{&account}, nil
+	events := []model.Event{&account}
+	events = append(events, c.flushPendingOrdersLocked(raw.ID)...)
+	return events, nil
 }
 
 func decodeClientAsset(c *Client, body []byte) ([]model.Event, error) {
@@ -75,6 +84,34 @@ func decodeClientAsset(c *Client, body []byte) ([]model.Event, error) {
 		return nil, err
 	}
 	key := positionKey{client: raw.ClientID, sym: raw.SymID}
+	if raw.SymID != 0xffff {
+		// Paper position: the <sec_position> stream callback (O: position-sec).
+		clientCode := ""
+		for _, id := range c.accountOrder {
+			if state := c.accounts[id]; state != nil && state.raw.ID == raw.ClientID {
+				clientCode = state.account.ID
+				break
+			}
+		}
+		if clientCode == "" {
+			return nil, nil
+		}
+		var sec records.SecNew
+		if c.catalog != nil {
+			if found, ok := c.catalog.Security(raw.SymID); ok {
+				sec = found
+			}
+		}
+		pos := records.SecPositionFromAsset(raw, clientCode, "", sec)
+		if c.secPositions == nil {
+			c.secPositions = map[positionKey]model.SecPosition{}
+		}
+		if _, seen := c.secPositions[key]; !seen {
+			c.secPositionOrder = append(c.secPositionOrder, key)
+		}
+		c.secPositions[key] = pos
+		return []model.Event{&pos}, nil
+	}
 	if c.positions == nil {
 		c.resetAccountsLocked()
 	}
@@ -195,6 +232,19 @@ func (c *Client) MoneyPositions() []model.MoneyPosition {
 	for _, key := range c.positionOrder {
 		if state := c.positions[key]; state != nil && state.sym == 0xffff {
 			out = append(out, state.pos)
+		}
+	}
+	return out
+}
+
+// SecPositions returns the paper positions in the order they arrived.
+func (c *Client) SecPositions() []model.SecPosition {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]model.SecPosition, 0, len(c.secPositionOrder))
+	for _, key := range c.secPositionOrder {
+		if pos, ok := c.secPositions[key]; ok {
+			out = append(out, pos)
 		}
 	}
 	return out

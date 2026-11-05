@@ -61,6 +61,7 @@ var dllCommands = map[string]bool{
 	"neworder": true, "moveorder": true, "change_pass": true, "newcondorder": true,
 	"newstoporder": true, "newrpsorder": true, "newrepoorder": true, "newmrepoorder": true,
 	"cancelorder": true, "cancelstoporder": true, "cancelnegdeal": true,
+	"newreport4": true, "cancelreport4": true,
 	"get_forts_positions": true, "get_client_limits": true, "get_markets": true,
 	"server_status": true, "get_securities": true, "get_servtime_difference": true,
 	"get_portfolio": true, "get_portfolio_mct": true, "get_united_portfolio": true,
@@ -273,6 +274,50 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		}
 		c.emit(msg)
 		return success(), nil
+	case "subscribe_ticks":
+		var req struct {
+			Filter     string `xml:"filter"`
+			FilterAttr string `xml:"filter,attr"`
+			SecID      *int   `xml:"secid"`
+			Securities []struct {
+				Board   string `xml:"board"`
+				SecCode string `xml:"seccode"`
+				TradeNo *int64 `xml:"tradeno"`
+			} `xml:"security"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.SecID != nil {
+			// S: the board/seccode form is required; <secid> is Wrong security format.
+			return failure("Wrong security format."), nil
+		}
+		filter := strings.EqualFold(req.Filter, "true") || strings.EqualFold(req.FilterAttr, "true")
+		var reqs []TickRequest
+		for _, sec := range req.Securities {
+			// The DLL requires the tradeno child element (D: "Cannot find
+			// tradeno element."); the attribute form is I.
+			if sec.TradeNo == nil {
+				return failure("Cannot find tradeno element."), nil
+			}
+			symbol, ok := client.SymbolByBoard(sec.Board, sec.SecCode)
+			if !ok {
+				return failure("unknown security " + sec.SecCode), nil
+			}
+			reqs = append(reqs, TickRequest{Symbol: symbol, TradeNo: *sec.TradeNo})
+		}
+		// Without <security> elements the DLL sends the mask 0 and subscribes
+		// nothing (D/S r14): the filter byte alone is sent.
+		if err := client.SubscribeTicks(ctx, filter, reqs...); err != nil {
+			return failure(err.Error()), nil
+		}
+		return success(), nil
 	case "gethistorydata":
 		var req struct {
 			Security *struct {
@@ -315,13 +360,1091 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		if count == 0 {
 			count = req.ACount
 		}
+		if period <= 0 {
+			// DLL text (D): the period comes from <candlekinds> and is required.
+			return failure("'period' is absent"), nil
+		}
+		if count <= 0 || count > 0xffff {
+			return failure("count is out of range"), nil
+		}
 		reset := req.Reset == "true" || req.Reset == "1" || req.AReset == "true" || req.AReset == "1"
-		// The DLL accepts the command only with an established connection (S).
-		candles, err := client.History(ctx, HistoryRequest{Symbol: symbol, Period: period, Count: count, Reset: reset})
+		// The DLL renders <result success="true"/> at once (S r14: result at
+		// 7.310 s, <candles> at 7.340 s): start the collection in the background
+		// and emit the candles when the parts are complete.
+		err := client.StartHistory(ctx, HistoryRequest{Symbol: symbol, Period: period, Count: count, Reset: reset},
+			func(candles model.Candles, err error) {
+				if err != nil {
+					return
+				}
+				c.mu.Lock()
+				closed := c.closed
+				c.mu.Unlock()
+				if closed {
+					return
+				}
+				c.emit(xmlcompat.CandlesXML(candles))
+			})
 		if err != nil {
 			return failure(err.Error()), nil
 		}
-		c.emit(xmlcompat.CandlesXML(candles))
+		return success(), nil
+	case "neworder":
+		var req struct {
+			SecID     int     `xml:"secid"`
+			Client    string  `xml:"client"`
+			Union     string  `xml:"union"`
+			Price     string  `xml:"price"`
+			Quantity  int64   `xml:"quantity"`
+			BuySell   string  `xml:"buysell"`
+			Unfilled  string  `xml:"unfilled"`
+			Hidden    int64   `xml:"hidden"`
+			BrokerRef string  `xml:"brokerref"`
+			ByMarket  string  `xml:"bymarket"`
+			UseCredit string  `xml:"usecredit"`
+			NoSplit   string  `xml:"nosplit"`
+			ExpDate   *string `xml:"expdate"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.SecID == 0 {
+			return failure("Не указан элемент secid"), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Должен быть указан клиент и/или юнион"), nil
+		}
+		if req.Price == "" {
+			return failure("Price not found."), nil
+		}
+		symbol, ok := client.SymbolBySecID(uint16(req.SecID))
+		if !ok {
+			return failure(fmt.Sprintf("unknown secid %d", req.SecID)), nil
+		}
+		price, err := model.ParseDecimal(req.Price)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		buySell := byte(0)
+		if len(req.BuySell) == 1 {
+			buySell = req.BuySell[0]
+		}
+		if buySell != 'B' && buySell != 'S' {
+			return failure("Wrong buysell."), nil
+		}
+		if req.ExpDate != nil && *req.ExpDate != "" {
+			// The DLL payload field for expdate is not recovered (I): reject it explicitly
+			// instead of silently dropping a requested condition.
+			return failure("transaq: neworder expdate is not encoded yet (I)"), nil
+		}
+		order := model.NewOrder{
+			Client: req.Client, Union: req.Union, Symbol: symbol, Price: price,
+			Hidden: req.Hidden, Quantity: req.Quantity, BuySell: buySell,
+			Unfilled: req.Unfilled, BrokerRef: req.BrokerRef,
+			ByMarket:  strings.EqualFold(req.ByMarket, "true"),
+			UseCredit: strings.EqualFold(req.UseCredit, "true"),
+			NoSplit:   strings.EqualFold(req.NoSplit, "true"),
+		}
+		id, err := client.NewOrder(ctx, order)
+		if err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(id), 10) + "\"/>", nil
+	case "moveorder":
+		var req struct {
+			TransactionID     *string `xml:"transactionid"`
+			TransactionIDAttr *string `xml:"transactionid,attr"`
+			Price             *string `xml:"price"`
+			PriceAttr         *string `xml:"price,attr"`
+			MoveFlag          *string `xml:"moveflag"`
+			MoveFlagAttr      *string `xml:"moveflag,attr"`
+			Quantity          *string `xml:"quantity"`
+			QuantityAttr      *string `xml:"quantity,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		pick := func(elem, attr *string) *string {
+			if elem != nil && *elem != "" {
+				return elem
+			}
+			if attr != nil && *attr != "" {
+				return attr
+			}
+			return nil
+		}
+		txText := pick(req.TransactionID, req.TransactionIDAttr)
+		if txText == nil {
+			return failure("Cannot find transactionid."), nil
+		}
+		txID, err := strconv.ParseInt(*txText, 10, 64)
+		if err != nil || txID <= 0 {
+			return failure("Wrong transactionid value."), nil
+		}
+		priceText := pick(req.Price, req.PriceAttr)
+		if priceText == nil {
+			return failure("Price not found."), nil
+		}
+		price, err := model.ParseDecimal(*priceText)
+		if err != nil {
+			return failure("Price have to be a number."), nil
+		}
+		flagText := pick(req.MoveFlag, req.MoveFlagAttr)
+		if flagText == nil {
+			return failure("Cannot find moveflag."), nil
+		}
+		flag, err := strconv.ParseUint(*flagText, 10, 8)
+		if err != nil || flag > 3 {
+			return failure("Wrong moveflag value."), nil
+		}
+		var quantity int64
+		if qtyText := pick(req.Quantity, req.QuantityAttr); qtyText != nil {
+			quantity, err = strconv.ParseInt(*qtyText, 10, 64)
+			if err != nil {
+				return failure("Quantity have to be a number."), nil
+			}
+		} else if flag == 1 || flag == 2 {
+			return failure("Cannot find quantity."), nil
+		}
+		if err := client.MoveOrder(ctx, model.MoveOrder{
+			TransactionID: model.TransactionID(txID), Price: price, MoveFlag: byte(flag), Quantity: quantity,
+		}); err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatInt(txID, 10) + "\"/>", nil
+	case "makeordown":
+		var req struct {
+			TransactionID     *string `xml:"transactionid,attr"`
+			TransactionIDElem *string `xml:"transactionid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		txText := req.TransactionID
+		if txText == nil || *txText == "" {
+			txText = req.TransactionIDElem
+		}
+		if txText == nil || *txText == "" {
+			return failure("Cannot find transactionid."), nil
+		}
+		if _, err := strconv.ParseInt(*txText, 10, 64); err != nil {
+			return failure("Wrong transactionid value."), nil
+		}
+		// DLL supports the command but the RQ_MAKE_COND_OWN (112) payload is not
+		// recovered (D/O/S, orders.md T19): fail explicitly instead of sending a
+		// fabricated transaction.
+		return failure("RQ_MAKE_COND_OWN payload is not recovered (I)"), nil
+	case "cancelorder":
+		var req struct {
+			TransactionID uint64 `xml:"transactionid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.TransactionID == 0 {
+			return failure("You have to specify transactionid."), nil
+		}
+		if err := client.CancelOrder(ctx, model.TransactionID(req.TransactionID)); err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(req.TransactionID, 10) + "\"/>", nil
+	case "get_portfolio":
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		// Local render from the loaded stores: the DLL sends no request (O).
+		for _, pos := range client.MoneyPositions() {
+			c.emit(xmlcompat.PortfolioCurrencyXML(pos))
+		}
+		return success(), nil
+	case "get_mc_portfolio":
+		var req struct {
+			Client string `xml:"client,attr"`
+			Union  string `xml:"union,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Attributes union and client are empty"), nil
+		}
+		for _, pos := range client.MoneyPositions() {
+			if req.Client != "" && pos.Client != req.Client {
+				continue
+			}
+			if req.Client == "" && req.Union != "" && pos.Union != req.Union {
+				continue
+			}
+			c.emit(xmlcompat.MCPortfolioXML(pos.Client, pos))
+		}
+		return success(), nil
+	case "get_portfolio_mct":
+		// O: the DLL expects another szClient format and rejects the client code
+		// (the exact input format is I).
+		return failure("{8} Неверное значение параметра szClient"), nil
+	case "get_united_portfolio", "get_united_equity", "get_united_go":
+		return failure("layout not recovered (I)"), nil
+	case "newstoporder":
+		var req struct {
+			SecID    int     `xml:"secid"`
+			Client   string  `xml:"client"`
+			Union    string  `xml:"union"`
+			BuySell  *string `xml:"buysell"`
+			Quantity *int64  `xml:"quantity"`
+			StopLoss *struct {
+				ActivationPrice *string `xml:"activationprice"`
+				OrderPrice      *string `xml:"orderprice"`
+				Quantity        *int64  `xml:"quantity"`
+			} `xml:"stoploss"`
+			TakeProfit *struct {
+				ActivationPrice *string `xml:"activationprice"`
+				OrderPrice      *string `xml:"orderprice"`
+				Quantity        *int64  `xml:"quantity"`
+			} `xml:"takeprofit"`
+			LinkedOrderNo uint64 `xml:"linkedorderno"`
+			BrokerRef     string `xml:"brokerref"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.SecID == 0 {
+			return failure("Не указан элемент \"secid\""), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Должен быть указан клиент и/или юнион"), nil
+		}
+		if req.BuySell == nil {
+			return failure("Cannot find buysell tag."), nil
+		}
+		if len(*req.BuySell) != 1 || ((*req.BuySell)[0] != 'B' && (*req.BuySell)[0] != 'S') {
+			return failure("Buisell can be only 'B' or 'S'."), nil
+		}
+		if req.StopLoss == nil && req.TakeProfit == nil {
+			return failure("Cannot find stop-loss activation price."), nil
+		}
+		parse := func(text *string) (model.Decimal, error) {
+			if text == nil || *text == "" {
+				return model.Decimal{}, fmt.Errorf("empty price")
+			}
+			return model.ParseDecimal(*text)
+		}
+		var sl *model.StopLoss
+		if req.StopLoss != nil {
+			if req.StopLoss.ActivationPrice == nil {
+				return failure("Cannot find stop-loss activation price."), nil
+			}
+			if req.StopLoss.OrderPrice == nil {
+				return failure("Cannot find stop-loss order price."), nil
+			}
+			if req.StopLoss.Quantity == nil || *req.StopLoss.Quantity <= 0 {
+				return failure("Cannot find stop-loss quantity."), nil
+			}
+			act, err := parse(req.StopLoss.ActivationPrice)
+			if err != nil {
+				return failure(err.Error()), nil
+			}
+			orderPrice, err := parse(req.StopLoss.OrderPrice)
+			if err != nil {
+				return failure(err.Error()), nil
+			}
+			sl = &model.StopLoss{ActivationPrice: act, OrderPrice: orderPrice, Quantity: *req.StopLoss.Quantity}
+		}
+		var tp *model.TakeProfit
+		if req.TakeProfit != nil {
+			if req.TakeProfit.ActivationPrice == nil {
+				return failure("Cannot find take-profit activation price."), nil
+			}
+			act, err := parse(req.TakeProfit.ActivationPrice)
+			if err != nil {
+				return failure(err.Error()), nil
+			}
+			var qty int64
+			if req.TakeProfit.Quantity != nil {
+				qty = *req.TakeProfit.Quantity
+			}
+			tp = &model.TakeProfit{ActivationPrice: act, Quantity: qty}
+		}
+		symbol, ok := client.SymbolBySecID(uint16(req.SecID))
+		if !ok {
+			return failure(fmt.Sprintf("unknown secid %d", req.SecID)), nil
+		}
+		var topQuantity int64
+		if req.Quantity != nil {
+			topQuantity = *req.Quantity
+		}
+		order := model.NewStopOrder{
+			Client: req.Client, Union: req.Union, Symbol: symbol, Quantity: topQuantity,
+			BuySell: (*req.BuySell)[0], StopLoss: sl, TakeProfit: tp,
+			LinkedOrderNo: req.LinkedOrderNo, BrokerRef: req.BrokerRef,
+		}
+		id, err := client.NewStopOrder(ctx, order)
+		if err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(id), 10) + "\"/>", nil
+	case "newcondorder":
+		var req struct {
+			SecID       int     `xml:"secid"`
+			Client      string  `xml:"client"`
+			Union       string  `xml:"union"`
+			BuySell     *string `xml:"buysell"`
+			Quantity    *int64  `xml:"quantity"`
+			Price       *string `xml:"price"`
+			CondType    *string `xml:"cond_type"`
+			CondValue   *string `xml:"cond_value"`
+			ValidAfter  *string `xml:"validafter"`
+			ValidBefore *string `xml:"validbefore"`
+			BrokerRef   string  `xml:"brokerref"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.SecID == 0 {
+			return failure("Не указан элемент \"secid\""), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Должен быть указан клиент и/или юнион"), nil
+		}
+		if req.BuySell == nil {
+			return failure("Cannot find buysell tag."), nil
+		}
+		if len(*req.BuySell) != 1 || ((*req.BuySell)[0] != 'B' && (*req.BuySell)[0] != 'S') {
+			return failure("Buisell can be only 'B' or 'S'."), nil
+		}
+		if req.CondType == nil || *req.CondType == "" {
+			return failure("You have to specify condition type."), nil
+		}
+		if req.CondValue == nil || *req.CondValue == "" {
+			return failure("You have to specify cond_value"), nil
+		}
+		if req.ValidAfter == nil || *req.ValidAfter == "" {
+			return failure("Cannot find validafter param."), nil
+		}
+		if req.ValidBefore == nil || *req.ValidBefore == "" {
+			return failure("Cannot find validbefore param."), nil
+		}
+		if req.Price == nil || *req.Price == "" {
+			return failure("Price not found."), nil
+		}
+		parse := func(text string) (model.Decimal, error) { return model.ParseDecimal(text) }
+		price, err := parse(*req.Price)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		condValue, err := parse(*req.CondValue)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		parseTime := func(text string) (*time.Time, error) {
+			t, err := time.Parse("02.01.2006 15:04:05", text)
+			if err != nil {
+				return nil, fmt.Errorf("Bad validafter: Incorrect DateTime format. Should be: \"DD.MM.YYYY hh:mm:ss\".")
+			}
+			return &t, nil
+		}
+		after, err := parseTime(*req.ValidAfter)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		before, err := parseTime(*req.ValidBefore)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		symbol, ok := client.SymbolBySecID(uint16(req.SecID))
+		if !ok {
+			return failure(fmt.Sprintf("unknown secid %d", req.SecID)), nil
+		}
+		var quantity int64
+		if req.Quantity != nil {
+			quantity = *req.Quantity
+		}
+		order := model.NewCondOrder{
+			Client: req.Client, Union: req.Union, Symbol: symbol, Price: price, Quantity: quantity,
+			BuySell: (*req.BuySell)[0], CondType: *req.CondType, CondValue: condValue,
+			ValidAfter: after, ValidBefore: before, BrokerRef: req.BrokerRef,
+		}
+		id, err := client.NewCondOrder(ctx, order)
+		if err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(id), 10) + "\"/>", nil
+	case "cancelstoporder":
+		var req struct {
+			TransactionID uint64 `xml:"transactionid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.TransactionID == 0 {
+			return failure("You have to specify transactionid."), nil
+		}
+		if err := client.CancelStopOrder(ctx, model.TransactionID(req.TransactionID)); err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(req.TransactionID, 10) + "\"/>", nil
+	case "get_client_limits":
+		var req struct {
+			Client string `xml:"client,attr"`
+			Union  string `xml:"union,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Client == "" {
+			return failure("Client not specified."), nil
+		}
+		limits, err := client.ClientLimits(ctx, req.Client)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.ClientLimitsXML(*limits))
+		return success(), nil
+	case "get_max_buy_sell_tplus":
+		var req struct {
+			Client   string `xml:"client,attr"`
+			Union    string `xml:"union,attr"`
+			Security []struct {
+				SecCode string `xml:"seccode"`
+				Market  int    `xml:"market"`
+			} `xml:"security"`
+			SecIDs []int `xml:"secid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Client == "" {
+			return failure("Client not specified."), nil
+		}
+		var symbols []model.Symbol
+		for _, item := range req.Security {
+			symbol, ok := client.SymbolByMarket(item.Market, item.SecCode)
+			if !ok {
+				return failure(fmt.Sprintf("Failed to get symbol. seecode(%s), market(%d)", item.SecCode, item.Market)), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		for _, id := range req.SecIDs {
+			symbol, ok := client.SymbolBySecID(uint16(id))
+			if !ok {
+				return failure("Wrong secid precified."), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		// Local render from the stores: the DLL sends no request (O).
+		rows, err := client.MaxBuySellTPlus(ctx, req.Client, symbols...)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.MaxBuySellTPlusXML(req.Client, rows))
+		return success(), nil
+	case "get_max_buy_sell":
+		var req struct {
+			Client   string `xml:"client,attr"`
+			Union    string `xml:"union,attr"`
+			Security []struct {
+				SecCode string `xml:"seccode"`
+				Market  int    `xml:"market"`
+			} `xml:"security"`
+			SecIDs []int `xml:"secid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Parameters \"union\" and \"client\" should not be empty"), nil
+		}
+		var symbols []model.Symbol
+		for _, item := range req.Security {
+			symbol, ok := client.SymbolByMarket(item.Market, item.SecCode)
+			if !ok {
+				return failure(fmt.Sprintf("Failed to get symbol. seecode(%s), market(%d)", item.SecCode, item.Market)), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		for _, id := range req.SecIDs {
+			symbol, ok := client.SymbolBySecID(uint16(id))
+			if !ok {
+				return failure("Wrong secid precified."), nil
+			}
+			symbols = append(symbols, symbol)
+		}
+		rows, err := client.MaxBuySell(ctx, req.Client, req.Union, symbols...)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.MaxBuySellXML(req.Client, req.Union, rows))
+		return success(), nil
+	case "get_cln_sec_permissions":
+		var req struct {
+			Security *struct {
+				SecCode string `xml:"seccode"`
+				Market  int    `xml:"market"`
+				Board   string `xml:"board"`
+			} `xml:"security"`
+			Client string `xml:"client"`
+			Union  string `xml:"union"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Security == nil || req.Security.Board == "" {
+			return failure("Не указан элемент \"board\""), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Должен быть указан клиент и/или юнион"), nil
+		}
+		symbol, ok := client.SymbolByBoard(req.Security.Board, req.Security.SecCode)
+		if !ok {
+			return failure(fmt.Sprintf("Инструмент не найден ('seccode'=%s, 'board='%s)", req.Security.SecCode, req.Security.Board)), nil
+		}
+		var perm model.SecPermissions
+		var err error
+		if req.Client != "" {
+			perm, err = client.ClientSecPermissions(ctx, req.Client, symbol)
+		} else {
+			perm, err = client.ClientSecPermissionsUnion(ctx, req.Union, symbol)
+		}
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.ClnSecPermissionsXML(perm))
+		return success(), nil
+	case "get_old_news":
+		var req struct {
+			Count *string `xml:"count,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.Count == nil {
+			return failure("\"count\" attribute not found"), nil
+		}
+		count, err := strconv.Atoi(*req.Count)
+		if err != nil {
+			return failure("\"count\" attribute must be an integer"), nil
+		}
+		if count < 1 || count > 100 {
+			return failure(fmt.Sprintf("News count must be in interval from 1 to 100. Received value is %d", count)), nil
+		}
+		// Local request: RQ_GETNEWS 73; the headers arrive as 0x35/0x36 events.
+		if err := client.OldNews(ctx, count); err != nil {
+			return failure(err.Error()), nil
+		}
+		return success(), nil
+	case "get_news_body":
+		var req struct {
+			NewsID *string `xml:"news_id,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.NewsID == nil {
+			return failure("\"news_id\" attribute not found"), nil
+		}
+		newsID, err := strconv.ParseInt(*req.NewsID, 10, 64)
+		if err != nil || newsID < 0 || newsID > 2147483647 {
+			return failure("Attribute \"news_id\" must be in interval from 0 to 2147483647"), nil
+		}
+		if _, ok := client.newsHeader(newsID); !ok {
+			return failure(fmt.Sprintf("Header with id = %d not found", newsID)), nil
+		}
+		if _, err := client.NewsBody(ctx, newsID); err != nil {
+			return failure(err.Error()), nil
+		}
+		return success(), nil
+	case "change_pass":
+		var req struct {
+			OldPass *string `xml:"oldpass,attr"`
+			NewPass *string `xml:"newpass,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		oldPassword, newPassword := "", ""
+		if req.OldPass != nil {
+			oldPassword = *req.OldPass
+		}
+		if req.NewPass != nil {
+			newPassword = *req.NewPass
+		}
+		if err := client.ChangePassword(ctx, oldPassword, newPassword); err != nil {
+			if errors.Is(err, session.ErrChangePasswordFatal) {
+				// The fatal reply closed the session; Client.Run is terminal and
+				// will report connected="false" once (no recover), like the DLL.
+				return failure("RQ_CHANGE_PWD incorrect server buffer"), nil
+			}
+			return failure(err.Error()), nil
+		}
+		return success(), nil
+	case "get_option_families":
+		var req struct {
+			SecID    int    `xml:"secid,attr"`
+			Board    string `xml:"board,attr"`
+			SecCode  string `xml:"seccode,attr"`
+			Security *struct {
+				SecID   int    `xml:"secid"`
+				Board   string `xml:"board"`
+				SecCode string `xml:"seccode"`
+			} `xml:"security"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		secID, symbol, ok := 0, model.Symbol{}, false
+		if req.Security != nil {
+			switch {
+			case req.Security.SecID > 0:
+				symbol, ok = client.SymbolBySecID(uint16(req.Security.SecID))
+			case req.Security.Board != "":
+				symbol, ok = client.SymbolByBoard(req.Security.Board, req.Security.SecCode)
+			}
+		} else if req.SecID > 0 {
+			symbol, ok = client.SymbolBySecID(uint16(req.SecID))
+		} else if req.Board != "" {
+			symbol, ok = client.SymbolByBoard(req.Board, req.SecCode)
+		}
+		if !ok {
+			return failure("unknown security"), nil
+		}
+		_ = secID
+		if _, err := client.OptionFamilies(ctx, symbol); err != nil {
+			if message, ok := optionsServerMessage(err); ok {
+				return failure(message), nil
+			}
+			return failure(err.Error()), nil
+		}
+		// Families are rendered by the run/OnLoad event stream. Emitting the
+		// store here again would duplicate every <option_families> callback
+		// (there is no O form to confirm a command-side replay; dedup like this).
+		return success(), nil
+	case "get_family_strikes":
+		var req struct {
+			MatDate *string `xml:"mat_date"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.MatDate == nil || *req.MatDate == "" {
+			return failure("No mat_date found"), nil
+		}
+		if _, err := time.Parse("02.01.2006", *req.MatDate); err != nil {
+			return failure(fmt.Sprintf("Failed to parse mat_date=%s", *req.MatDate)), nil
+		}
+		// The family-name -> (secid, family_id) mapping is not recovered (D:
+		// internal family store, options.md I), so no guessed request is sent.
+		return failure("family id mapping is not recovered (I)"), nil
+	case "get_options":
+		var req struct {
+			OptCodes []string `xml:"opt_code"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if len(req.OptCodes) == 0 {
+			return failure("No seccodes found"), nil
+		}
+		if _, err := client.Options(ctx, model.OptionsRequest{OptCodes: req.OptCodes}); err != nil {
+			if message, ok := optionsServerMessage(err); ok {
+				return failure(message), nil
+			}
+			return failure(err.Error()), nil
+		}
+		return success(), nil
+	case "newrpsorder", "newrepoorder", "newmrepoorder":
+		var req struct {
+			SecID           int     `xml:"secid"`
+			Client          string  `xml:"client"`
+			Union           string  `xml:"union"`
+			BuySell         *string `xml:"buysell"`
+			Quantity        *string `xml:"quantity"`
+			Price           *string `xml:"price"`
+			RepoTerm        *string `xml:"repoterm"`
+			RepoRate        *string `xml:"reporate"`
+			StartDiscount   *string `xml:"startdiscount"`
+			LowerDiscount   *string `xml:"lowerdiscount"`
+			UpperDiscount   *string `xml:"upperdiscount"`
+			BlockSecurities *string `xml:"blocksecurities"`
+			Value           *string `xml:"value"`
+			RefundRate      *string `xml:"refundrate"`
+			MatchRef        *string `xml:"matchref"`
+			Cpfirmid        *string `xml:"cpfirmid"`
+			Settlecode      *string `xml:"settlecode"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.SecID == 0 {
+			return failure("Не указан элемент \"secid\""), nil
+		}
+		if req.Client == "" && req.Union == "" {
+			return failure("Client not specified."), nil
+		}
+		if id == "newmrepoorder" {
+			return failure("newmrepoorder payload layout is not recovered (I)"), nil
+		}
+		symbol, ok := client.SymbolBySecID(uint16(req.SecID))
+		if !ok {
+			return failure(fmt.Sprintf("unknown secid %d", req.SecID)), nil
+		}
+		if req.BuySell == nil {
+			return failure("Cannot find buysell tag."), nil
+		}
+		buySell := (*req.BuySell)[0]
+		if len(*req.BuySell) != 1 || (buySell != 'B' && buySell != 'S') {
+			return failure("Buisell can be only 'B' or 'S'."), nil
+		}
+		if req.Quantity == nil || *req.Quantity == "" {
+			return failure("Cannot find quantity."), nil
+		}
+		quantity, err := strconv.ParseInt(*req.Quantity, 10, 64)
+		if err != nil {
+			return failure("Quantity have to be a number."), nil
+		}
+		price := model.Decimal{}
+		if req.Price != nil && *req.Price != "" {
+			parsed, err := model.ParseDecimal(*req.Price)
+			if err != nil {
+				return failure(err.Error()), nil
+			}
+			price = parsed
+		}
+		if id == "newrpsorder" {
+			txID, err := client.NewRPSOrder(ctx, model.NewRPSOrder{
+				Symbol: symbol, Client: req.Client, Union: req.Union, BuySell: buySell,
+				Price: price, Quantity: quantity,
+			})
+			if err != nil {
+				return transactionFailure(err), nil
+			}
+			return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(txID), 10) + "\"/>", nil
+		}
+		// Fields whose payload layout is not recovered (rps.md I): reject an
+		// explicit non-sample value instead of silently sending oracle constants.
+		for _, field := range []struct {
+			name  string
+			value *string
+		}{
+			{"value", req.Value}, {"refundrate", req.RefundRate}, {"matchref", req.MatchRef},
+			{"cpfirmid", req.Cpfirmid}, {"settlecode", req.Settlecode},
+		} {
+			if field.value != nil && *field.value != "" {
+				return failure(fmt.Sprintf("newrepoorder %s layout is not recovered (I)", field.name)), nil
+			}
+		}
+		parseNumber := func(text *string, missing, invalid string) (int64, string) {
+			if text == nil || *text == "" {
+				if missing == "" {
+					return 0, ""
+				}
+				return 0, missing
+			}
+			n, err := strconv.ParseInt(*text, 10, 64)
+			if err != nil {
+				return 0, invalid
+			}
+			return n, ""
+		}
+		repoTerm, msg := parseNumber(req.RepoTerm, "", "Repoterm have to be a number.")
+		if msg != "" {
+			return failure(msg), nil
+		}
+		repoRate := model.Decimal{}
+		if req.RepoRate == nil || *req.RepoRate == "" {
+			return failure("RepoRate not found."), nil
+		}
+		if repoRate, err = model.ParseDecimal(*req.RepoRate); err != nil {
+			return failure("RepoRate have to be a number."), nil
+		}
+		parseDecimal := func(text *string, name string) (model.Decimal, string) {
+			if text == nil || *text == "" {
+				return model.Decimal{}, ""
+			}
+			parsed, err := model.ParseDecimal(*text)
+			if err != nil {
+				return model.Decimal{}, fmt.Sprintf("newrepoorder %s layout is not recovered (I)", name)
+			}
+			return parsed, ""
+		}
+		startDisc, msg := parseDecimal(req.StartDiscount, "startdiscount")
+		if msg != "" {
+			return failure(msg), nil
+		}
+		lowerDisc, msg := parseDecimal(req.LowerDiscount, "lowerdiscount")
+		if msg != "" {
+			return failure(msg), nil
+		}
+		upperDisc, msg := parseDecimal(req.UpperDiscount, "upperdiscount")
+		if msg != "" {
+			return failure(msg), nil
+		}
+		block := byte(0)
+		if req.BlockSecurities != nil && *req.BlockSecurities != "" {
+			switch strings.ToUpper(*req.BlockSecurities) {
+			case "Y":
+				block = 'Y'
+			case "N":
+				block = 'N'
+			default:
+				return failure("newrepoorder blocksecurities layout is not recovered (I)"), nil
+			}
+		}
+		txID, err := client.NewRepoOrder(ctx, model.NewRepoOrder{
+			Symbol: symbol, Client: req.Client, Union: req.Union, BuySell: buySell,
+			Price: price, Quantity: quantity, RepoTerm: repoTerm, RepoRate: repoRate,
+			StartDisc: startDisc, LowerDisc: lowerDisc, UpperDisc: upperDisc, Block: block,
+		})
+		if err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(txID), 10) + "\"/>", nil
+	case "cancelnegdeal":
+		var req struct {
+			TransactionID *string `xml:"transactionid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.TransactionID == nil || *req.TransactionID == "" {
+			return failure("You have to specify transactionid."), nil
+		}
+		id, err := strconv.ParseInt(*req.TransactionID, 10, 64)
+		if err != nil {
+			return failure("Transaction identifier have to be a number."), nil
+		}
+		txid, err := client.CancelNegDeal(ctx, model.TransactionID(id))
+		if err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(txid), 10) + "\"/>", nil
+	case "newreport4":
+		var req struct {
+			UstradeLeg *struct{} `xml:"ustrade_leg"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.UstradeLeg == nil {
+			return failure("No \"ustrade_leg\" element found"), nil
+		}
+		return failure("newreport4 payload layout is not recovered (I)"), nil
+	case "cancelreport4":
+		var req struct {
+			ReportID *string `xml:"reportid"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		if req.ReportID == nil || *req.ReportID == "" {
+			return failure("You have to specify reportid."), nil
+		}
+		reportID, err := strconv.ParseInt(*req.ReportID, 10, 64)
+		if err != nil {
+			return failure("Reportid identifier have to be a number."), nil
+		}
+		txid, err := client.CancelReport4(ctx, reportID)
+		if err != nil {
+			return transactionFailure(err), nil
+		}
+		return "<result success=\"true\" transactionid=\"" + strconv.FormatUint(uint64(txid), 10) + "\"/>", nil
+	case "set_csp":
+		var req struct {
+			CSP *struct {
+				Type *string `xml:"type,attr"`
+			} `xml:"csp"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		if c.currentState() == stateConnected {
+			// O: every set_csp variant returns this CP1251 text while connected.
+			return failure("Данная операция требует отключения от сервера. Необходимо выполнить команду Disconnect."), nil
+		}
+		if req.CSP == nil {
+			return success(), nil // no-op, D+O
+		}
+		if req.CSP.Type == nil || *req.CSP.Type == "" {
+			return failure("You have to specify at least one CSP."), nil
+		}
+		cspTypes := map[string]bool{
+			"NONE": true, "MS": true, "CP": true, "SC": true, "MP": true, "MPSSL": true,
+			"CPBB": true, "CPBB_2012_256": true, "CPBB_2012_512": true,
+		}
+		if !cspTypes[*req.CSP.Type] {
+			return failure("Unsupported CSP type."), nil
+		}
+		// The selected CSP type is stored in DLL connector+0x688; the native
+		// connector has no built-in crypto provider, so only validation is done (I).
+		return success(), nil
+	case "authenticate":
+		var req struct {
+			Pin *string `xml:"pin,attr"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		// D/O: the default bundled provider answers Illegal context for sendpin
+		// both with and without a connection; a configured provider (mode 3 with
+		// the pin attribute and async callbacks) is I and not implemented.
+		_ = req
+		return failure(`Illegal context for "sendpin" command`), nil
+	case "get_forts_positions":
+		var req struct {
+			Client string `xml:"client"`
+		}
+		if err := xml.Unmarshal([]byte(command), &req); err != nil {
+			return failure(err.Error()), nil
+		}
+		c.mu.Lock()
+		client := c.client
+		c.mu.Unlock()
+		if client == nil {
+			return failure(msgNeedsConnection), nil
+		}
+		clientCode := req.Client
+		if clientCode == "" {
+			if accounts := client.Accounts(); len(accounts) > 0 {
+				clientCode = accounts[0].ID
+			}
+		}
+		positions, money, err := client.GetFortsPositions(ctx, clientCode)
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		c.emit(xmlcompat.FortsPositionsXML(positions, money))
 		return success(), nil
 	case "get_securities_info":
 		var req struct {
@@ -439,6 +1562,10 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 	reportedDown := false
 	err = client.Run(ctx, RunOptions{RqDelay: delay}, func(events []model.Event) error {
 		var trades []model.Trade
+		// Several order records of one RQ_MAIN batch (e.g. 0x03+0x10) render as
+		// ONE final <orders> callback (O): keep the last state per id.
+		orders := make(map[uint64]model.Order)
+		var orderOrder []uint64
 		for _, ev := range events {
 			switch e := ev.(type) {
 			case *model.Trade:
@@ -447,6 +1574,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.ClientXML(*e))
 			case *model.MoneyPosition:
 				c.emit(xmlcompat.PositionsXML([]model.MoneyPosition{*e}, c.micexRegisters))
+			case *model.SecPosition:
+				c.emit(xmlcompat.SecPositionXML(*e))
 			case *model.Union:
 				c.emit(xmlcompat.UnionXML(*e))
 			case *model.SecInfoUpdate:
@@ -455,6 +1584,33 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.QuotationXML(*e))
 			case *model.Quotes:
 				c.emit(xmlcompat.QuotesXML(*e))
+			case *model.Order:
+				if _, seen := orders[e.TransactionID]; !seen {
+					orderOrder = append(orderOrder, e.TransactionID)
+				}
+				orders[e.TransactionID] = *e
+			case *model.StopOrder:
+				c.emit(xmlcompat.StopOrdersXML([]model.StopOrder{*e}))
+			case *model.ClientTrade:
+				c.emit(xmlcompat.TradesXML([]model.ClientTrade{*e}))
+			case *model.MarketOrd:
+				c.emit(xmlcompat.MarketOrdXML(*e))
+			case *model.NewsHeader:
+				c.emit(xmlcompat.NewsHeaderXML(*e))
+			case *model.NewsBody:
+				c.emit(xmlcompat.NewsBodyXML(*e))
+			case *model.Messages:
+				c.emit(xmlcompat.MessagesXML(e.Items))
+			case *model.Tick:
+				c.emit(xmlcompat.TicksXML([]model.Tick{*e}))
+			case *model.Ticks:
+				c.emit(xmlcompat.TicksXML(e.Items))
+			case *model.OptionFamily:
+				c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{*e}))
+			case *model.OptionStrikes:
+				c.emit(xmlcompat.FamilyStrikesXML(*e))
+			case *model.EndOfFamily:
+				c.emit(xmlcompat.OptionsFailedXML(*e))
 			case model.ServerStatus:
 				switch {
 				case e.Recover:
@@ -475,6 +1631,9 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				Milliseconds: c.withMillis,
 				UTCTime:      c.withUTC,
 			}))
+		}
+		for _, id := range orderOrder {
+			c.emit(xmlcompat.OrdersXML([]model.Order{orders[id]}))
 		}
 		if secs := client.Catalog().DrainPending(); len(secs) > 0 {
 			st := client.Catalog().Startup()
@@ -544,6 +1703,33 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 				if update, ok := ev.(*model.SecInfoUpdate); ok {
 					c.emit(xmlcompat.SecInfoUpdateXML(*update))
 				}
+				if marketOrd, ok := ev.(*model.MarketOrd); ok {
+					c.emit(xmlcompat.MarketOrdXML(*marketOrd))
+				}
+				if header, ok := ev.(*model.NewsHeader); ok {
+					c.emit(xmlcompat.NewsHeaderXML(*header))
+				}
+				if body, ok := ev.(*model.NewsBody); ok {
+					c.emit(xmlcompat.NewsBodyXML(*body))
+				}
+				if messages, ok := ev.(*model.Messages); ok {
+					c.emit(xmlcompat.MessagesXML(messages.Items))
+				}
+				if tick, ok := ev.(*model.Tick); ok {
+					c.emit(xmlcompat.TicksXML([]model.Tick{*tick}))
+				}
+				if ticks, ok := ev.(*model.Ticks); ok {
+					c.emit(xmlcompat.TicksXML(ticks.Items))
+				}
+				if family, ok := ev.(*model.OptionFamily); ok {
+					c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{*family}))
+				}
+				if strikes, ok := ev.(*model.OptionStrikes); ok {
+					c.emit(xmlcompat.FamilyStrikesXML(*strikes))
+				}
+				if end, ok := ev.(*model.EndOfFamily); ok {
+					c.emit(xmlcompat.OptionsFailedXML(*end))
+				}
 			}
 		},
 	})
@@ -560,8 +1746,17 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 	for _, account := range client.Accounts() {
 		c.emit(xmlcompat.ClientXML(account))
 	}
+	for _, pos := range client.SecPositions() {
+		c.emit(xmlcompat.SecPositionXML(pos))
+	}
 	if positions := client.MoneyPositions(); len(positions) > 0 {
 		c.emit(xmlcompat.PositionsXML(positions, req.MicexRegisters))
+	}
+	// Orders decoded during the load are not in the Run event stream: the DLL
+	// reports them at the end of the load, so emit them here (I for the exact
+	// place relative to <positions>).
+	for _, order := range client.Orders() {
+		c.emit(xmlcompat.OrdersXML([]model.Order{order}))
 	}
 	// A non-empty union is not in the live capture (the demo union is empty):
 	// the DLL position is inferred, so the callbacks go right after
@@ -788,6 +1983,21 @@ func connectErrorXML(err error) string {
 }
 
 func success() string { return `<result success="true"/>` }
+
+// transactionFailure renders the <result> of a failed RQ_TRANSACT like the DLL:
+// a known RSM rejection carries only its message, an unknown/empty outcome is
+// "Unknown error" (orders.md, transact-*-dll.xml).
+func transactionFailure(err error) string {
+	var tx *session.TransactionError
+	if errors.As(err, &tx) {
+		return failure(tx.Message)
+	}
+	var outcome *session.OutcomeError
+	if errors.As(err, &outcome) {
+		return failure("Unknown error")
+	}
+	return failure(err.Error())
+}
 
 func failure(message string) string {
 	return `<result success="false"><message>` + escapeText(message) + `</message></result>`

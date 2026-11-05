@@ -4,6 +4,54 @@ Go adapter around the proprietary Win32 `TXmlConnector.dll`. The adapter exposes
 the connector over gRPC so native Linux and macOS applications do not depend on
 Win32 calls or Wine themselves.
 
+
+## Нативный клиент (без DLL)
+
+Пакет `native` — типизированный Go-клиент TRANSAQ: без DLL, Wine и XML-слоя. Он
+использует тот же протокол, что и Connector, и отдаёт серверные сообщения
+Go-структурами; Connector и gRPC-сервер построены поверх него.
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+defer cancel()
+
+client, err := native.Dial(ctx, native.ClientConfig{
+    Address:  "tr1-demo5.finam.ru:3939",
+    Login:    os.Getenv("TC_LOGIN"),
+    Password: os.Getenv("TC_PASSWORD"),
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer client.Close()
+
+sber := model.Symbol{Board: "TQBR", SecCode: "SBER"}
+if err := client.Subscribe(ctx, native.Subscription{
+    AllTrades:  []model.Symbol{sber},
+    Quotations: []model.Symbol{sber},
+}); err != nil {
+    log.Fatal(err)
+}
+err = client.Run(ctx, native.RunOptions{RqDelay: 100 * time.Millisecond}, func(events []model.Event) error {
+    for _, ev := range events {
+        switch e := ev.(type) {
+        case *model.Trade:
+            log.Printf("trade %s %.2f x %d", e.Symbol, e.Price.Float64(), e.Quantity)
+        case *model.Quotation:
+            log.Printf("quotation %s bid=%s ask=%s", e.Symbol, e.Bid, e.Ask)
+        case model.ServerStatus:
+            log.Printf("server connected=%v recover=%v", e.Connected, e.Recover)
+        }
+    }
+    return nil
+})
+```
+
+`Run` сам опрашивает RQ_MAIN, восстанавливает соединение после обрыва
+(`connected="true" recover="true"`) и отдаёт `model.UnknownRecord`, если
+встретил неизвестную запись. Долгий read-only soak (20 валидных бумаг TQBR, Stats/RSS/latency раз в 5 минут) —
+`go run ./tools/native-soak` при `TC_SOAK=1`; `TC_SOAK_DURATION` принимает `300` и `300s`; без env он завершается сразу.
+
 ## Architecture
 
 ```text

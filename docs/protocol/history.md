@@ -140,7 +140,8 @@ XML `<ticks>`/`<tick>` имеют литералы `0x180836fb8`/`0x180832da8` (
 | `candles-part1-inject.hex` | hex: одна запись 0x09 (status=2, 1 свеча 18:44) — часть 1 | O |
 | `candles-part2-inject.hex` | hex: одна запись 0x09 (status=1, 1 свеча 18:43) — часть 2 | O |
 | `candles-multipart-dll.xml` | ожидаемый итоговый колбэк DLL (status=1, обе свечи 18:43/18:44) | O |
-| (тики) | не сняты — S-негатив вечерней сессии; формат RQ_SUBSCRIBE_TICKS — D/S выше | — |
+| `ticks-live-inject.hex` | hex: одна запись RQ_MAIN 0x5a (S, prod) | S |
+| `ticks-live-dll.xml` | ожидаемый `<ticks><tick>…</tick></ticks>` (S) | S |
 
 Большие части (count=1000: запись 11 783 Б и колбэк ~107 КБ) и запросы
 `01 001a 0025 01 000a 18 00`/`01 001a 0025 01 03e8 18 00` — в `.re-run/r14/`, в git не кладутся.
@@ -151,4 +152,68 @@ XML `<ticks>`/`<tick>` имеют литералы `0x180836fb8`/`0x180832da8` (
 - Накопление времени в многозаписной выдаче (когда дельта, когда абсолют) — I; в фикстурах
   каждая часть начинается со своего абсолютного времени.
 - Многочастная выдача воспроизведена оракулом (O), но не на живом демо (S-негатив).
-- Тики: живых данных нет (S-негатив), формат записи тиков и RQ_TICKS не подтверждены.
+- Тики: S-факты (RQ_MAIN 0x5a, batch/накопление) внесены; legacy RQ_TICKS(13) поллинг не используется.
+## RQ_TICKS: оракул в текущем окружении заблокирован (D/O, 2026-11-04)
+
+Попытки снять `<ticks>` оракулом (replay-server с `-reply-to 13 -reply-type 13`, dump-редакция с
+S>C кадром type=13; `ticks-reply.hex` = `W secid, W board, G tradeno, L time, L price, B, L volume,
+W 0xffff`) не дали ответа: **DLL отправляет RQ_SUBSCRIBE_TICKS (120), но не отправляет RQ_TICKS (13)**
+за 10–15 с (захват через `tcproxy`: C>S типы `1,46,42,120`). То же в вечерних live-прогонах r15/r16
+(25–45 с без 13).
+
+В декомпиляторе найден guard: отправка подписок/тиков (`FUN_1803ba530`, `FUN_180358d20`) разрешена
+только при `connector+0xaa4 != 0`; флаг ставит тег `0x05` (`FUN_180357f90`, лог «Snapshot accepted»).
+Инъекция 0x05 после загрузки флаг ставит, но DLL уходит в «Cannot process this command without
+connection» (повторный snapshot ломает состояние) — обход непригоден. **Гипотеза (I):** RQ_TICKS
+опрашивается только по серверному триггеру в основную торговую сессию; в вечерней/реплейной сессии
+триггера нет.
+
+### План утренней S-съёмки (5 ноября, 10:00+ МСК)
+
+1. `set -a; . ~/re/demo.env; set +a`; окно демо 09:50–23:50 МСК; живой DLL под Wine через `tcproxy`.
+2. Подписка: `<command id="subscribe_ticks"><filter>true</filter><security><board>TQBR</board>
+<seccode>SBER</seccode><tradeno>0</tradeno></security><security><board>TQBR</board>
+<seccode>GAZP</seccode><tradeno>0</tradeno></security></command>`; ждать 30–60 с.
+3. Проверить в захвате: C>S type=13 и/или S>C `<ticks>`; при отсутствии — ответить на type=13
+через `replay-server -reply-to 13 -reply-type 13 -inject ticks-reply.hex` (формат из D выше) и
+повторить подписку.
+4. Снять `native/records/testdata/ticks-live.hex.gz` (RQ_MAIN reply/куски) и `ticks-dll.xml.gz`
+(колбэки `<ticks>/<tick>`); обновить это приложение и docs/commands.md, статус S.
+5. Если пользователь не поднимет сессию — зафиксировать как внешний блокер, не выдумывать данные.
+
+## S: тики на проде в основную сессию (2026-11-05, read-only)
+
+- Команда (`S`): `<command id="subscribe_ticks"><filter>true</filter><security><board>TQBR</board>
+  <seccode>SBER</seccode><tradeno>0</tradeno></security></command>`; с `<secid>` вместо
+  board/seccode — `Wrong security format.`; `unsubscribe_ticks` — `Unknown command.`.
+- C>S `type=120` payload (**S**): `01 096c 004b 00 0602 004b 00` = `B filter=1; {W secid, W board,
+  G tradeno}*`; на проде `secid SBER=2412, GAZP=1538, board TQBR=75` (на демо board=37); S>C
+  reply `type=120` пустой.
+- **Тики приходят записями RQ_MAIN `0x5a` (TICK), а не кадром RQ_TICKS (13)**: в 25-секундном
+  захвате основной сессии **ни одного `type=13`** (ни C>S, ни S>C) — прежняя гипотеза о поллинге
+  опровергнута (**S**).
+- Запись `0x5a` (**D + S**): диспетчер case `0x59` → `FUN_1803bf6c0` → `FUN_1803858b0`
+  (строки `TICK: incorrect buffer 1/2`); тело — цикл до `W secid == 0xffff`:
+  `W secid; W board; G tradeno; L time; L price; L quantity; B period; B buysell; L X; L Y`.
+  `tradeno` и `time` — накопительные (суммируемые) дельты, при нуле time подставляется начало дня
+  (`FUN_18017c360`); в снятом тике time уже абсолютное Unix-время (**S**: 1793865395 →
+  `05.11.2026 07:56:35`).
+- XML `<ticks><tick>…</tick></ticks>` (**S**): `<secid>`, `<board>`, `<seccode>`, `<tradeno>`,
+  `<tradetime>` (`DD.MM.YYYY HH:MM:SS`), `<price>` (Decimal), `<quantity>`, `<period>` (`N`),
+  `<buysell>` (`B`/`S`); один колбэк может нести несколько `<tick>`.
+- S-фикстура: `native/records/testdata/ticks-live-inject.hex` (запись 0x5a) +
+  `ticks-live-dll.xml` + `ticks-live-repro.md`.
+- Для T14: декодер — RQ_MAIN-запись `0x5a` (не поллинг RQ_TICKS 13); `X`/`Y`-поля записи —
+  семантика **I**.
+
+
+## Go-реализация T14 (S, 2026-11-05)
+
+- `records.TagTick` = 0x5a: splitter-unsized walker до `W secid==0xffff`, `ParseTickRecord`
+  (W secid,W board,G tradeno,L time,L price,L quantity,B period,B buysell,L X,L Y) — S/D.
+- `events_ticks.go` регистрирует декодер 0x5a; `<ticks><tick>` рендерит `xmlcompat.TicksXML`
+  (secid/board/seccode/tradeno/tradetime/price/quantity/period/buysell) и эмитится Connector.Run.
+- RQ_TICKS(13) в command path не используется (S: на проде ни одного type=13); `Client.PollTicks`
+  оставлен только как legacy D/I API (не вызывается коннектором).
+
+- T14 review-fix: tradeno/time накапливаются per (secid,board) через RQ_MAIN-записи, zero-time -> начало текущего UTC дня; один 0x5a record даёт batch *model.Ticks и один `<ticks>` с несколькими `<tick>`; `subscribe_ticks` с `<secid>` -> `Wrong security format.`

@@ -79,19 +79,46 @@ type Client struct {
 	mu         sync.Mutex
 	subs       map[model.Symbol]byte // stable board+seccode -> subscription mask
 	dedup      records.TradeDedup
-	recovering bool // true while recover replaces the session
+	recovering bool  // true while recover replaces the session
+	fatal      error // terminal session failure (e.g. fatal change_pass): no recover
 	stats      Stats
 
 	// End-of-load state (task 7): the R_CLN_NEW client store, money
 	// positions, unions and the R_OVERNIGHT flag.
-	accounts      map[int64]*accountState
-	accountOrder  []int64
-	positions     map[positionKey]*positionState
-	positionOrder []positionKey
-	unions        []model.Union
-	overnight     model.Overnight
-	secSpecs      map[uint16]records.SecSpec
-	history       map[historyKey]*historyCollector
+	accounts         map[int64]*accountState
+	accountOrder     []int64
+	positions        map[positionKey]*positionState
+	positionOrder    []positionKey
+	unions           []model.Union
+	overnight        model.Overnight
+	secSpecs         map[uint16]records.SecSpec
+	history          map[historyKey]*historyCollector
+	orders           map[uint64]*model.Order
+	pendingOrders    []records.OrderNew
+	orderOrder       []uint64
+	secPositions     map[positionKey]model.SecPosition
+	secPositionOrder []positionKey
+	// marginRates is the R_SEC_RATE (0x0a) price V per secid (kopecks per unit;
+	// lot value = V*lotsize) used by the local max-buy/sell formula (task 23/52).
+	marginRates map[uint16]int64
+	// 0x5a tick deltas accumulate per (secid,board) across RQ_MAIN records (S).
+	tickTradeNos map[tickKey]int64
+	tickTimes    map[tickKey]int64
+	// newsBodyRequest is the get_news_body id waiting for its 0x36 flags=2 body.
+	newsBodyRequest int64
+	// news is the header store of get_old_news/get_news_body. The RQ_GETNEWS
+	// from/to rule uses the MINIMUM stored id (news.md D+O, task-56).
+	news      map[int64]model.NewsHeader
+	newsOrder []int64
+	// newsBodies keeps the unpacked UTF-8 0x36 body when the header is known;
+	// S: the <news_body> callback is emitted for the requested header.
+	newsBodies map[int64]string
+	// Options state (task 27): families/strikes end-of-family records are D-only;
+	// the XML forms are I until the S series.
+	optionFamilies map[uint16][]model.OptionFamily
+	// optionStrikes is kept for the D-only R_STRIKES state; it is not rendered by
+	// a confirmed XML form yet (I).
+	optionStrikes map[[2]int64]model.OptionStrikes
 }
 
 // Dial logs in, loads the dictionaries and the initial snapshot (RQ_TIME,
@@ -129,7 +156,7 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	// becomes half the window (docs/protocol/connect.md).
 	cfg.RequestTimeout = normalizeRequestTimeout(cfg.RequestTimeout, effectiveSessionTTL(cfg.SessionTimeout, info))
 	conn.SetRequestTimeout(cfg.RequestTimeout)
-	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}, secSpecs: map[uint16]records.SecSpec{}, history: map[historyKey]*historyCollector{}}
+	c := &Client{cfg: cfg, conn: conn, info: info, subs: map[model.Symbol]byte{}, secSpecs: map[uint16]records.SecSpec{}, history: map[historyKey]*historyCollector{}, orders: map[uint64]*model.Order{}, secPositions: map[positionKey]model.SecPosition{}}
 	c.resetAccountsLocked()
 	if err := c.load(ctx, conn); err != nil {
 		conn.Close()
@@ -226,6 +253,11 @@ func (c *Client) Close() error {
 	if conn == nil {
 		return nil
 	}
+	// A gethistorydata collection still waiting for its RQ_MAIN parts can never
+	// complete after Close: wake it instead of leaving it until the ctx timeout.
+	c.mu.Lock()
+	c.failHistoryParts(errors.New("transaq: client is closed"))
+	c.mu.Unlock()
 	return conn.Close()
 }
 
@@ -297,6 +329,30 @@ func (c *Client) Poll(ctx context.Context) (events []model.Event, more bool, err
 		}
 		events = append(events, evs...)
 	}
+	// The DLL batches all R_MSG records of one RQ_MAIN reply into one
+	// <messages> callback (messages.md, O); the batch takes the position of the
+	// first message in the wire order.
+	var messages []model.Message
+	batchAt := -1
+	if len(events) > 0 {
+		kept := make([]model.Event, 0, len(events))
+		for _, ev := range events {
+			if message, ok := ev.(*model.Message); ok {
+				if batchAt < 0 {
+					batchAt = len(kept)
+				}
+				messages = append(messages, *message)
+				continue
+			}
+			kept = append(kept, ev)
+		}
+		if len(messages) > 0 {
+			kept = append(kept, nil)
+			copy(kept[batchAt+1:], kept[batchAt:])
+			kept[batchAt] = &model.Messages{Items: messages}
+		}
+		events = kept
+	}
 	if unknown != nil {
 		events = append(events, model.UnknownRecord{
 			Tag:     unknown.Tag,
@@ -337,8 +393,14 @@ func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) 
 			return ctx.Err()
 		case <-timer.C:
 		}
+		if ferr := c.fatalError(); ferr != nil {
+			return ferr
+		}
 		for {
 			events, more, err := c.Poll(ctx)
+			if ferr := c.fatalError(); ferr != nil {
+				return ferr
+			}
 			if err != nil {
 				if ctx.Err() != nil {
 					return ctx.Err()
@@ -432,4 +494,28 @@ func (c *Client) runRqDelay(opt RunOptions) time.Duration {
 		delay = minRqDelay
 	}
 	return delay
+}
+
+// fatalError returns the terminal session failure set by a command whose DLL
+// contract makes the connection unusable (currently only fatal change_pass).
+func (c *Client) fatalError() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.fatal
+}
+
+// clearFatal resets the terminal failure on an explicit Reconnect.
+func (c *Client) clearFatal() {
+	c.mu.Lock()
+	c.fatal = nil
+	c.mu.Unlock()
+}
+
+// markFatal records the terminal failure under the client lock.
+func (c *Client) markFatal(err error) {
+	c.mu.Lock()
+	if c.fatal == nil {
+		c.fatal = err
+	}
+	c.mu.Unlock()
 }
