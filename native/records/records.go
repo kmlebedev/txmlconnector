@@ -135,7 +135,9 @@ func Records(p []byte) ([]Record, error) {
 			if _, err := r.Uint16(); err != nil {
 				return out, fmt.Errorf("R_SEC_RATE: %w", err)
 			}
-			if _, err := r.Int32(); err != nil {
+			// The value is a packed L that can need the full 8-byte wide form
+			// (count 7); read it with Int64 exactly like ParseSecRate.
+			if _, err := r.Int64(); err != nil {
 				return out, fmt.Errorf("R_SEC_RATE: %w", err)
 			}
 			out = append(out, Record{Tag: tag, Body: p[start : len(p)-r.Len()]})

@@ -207,12 +207,15 @@ func (c *Client) shortRecover(ctx context.Context) error {
 // client state on it: catalog, securities callbacks and subscriptions. It is the
 // explicit Client.Reconnect path.
 func (c *Client) relogin(ctx context.Context) error {
-	nc, err := c.cfg.Dial(ctx, c.cfg.Address)
+	c.mu.Lock()
+	cfg := c.cfg
+	c.mu.Unlock()
+	nc, err := cfg.Dial(ctx, cfg.Address)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
 	conn, info, err := session.Login(ctx, nc, session.Config{
-		Login: c.cfg.Login, Password: c.cfg.Password, Client: c.cfg.Client, RequestTimeout: c.cfg.RequestTimeout,
+		Login: cfg.Login, Password: cfg.Password, Client: cfg.Client, RequestTimeout: cfg.RequestTimeout,
 	})
 	if err != nil {
 		nc.Close()

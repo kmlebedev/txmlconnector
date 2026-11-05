@@ -53,3 +53,12 @@ func (*MarketOrd) isEvent() {}
 type Leverage struct{}
 
 func (*Leverage) isEvent() {}
+
+// SecRate is one R_SEC_RATE (0x0a) state/event: the price V in kopecks per unit
+// (the lot value is V*lotsize; margin.md). It has no XML callback yet (I).
+type SecRate struct {
+	SecID uint16
+	Value int64
+}
+
+func (*SecRate) isEvent() {}

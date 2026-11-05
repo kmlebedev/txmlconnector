@@ -125,6 +125,9 @@ func (c *Client) marginRows(account model.ClientAccount, rawID int64, zero bool,
 		}
 		row := model.MaxBuySell{SecID: sec.SecID, Market: int(sec.Market), SecCode: sec.SecCode}
 		if !zero {
+			if rate(sec.SecID) <= 0 {
+				return nil, fmt.Errorf("rate is not known for secid %d (I)", sec.SecID)
+			}
 			selfPos := 0.0
 			if pos, ok := c.secPositions[positionKey{client: rawID, sym: sec.SecID}]; ok {
 				selfPos = float64(pos.SaldoIn) // open_balance in units
