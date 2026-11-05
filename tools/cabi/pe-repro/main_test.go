@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"testing"
 )
 
@@ -63,5 +64,28 @@ func TestNormalizeMakesBuildsIdentical(t *testing.T) {
 func TestNormalizeRejectsNonPE(t *testing.T) {
 	if err := Normalize([]byte("not a dll at all, just some bytes padding padding padding padding")); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+// The reference DLL in the repository root exports the 9 API functions with
+// ordinals 1..9 in name order (O: objdump of txmlconnector64-6.47.2.26.4.dll).
+func TestExportsOfReferenceDLL(t *testing.T) {
+	data, err := os.ReadFile("../../../txmlconnector64-6.47.2.26.4.dll")
+	if err != nil {
+		t.Skip("reference DLL not available:", err)
+	}
+	got, err := Exports(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"FreeMemory", "GetServiceInfo", "Initialize", "InitializeEx", "SendCommand",
+		"SetCallback", "SetCallbackEx", "SetLogLevel", "UnInitialize"}
+	if len(got) != len(want) {
+		t.Fatalf("exports = %v", got)
+	}
+	for i, e := range got {
+		if e.Ordinal != i+1 || e.Name != want[i] {
+			t.Fatalf("export %d = %+v, want %d %s", i, e, i+1, want[i])
+		}
 	}
 }
