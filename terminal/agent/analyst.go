@@ -80,7 +80,8 @@ func (e *Engine) localAnalyst(ctx context.Context, message string) (ChatResponse
 			label = name + " (" + intent.Symbol + ")"
 		}
 		resp.Answer = fmt.Sprintf("%s, период %s, %d баров: ни одна стратегия не дала сделок — сигналов нет. "+
-			"Запускать автоторговлю не рекомендую: без сделок стратегию нельзя оценить. Не является инвестиционной рекомендацией.",
+			"Запускать автоторговлю не рекомендую: без сделок стратегию нельзя оценить. Не является инвестиционной рекомендацией.\n\n"+
+			"Рекомендация: не запускать — сигналов нет (ни одна стратегия не торговала на выбранном периоде).",
 			label, periodLabel(intent.PeriodSec), barsCount)
 		resp.ElapsedMs = e.now().Sub(started).Milliseconds()
 		return resp, nil
@@ -168,7 +169,8 @@ func (e *Engine) localAnalyst(ctx context.Context, message string) (ChatResponse
 		}
 	}
 
-	resp.Answer = e.formatAnalystAnswer(intent, chosen, result, hints, hintsOK, autonomy, autonomyErr, autoStarted)
+	launched := intent.Start && (autoStarted || e.Status().Autonomy.Running)
+	resp.Answer = e.formatAnalystAnswer(intent, chosen, result, hints, hintsOK, autonomy, autonomyErr, autoStarted, launched)
 	resp.ElapsedMs = e.now().Sub(started).Milliseconds()
 	return resp, nil
 }
@@ -390,7 +392,7 @@ func parseDecimal(raw string) (float64, bool) {
 // formatAnalystAnswer renders the Russian local-analyst answer with concrete
 // metrics, the technical picture and the risks.
 func (e *Engine) formatAnalystAnswer(intent analystIntent, strategy string, result backtest.Result,
-	hints MarketHints, hintsOK bool, autonomy *AutonomyStatus, autonomyErr string, autoStarted bool) string {
+	hints MarketHints, hintsOK bool, autonomy *AutonomyStatus, autonomyErr string, autoStarted, launched bool) string {
 	var b strings.Builder
 	m := result.Metrics
 
@@ -445,7 +447,61 @@ func (e *Engine) formatAnalystAnswer(intent analystIntent, strategy string, resu
 	default:
 		b.WriteString("\nЧтобы запустить автоторговлю на бумажном счёте, напишите «запусти».")
 	}
+	b.WriteString("\n\n")
+	if launched {
+		// The user's explicit command was actually honoured: the closing line
+		// must agree with the action instead of telling them not to launch.
+		b.WriteString(startedRecommendationLine(m))
+	} else {
+		b.WriteString(recommendationLine(m))
+	}
 	return b.String()
+}
+
+// startedRecommendationLine closes the answer when the paper autonomy was
+// actually started by the user's explicit command.
+func startedRecommendationLine(m backtest.Metrics) string {
+	const tail = "Счёт бумажный, прошлая доходность не гарантирует будущую; это не инвестиционная рекомендация."
+	switch {
+	case m.Trades <= 0:
+		return "Запущено по вашей команде на бумажном счёте. Учитывайте: на истории стратегия не дала сделок — " +
+			"следите за риск-лимитами и при необходимости остановите: «останови автоторговлю». " + tail
+	case m.TotalReturnPct <= 0:
+		return fmt.Sprintf("Запущено по вашей команде на бумажном счёте. Учитывайте: на истории стратегия убыточна "+
+			"(доходность %s%%, buy&hold %s%%) — следите за риск-лимитами и при необходимости остановите: «останови автоторговлю». ",
+			pct(m.TotalReturnPct), pct(m.BenchmarkReturnPct)) + tail
+	case m.TotalReturnPct <= m.BenchmarkReturnPct:
+		return fmt.Sprintf("Запущено по вашей команде на бумажном счёте. Учитывайте: на истории стратегия не обгоняет buy&hold "+
+			"(доходность %s%% против %s%%) — следите за риск-лимитами и при необходимости остановите: «останови автоторговлю». ",
+			pct(m.TotalReturnPct), pct(m.BenchmarkReturnPct)) + tail
+	default:
+		return fmt.Sprintf("Запущено по вашей команде на бумажном счёте. На истории стратегия обгоняет buy&hold "+
+			"(доходность %s%% против %s%%, макс. просадка %s%%) — следите за риск-лимитами и при необходимости остановите: «останови автоторговлю». ",
+			pct(m.TotalReturnPct), pct(m.BenchmarkReturnPct), pct(m.MaxDrawdownPct)) + tail
+	}
+}
+
+// recommendationLine renders the explicit "стоит ли запускать" conclusion that
+// closes every local-analyst answer. It only describes the numbers of the
+// chosen backtest; the autonomy guards live in localAnalyst.
+func recommendationLine(m backtest.Metrics) string {
+	switch {
+	case m.Trades <= 0:
+		return "Рекомендация: не запускать — на выбранном периоде стратегия не дала сделок."
+	case m.TotalReturnPct <= 0:
+		return fmt.Sprintf(
+			"Рекомендация: не запускать — на выбранном периоде стратегия убыточна (доходность %s%%, бенчмарк buy&hold %s%%).",
+			pct(m.TotalReturnPct), pct(m.BenchmarkReturnPct))
+	case m.TotalReturnPct <= m.BenchmarkReturnPct:
+		return fmt.Sprintf(
+			"Рекомендация: не запускать — стратегия не обгоняет buy&hold (доходность %s%% против %s%% у buy&hold).",
+			pct(m.TotalReturnPct), pct(m.BenchmarkReturnPct))
+	default:
+		return fmt.Sprintf(
+			"Рекомендация: можно рассмотреть на бумажном счёте с риск-лимитами (доходность %s%% против %s%% у buy&hold, макс. просадка %s%%). "+
+				"Счёт бумажный, прошлая доходность не гарантирует будущую; это не инвестиционная рекомендация.",
+			pct(m.TotalReturnPct), pct(m.BenchmarkReturnPct), pct(m.MaxDrawdownPct))
+	}
 }
 
 // instrumentName returns the human-readable name of a symbol or "".

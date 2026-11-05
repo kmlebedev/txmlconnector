@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -108,6 +109,12 @@ func TestLocalAnalystStartAutonomy(t *testing.T) {
 	}
 	if !strings.Contains(resp.Answer, "Автономия запущена") {
 		t.Errorf("answer does not report the started autonomy: %q", resp.Answer)
+	}
+	if !strings.Contains(resp.Answer, "Запущено по вашей команде на бумажном счёте") {
+		t.Errorf("answer lacks the action-consistent closing line: %q", resp.Answer)
+	}
+	if strings.Contains(resp.Answer, "Рекомендация: не запускать") {
+		t.Errorf("started autonomy contradicts the closing line: %q", resp.Answer)
 	}
 	st := waitAutonomy(t, e)
 	foundStart := false
@@ -274,6 +281,9 @@ func TestLocalAnalystNoSignalsNoAutonomy(t *testing.T) {
 	if len(resp.Artifacts) != 0 {
 		t.Errorf("artifacts = %+v, want none for a no-signal comparison", resp.Artifacts)
 	}
+	if !strings.Contains(resp.Answer, "Рекомендация: не запускать — сигналов нет") {
+		t.Errorf("answer lacks the explicit no-signals recommendation: %q", resp.Answer)
+	}
 }
 
 // TestLocalAnalystNoTradeStrategyDoesNotStartAutonomy: an explicitly requested
@@ -331,6 +341,9 @@ func TestLocalAnalystAlreadyRunningNoSecondRunner(t *testing.T) {
 	if !strings.Contains(resp.Answer, "уже запущена") {
 		t.Errorf("answer = %q", resp.Answer)
 	}
+	if !strings.Contains(resp.Answer, "Запущено по вашей команде на бумажном счёте") {
+		t.Errorf("answer lacks the action-consistent closing line: %q", resp.Answer)
+	}
 	after := e.Status().Autonomy
 	if !after.StartedAt.Equal(before.StartedAt) {
 		t.Errorf("StartedAt changed from %v to %v: a second runner was created", before.StartedAt, after.StartedAt)
@@ -346,6 +359,168 @@ func TestLocalAnalystAlreadyRunningNoSecondRunner(t *testing.T) {
 	}
 	if err := e.StopAutonomy(); err != nil {
 		t.Fatalf("StopAutonomy: %v", err)
+	}
+}
+
+// fakeReturnsOverrides builds a backtest seam with per-strategy returns and a
+// fixed number of trades.
+func fakeReturnsOverrides(returns map[string]float64, trades int) func(backtest.Request) (backtest.Result, error) {
+	return func(req backtest.Request) (backtest.Result, error) {
+		totalReturn, ok := returns[req.Strategy]
+		if !ok {
+			return backtest.Result{}, fmt.Errorf("unexpected strategy %q", req.Strategy)
+		}
+		return makeFakeResult(req, trades, totalReturn, 0.8, -2.4), nil
+	}
+}
+
+// TestLocalAnalystExplicitCommandLosingStrategy: an explicit start command for
+// a losing (but trading) strategy really starts the runner, and the closing
+// line must agree with the action — no "Рекомендация: не запускать".
+func TestLocalAnalystExplicitCommandLosingStrategy(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	e.stepDelay = func(float64) time.Duration { return 20 * time.Millisecond }
+	e.backtestRun = func(req backtest.Request) (backtest.Result, error) {
+		if req.Strategy == "sma_cross" {
+			return makeFakeResult(req, 11, -2.69, -20.36, -3.27), nil
+		}
+		return makeFakeResult(req, 5, 0.4, 0.8, -2.4), nil
+	}
+	resp, err := e.Chat(context.Background(), ChatRequest{Message: "запусти автоторговлю по SMA на SBER"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	call, ok := findToolCall(resp.ToolCalls, "start_autonomy")
+	if !ok || call.Error != "" {
+		t.Fatalf("start_autonomy = %+v", call)
+	}
+	if !e.Status().Autonomy.Running {
+		t.Fatal("autonomy must be running after the explicit command")
+	}
+	if !strings.Contains(resp.Answer, "Запущено по вашей команде на бумажном счёте") {
+		t.Errorf("answer lacks the action-consistent closing line: %q", resp.Answer)
+	}
+	if !strings.Contains(resp.Answer, "убыточна") {
+		t.Errorf("answer does not warn about the losing history: %q", resp.Answer)
+	}
+	if strings.Contains(resp.Answer, "Рекомендация: не запускать") {
+		t.Errorf("answer contradicts the started runner: %q", resp.Answer)
+	}
+	if err := e.StopAutonomy(); err != nil {
+		t.Fatalf("StopAutonomy: %v", err)
+	}
+}
+
+// TestLocalAnalystExplicitCommandWinningStrategy: the same command for a
+// strategy that beats buy&hold gets the positive action-consistent wording.
+func TestLocalAnalystExplicitCommandWinningStrategy(t *testing.T) {
+	e, _, _ := newTestEngine(t) // default fake: sma_cross +7.5% vs benchmark +1.5%
+	e.stepDelay = func(float64) time.Duration { return 20 * time.Millisecond }
+	resp, err := e.Chat(context.Background(), ChatRequest{Message: "запусти автоторговлю по SMA на SBER"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	call, ok := findToolCall(resp.ToolCalls, "start_autonomy")
+	if !ok || call.Error != "" {
+		t.Fatalf("start_autonomy = %+v", call)
+	}
+	if !e.Status().Autonomy.Running {
+		t.Fatal("autonomy must be running after the explicit command")
+	}
+	if !strings.Contains(resp.Answer, "Запущено по вашей команде на бумажном счёте") ||
+		!strings.Contains(resp.Answer, "обгоняет buy&hold") {
+		t.Errorf("answer lacks the positive action-consistent line: %q", resp.Answer)
+	}
+	if strings.Contains(resp.Answer, "Рекомендация: не запускать") {
+		t.Errorf("answer contradicts the started runner: %q", resp.Answer)
+	}
+	if err := e.StopAutonomy(); err != nil {
+		t.Fatalf("StopAutonomy: %v", err)
+	}
+}
+
+// TestLocalAnalystRecommendationUnprofitable covers the negative-return branch:
+// the answer must end with an explicit "не запускать — убыточна".
+func TestLocalAnalystRecommendationUnprofitable(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	e.backtestRun = fakeReturnsOverrides(map[string]float64{
+		"sma_cross": -1.5, "rsi_reversion": -0.5, "donchian_breakout": -2.0, "momentum": -3.0,
+	}, 5)
+	resp, err := e.Chat(context.Background(), ChatRequest{Message: "проанализируй лучшую стратегию на SBER 5м"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if !strings.Contains(resp.Answer, "Рекомендация: не запускать") || !strings.Contains(resp.Answer, "убыточна") {
+		t.Errorf("answer lacks the unprofitable recommendation: %q", resp.Answer)
+	}
+	if e.Status().Autonomy.Running {
+		t.Fatal("unprofitable strategy must not start autonomy")
+	}
+}
+
+// TestLocalAnalystRecommendationBelowBenchmark covers the positive-but-below-
+// buy&hold branch.
+func TestLocalAnalystRecommendationBelowBenchmark(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	// makeFakeResult uses BenchmarkReturnPct = 1.5, so 0.5% is below buy&hold.
+	e.backtestRun = fakeReturnsOverrides(map[string]float64{
+		"sma_cross": 0.5, "rsi_reversion": 0.3, "donchian_breakout": 0.2, "momentum": 0.4,
+	}, 5)
+	resp, err := e.Chat(context.Background(), ChatRequest{Message: "проанализируй лучшую стратегию на SBER 5м"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if !strings.Contains(resp.Answer, "Рекомендация: не запускать") ||
+		!strings.Contains(resp.Answer, "не обгоняет buy&hold") {
+		t.Errorf("answer lacks the below-benchmark recommendation: %q", resp.Answer)
+	}
+	if e.Status().Autonomy.Running {
+		t.Fatal("below-benchmark strategy must not start autonomy")
+	}
+}
+
+// TestLocalAnalystRecommendationOutperforms covers the branch that beats
+// buy&hold: "можно рассмотреть на бумажном счёте".
+func TestLocalAnalystRecommendationOutperforms(t *testing.T) {
+	e, _, _ := newTestEngine(t) // default fake: sma_cross 7.5% vs benchmark 1.5%
+	resp, err := e.Chat(context.Background(), ChatRequest{Message: "проанализируй лучшую стратегию на SBER 5м"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if !strings.Contains(resp.Answer, "Рекомендация: можно рассмотреть на бумажном счёте") {
+		t.Errorf("answer lacks the outperform recommendation: %q", resp.Answer)
+	}
+	if !strings.Contains(resp.Answer, "не инвестиционная рекомендация") {
+		t.Errorf("answer lacks the paper/not-advice reminder: %q", resp.Answer)
+	}
+}
+
+// TestLocalAnalystExplicitStrategyRecommendation checks that a user-named
+// losing strategy (SMA) gets the same explicit conclusion and is not started.
+func TestLocalAnalystExplicitStrategyRecommendation(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	e.backtestRun = func(req backtest.Request) (backtest.Result, error) {
+		if req.Strategy == "sma_cross" {
+			return makeFakeResult(req, 11, -2.69, -20.36, -3.27), nil
+		}
+		return makeFakeResult(req, 5, 0.4, 0.8, -2.4), nil
+	}
+	resp, err := e.Chat(context.Background(), ChatRequest{Message: "протестируй стратегию SMA на SBER"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if !strings.Contains(resp.Answer, "Стратегия sma_cross (по запросу)") {
+		t.Errorf("answer does not mention the requested strategy: %q", resp.Answer)
+	}
+	if !strings.Contains(resp.Answer, "Рекомендация: не запускать") ||
+		!strings.Contains(resp.Answer, "убыточна") {
+		t.Errorf("answer lacks the explicit conclusion for a losing explicit strategy: %q", resp.Answer)
+	}
+	if _, ok := findToolCall(resp.ToolCalls, "start_autonomy"); ok {
+		t.Fatalf("explicit losing strategy must not be auto-started; tools = %v", toolNames(resp.ToolCalls))
+	}
+	if e.Status().Autonomy.Running {
+		t.Fatal("autonomy was started for a losing strategy")
 	}
 }
 
