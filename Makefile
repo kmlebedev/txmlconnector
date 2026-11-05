@@ -46,10 +46,18 @@ server_build:
 	mkdir -p bin
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o bin/server.exe .
 
-## Build and run the Win32 adapter under Wine.
+## Run the server for the selected backend (T29/RE-4).
+## TC_BACKEND=native runs the pure-Go backend locally: no Windows cross-build and
+## no Wine. dll (or the empty/default value) keeps the Win32 DLL server under Wine.
+ifeq ($(TC_BACKEND),native)
+server:
+	mkdir -p logs
+	go run .
+else
 server: server_build
 	mkdir -p logs
 	wine64 bin/server.exe
+endif
 
 queues_build:
 	mkdir -p bin
