@@ -126,6 +126,14 @@ tools/reference-harness/       # создать на M1
 
 Релиз считается нативным только если покрытые операции выполняются прямым Go-клиентом без вспомогательного процесса, загружающего DLL. Полнота совместимости определяется опубликованной матрицей, а не одним успешным login.
 
+## M7 статус (2026-11-05)
+
+- Native backend без Wine: `server.Backend=dll|native`, `TC_BACKEND=native make server`.
+- Долгая read-only сессия: `tools/native-soak` (Dial -> 20 бумаг в alltrades/quotations/quotes -> Run,
+  лог Stats/RSS/latency каждые 5 минут, обрывы через tcproxy, критерий `UnknownRecords==0`).
+- Матрица покрытия и known I/blockers — `docs/protocol/coverage.md` (sections 3/4/5 + 5.1).
+- Открыто: demo moveorder/makeordown payloads (T19), RE-4 live прогон/full matrix (T29), финальный PR.
+
 ## Ближайшие задачи
 
 - [x] Определить PE-архитектуру, хеш, экспорты и статические ориентиры.
