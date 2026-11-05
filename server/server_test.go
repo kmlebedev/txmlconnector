@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	tcClient "github.com/kmlebedev/txmlconnector/client"
+	tcCommands "github.com/kmlebedev/txmlconnector/client/commands"
 	"github.com/kmlebedev/txmlconnector/connector"
 	nativeconnector "github.com/kmlebedev/txmlconnector/native"
 	"github.com/kmlebedev/txmlconnector/native/testserver"
@@ -248,3 +250,59 @@ func TestServerRunsNativeBackend(t *testing.T) {
 }
 
 const quoteServer = "\""
+
+// TestNativeBackendTCClientRE4: the TCClient path (async connect + stream) must
+// receive connected=true without the stream closing immediately (RE-4 demo EOF).
+func TestNativeBackendTCClientRE4(t *testing.T) {
+	srv := testserver.New(t)
+	raw, err := os.ReadFile("../native/records/testdata/startup-demo.hex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if srv.Startup, err = hex.DecodeString(strings.TrimSpace(string(raw))); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Backend: "native", Native: nativeconnector.Config{Dial: srv.Dial}, SubscriberBuffer: 4096, ShutdownTimeout: time.Second}
+	backend, err := newBackend(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := bufconn.Listen(4 * 1024 * 1024)
+	ctx, cancel := context.WithCancel(context.Background())
+	serverDone := make(chan error, 1)
+	go func() { serverDone <- Serve(ctx, listener, backend, cfg) }()
+	conn, err := grpc.NewClient("passthrough:///native-tcclient",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	tc, err := tcClient.NewTCClientWithConnAndOptions(pb.NewConnectServiceClient(conn), conn, tcClient.Options{
+		Connect: &tcClient.ConnectConfig{Login: testserver.Login, Password: testserver.Password, Host: "127.0.0.1", Port: "1"},
+	})
+	if err != nil {
+		t.Fatalf("NewTCClient: %v", err)
+	}
+	defer tc.Close()
+	select {
+	case status := <-tc.ServerStatusChan:
+		if status.Connected != "true" {
+			t.Fatalf("status = %+v, want connected=true", status)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no connected=true status")
+	}
+	if err := tc.SendCommand(tcCommands.Command{Id: "get_securities"}); err != nil {
+		t.Fatalf("get_securities after connected: %v", err)
+	}
+	if err := tc.Disconnect(); err != nil {
+		t.Fatalf("disconnect: %v", err)
+	}
+	cancel()
+	select {
+	case <-serverDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not stop")
+	}
+}
