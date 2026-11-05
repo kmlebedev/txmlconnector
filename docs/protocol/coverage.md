@@ -46,7 +46,7 @@
 | 26 | change_pass | 6 | **done** | RQ_CHANGE_PWD 3, payload/SHA-1, replies, fatal empty reply, local texts (7427b10); живьём не выполнялось (S-негатив) |
 | 27 | options | 7 | **partial** | RQ 149/153/150/151 payloads+reply, 149 O e2e (9b7204f); гейт версии 0x45 — I (поле не восстановлено), 153/150/151 mapping/XML — D/I |
 | 28 | RPS/REPO/отчёты | 8 | **partial** | payloads newrpsorder/newrepoorder/cancel O-побайтно, 6 команд, ошибки, D-literal XML (b9f305a); newmrepoorder/newreport4 и records/XML — I |
-| 29 | XML-коннектор целиком, native backend | 9 | **partial** | `native/connector.go`: 26/43 команд; `server/` native backend нет; матрица 45 имён — в этом документе `2 |
+| 29 | XML-коннектор целиком, native backend | 9 | **partial** | `dllCommands` = 45 имён (T28); matrix-тест и pending {moveorder,makeordown,set_csp,authenticate} (043d7c9); `server.Backend dll|native` + `TC_BACKEND`, `TC_BACKEND=native make server` без Wine (043d7c9/5aea9d5); RE-4/errors.md — pending |
 | 30 | Матрица покрытия, soak, выпуск | 9 | **in progress** | этот документ; soak/выпуск — после 29 |
 
 Фазы 0–2 закрыты по AGENTS.md (коммиты в истории ветки, PR #47/#48 — в main).
