@@ -172,3 +172,41 @@ func TestNewsUploadFlags2(t *testing.T) {
 		t.Fatalf("body = %q, %v", body, err)
 	}
 }
+
+// TestNewsUploadFlagForms: flags=1 (header only) and flags=2 (body only) are
+// both unsized walkers and keep the stream aligned when concatenated.
+func TestNewsUploadFlagForms(t *testing.T) {
+	recs, err := records.Records(newsFixture(t))
+	if err != nil || len(recs) != 2 {
+		t.Fatalf("fixture: %v", err)
+	}
+	upload, err := records.ParseNewsUpload(recs[1].Body)
+	if err != nil || upload.Header == nil {
+		t.Fatalf("upload: %v", err)
+	}
+	var header wire.Writer
+	header.Byte(1)
+	header.Int32(1500)
+	header.Int32(1762300000)
+	header.String("SRC", 16)
+	header.String("Title", 128)
+	header.Byte(0)
+	var body wire.Writer
+	body.Byte(2)
+	body.Int32(2002)
+	body.Int32(int32(len(upload.Package)))
+	body.Raw(upload.Package)
+	stream := append([]byte{records.TagNewsUpload}, header.Bytes()...)
+	stream = append(stream, records.TagNewsUpload)
+	stream = append(stream, body.Bytes()...)
+	got, err := records.Records(stream)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("flags forms: %v, %+v", err, got)
+	}
+	if parsed, err := records.ParseNewsUpload(got[0].Body); err != nil || parsed.Header == nil || parsed.Header.ID != 1500 {
+		t.Fatalf("flags=1: %+v, %v", parsed, err)
+	}
+	if parsed, err := records.ParseNewsUpload(got[1].Body); err != nil || !parsed.HasID || parsed.NewsID != 2002 {
+		t.Fatalf("flags=2: %+v, %v", parsed, err)
+	}
+}

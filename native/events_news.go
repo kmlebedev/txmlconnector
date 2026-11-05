@@ -63,16 +63,23 @@ func decodeNewsUpload(c *Client, body []byte) ([]model.Event, error) {
 	if len(parsed.Package) > 0 {
 		text, err := records.UnpackNewsBody(parsed.Package)
 		if err != nil {
-			return nil, err
+			// DLL logs "Failed to unpack body!" and drops the element; a bad
+			// package must not abort the poll/Run stream.
+			return events, nil
 		}
 		id := parsed.NewsID
 		if parsed.Header != nil {
 			id = parsed.Header.ID
 		}
-		if c.newsBodies == nil {
-			c.newsBodies = map[int64]string{}
+		// The DLL drops a body whose header is not in the store
+		// ("Header with id = N not found").
+		if _, ok := c.news[id]; ok {
+			if c.newsBodies == nil {
+				c.newsBodies = map[int64]string{}
+			}
+			c.newsBodies[id] = string(text)
 		}
-		c.newsBodies[id] = string(text)
+		// No <news_body> event: the DLL emitter path is not confirmed (I).
 	}
 	return events, nil
 }
