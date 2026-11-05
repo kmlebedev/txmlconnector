@@ -79,7 +79,8 @@ type Client struct {
 	mu         sync.Mutex
 	subs       map[model.Symbol]byte // stable board+seccode -> subscription mask
 	dedup      records.TradeDedup
-	recovering bool // true while recover replaces the session
+	recovering bool  // true while recover replaces the session
+	fatal      error // terminal session failure (e.g. fatal change_pass): no recover
 	stats      Stats
 
 	// End-of-load state (task 7): the R_CLN_NEW client store, money
@@ -387,8 +388,14 @@ func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) 
 			return ctx.Err()
 		case <-timer.C:
 		}
+		if ferr := c.fatalError(); ferr != nil {
+			return ferr
+		}
 		for {
 			events, more, err := c.Poll(ctx)
+			if ferr := c.fatalError(); ferr != nil {
+				return ferr
+			}
 			if err != nil {
 				if ctx.Err() != nil {
 					return ctx.Err()
@@ -482,4 +489,21 @@ func (c *Client) runRqDelay(opt RunOptions) time.Duration {
 		delay = minRqDelay
 	}
 	return delay
+}
+
+// fatalError returns the terminal session failure set by a command whose DLL
+// contract makes the connection unusable (currently only fatal change_pass).
+func (c *Client) fatalError() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.fatal
+}
+
+// markFatal records the terminal failure under the client lock.
+func (c *Client) markFatal(err error) {
+	c.mu.Lock()
+	if c.fatal == nil {
+		c.fatal = err
+	}
+	c.mu.Unlock()
 }

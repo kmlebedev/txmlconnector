@@ -59,7 +59,8 @@ SHA-1(newpass)          20 байт
 | пустой reply | фатально: D-лог `RQ_CHANGE_PWD incorrect server buffer`, соединение закрывается (`connected="false"`) — **O** |
 
 Прочие значения status — не проверялись (**I**; по коду: «else» → текст из структуры, может быть
-пустым).
+пустым). Go-реализация трактует любой некорректный reply (status не 0/1, status 2 без непустого
+C-строкового текста, любые лишние байты) как фатальный (`ErrChangePasswordFatal`).
 
 ## Сессия/recover после успеха — I
 
@@ -91,3 +92,14 @@ SHA-1(newpass)          20 байт
 D: `tools/re/ghidra/XrefDecomp.java` по `txmlconnector64-6.47.2.26.4.dll`; функции — выше.
 O: `tools/replay-server` + `tools/tcproxy` + DLL под Wine 11.21, dump `.re-run/r14/decode-full.txt`
 (вне git); команды — `native/session/testdata/changepwd-repro.md`.
+
+## Go: терминальность фатального reply (T29 fix)
+
+- Фатальный reply change_pass закрывает сессионное соединение и **терминален** для `Client.Run`:
+  Run завершается, `recover=true` и последующий `connected="true"` не эмитятся; коннектор отдаёт
+  ровно один `connected="false"` (как DLL при "RQ_CHANGE_PWD incorrect server buffer").
+- Строгий разбор: status 0/1 — ровно один байт; status 2 — непустая C-строка + отсутствие хвоста;
+  zero-length/неизвестный status/лишние байты → fatal.
+- Пароль/recover: сессионные ключи после успеха не меняются (DLL); Go-клиент обновляет
+  сохранённый `cfg.Password` (под Client.mu) для будущего полного reconnect; recover/relelogin
+  читают снимок cfg под локом.

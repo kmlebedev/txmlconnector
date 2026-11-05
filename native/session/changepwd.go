@@ -41,26 +41,36 @@ func ChangePasswordPayload(oldPassword, newPassword string) []byte {
 	return out
 }
 
-// ParseChangePasswordReply decodes the type-3 reply payload.
+// ParseChangePasswordReply decodes the type-3 reply payload strictly:
+//   - status 0/1: exactly one byte;
+//   - status 2: a non-empty NUL-terminated C-string message, no trailing bytes;
+//   - zero-length/other statuses/extra bytes: ErrChangePasswordFatal.
 func ParseChangePasswordReply(payload []byte) (ChangePasswordReply, error) {
 	var out ChangePasswordReply
 	if len(payload) == 0 {
 		return out, ErrChangePasswordFatal
 	}
 	out.Status = payload[0]
-	if out.Status == 2 {
-		// C-string with the server message.
+	switch out.Status {
+	case 0, 1:
+		if len(payload) != 1 {
+			return ChangePasswordReply{}, ErrChangePasswordFatal
+		}
+		return out, nil
+	case 2:
+		if len(payload) < 3 {
+			return ChangePasswordReply{}, ErrChangePasswordFatal
+		}
 		r := wire.NewReader(payload[1:])
 		message, err := readCStringLimit(r, 0xfff0)
-		if err != nil {
-			return out, fmt.Errorf("RQ_CHANGE_PWD message: %w", err)
+		if err != nil || message == "" || r.Len() > 0 {
+			return ChangePasswordReply{}, ErrChangePasswordFatal
 		}
 		out.Message = message
-		if r.Len() > 0 {
-			return out, fmt.Errorf("RQ_CHANGE_PWD: %d trailing bytes after the message", r.Len())
-		}
+		return out, nil
+	default:
+		return ChangePasswordReply{}, ErrChangePasswordFatal
 	}
-	return out, nil
 }
 
 // readCStringLimit reads a NUL-terminated string with at most max characters
@@ -93,9 +103,10 @@ func (c *Conn) ChangePassword(ctx context.Context, oldPassword, newPassword stri
 		return ChangePasswordReply{}, err
 	}
 	parsed, err := ParseChangePasswordReply(reply)
-	if errors.Is(err, ErrChangePasswordFatal) {
+	if err != nil {
+		// Any malformed reply is the DLL fatal "incorrect server buffer" path.
 		_ = c.Close()
-		return ChangePasswordReply{}, err
+		return ChangePasswordReply{}, ErrChangePasswordFatal
 	}
-	return parsed, err
+	return parsed, nil
 }
