@@ -222,8 +222,21 @@ func (e *Engine) executeToolCall(ctx context.Context, name string, args map[stri
 }
 
 // executeToolCallFor runs one tool on behalf of one LLM call: mutating tools
-// receive the call identity needed for their ClientOrderID.
+// receive the call identity needed for their ClientOrderID and pass through the
+// human-in-the-loop approval gate (§9.5).
 func (e *Engine) executeToolCallFor(ctx context.Context, inv toolInvocation, name string, args map[string]any) (ToolCall, *Artifact) {
+	return e.executeToolCallWith(ctx, inv, name, args, true)
+}
+
+// executeToolCallDirect runs a tool that a human already approved: it bypasses
+// the approval gate but keeps the normal tool events.
+func (e *Engine) executeToolCallDirect(ctx context.Context, inv toolInvocation, name string, args map[string]any) (ToolCall, *Artifact) {
+	return e.executeToolCallWith(ctx, inv, name, args, false)
+}
+
+// executeToolCallWith is the common tool wrapper; gate enables the approval
+// gate of the mutating tools.
+func (e *Engine) executeToolCallWith(ctx context.Context, inv toolInvocation, name string, args map[string]any, gate bool) (ToolCall, *Artifact) {
 	if args == nil {
 		args = map[string]any{}
 	}
@@ -233,7 +246,7 @@ func (e *Engine) executeToolCallFor(ctx context.Context, inv toolInvocation, nam
 	start := time.Now()
 	e.publish(Event{Type: "tool_call", Data: map[string]any{"name": name, "args": args}})
 	call := ToolCall{Name: name, Args: args}
-	result, artifact, err := e.invokeTool(ctx, inv, name, args)
+	result, artifact, err := e.invokeToolWith(ctx, inv, name, args, gate)
 	call.DurationMs = time.Since(start).Milliseconds()
 	if err != nil {
 		call.Error = err.Error()
@@ -252,9 +265,16 @@ func (e *Engine) executeToolCallFor(ctx context.Context, inv toolInvocation, nam
 	return call, artifact
 }
 
-// invokeTool is the in-process tool dispatch. Panics inside a data source or a
-// tool implementation are recovered and reported as tool errors.
+// invokeTool is the in-process tool dispatch with the approval gate enabled.
+// Panics inside a data source or a tool implementation are recovered and
+// reported as tool errors.
 func (e *Engine) invokeTool(ctx context.Context, inv toolInvocation, name string, args map[string]any) (result any, artifact *Artifact, err error) {
+	return e.invokeToolWith(ctx, inv, name, args, true)
+}
+
+// invokeToolWith is the in-process tool dispatch; gate enables the approval
+// gate of the mutating tools (the approve path calls it with gate=false).
+func (e *Engine) invokeToolWith(ctx context.Context, inv toolInvocation, name string, args map[string]any, gate bool) (result any, artifact *Artifact, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			result, artifact, err = nil, nil, fmt.Errorf("agent: tool %s panicked: %v", name, r)
@@ -343,9 +363,28 @@ func (e *Engine) invokeTool(ctx context.Context, inv toolInvocation, name string
 		if err != nil {
 			return nil, nil, err
 		}
-		order, err := e.toolPlaceOrder(args, qty, inv.clientOrderID())
+		// The order is validated (structure and the hard risk limits) before the
+		// approval gate: a malformed or risk-blocked order is an error, never a
+		// proposal a human could not legally approve (R5).
+		req, err := e.checkOrderRisk(
+			argString(args, "symbol"),
+			argString(args, "side"),
+			qty,
+			argString(args, "type"),
+			argFloat(args, "price", 0),
+		)
 		if err != nil {
 			return nil, nil, err
+		}
+		if gate {
+			if result, gated := e.gatePlaceOrder(args, req); gated {
+				return result, nil, nil
+			}
+		}
+		req.ClientOrderID = inv.clientOrderID()
+		order, err := e.broker.Place(req)
+		if err != nil {
+			return nil, nil, fmt.Errorf("agent: place order: %w", err)
 		}
 		return order, nil, nil
 	case "cancel_order":
@@ -355,6 +394,14 @@ func (e *Engine) invokeTool(ctx context.Context, inv toolInvocation, name string
 		id := argString(args, "orderId")
 		if id == "" {
 			return nil, nil, errors.New("agent: orderId is required")
+		}
+		if gate {
+			if !e.orderExists(id) {
+				return nil, nil, fmt.Errorf("agent: cancel order %s: %w", id, errOrderNotFound)
+			}
+			if result, gated := e.gateMutatingTool("cancel_order", args); gated {
+				return result, nil, nil
+			}
 		}
 		order, err := e.broker.Cancel(id)
 		if err != nil {
@@ -369,12 +416,27 @@ func (e *Engine) invokeTool(ctx context.Context, inv toolInvocation, name string
 		if cfg.Live {
 			return nil, nil, errLiveAutonomy
 		}
+		if gate {
+			// Never propose starting a runner that is already active, and never
+			// propose a configuration the engine would reject at start time.
+			if e.Status().Autonomy.Running {
+				return nil, nil, ErrAlreadyRunning
+			}
+			if _, _, _, _, err := e.prepareAutonomy(ctx, cfg); err != nil {
+				return nil, nil, err
+			}
+			if result, gated := e.gateMutatingTool("start_autonomy", args); gated {
+				return result, nil, nil
+			}
+		}
 		if err := e.StartAutonomy(ctx, cfg); err != nil {
 			return nil, nil, err
 		}
 		st := e.autonomyStatus()
 		return st, &Artifact{Kind: "autonomy", Payload: st}, nil
 	case "stop_autonomy":
+		// Documented exception (§9.5): the kill-switch is never delayed by a
+		// human confirmation, otherwise a bad autonomy run could not be stopped.
 		if err := e.StopAutonomy(); err != nil {
 			return nil, nil, err
 		}
@@ -623,29 +685,21 @@ func (e *Engine) toolQuote(ctx context.Context, args map[string]any) (quoteResul
 	return out, nil
 }
 
-// toolPlaceOrder implements place_order with the risk limits of §9.4. The
-// integer qty is validated by the caller (argIntStrict), never truncated here;
-// clientOrderID is the idempotency key of the LLM tool call.
-func (e *Engine) toolPlaceOrder(args map[string]any, qty int64, clientOrderID string) (OrderView, error) {
+// errOrderNotFound is returned by the cancel_order validation when the paper
+// broker has no such order (the gate must not propose cancelling a ghost).
+var errOrderNotFound = errors.New("agent: order not found")
+
+// orderExists reports whether the paper broker knows one order id.
+func (e *Engine) orderExists(id string) bool {
 	if e.broker == nil {
-		return OrderView{}, errors.New("agent: paper broker is not configured")
+		return false
 	}
-	req, err := e.checkOrderRisk(
-		argString(args, "symbol"),
-		argString(args, "side"),
-		qty,
-		argString(args, "type"),
-		argFloat(args, "price", 0),
-	)
-	if err != nil {
-		return OrderView{}, err
+	for _, order := range e.broker.Orders() {
+		if order.ID == id {
+			return true
+		}
 	}
-	req.ClientOrderID = clientOrderID
-	order, err := e.broker.Place(req)
-	if err != nil {
-		return OrderView{}, fmt.Errorf("agent: place order: %w", err)
-	}
-	return order, nil
+	return false
 }
 
 // autonomyConfigFromArgs maps raw tool arguments to AutonomyConfig. The

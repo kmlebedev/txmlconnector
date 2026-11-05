@@ -80,6 +80,7 @@ export function createInitialState() {
     agentStatus: null,
     autonomy: null,
     autonomyLog: [],
+    proposals: [],
     chat: [],
     chatBusy: false,
     llm: null,
@@ -262,6 +263,21 @@ export class ApiClient {
   async agentBacktests() {
     const data = await this.request('/api/agent/backtests');
     return data.results || [];
+  }
+
+  async agentProposals() {
+    const data = await this.request('/api/agent/proposals');
+    return data.proposals || [];
+  }
+
+  async approveProposal(id) {
+    return await this.request(
+      `/api/agent/proposals/${encodeURIComponent(id)}/approve`, { method: 'POST', timeoutMs: 30000 });
+  }
+
+  async rejectProposal(id) {
+    return await this.request(
+      `/api/agent/proposals/${encodeURIComponent(id)}/reject`, { method: 'POST', timeoutMs: 30000 });
   }
 
   // ---- SSE -------------------------------------------------------------

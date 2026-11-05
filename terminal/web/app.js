@@ -101,7 +101,7 @@ async function startApp() {
     api = await createApi({ store });
     const health = await api.health();
     applyHealth(health);
-    const [instrumentsPayload, portfolio, orders, trades, strategies, agentStatus, backtests] = await Promise.all([
+    const [instrumentsPayload, portfolio, orders, trades, strategies, agentStatus, backtests, proposals] = await Promise.all([
       api.instruments(),
       api.portfolio(),
       api.orders(),
@@ -109,6 +109,7 @@ async function startApp() {
       api.strategies().catch(() => []),
       api.agentStatus().catch(() => null),
       api.agentBacktests().catch(() => []),
+      api.agentProposals().catch(() => []),
     ]);
     const instruments = instrumentsPayload.instruments || [];
     store.set({
@@ -121,6 +122,7 @@ async function startApp() {
       strategies,
       agentStatus,
       backtests,
+      proposals,
       autonomy: agentStatus && agentStatus.autonomy ? agentStatus.autonomy : null,
       autonomyLog: agentStatus && agentStatus.autonomy && agentStatus.autonomy.log ? agentStatus.autonomy.log : [],
       llm: health.llm || (agentStatus && agentStatus.llm) || null,
@@ -1232,6 +1234,10 @@ function handleServerEvent(message) {
     }
     case 'agent': {
       ai?.handleAgentEvent(data);
+      break;
+    }
+    case 'proposal': {
+      ai?.handleProposalEvent(data);
       break;
     }
     default:

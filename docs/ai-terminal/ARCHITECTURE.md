@@ -739,6 +739,43 @@ func (e *Engine) Hints(ctx context.Context, symbol string, periodSec int) (Marke
   `mark_to_market`; `finalEquity = cash + qty*lastPrice`.
 - После Stop статус сохраняет итоговые PnL/лог для UI.
 
+### 9.5 Предложения действий и подтверждение человеком (R5)
+
+Мутирующие инструменты (`place_order`, `cancel_order`, `start_autonomy`) в режиме
+`confirm` (по умолчанию) не исполняются сразу: диспетчер создаёт `Proposal`
+(`pending`), брокер и автономия не вызываются, а результат инструмента для модели
+и UI — `{"proposal":{id,tool,args,summary,createdAt,expiresAt,status}}`. Исключение —
+`stop_autonomy`: kill-switch исполняется немедленно, иначе плохой прогон нельзя
+остановить. Гейт стоит после валидации аргументов: некорректная заявка (дробный
+qty, `live=true`, неизвестная сторона/тип) — ошибка, а не предложение.
+
+```go
+type Proposal struct {
+	ID, Tool string
+	Args map[string]any
+	Summary string
+	CreatedAt, ExpiresAt time.Time
+	Status string // pending|approved|rejected|expired|executed
+}
+
+type ApprovalPolicy struct {
+	Mode string          // confirm (default) | envelope (только явно)
+	Envelope RiskLimits  // лимиты авто-одобрения; незаданные поля = Config.Risk
+	MaxOrdersPerRun int  // 0 = без ограничения
+}
+```
+
+- `envelope` — режим фазы F: `place_order` внутри лимитов `Envelope` и в пределах
+  `MaxOrdersPerRun` исполняется сразу, иначе становится предложением;
+  `cancel_order`/`start_autonomy` в envelope тоже предложения.
+- Жизненный цикл (`Engine.Proposals`, `Approve`, `Reject`): `pending` →
+  `approved` → `executed`; `rejected`; старше 5 минут (`proposalTTL` по
+  `Config.Now`) — `expired`. Повторный approve/reject → `ErrProposalHandled`
+  (409), просроченный → `ErrProposalExpired` (410), неизвестный id →
+  `ErrProposalNotFound` (404). `Approve` исполняет инструмент ровно один раз,
+  обходя гейт подтверждения. Кольцо предложений ограничено 100 записями.
+- Каждый переход статуса публикует SSE-событие `proposal` (top-level, §10.3).
+
 ## 10. Пакет `terminal/api` (HTTP/JSON/SSE)
 
 ```go
@@ -795,6 +832,10 @@ type AgentAPI interface {
 	Backtests() []backtest.Result
 	Hints(ctx context.Context, symbol string, periodSec int) (agent.MarketHints, error)
 	Tools() []agent.ToolInfo
+	// Human-in-the-loop approval of the mutating tools (§9.5).
+	Proposals() []agent.Proposal
+	Approve(ctx context.Context, id string) (agent.ToolCall, error)
+	Reject(id string) error
 }
 
 type Deps struct {
@@ -814,8 +855,9 @@ func (s *Server) Handler() http.Handler // mux, обёрнутый в Guard; п�
 {"error":{"code":"bad_request","message":"что не так"}}
 ```
 
-Коды: `bad_request` 400, `not_found` 404, `conflict` 409, `unavailable` 503,
-`live_trading_disabled` 403, `internal` 500. Коды Guard (§10.4): `forbidden_host` 421,
+Коды: `bad_request` 400, `not_found` 404, `conflict` 409,
+`proposal_expired` 410, `unavailable` 503, `live_trading_disabled` 403,
+`internal` 500. Коды Guard (§10.4): `forbidden_host` 421,
 `forbidden_origin` 403, `unsupported_media_type` 415, `unauthorized` 401. Маппинг ошибок агента:
 повторный `start` при работающем runner → 409 `conflict`; невалидный конфиг/`live=true` → 400;
 нереализованное → 503.
@@ -843,6 +885,9 @@ func (s *Server) Handler() http.Handler // mux, обёрнутый в Guard; п�
 | `POST /api/agent/autonomy` | `{action:"start"\|"stop", config?}` | `{autonomy: AutonomyStatus}` |
 | `GET /api/agent/autonomy/log?limit=200` | — | `{log:[LogEntry]}` |
 | `GET /api/agent/backtests` | — | `{results:[backtest.Result]}` |
+| `GET /api/agent/proposals` | — | `{proposals:[Proposal]}` |
+| `POST /api/agent/proposals/{id}/approve` | — | `{proposal,result:ToolCall}`; 404/409/410 `proposal_expired` |
+| `POST /api/agent/proposals/{id}/reject` | — | `{proposal}`; 404/409/410 |
 | `GET /api/events` | SSE | §10.3 |
 | `GET /` и `/assets/*` | — | SPA из `terminal.WebFS()` (index.html fallback) |
 
@@ -882,8 +927,13 @@ func (s *Server) Handler() http.Handler // mux, обёрнутый в Guard; п�
 
 // ChatResponse
 {"answer":"...","toolCalls":[{"name":"run_backtest","args":{},"result":{},"error":"",
- "durationMs":12}],"artifacts":[{"kind":"backtest","payload":{}}],"llm":false,
+ "durationMs":12}],"artifacts":[{"kind":"backtest","payload":{}}],"llm":false,"partial":false,
  "conversationId":"a1b2c3...","elapsedMs":42}
+
+// Proposal (§9.5). В режиме confirm результат мутирующего инструмента —
+// {"proposal": Proposal}
+{"id":"prop_000001","tool":"place_order","args":{"symbol":"TQBR:SBER","side":"buy","qty":10},
+ "summary":"Купить 10 SBER по рынку","createdAt":"...","expiresAt":"...","status":"pending"}
 ```
 
 `time` во всех JSON — RFC3339 UTC. Цены — числа; UI форматирует с `decimals` инструмента.
@@ -907,11 +957,14 @@ data: {"type":"quote","data":{...}}
 | `portfolio` | `Portfolio` (полный, как GET) | при изменении/1s |
 | `orders` | `{orders:[Order]}` | при изменении |
 | `agent` | `{type:"tool_call"\|"tool_result"\|"message"\|"autonomy"\|"log"\|"backtest", ...}` | по мере событий агента |
+| `proposal` | `Proposal` (§9.5), top-level (не внутри `agent`) | создание/approve/reject/expiry предложения |
 | `status` | `{ok,mode,connected,message,serverTime}` | 5s |
 | `heartbeat` | `{}` | 15s |
 
-Событие агента — обёртка `{"type":"agent","data":{"type":"<agentEventType>","data":...}}`; для
-автономии в `data` приходит **частичный тик** прогресса, а не полный `AutonomyStatus`:
+Событие агента — обёртка `{"type":"agent","data":{"type":"<agentEventType>","data":...}}`.
+Исключение — предложения действий (§9.5): они публикуются как самостоятельный
+top-level тип `{"type":"proposal","data":Proposal}`.
+Для автономии в `data` приходит **частичный тик** прогресса, а не полный `AutonomyStatus`:
 `{"running":true,"symbol":"TQBR:SBER","periodSec":300,"time":"...","price":293.2,
 "position":100,"trades":1,"pnl":12.3,"pnlPct":0.01}`; полный статус (config/log/startedAt) — из
 `GET /api/agent/status`.

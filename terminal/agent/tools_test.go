@@ -213,7 +213,7 @@ func TestToolGetQuoteAndHistory(t *testing.T) {
 // TestPlaceOrderPaper checks a normal paper order passes the risk checks and
 // reaches the broker.
 func TestPlaceOrderPaper(t *testing.T) {
-	e, _, broker := newTestEngine(t)
+	e, _, broker := newTestEngineEnvelope(t)
 	call, artifact := e.executeToolCall(context.Background(), "place_order", map[string]any{
 		"symbol": "SBER", "side": "buy", "qty": 10, "type": "market",
 	})
@@ -297,9 +297,11 @@ func TestPlaceOrderValidation(t *testing.T) {
 	}
 }
 
-// TestCancelOrder places and cancels a paper order through tools.
+// TestCancelOrder places a paper order and cancels it through the proposal flow:
+// in envelope mode only place_order auto-executes, the cancel still needs the
+// human approval (R5).
 func TestCancelOrder(t *testing.T) {
-	e, _, _ := newTestEngine(t)
+	e, _, _ := newTestEngineEnvelope(t)
 	placed, _ := e.executeToolCall(context.Background(), "place_order", map[string]any{
 		"symbol": "SBER", "side": "buy", "qty": 1, "type": "market",
 	})
@@ -308,17 +310,20 @@ func TestCancelOrder(t *testing.T) {
 		t.Fatalf("place result type = %T", placed.Result)
 	}
 	call, _ := e.executeToolCall(context.Background(), "cancel_order", map[string]any{"orderId": order.ID})
-	if call.Error != "" {
-		t.Fatalf("cancel_order: %s", call.Error)
+	proposal := proposalOf(t, call)
+	approved, err := e.Approve(context.Background(), proposal.ID)
+	if err != nil {
+		t.Fatalf("Approve cancel: %v", err)
 	}
-	payload, ok := call.Result.(map[string]any)
+	payload, ok := approved.Result.(map[string]any)
 	if !ok {
-		t.Fatalf("cancel result type = %T", call.Result)
+		t.Fatalf("cancel result type = %T", approved.Result)
 	}
 	cancelled, ok := payload["order"].(OrderView)
 	if !ok || cancelled.Status != "cancelled" {
 		t.Fatalf("cancel payload = %+v", payload)
 	}
+	// Cancelling an unknown order is an error, not a proposal.
 	if call, _ := e.executeToolCall(context.Background(), "cancel_order", map[string]any{"orderId": "nope"}); call.Error == "" {
 		t.Fatal("expected an error for an unknown order")
 	}
@@ -339,7 +344,8 @@ func TestStartAutonomyLiveRejected(t *testing.T) {
 	}
 }
 
-// TestStartAutonomyTool runs the tool path (non-blocking start + snapshot).
+// TestStartAutonomyTool runs the tool path: confirm mode creates a proposal and
+// only the approval starts the runner (R5).
 func TestStartAutonomyTool(t *testing.T) {
 	e, _, _ := newTestEngine(t)
 	call, artifact := e.executeToolCall(context.Background(), "start_autonomy", map[string]any{
@@ -348,9 +354,27 @@ func TestStartAutonomyTool(t *testing.T) {
 	if call.Error != "" {
 		t.Fatalf("start_autonomy: %s", call.Error)
 	}
-	status, ok := call.Result.(AutonomyStatus)
+	if artifact != nil {
+		t.Fatalf("proposal must not create an artifact, got %+v", artifact)
+	}
+	proposal := proposalOf(t, call)
+	if proposal.Tool != "start_autonomy" || proposal.Status != ProposalPending {
+		t.Fatalf("proposal = %+v", proposal)
+	}
+	if e.Status().Autonomy.Running {
+		t.Fatal("autonomy must not run before the approval")
+	}
+
+	approved, err := e.Approve(context.Background(), proposal.ID)
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if approved.Error != "" {
+		t.Fatalf("approved start_autonomy: %s", approved.Error)
+	}
+	status, ok := approved.Result.(AutonomyStatus)
 	if !ok {
-		t.Fatalf("autonomy result type = %T", call.Result)
+		t.Fatalf("autonomy result type = %T", approved.Result)
 	}
 	if status.Config.Symbol != "TQBR:SBER" || status.Config.Strategy != "sma_cross" {
 		t.Errorf("unexpected autonomy config: %+v", status.Config)
@@ -358,8 +382,8 @@ func TestStartAutonomyTool(t *testing.T) {
 	if status.Config.Budget != defaultAutonomyLimit {
 		t.Errorf("budget = %v, want default %v", status.Config.Budget, defaultAutonomyLimit)
 	}
-	if artifact == nil || artifact.Kind != "autonomy" {
-		t.Fatalf("artifact = %+v", artifact)
+	if !e.Status().Autonomy.Running {
+		t.Fatal("autonomy must run after the approval")
 	}
 	if err := e.StopAutonomy(); err != nil {
 		t.Fatalf("StopAutonomy: %v", err)

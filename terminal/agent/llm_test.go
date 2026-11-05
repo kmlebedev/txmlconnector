@@ -394,6 +394,13 @@ func TestChatNoFallbackAfterMutatingTool(t *testing.T) {
 	defer srv.Close()
 
 	e, broker := newLLMEngine(t, srv.URL, 2*time.Second)
+	// R5 gates mutating tools in the default confirm mode; this test exercises
+	// the "action already executed, then the LLM died" path, so the envelope
+	// auto-approves the small order.
+	e.cfg.Approval = ApprovalPolicy{
+		Mode:     ApprovalEnvelope,
+		Envelope: RiskLimits{MaxPositionPct: 100, MaxOrderPct: 100},
+	}
 	resp, err := e.Chat(context.Background(), ChatRequest{
 		Message: "купи 10 SBER по рынку", ConversationID: "conv-1",
 	})

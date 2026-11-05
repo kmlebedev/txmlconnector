@@ -37,14 +37,17 @@ type RiskLimits struct {
 
 // Config configures the agent engine.
 type Config struct {
-	LLM              LLMConfig        `json:"llm"`
-	Universe         []string         `json:"universe"`
-	DefaultSymbol    string           `json:"defaultSymbol"`
-	DefaultPeriodSec int              `json:"defaultPeriodSec"`
-	Risk             RiskLimits       `json:"risk"`
-	FeeBps           float64          `json:"feeBps"`
-	BacktestHistory  int              `json:"backtestHistory"`
-	Now              func() time.Time `json:"-"`
+	LLM              LLMConfig  `json:"llm"`
+	Universe         []string   `json:"universe"`
+	DefaultSymbol    string     `json:"defaultSymbol"`
+	DefaultPeriodSec int        `json:"defaultPeriodSec"`
+	Risk             RiskLimits `json:"risk"`
+	FeeBps           float64    `json:"feeBps"`
+	BacktestHistory  int        `json:"backtestHistory"`
+	// Approval is the human-in-the-loop policy of the mutating tools (§9.5):
+	// confirm (default) or an explicitly enabled envelope.
+	Approval ApprovalPolicy   `json:"approval"`
+	Now      func() time.Time `json:"-"`
 	// NewsStore is the optional recorded-news source of the get_news tool: the
 	// md.news table written by cmd/md-recorder. It is not part of the JSON
 	// contract; nil means the news recording pipeline is off and get_news

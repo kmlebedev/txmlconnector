@@ -58,6 +58,16 @@ type Engine struct {
 	backtests []backtest.Result
 	tools     []ToolInfo
 	autonomy  *autonomyRun
+
+	// proposals is the human-in-the-loop approval state of the mutating tools
+	// (§9.5). proposalMu guards the bounded ring, the executed results and the
+	// envelope auto-approval quota.
+	proposalMu      sync.Mutex
+	proposals       map[string]*Proposal
+	proposalOrder   []string
+	proposalResults map[string]ToolCall
+	proposalSeq     int64
+	autoApprovals   int
 }
 
 // New builds the agent engine. The data source is required; the paper broker
@@ -87,7 +97,9 @@ func New(cfg Config, data DataSource, broker Broker) (*Engine, error) {
 			}
 			return d
 		},
-		subs: make(map[int]func(Event)),
+		subs:            make(map[int]func(Event)),
+		proposals:       make(map[string]*Proposal),
+		proposalResults: make(map[string]ToolCall),
 	}
 	e.tools = buildTools()
 	return e, nil
@@ -148,6 +160,24 @@ func withDefaults(cfg Config) Config {
 	// base URL and a key the deterministic local analyst is used.
 	llm.Enabled = llm.BaseURL != "" && llm.APIKey != ""
 	cfg.LLM = llm
+
+	// Human-in-the-loop policy (§9.5): confirm is the safe default; the
+	// envelope mode is enabled only explicitly (phase F autonomy).
+	approval := cfg.Approval
+	switch approval.Mode {
+	case ApprovalEnvelope:
+		// Explicitly enabled; unset envelope limits fall back to Config.Risk at
+		// the approval gate.
+	case "", ApprovalConfirm:
+		approval.Mode = ApprovalConfirm
+	default:
+		// An unknown mode must never silently execute mutating tools.
+		approval.Mode = ApprovalConfirm
+	}
+	if approval.MaxOrdersPerRun < 0 {
+		approval.MaxOrdersPerRun = 0
+	}
+	cfg.Approval = approval
 	return cfg
 }
 

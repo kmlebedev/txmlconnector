@@ -804,6 +804,96 @@ func (s *Server) handleAgentBacktests(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }
 
+// --- agent proposals (R5) --------------------------------------------------
+
+// handleAgentProposals serves GET /api/agent/proposals.
+func (s *Server) handleAgentProposals(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Agent == nil {
+		writeUnavailable(w, "AI-агент недоступен")
+		return
+	}
+	proposals := s.deps.Agent.Proposals()
+	if proposals == nil {
+		proposals = []agent.Proposal{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"proposals": proposals})
+}
+
+// proposalResponse is the reply of one proposal mutation.
+type proposalResponse struct {
+	Proposal agent.Proposal  `json:"proposal"`
+	Result   *agent.ToolCall `json:"result,omitempty"`
+}
+
+// handleApproveProposal serves POST /api/agent/proposals/{id}/approve: the
+// approved tool call executes exactly once and its result is returned.
+func (s *Server) handleApproveProposal(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Agent == nil {
+		writeUnavailable(w, "AI-агент недоступен")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	ctx, cancel := requestContext(r, agentRequestTimeout)
+	defer cancel()
+	call, err := s.deps.Agent.Approve(ctx, id)
+	if err != nil {
+		s.mapProposalError(w, err)
+		return
+	}
+	proposal, ok := findProposal(s.deps.Agent.Proposals(), id)
+	if !ok {
+		writeInternal(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, proposalResponse{Proposal: proposal, Result: &call})
+}
+
+// handleRejectProposal serves POST /api/agent/proposals/{id}/reject.
+func (s *Server) handleRejectProposal(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Agent == nil {
+		writeUnavailable(w, "AI-агент недоступен")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if err := s.deps.Agent.Reject(id); err != nil {
+		s.mapProposalError(w, err)
+		return
+	}
+	proposal, ok := findProposal(s.deps.Agent.Proposals(), id)
+	if !ok {
+		writeInternal(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, proposalResponse{Proposal: proposal})
+}
+
+// findProposal returns the proposal with the given id from a snapshot.
+func findProposal(proposals []agent.Proposal, id string) (agent.Proposal, bool) {
+	for _, proposal := range proposals {
+		if proposal.ID == id {
+			return proposal, true
+		}
+	}
+	return agent.Proposal{}, false
+}
+
+// mapProposalError maps the approval lifecycle sentinels to the API codes of
+// §10: unknown -> 404, already handled -> 409, expired -> 410 gone.
+func (s *Server) mapProposalError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, agent.ErrProposalNotFound):
+		writeError(w, http.StatusNotFound, codeNotFound, "предложение не найдено")
+	case errors.Is(err, agent.ErrProposalHandled):
+		writeError(w, http.StatusConflict, codeConflict, "предложение уже обработано")
+	case errors.Is(err, agent.ErrProposalExpired):
+		writeError(w, http.StatusGone, codeProposalExpired, "срок подтверждения предложения истёк")
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "превышено время ожидания ответа")
+	default:
+		writeInternal(w)
+	}
+}
+
 // --- paper helpers ---------------------------------------------------------
 
 // paperSnapshot returns the paper account snapshot.

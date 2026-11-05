@@ -546,6 +546,19 @@ func newTestEngine(t *testing.T) (*Engine, *fakeDataSource, *fakeBroker) {
 	return e, data, broker
 }
 
+// newTestEngineEnvelope builds a test engine with the explicitly enabled
+// envelope approval mode (R5 turns orders into proposals in the default confirm
+// mode), so tests of the direct execution paths stay focused.
+func newTestEngineEnvelope(t *testing.T) (*Engine, *fakeDataSource, *fakeBroker) {
+	t.Helper()
+	e, data, broker := newTestEngine(t)
+	e.cfg.Approval = ApprovalPolicy{
+		Mode:     ApprovalEnvelope,
+		Envelope: RiskLimits{MaxPositionPct: 100, MaxOrderPct: 100},
+	}
+	return e, data, broker
+}
+
 // newTestEngineWith builds an Engine with the given config and fakes.
 func newTestEngineWith(t *testing.T, cfg Config, data DataSource, broker Broker) *Engine {
 	t.Helper()
