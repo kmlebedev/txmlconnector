@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/session"
 )
 
@@ -52,7 +53,17 @@ func (c *Client) OptionFamilies(ctx context.Context, underlying model.Symbol) ([
 func (c *Client) FamilyStrikes(ctx context.Context, family string) ([]model.Strike, error) {
 	_ = ctx
 	_ = family
+	if !c.optionsSupported() {
+		return nil, session.ErrUnsupportedRequest
+	}
 	return nil, fmt.Errorf("family id mapping is not recovered (I)")
+}
+
+// optionsSupported reports whether the server protocol passes the DLL gate of
+// RQ_FAMILY_STRIKES/RQ_CERTAIN_OPTIONS (session.OptionsMinProtocol).
+func (c *Client) optionsSupported() bool {
+	info := c.Info()
+	return info != nil && info.Protocol >= session.OptionsMinProtocol
 }
 
 // Options is get_options: RQ_CERTAIN_OPTIONS 151 with the Z25 opt_code list
@@ -61,6 +72,9 @@ func (c *Client) FamilyStrikes(ctx context.Context, family string) ([]model.Stri
 func (c *Client) Options(ctx context.Context, req model.OptionsRequest) ([]model.Option, error) {
 	if len(req.OptCodes) == 0 {
 		return nil, fmt.Errorf("No seccodes found")
+	}
+	if !c.optionsSupported() {
+		return nil, session.ErrUnsupportedRequest
 	}
 	conn := c.connection()
 	if conn == nil {
@@ -77,7 +91,7 @@ func (c *Client) Options(ctx context.Context, req model.OptionsRequest) ([]model
 func optionsServerMessage(err error) (string, bool) {
 	var reply *session.OptionsServerError
 	if errors.As(err, &reply) {
-		return reply.Message, true
+		return records.DecodeCP1251(reply.Message), true
 	}
 	return "", false
 }

@@ -36,6 +36,8 @@ func TestConnectorOptionFamilies(t *testing.T) {
 	}{
 		{"ok", optionFixture(t, "option-families-reply-ok.hex"), true, ""},
 		{"error", optionFixture(t, "option-families-reply-error.hex"), false, "No families"},
+		// S (demo 2026-11-05): the server has no options service; CP1251 text.
+		{"no service", optionFixture(t, "option-families-reply-231-live.hex"), false, "[231]Информационный сервис опционов недоступен"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newRunServer(t)
@@ -74,6 +76,7 @@ func TestConnectorOptionFamilies(t *testing.T) {
 func TestConnectorGetOptions(t *testing.T) {
 	srv := newRunServer(t)
 	srv.Snapshot = clientSnapshot(t)
+	srv.Protocol = session.OptionsMinProtocol
 	var captured []byte
 	srv.Handle(session.RqCertainOptions, func(payload []byte) (byte, []byte) {
 		captured = append([]byte(nil), payload...)
@@ -129,7 +132,7 @@ func TestConnectorFamilyStrikesErrors(t *testing.T) {
 	}{
 		{"no mat_date", "<command id=" + quote + "get_family_strikes" + quote + "/>", "No mat_date found"},
 		{"bad mat_date", "<command id=" + quote + "get_family_strikes" + quote + "><mat_date>2026-02-01</mat_date></command>", "Failed to parse mat_date=2026-02-01"},
-		{"valid mat_date", "<command id=" + quote + "get_family_strikes" + quote + "><mat_date>01.02.2026</mat_date></command>", "family id mapping is not recovered (I)"},
+		{"valid mat_date below the version gate", "<command id=" + quote + "get_family_strikes" + quote + "><mat_date>01.02.2026</mat_date></command>", "<message>Unsupported request.</message>"},
 	}
 	for _, tc := range cases {
 		if got := send(t, c, tc.cmd); !strings.Contains(got, tc.want) {
@@ -203,5 +206,34 @@ func TestOptionFamiliesNoDuplicate(t *testing.T) {
 	rec.mu.Unlock()
 	if count != 1 {
 		t.Fatalf("<option_families> callbacks = %d, want 1 (no command-side duplicate)", count)
+	}
+}
+
+// TestConnectorOptionsVersionGate: get_family_strikes (153) and get_options
+// (151) are refused locally while the server protocol (PRO# of RQ_PWD, DLL
+// +0x694 via FUN_180257680) is below 0x45 (D: FUN_1803b9950/FUN_1803b9cd0;
+// S demo PRO#=68: only 149 reached the server, the DLL answered as below).
+func TestConnectorOptionsVersionGate(t *testing.T) {
+	srv := newRunServer(t)
+	srv.Snapshot = clientSnapshot(t)
+	srv.Protocol = 68
+	c := New(Config{Dial: srv.Dial})
+	rec := newRecorder()
+	if err := c.Start(rec.handle); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	send(t, c, connectCommand())
+	rec.next(t, "<server_status")
+	strikes := "<command id=" + quote + "get_family_strikes" + quote + "><mat_date>17.12.2026</mat_date></command>"
+	if got, want := send(t, c, strikes), "<result success="+quote+"false"+quote+"><message>Unsupported request.</message></result>"; got != want {
+		t.Fatalf("get_family_strikes = %s, want %s", got, want)
+	}
+	options := "<command id=" + quote + "get_options" + quote + "><opt_code>Si76000BL6</opt_code></command>"
+	if got, want := send(t, c, options), "<result success="+quote+"false"+quote+"/>"; got != want {
+		t.Fatalf("get_options = %s, want %s", got, want)
+	}
+	if n := countRequests(srv, session.RqCertainOptions) + countRequests(srv, session.RqFamilyStrikes); n != 0 {
+		t.Fatalf("%d gated requests reached the server", n)
 	}
 }
