@@ -52,14 +52,18 @@ jobs:
             cc: clang
             abi: true
             libs: -Ldist -ltxmlconnector
+          # macos-13 (Intel) is not available on public GitHub runners as of
+          # 2026-11; build amd64 on the arm64 runner with clang -arch x86_64
+          # (CGO cross works) and run the ABI test through Rosetta (best effort).
           - name: macos-amd64
-            os: macos-13
+            os: macos-14
             goarch: amd64
             lib: libtxmlconnector.dylib
             extra: libtxmlconnector64.dylib
             cc: clang
             abi: true
             libs: -Ldist -ltxmlconnector
+            cross: true
 
     steps:
       - uses: actions/checkout@v4
@@ -94,7 +98,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          CGO_ENABLED=1 CC="${{ matrix.cc }}" GOARCH="${{ matrix.goarch }}" \
+          CGO_ENABLED=1 CC="${{ matrix.cc }}${{ matrix.cross && ' -arch x86_64' || '' }}" GOARCH="${{ matrix.goarch }}" \
             go build -buildmode=c-shared -trimpath -buildvcs=false \
             -ldflags "-s -w -X main.defaultVersion=6.47.2.26.4" \
             -o "dist/${{ matrix.lib }}" ./cmd/connector
@@ -106,7 +110,7 @@ jobs:
         run: cp "dist/${{ matrix.lib }}" "dist/${{ matrix.extra }}"
 
       - name: C ABI test (linux/macos)
-        if: matrix.abi
+        if: matrix.abi && !matrix.cross
         shell: bash
         run: |
           ${{ matrix.cc }} -I cmd/connector/include -o dist/abi_test \
@@ -116,6 +120,15 @@ jobs:
           else
             LD_LIBRARY_PATH=dist ./dist/abi_test "dist/${{ matrix.lib }}"
           fi
+
+      - name: C ABI test (cross macOS via Rosetta, best effort)
+        if: matrix.cross
+        continue-on-error: true
+        shell: bash
+        run: |
+          ${{ matrix.cc }} -arch x86_64 -I cmd/connector/include -o dist/abi_test \
+            cmd/connector/testdata/abi_test.c ${{ matrix.libs }}
+          arch -x86_64 env DYLD_LIBRARY_PATH=dist ./dist/abi_test "dist/${{ matrix.lib }}"
 
       # Windows/mingw ABI test is best effort for C3: it validates the DLL and the
       # header, but the final Windows live check is C4.
