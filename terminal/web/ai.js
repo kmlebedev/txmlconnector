@@ -72,7 +72,7 @@ const QUICK_PROMPTS = [
 ];
 
 export class AIDrawer {
-  constructor({ root, backdrop, store, api, chart, onToast = () => {}, onOpenBacktests = () => {} }) {
+  constructor({ root, backdrop, store, api, chart, onToast = () => {}, onOpenBacktests = () => {}, getScreenContext = () => null }) {
     this.root = root;
     this.backdrop = backdrop;
     this.store = store;
@@ -80,6 +80,9 @@ export class AIDrawer {
     this.chart = chart;
     this.onToast = onToast;
     this.onOpenBacktests = onOpenBacktests;
+    // Returns the visible screen (chart window/selection, active tab); it is
+    // attached to every chat request so the model sees what the user sees.
+    this.getScreenContext = getScreenContext;
     this.equityCharts = [];
     // Dialog id of the bounded conversation history kept by the backend. The
     // first request sends none and stores the id the response returns.
@@ -521,6 +524,8 @@ export class AIDrawer {
         periodSec: state.periodSec,
       };
       if (this.conversationId) payload.conversationId = this.conversationId;
+      const context = this.getScreenContext ? this.getScreenContext() : null;
+      if (context) payload.context = context;
       const response = await this.api.agentChat(payload);
       if (response && response.conversationId) this.conversationId = response.conversationId;
       const assistant = {
