@@ -278,6 +278,7 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		var req struct {
 			Filter     string `xml:"filter"`
 			FilterAttr string `xml:"filter,attr"`
+			SecID      *int   `xml:"secid"`
 			Securities []struct {
 				Board   string `xml:"board"`
 				SecCode string `xml:"seccode"`
@@ -292,6 +293,10 @@ func (c *Connector) SendCommand(ctx context.Context, command string) (string, er
 		c.mu.Unlock()
 		if client == nil {
 			return failure(msgNeedsConnection), nil
+		}
+		if req.SecID != nil {
+			// S: the board/seccode form is required; <secid> is Wrong security format.
+			return failure("Wrong security format."), nil
 		}
 		filter := strings.EqualFold(req.Filter, "true") || strings.EqualFold(req.FilterAttr, "true")
 		var reqs []TickRequest
@@ -1502,6 +1507,8 @@ func (c *Connector) run(ctx context.Context, done chan struct{}, req commands.Co
 				c.emit(xmlcompat.MessagesXML(e.Items))
 			case *model.Tick:
 				c.emit(xmlcompat.TicksXML([]model.Tick{*e}))
+			case *model.Ticks:
+				c.emit(xmlcompat.TicksXML(e.Items))
 			case *model.OptionFamily:
 				c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{*e}))
 			case *model.OptionStrikes:
@@ -1614,6 +1621,9 @@ func (c *Connector) open(ctx context.Context, req commands.Connect, timeout time
 				}
 				if tick, ok := ev.(*model.Tick); ok {
 					c.emit(xmlcompat.TicksXML([]model.Tick{*tick}))
+				}
+				if ticks, ok := ev.(*model.Ticks); ok {
+					c.emit(xmlcompat.TicksXML(ticks.Items))
 				}
 				if family, ok := ev.(*model.OptionFamily); ok {
 					c.emit(xmlcompat.OptionFamiliesXML([]model.OptionFamily{*family}))

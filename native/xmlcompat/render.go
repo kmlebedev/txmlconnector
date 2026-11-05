@@ -62,6 +62,8 @@ func Render(c *records.Catalog, ev model.Event, opt Options) (string, bool) {
 		return MessagesXML(e.Items), true
 	case *model.Tick:
 		return TicksXML([]model.Tick{*e}), true
+	case *model.Ticks:
+		return TicksXML(e.Items), true
 	case *model.OptionFamily:
 		return OptionFamiliesXML([]model.OptionFamily{*e}), true
 	case *model.OptionStrikes:

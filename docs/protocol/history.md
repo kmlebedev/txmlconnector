@@ -214,3 +214,5 @@ connection» (повторный snapshot ломает состояние) — �
   (secid/board/seccode/tradeno/tradetime/price/quantity/period/buysell) и эмитится Connector.Run.
 - RQ_TICKS(13) в command path не используется (S: на проде ни одного type=13); `Client.PollTicks`
   оставлен только как legacy D/I API (не вызывается коннектором).
+
+- T14 review-fix: tradeno/time накапливаются per (secid,board) через RQ_MAIN-записи, zero-time -> начало текущего UTC дня; один 0x5a record даёт batch *model.Ticks и один `<ticks>` с несколькими `<tick>`; `subscribe_ticks` с `<secid>` -> `Wrong security format.`

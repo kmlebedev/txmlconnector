@@ -48,6 +48,9 @@ func (c *Client) resetAccountsLocked() {
 	c.secPositionOrder = nil
 	// R_SEC_RATE prices are per-secid and must not leak into a new session.
 	c.marginRates = nil
+	c.tickTradeNos = nil
+	c.tickTimes = nil
+	c.newsBodyRequest = 0
 }
 
 func decodeClientNew(c *Client, body []byte) ([]model.Event, error) {
