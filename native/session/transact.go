@@ -29,6 +29,8 @@ const (
 	TxNewOrder TxKind = 1
 	// TxCancelOrder is TRN_CANCELORDER.
 	TxCancelOrder TxKind = 2
+	// TxMoveOrder is TRN_MOVEORDER (S payload 02 01 <txid> 00).
+	TxMoveOrder TxKind = 0x02
 	// TxNewRpsRepo is TRN_NEWRPSREPO (O payload prefix 0x04).
 	TxNewRpsRepo TxKind = 0x04
 	// TxNewRepoOrder is TRN_NEWREPOORDER (O payload prefix 0x0e).

@@ -190,7 +190,7 @@ lot_volume, isin, regnumber, buybackprice, buybackdate, currencyid`; пусты�
 - `subscribe`/`unsubscribe` поддерживают `<alltrades>`, `<quotations>` и `<quotes>` (фаза 2; первые блоки, см. раздел подписок).
 - `get_securities` отдаёт `<result success="true"/>` и колбэк `<securities>` со всем каталогом, элемент в элемент как DLL (`FUN_18011f4a0`, см. [dictionaries.md](dictionaries.md)).
 - `get_server_id`, `get_servtime_difference` и `get_markets` реализованы по R6 (`native/testdata/service-dll.xml`): SID и рынки из кэша без сети, разница времени — через RQ_TIME, ответ с атрибутом `diff` (см. ниже).
-- В `dllCommands` 45 имён; реализовано 43, pending — только `moveorder`/`makeordown` (ждут демо-цикл T19). Pending-команды отвечают `Command is not implemented by the native connector.`, а без соединения — сообщением DLL.
+- В `dllCommands` 45 имён; реализовано 45, pending пуст. `moveorder` — S-payload/валидации, успешный активный сценарий I; `makeordown` обрабатывается (transactionid — атрибут), но RQ_MAKE_COND_OWN payload не восстановлен — explicit I error.
 - `get_connector_version` возвращает `6.47.2.26.4-native`: версию DLL, поведение которой воспроизводится, с пометкой реализации.
 - Колбэки доставляются по порядку из одной горутины, как из потока колбэков DLL.
 
