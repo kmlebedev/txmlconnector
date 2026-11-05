@@ -78,3 +78,21 @@ Frontmatter (обязательно):
 - Метрики моделей — вывод (**I**): их считает движок терминала; живые прогоны только по согласию.
 - Каталог паттернов лежит вне git; в репозитории живёт только сам навык `trading-pattern-author`.
 
+
+## 8. Работа вне DSH: установка через npx и MCP
+
+Навык переносим: DSH-провайдер плагина читает этот же файл из \`skills/\` (один источник, без
+копий), а другие агенты ставят его командой:
+
+\`\`\`
+npx skills add github.com/kmlebedev/txmlconnector --skill trading-pattern-author
+\`\`\`
+
+Вне DSH данные для Evidence берутся теми же REST-инструментами, что и в DSH: MCP \`/mcp\` с
+заголовком \`X-Terminal-Token\` или \`trading-terminal/scripts/terminal.sh\` (\`vol\`, \`news\`,
+\`backtest\`, \`history\`). Токен (\`TERMINAL_API_TOKEN\`) и креды TRANSAQ (\`TC_LOGIN\`,
+\`TC_PASSWORD\`) живут только в \`.env\`, никогда — в чате, промпте или SKILL.md.
+
+Черновики и validated-паттерны лежат вне git в \`<dataDir>/skills\`: в репозиторий паттерн попадает
+только через PR человека. Реальные заявки недоступны: validated не включает live.
+

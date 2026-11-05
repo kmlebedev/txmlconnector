@@ -75,6 +75,29 @@ make terminal && ./bin/terminal -mode offline   # http://127.0.0.1:8090, без 
 `go run ./tools/native-soak` при `TC_SOAK=1`; `TC_SOAK_DURATION` принимает `300` и `300s`; без env он завершается сразу.
 
 
+## Переносимые навыки AI-терминала (`npx skills add`)
+
+Навыки работы с терминалом лежат в репозитории ([`skills/`](skills/README.md)) и ставятся одной
+командой в Cursor, Claude Code, Qwen Code или Codex — без DSH и без MCP:
+
+```bash
+npx skills add github.com/kmlebedev/txmlconnector --skill trading-terminal
+npx skills add github.com/kmlebedev/txmlconnector --skill trading-pattern-author
+npx skills add github.com/kmlebedev/txmlconnector --skill trading-automation-author
+```
+
+- `trading-terminal` — котировки, свечи, стакан, бэктест по `rules.Spec`, walk-forward, новости и
+  прогноз волатильности через REST (read-only скрипт `skills/trading-terminal/scripts/terminal.sh`)
+  или MCP `/mcp` запущенного `bin/terminal`.
+- `trading-pattern-author` — как оформить паттерн из исследования: out-of-sample доказательства,
+  deflated Sharpe/PBO, promotion policy; паттерны живут вне git.
+- `trading-automation-author` — превращение повторяющихся вычислений агента в задачи автоматизации.
+
+Токен терминала (`TERMINAL_API_TOKEN`) и креды TRANSAQ (`TC_LOGIN`/`TC_PASSWORD`) — только в
+`.env`, никогда в чате, промпте или коммите; реальные заявки недоступны (paper-only).
+В DSH те же навыки отдаёт провайдер плагина `dsh-ai-terminal` — один источник, без копий.
+Подробнее: [skills/README.md](skills/README.md).
+
 ## C ABI библиотека (drop-in для DLL)
 
 `cmd/connector` собирает `libtxmlconnector.so`, `libtxmlconnector.dylib` или
