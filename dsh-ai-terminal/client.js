@@ -18,6 +18,7 @@ window.__ModuleLoader__.load({
     const STATUS_URL = '/ai-terminal-ctl/status';
     const RESTART_URL = '/ai-terminal-ctl/restart';
     const TERMINAL_URL = '/ai-terminal/';
+    const PROPOSALS_URL = '/ai-terminal/api/agent/proposals';
 
     const en = {
       panel: 'AI terminal',
@@ -245,6 +246,167 @@ window.__ModuleLoader__.load({
       }, children);
     }
 
+
+    // --- Harness tool cards (plan Task 9) ---------------------------------
+    //
+    // One tool.call.toolview component per bridged Go tool. The structured data
+    // comes from the Host bridge as output.presentationMeta, which the Harness
+    // pipeline persists in tool/result.meta and the Chat view hands over as
+    // block.meta.
+
+    const CARD = {
+      root: {
+        border: `1px solid ${COLORS.border}`,
+        borderRadius: '8px',
+        padding: '10px 12px',
+        margin: '6px 0',
+        background: COLORS.layer,
+        color: COLORS.text,
+        fontSize: '12px',
+        maxWidth: '620px',
+      },
+      head: { display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' },
+      title: { fontSize: '12.5px', fontWeight: 600 },
+      sub: { color: COLORS.secondary, fontSize: '11px', marginLeft: 'auto', whiteSpace: 'nowrap' },
+      grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(108px, 1fr))', gap: '6px 12px' },
+      cell: { display: 'flex', flexDirection: 'column', gap: '1px' },
+      label: { color: COLORS.secondary, fontSize: '10.5px' },
+      value: { fontSize: '12.5px', fontWeight: 600, fontVariantNumeric: 'tabular-nums' },
+      actions: { display: 'flex', gap: '6px', marginTop: '8px' },
+      note: { color: COLORS.secondary, fontSize: '11px', marginTop: '6px', lineHeight: 1.4 },
+      error: { color: COLORS.error, fontSize: '11px', marginTop: '4px' },
+    };
+
+    /** Format a number the Russian way: comma separator, fixed digits. */
+    function cardNumber(value, digits = 2) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+      return value.toFixed(digits).replace('.', ',');
+    }
+
+    /** One labelled value cell of a tool card. */
+    function cardCell(label, value) {
+      return h('div', { style: CARD.cell },
+        h('span', { style: CARD.label }, label),
+        h('span', { style: CARD.value }, value));
+    }
+
+    /** Polyline path of an equity curve (values only; time axis is uniform). */
+    function equityPolyline(equity) {
+      const values = equity
+        .map((point) => (point && typeof point.value === 'number' ? point.value : Number(point)))
+        .filter((value) => Number.isFinite(value));
+      if (values.length < 2) return '';
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const span = max - min || 1;
+      return values.map((value, index) => {
+        const x = (index / (values.length - 1)) * 200;
+        const y = 38 - ((value - min) / span) * 36;
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+    }
+
+    /** Wait frame of a tool card before its result arrives. */
+    function toolCardWaiting(label) {
+      return h('div', { style: CARD.root }, h('span', { style: CARD.sub }, label));
+    }
+
+    /** GET /api/backtest reply card. */
+    function BacktestToolCard({ phase, block }) {
+      const meta = block && block.meta && block.meta.kind === 'backtest' ? block.meta : null;
+      if (phase !== 'result' || meta === null) return toolCardWaiting('Бэктест выполняется…');
+      const metrics = meta.metrics || {};
+      const points = equityPolyline(Array.isArray(meta.equity) ? meta.equity : []);
+      return h('div', { style: CARD.root },
+        h('div', { style: CARD.head },
+          h('span', { style: CARD.title }, 'Бэктест · ' + (meta.strategy || '—')),
+          h('span', { style: CARD.sub }, meta.symbol || '')),
+        h('div', { style: CARD.grid },
+          cardCell('Доходность', cardNumber(metrics.totalReturnPct) + '%'),
+          cardCell('Просадка', cardNumber(metrics.maxDrawdownPct) + '%'),
+          cardCell('Сделок', String(metrics.trades ?? '—')),
+          cardCell('Sharpe', cardNumber(metrics.sharpe))),
+        points
+          ? h('svg', {
+            viewBox: '0 0 200 40',
+            width: '100%',
+            height: 40,
+            preserveAspectRatio: 'none',
+            role: 'img',
+            'aria-label': 'Кривая доходности бэктеста',
+            style: { display: 'block', marginTop: '8px' },
+          }, h('polyline', { points, fill: 'none', stroke: COLORS.accent, strokeWidth: 1.6 }))
+          : null,
+        Array.isArray(meta.warnings) && meta.warnings.length > 0
+          ? h('div', { style: CARD.note }, meta.warnings.join(' · '))
+          : null);
+    }
+
+    /** GET /api/agent/tools/get_quote reply card. */
+    function QuoteToolCard({ phase, block }) {
+      const meta = block && block.meta && block.meta.kind === 'quote' ? block.meta : null;
+      if (phase !== 'result' || meta === null) return toolCardWaiting('Запрашиваю котировку…');
+      const change = typeof meta.changePct === 'number' ? meta.changePct : null;
+      return h('div', { style: CARD.root },
+        h('div', { style: CARD.head },
+          h('span', { style: CARD.title }, 'Котировка · ' + (meta.symbol || '—')),
+          h('span', { style: CARD.sub }, change === null ? '' : (change >= 0 ? '+' : '') + cardNumber(change) + '%')),
+        h('div', { style: CARD.grid },
+          cardCell('Последняя', cardNumber(meta.last)),
+          cardCell('Bid', cardNumber(meta.bid)),
+          cardCell('Ask', cardNumber(meta.ask))));
+    }
+
+    /** POST /api/agent/proposals/{id}/approve|reject. */
+    async function proposalAction(id, action) {
+      const response = await fetch(PROPOSALS_URL + '/' + encodeURIComponent(id) + '/' + action, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Accept: 'application/json' },
+        body: '{}',
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = data && data.error && data.error.message ? data.error.message : 'HTTP ' + response.status;
+        throw new Error(message);
+      }
+      return data;
+    }
+
+    /** A pending mutating tool proposal with approve/reject controls. */
+    function ProposalToolCard({ phase, block }) {
+      const proposal = block && block.meta && block.meta.kind === 'proposal' ? block.meta.proposal : null;
+      const [status, setStatus] = React.useState(proposal ? proposal.status : 'pending');
+      const [busy, setBusy] = React.useState(false);
+      const [error, setError] = React.useState('');
+      if (phase !== 'result' || proposal === null) return toolCardWaiting('Готовлю предложение…');
+      const decide = async (action) => {
+        setBusy(true);
+        setError('');
+        try {
+          const data = await proposalAction(proposal.id, action);
+          const next = data && data.proposal && data.proposal.status ? data.proposal.status : (action === 'approve' ? 'executed' : 'rejected');
+          setStatus(next);
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure));
+        } finally {
+          setBusy(false);
+        }
+      };
+      const pending = status === 'pending';
+      return h('div', { style: CARD.root },
+        h('div', { style: CARD.head },
+          h('span', { style: CARD.title }, 'Требуется подтверждение'),
+          h('span', { style: CARD.sub }, String(status))),
+        h('div', { style: CARD.note }, proposal.summary || String(proposal.tool || '')),
+        h('div', { style: CARD.note }, 'Действие не выполнено, пока вы его не подтвердите.'),
+        pending
+          ? h('div', { style: CARD.actions },
+            h(Button, { onClick: () => decide('approve'), primary: true, disabled: busy }, 'Подтвердить'),
+            h(Button, { onClick: () => decide('reject'), disabled: busy }, 'Отклонить'))
+          : null,
+        error ? h('div', { style: CARD.error }, error) : null);
+    }
+
     function TerminalPanel({ t }) {
       const [status, setStatus] = React.useState({ phase: 'loading', message: '' });
       const [reloadKey, setReloadKey] = React.useState(0);
@@ -344,6 +506,22 @@ window.__ModuleLoader__.load({
         label: () => t('panel'),
         locale: NS,
       }, TerminalPanelIcon));
+
+      // Chat cards of the bridged terminal tools (plan Task 9); the key is the
+      // wire tool name registered by the Host half.
+      const toolView = (key, Component) => ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
+        name: 'tool.call.toolview',
+        key,
+        locale: NS,
+      }, Component));
+      toolView('terminal_run_backtest', BacktestToolCard);
+      toolView('terminal_get_quote', QuoteToolCard);
+      // A proposal is the canonical result of a gated mutating tool, so the
+      // same card is keyed by those wire names; terminal_proposal is the
+      // generic plan key for a proposal surfaced on its own.
+      for (const key of ['terminal_proposal', 'terminal_place_order', 'terminal_cancel_order', 'terminal_start_autonomy']) {
+        toolView(key, ProposalToolCard);
+      }
     }
 
     return { inject: ['slots', 'locale'], apply };

@@ -73,6 +73,21 @@ ctx.tools.register(defineTool({
   карточку рисует слот tool.call.toolview по аргументам/контенту/мете (S: dsh-tools/README.md:99).
 - Model-visible result — канонический JSON объявленного output.schema; ошибка инструмента
   становится обычным error result и не завершает turn (S: dsh-tools/README.md:35-37,129).
+- **defineTool не обязателен.** ctx.tools.register принимает обычный ToolDefinition:
+  {name, description, parameters (raw JSON Schema), output:{schema, render, presentationMeta?},
+  execute(args, exec)}; registry проверяет только output.schema и не прогоняет parameters через
+  author-DSL (S: dsh-tools/lib/types/index.js:434-445; projectToolSchema — schema.js:362-368).
+  defineTool — лишь сахар «DSL → raw JSON Schema» + валидация аргументов модели
+  (S: dsh-tools/lib/index.js:311-360). Поэтому плагин может НЕ импортировать
+  @deepseek-ai/dsh-tools (проверено реализацией T9: dsh-ai-terminal/tools.js).
+- output.schema: {} (пустая схема) принимается registry и пропускает любой lossless JSON;
+  {type:'json'} — это только author-DSL defineTool, в raw-подмножестве такого типа НЕТ
+  (S: dsh-tools/lib/shared-DTdn5dXO.js:44-58,140-232; pipeline.js:713).
+- output.presentationMeta(args, value) персистится в tool/result.meta: pipeline вычисляет
+  meta = presentationMeta(args, value) и кладёт её в результат (S: dsh-tools/lib/pipeline.js:724-749,764);
+  Web-клиент получает её как block.meta в пропсах tool.call.toolview
+  (S: dsh-client-ui-tool/lib/client.js:1920-2040). Это единственный структурированный канал
+  данных для карточки (модель видит только render-контент).
 
 ### 2.2 ctx.llm.stream — S
 
@@ -316,21 +331,32 @@ dsh-client-ui-conversation/lib/client.js:15340-15375.
 
 ## 4. Как это ложится на задачи 9–10
 
-### Task 9 — инструменты терминала как инструменты Harness
+### Task 9 — инструменты терминала как инструменты Harness (реализовано)
 
-- Каждый ToolInfo из Go (GET /api/agent/tools) регистрируется как
-  ctx.tools.register(defineTool({...})); при рестарте бэкенда — перерегистрация (S: API выше).
-- **Требуется конвертер JSON Schema → DSL** (dsh-tools/lib/index.js:59-228): Go отдаёт JSON-Schema
-  (required: [...], без additionalProperties), а defineTool принимает «поле → value-schema» с
-  булевым required и обязательным additionalProperties у объектов. Прямая передача сырой
-  JSON Schema не подтверждена (I; для нетипизированных аргументов есть author-node json →
-  annotation-only schema, S: dsh-tools/lib/index.js:165+).
-- output.render — текстовый итог для модели; клиентская карточка — регистрация tool.call.toolview
-  по wire-имени (terminal_<name>), owner-props: callId, toolName, phase, block, loadImage,
-  openFile/inspect (S: dsh-client-ui-tool/README.md:39-49).
-- exec.signal — обязательный мост отмены: fetch(..., {signal: exec.signal}) к Go-бэкенду
-  (Review Focus 5 плана) (S: dsh-tools/README.md:129).
-- presentCall/presentResult не использовать для Web-карточек (S: dsh-tools/README.md:99).
+Реализация T9 (состояние 2026-11-06, ветка plan/ai-terminal-a):
+
+- Go: POST /api/agent/tools/{name}/invoke (terminal/api/tools_invoke.go) + публичные
+  Engine.Invoke и ProposalFromResult (terminal/agent/invoke.go); ответ
+  {result|error, artifact?, proposal?}; неизвестный инструмент — 404, ошибка инструмента — 200 с
+  полем error; мутирующий инструмент в confirm-режиме возвращает proposal (S: тесты
+  terminal/api/tools_invoke_test.go).
+- Host-мост: dsh-ai-terminal/tools.js регистрирует terminal_<name> по каталогу
+  GET /api/agent/tools, использует **обычный ToolDefinition с raw JSON Schema**
+  (Path A, без импорта @deepseek-ai/dsh-tools) и нормализатор Go-схем; при рестарте бэкенда
+  регистрации пересоздаются (index.js: TerminalBackend.onRunning/onStopped), при остановке —
+  снимаются. exec.signal прокидывается в fetch как AbortSignal (обрыв запроса к Go).
+- output.render — текстовый итог для модели; output.presentationMeta — компактные данные карточки
+  (metrics/equity ≤60 точек, quote, proposal), клиент рисует их через tool.call.toolview по
+  wire-имени terminal_<name> (owner-props: callId, toolName, phase, block, block.meta, loadImage,
+  openFile/inspect; S: dsh-client-ui-tool/README.md:39-49, lib/client.js:1985-2005).
+  Карточка proposal зарегистрирована и под generic-ключом terminal_proposal (ключ из плана), и
+  под wire-именами gated-инструментов terminal_place_order/terminal_cancel_order/
+  terminal_start_autonomy: proposal приходит как канонический результат именно их вызова, а
+  tool.call.toolview выбирается только по wire-имени инструмента (S: lib/client.js:2020-2040).
+- presentCall/presentResult не используются для Web-карточек (S: dsh-tools/README.md:99).
+- **Ручная проверка Step 5 (модель вызывает terminal_run_backtest в живой DSH-сессии) НЕ
+  выполнялась** — нужен перезапуск Harness и живой LLM; скриншот не создавался. Для node-тестов
+  клиентская половина поднимается с fake window.__ModuleLoader__ и stub React без Harness.
 
 ### Task 10 — один LLM, навыки, панели, MCP
 
@@ -361,7 +387,9 @@ dsh-client-ui-conversation/lib/client.js:15340-15375.
 
 | План говорит | Факт установленного Harness | Статус |
 |---|---|---|
-| ctx.tools.register(defineTool({… parameters, output:{schema, render}, execute(args, exec)})) | Подтверждено; parameters — DSL, не JSON Schema; у object-узлов обязателен additionalProperties; required — булев внутри поля | S |
+| ctx.tools.register(defineTool({… parameters, output:{schema, render}, execute(args, exec)})) | Подтверждено; но defineTool не обязателен: register принимает обычный ToolDefinition с raw JSON Schema в parameters. Для T9 выбран Path A без импорта @deepseek-ai/dsh-tools; Go-схемы проходят raw-подмножество после нормализации schema-valued additionalProperties → true | S |
+| (не в плане) структурированные данные карточки | output.presentationMeta персистится в tool/result.meta и доходит до клиента как block.meta в tool.call.toolview | S |
+| (не в плане) output.schema | {} (пустая схема) принимает любой lossless JSON; {type:'json'} в raw-подмножестве не существует | S |
 | ctx.llm.stream({provider, model, messages, tools?, temperature?, maxTokens?}) | Подтверждено; tool_choice нет; ответ — сырые чанки + обязательный terminal finish; tools требуют toolHistory внутри agent-loop | S |
 | ctx.skills.registerProvider(() => ({name, list(), get()})) | Фабрика получает control (signal, invalidate()), возвращает {name, list(), get()}; регистрация синхронная, возвращает disposer | S (уточнение) |
 | ctx.workflowEngine.start({script, meta, args}) | Подтверждено; плюс parent, signal; run: id/meta/result/cancel(reason?)/dispose(), result не reject, dispose() обязателен | S |
@@ -376,9 +404,11 @@ dsh-client-ui-conversation/lib/client.js:15340-15375.
 
 ## 6. Открытые вопросы (I)
 
-1. Примет ли defineTool сырую JSON Schema (JsonSchemaNode) вместо DSL — в bundled JS виден только
-   компилятор DSL; для Task 9 закладывать конвертер JSON Schema → DSL (обязательный
-   additionalProperties, булев required).
+1. ~~Примет ли defineTool сырую JSON Schema~~ — закрыт: defineTool принимает только author-DSL;
+   сырую схему принимает ctx.tools.register через обычный ToolDefinition (Path A, T9 так и
+   реализован). Остаточный вопрос: нормализатор вырезает неизвестные ключи с warning — при
+   расширении Go-схем (format/min/max/pattern) их надо либо эмулировать, либо продолжать
+   релаксировать.
 2. Точный путь доступа к insertQuote из чужого Client-плагина: standard prop inputActions в
    компоненте слота подтверждён; ctx.uiConversation.inputActions — не подтверждён.
 3. ctx.sessionController.createSession DTO (request.agentPreset, cwd, …) и возвращаемый тип в
@@ -413,13 +443,17 @@ dsh-client-ui-conversation/lib/client.js:15340-15375.
 | conversation.input.dock | dsh-client-ui-conversation/README.md:110 |
 | insertQuote/inputActions | dsh-client-ui-conversation/README.md:65,102; lib/client.js:15340-15375,22778 |
 | context menus | dsh-client-ui-context-menu/README.md:29-55 |
+| Плейн ToolDefinition / output.schema / presentationMeta | dsh-tools/lib/types/index.js:434-445; dsh-tools/lib/types/schema.js:362-368; dsh-tools/lib/pipeline.js:713-731,749,764 |
 | MCP client (строки) | dsh-mcp-client/README.md:31-54,90-94; dsh-mcp-client/lib/index.js:837 |
 | Web-композиция/провайдер по умолчанию | dsh-web-app/README.md:44,48-61,92 |
 
 ## 8. Что не проверялось
 
-- Живой запуск плагина и Client-слотов в Harness (нужен реальный плагин; документ — только
-  статическая верификация по установленной сборке).
+- Живой запуск плагина и Client-слотов в Harness (документ — статическая верификация по
+  установленной сборке; T9 node-тесты поднимают client.js с fake module loader/React, но живой
+  рендер в Harness не проверялся).
+- Ручная проверка T9 Step 5 (модель вызывает terminal_run_backtest в живой DSH-сессии, карточка
+  equity в чате) — НЕ ПРОВЕРЕНО: нужен перезапуск Harness и живой LLM; скриншот не создавался.
 - Remote-вызовы (ctx.remote.*) и точные JSON-формы DTO — в README описаны частично; в asar нет
   *.d.ts.
 - Полные страницы docs/subsystems/* (в asar отсутствуют), на которые ссылаются README.
