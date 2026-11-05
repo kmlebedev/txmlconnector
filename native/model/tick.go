@@ -2,9 +2,9 @@ package model
 
 import "time"
 
-// Tick is one <tick> of subscribe_ticks. Period/BuySell are filled from the
-// single flag byte of the D reply (semantics I); OpenInterest is set when a
-// later RE pass recovers it (I, the field is not in the D layout).
+// Tick is one <tick> of subscribe_ticks (S: RQ_MAIN 0x5a). Board is the board
+// code resolved from the catalog (also stored in Symbol.Board). Period/BuySell
+// are the D fields; OpenInterest is not in the S layout (I).
 type Tick struct {
 	Symbol       Symbol
 	Board        string

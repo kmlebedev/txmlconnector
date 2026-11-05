@@ -9,8 +9,8 @@ import (
 
 // News feed: R_NEWS 0x35 and R_NEWS_UPLOAD 0x36 are unsized records with
 // variable C-strings (news.md, D/O). The 0x35 headers are reported as
-// <news_header>; the 0x36 header form is reported too, while the packed body is
-// only stored: the O run shows no <news_body> callback (I until task-56).
+// <news_header>; 0x36 flags=1 headers and flags=2 bodies are S-confirmed. A body
+// is emitted only for the requested header (pending get_news_body) and known id.
 func init() {
 	registerDecoder(records.TagNews, decodeNewsHeader)
 	registerDecoder(records.TagNewsUpload, decodeNewsUpload)

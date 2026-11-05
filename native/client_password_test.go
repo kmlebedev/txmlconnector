@@ -183,7 +183,21 @@ func TestChangePasswordConnectorFatal(t *testing.T) {
 	}
 	// Fatal must be terminal: exactly one connected=false, no recover=true and
 	// no subsequent connected=true.
-	time.Sleep(300 * time.Millisecond)
+	// Wait until the Run loop has exited and no further status arrives.
+	waitFor(t, func() bool {
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		falseSeen := false
+		for _, msg := range rec.msgs {
+			if strings.Contains(msg, "connected="+quote+"false"+quote) {
+				falseSeen = true
+			}
+			if falseSeen && strings.Contains(msg, "connected="+quote+"true"+quote) {
+				return false
+			}
+		}
+		return falseSeen
+	})
 	rec.mu.Lock()
 	falseCount, recoverCount, trueCount := 0, 0, 0
 	for _, msg := range rec.msgs {
@@ -200,7 +214,6 @@ func TestChangePasswordConnectorFatal(t *testing.T) {
 	if falseCount != 1 {
 		t.Fatalf("connected=false callbacks = %d, want exactly 1", falseCount)
 	}
-	_ = trueCount // the initial connected=true is expected; late true checked below
 	if recoverCount != 0 {
 		t.Fatalf("recover=true callbacks = %d, want 0 for fatal change_pass", recoverCount)
 	}
@@ -222,7 +235,6 @@ func TestChangePasswordConnectorFatal(t *testing.T) {
 	if lateTrue != 0 {
 		t.Fatalf("connected=true after false = %d, want 0", lateTrue)
 	}
-	_ = trueCount
 }
 
 // TestConnChangePasswordMalformedEndToEnd: status 3 and status-2 trailing bytes

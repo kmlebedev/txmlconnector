@@ -988,7 +988,7 @@ func NewsHeaderXML(h model.NewsHeader) string {
 		"]]></source><title><![CDATA[" + cdata(h.Title) + "]]></title></news_header>"
 }
 
-// NewsBodyXML renders <news_body> (D form; the emit mechanics are I).
+// NewsBodyXML renders the S <news_body> form.
 func NewsBodyXML(b model.NewsBody) string {
 	return "<news_body><id>" + strconv.FormatInt(b.ID, 10) + "</id><text><![CDATA[" + cdata(b.Text) + "]]></text></news_body>"
 }

@@ -154,7 +154,7 @@ func TestNewsErrors(t *testing.T) {
 }
 
 // TestGetNewsBodyRequest: the command sends the D+O payload (2002,2002,1,2) and
-// reports success; the <news_body> callback is I (news.md).
+// reports success; the body callback is S (news-body-live-dll.xml).
 func TestGetNewsBodyRequest(t *testing.T) {
 	srv := newRunServer(t)
 	srv.Snapshot = append(clientSnapshot(t), newsFixture(t)...)
