@@ -119,10 +119,14 @@ func methodIsUnsafe(method string) bool {
 
 // guardRequiresToken reports whether the path is protected by the API token.
 // /api/health stays readable: the plugin probes it before it knows whether the
-// backend on the port is its own.
+// backend on the port is its own. The MCP endpoint (/mcp) is guarded the same
+// way: external MCP clients send the token in X-Terminal-Token.
 func guardRequiresToken(path string) bool {
 	if path == "/api/health" {
 		return false
+	}
+	if path == "/mcp" || strings.HasPrefix(path, "/mcp/") {
+		return true
 	}
 	return path == "/api" || strings.HasPrefix(path, "/api/")
 }

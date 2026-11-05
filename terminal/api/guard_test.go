@@ -124,6 +124,34 @@ func TestGuardRequiresTokenWhenSet(t *testing.T) {
 	assertGuardStatus(t, rec, called, http.StatusOK, "")
 }
 
+// TestGuardRequiresTokenForMCP checks that the MCP endpoint is guarded by the
+// same token as /api/*: external MCP clients pass X-Terminal-Token.
+func TestGuardRequiresTokenForMCP(t *testing.T) {
+	cfg := GuardConfig{Token: guardTestToken}
+
+	req := newGuardRequest(t, http.MethodPost, "/mcp", `{}`)
+	req.Header.Set("Content-Type", "application/json")
+	rec, called := serveGuard(t, cfg, req)
+	assertGuardStatus(t, rec, called, http.StatusUnauthorized, "unauthorized")
+
+	req = newGuardRequest(t, http.MethodPost, "/mcp", `{}`)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Terminal-Token", guardTestToken)
+	rec, called = serveGuard(t, cfg, req)
+	assertGuardStatus(t, rec, called, http.StatusOK, "")
+
+	// The nested transport path is protected as well.
+	req = newGuardRequest(t, http.MethodPost, "/mcp/messages", `{}`)
+	req.Header.Set("Content-Type", "application/json")
+	rec, called = serveGuard(t, cfg, req)
+	assertGuardStatus(t, rec, called, http.StatusUnauthorized, "unauthorized")
+
+	// GET /mcp is not a data endpoint but stays closed without the token too.
+	req = newGuardRequest(t, http.MethodGet, "/mcp", "")
+	rec, called = serveGuard(t, cfg, req)
+	assertGuardStatus(t, rec, called, http.StatusUnauthorized, "unauthorized")
+}
+
 // TestGuardAllowsSameOriginGET checks that a direct loopback GET /api/health
 // passes without a token.
 func TestGuardAllowsSameOriginGET(t *testing.T) {

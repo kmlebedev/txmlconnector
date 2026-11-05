@@ -26,6 +26,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { createLLMBridge } from './llm-bridge.js';
+import { createSkillProvider } from './skills.js';
 import { createToolBridge } from './tools.js';
 
 /** Services required by the plugin; without them the row stays inactive. */
@@ -44,6 +46,12 @@ const DEFAULTS = {
   autoStart: true,
   repoDir: '',
   binaryPath: '',
+  // Harness LLM used by the terminal agent through the plugin bridge (plan
+  // Task 10): the user's provider/model, not a separate API key.
+  llmProvider: 'deepseek-official',
+  llmModel: 'deepseek-flash',
+  // Optional directory of generated skill patterns (<dataDir>/skills, Task 19).
+  dataDir: '',
 };
 
 // Environment the backend reads from the Harness process (ARCHITECTURE §2).
@@ -66,11 +74,18 @@ const BACKEND_ENV_NAMES = [
   'TERMINAL_LLM_TIMEOUT',
 ];
 
-/** Environment overrides for the backend child: the token, the nonce and the terminal env. */
-function backendEnv(token, instanceId) {
+/**
+ * Environment overrides for the backend child: the token, the nonce, the
+ * plugin-owned LLM endpoint and the terminal env. explicit overrides win over
+ * the ambient values (the plugin forwards the LLM base URL/token itself).
+ */
+function backendEnv(token, instanceId, overrides = {}) {
   const env = { TERMINAL_API_TOKEN: token, TERMINAL_INSTANCE_ID: instanceId };
   for (const name of BACKEND_ENV_NAMES) {
     const value = process.env[name];
+    if (typeof value === 'string' && value !== '') env[name] = value;
+  }
+  for (const [name, value] of Object.entries(overrides)) {
     if (typeof value === 'string' && value !== '') env[name] = value;
   }
   return env;
@@ -85,6 +100,9 @@ function normalizeConfig(config) {
   if (typeof config.autoStart === 'boolean') cfg.autoStart = config.autoStart;
   if (typeof config.repoDir === 'string' && config.repoDir.trim() !== '') cfg.repoDir = path.resolve(config.repoDir.trim());
   if (typeof config.binaryPath === 'string' && config.binaryPath.trim() !== '') cfg.binaryPath = path.resolve(config.binaryPath.trim());
+  if (typeof config.llmProvider === 'string' && config.llmProvider.trim() !== '') cfg.llmProvider = config.llmProvider.trim();
+  if (typeof config.llmModel === 'string' && config.llmModel.trim() !== '') cfg.llmModel = config.llmModel.trim();
+  if (typeof config.dataDir === 'string' && config.dataDir.trim() !== '') cfg.dataDir = path.resolve(config.dataDir.trim());
   return cfg;
 }
 
@@ -243,7 +261,7 @@ class TerminalBackend {
       cwd: repo,
       // The backend reads the token and the instance nonce from the
       // environment; they are generated per plugin launch and never logged.
-      env: backendEnv(this.token, this.instanceId),
+      env: backendEnv(this.token, this.instanceId, this.envOverrides),
       stdio: {
         stdin: 'ignore',
         stdout: { maxBytes: 1_048_576 },
@@ -435,6 +453,56 @@ export function apply(ctx, config) {
   backend.onStopped = () => {
     if (toolBridge) toolBridge.unregister();
   };
+
+  // --- Harness LLM bridge (plan Task 10) --------------------------------
+  //
+  // The terminal agent keeps its OpenAI-compatible client, but the provider is
+  // the user's Harness LLM: the plugin registers the bridge under the control
+  // path and hands the backend a one-time URL/token pair through its env.
+  const llmToken = randomUUID();
+  const llmService = typeof ctx.get === 'function' ? ctx.get('llm') : ctx.llm;
+  const llmBridge = llmService && typeof llmService.stream === 'function'
+    ? createLLMBridge({ llm: llmService, token: llmToken, provider: cfg.llmProvider, model: cfg.llmModel })
+    : null;
+  let dshOrigin = '';
+  try {
+    dshOrigin = typeof ctx.webServer.getOrigin === 'function' ? String(ctx.webServer.getOrigin()) : '';
+  } catch {
+    dshOrigin = '';
+  }
+  if (dshOrigin === '' && Number.isInteger(ctx.webServer.port)) dshOrigin = 'http://127.0.0.1:' + ctx.webServer.port;
+  if (llmBridge) {
+    own(ctx.webServer.register({
+      kind: 'exact',
+      path: CONTROL + '/llm/v1/chat/completions',
+      handler: (req, res) => {
+        Promise.resolve(llmBridge.handler(req, res)).catch((error) => {
+          json(res, 500, { error: { message: 'внутренняя ошибка LLM-моста', type: 'internal_error', detail: error instanceof Error ? error.message : String(error) } });
+        });
+      },
+    }));
+    backend.envOverrides = {
+      TERMINAL_LLM_BASE_URL: dshOrigin + CONTROL + '/llm/v1',
+      TERMINAL_LLM_API_KEY: llmToken,
+    };
+  } else {
+    backend.envOverrides = {};
+  }
+
+  // The MCP client row of the bundle patch resolves these env values when it
+  // loads (it follows the ai-terminal row, so apply() has already run here).
+  process.env.DSH_AI_TERMINAL_MCP_URL = 'http://127.0.0.1:' + cfg.port + '/mcp';
+  process.env.DSH_AI_TERMINAL_MCP_TOKEN = backend.token;
+
+  // Skill provider: the repository skills/trading-* tree (same frontmatter as
+  // "npx skills add") plus the generated patterns under <dataDir>/skills.
+  const skillsService = typeof ctx.get === 'function' ? ctx.get('skills') : ctx.skills;
+  if (skillsService && typeof skillsService.registerProvider === 'function') {
+    const repoDir = findRepoDir(cfg.repoDir);
+    const roots = [path.join(repoDir, 'skills')];
+    if (cfg.dataDir !== '') roots.push(path.join(cfg.dataDir, 'skills'));
+    own(ctx.effect(() => skillsService.registerProvider(() => createSkillProvider({ roots })), 'ai-terminal: skill provider'));
+  }
 
   own(ctx.webServer.register({
     kind: 'exact',
