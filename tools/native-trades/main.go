@@ -3,7 +3,7 @@
 // protobuf message (proto/marketdata.Trade) on
 // <prefix>.<board>.<seccode>.
 //
-//	TC_LOGIN=... TC_PASSWORD=... native-trades -addr tr1.finam.ru:3900 \
+//	TC_LOGIN=... TC_PASSWORD=... native-trades -addr transaq.example:3900 \
 //	    -nats nats://127.0.0.1:4222 -sec TQBR:SBER,TQBR:GAZP,FUT:SiZ6
 //
 // It exits on a lost server connection; run it under a supervisor that
