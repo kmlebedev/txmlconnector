@@ -15,7 +15,9 @@ Task 8 Step 4 — живая проверка на демо-сервере TRANS
 
 ## Итог одной строкой
 
-**Живая приёмка не пройдена: gateway 64/66 (2 FAIL — orderbook), коннектор против живого шлюза 42/42,
+**Блокеры закрыты в `fix/pr-67-blockers`; после фиксов повторная live/host-приёмка — PASS (см. §8).**
+
+На момент первой приёмки: gateway 64/66 (2 FAIL — orderbook), коннектор против живого шлюза 42/42,
 реальный хост dsh-trading с кодом PR как есть не загружает коннектор (HOST-BLOCKED; после трёх
 минимальных правок — HOST-PASS, включая агентский вызов `ru_get_ticker`). Остальные эндпоинты
 gateway и коннектор подтверждены живыми данными (S).**
@@ -124,7 +126,7 @@ qty<0, затем сортировка) и повторная live-провер�
   вкладка/HTTP-мост `ru` (невозможны без апстрима).
 - Прод-сервер TRANSAQ (проверка была на демо), полный дневной soak.
 
-## 7. Вердикт и следующий шаг
+## 7. Вердикт на момент приёмки (до фиксов) и следующий шаг
 
 **CHANGES.** Блокеры merge: P1 сортировка `bids` в gateway (+тест); P1 загрузка коннектора в реальном
 хосте (`inject`/`output`/ожидание реестров); P1-external — отдельная карточка на `terminal/feed`
@@ -135,3 +137,33 @@ Evidence (локально, gitignored): `.re-run/acceptance-pr67-live/` (`gatew
 `connector-summary.json`, `raw/`, `orderbook-polls.log`, `sse-events.txt`, `probe-quotes-raw.txt`,
 `audit/final-report.md`), `.re-run/host-acceptance/REPORT.md` + патчи `fix-index-js.patch`,
 `fix-tools-js.patch`.
+
+## 8. Закрытие блокеров (2026-11-06, ветка `fix/pr-67-blockers`)
+
+Все три блокера закрыты и повторно проверены; работа велась в worktree PR 67 (от `acceptance/pr-67-live`),
+новые коммиты идут после docs-коммита приёмки `5ecbf14`.
+
+| Блокер | Фикс | Повторная проверка |
+|---|---|---|
+| P1-1 `bids` не по убыванию | `terminal/api/gateway.go`: `gatewayLevels(levels, decimals, descending)` копирует вход и stable-sort'ит bids desc / asks asc; `TestGatewayOrderBookSortsLevels` (многоуровневый неотсортированный fake-фид) | live 66/66; post-fix прогоны — 20/20 и 10/10 опросов двусторонние, bids desc / asks asc (до фикса было 14/14 многоуровневых сэмплов bids по возрастанию) |
+| P1-3 (external) инкрементальный стакан | `terminal/feed/live.go`: persistent-книга на символ, `applyQuotes` применяет инкрементальные **upsert**-дельты (`Buy>0`/`Sell>0`), `resetBooks()` на новой сессии, сортировка сторон, `maxBookDepth=4·maxBookLevels`, deep copy на publish/read; удаление (`qty=-1`) намеренно не применяется — закреплённое кодирование даёт цену <1 (см. ограничения ниже), тесты `TestLiveOrderBookAppliesIncrementalQuotes`, `...ResetOnNewSession`, `...OutputDepth` | live: 20/20 опросов двусторонние (10 bid / 10 ask), bids desc, asks asc; книга больше не схлопывается |
+| P1-2 загрузка в реальном хосте | `dshtrading-connector-transaq/index.js`: сервисы (`tools`, оба реестра) опциональны и дожидаются через `ctx.inject(...)` (fallback без `ctx.inject`); `tools.js`: у 6 `ru_*` объявлен `output {schema, render}`; тесты 42/42 | **HOST-PASS** в реальном dsh-trading 0.6.3 без `/tmp`-патчей (финальный повтор на optional `tools`): плагин активируется, `ru/finam` в обоих реестрах, 6/6 tools реально появляются в tools-сервисе через `ctx.inject(['tools'])`, агентский `ru_get_ticker SBER` → `SBER.TQBR`, `source: "seed"`, exit 0 (`.re-run/host-acceptance/recheck2/REPORT.md`) |
+
+Повторные live-прогоны на итоговом дереве (2026-11-06 20:29–20:40 MSK, демо-сервер,
+`bin/terminal -mode live` из `fix/pr-67-blockers`, только GET): **gateway 66/66 PASS**,
+**коннектор 42/42 PASS** (два независимых прогона), raw-книга `TQBR:SBER` — 10/10 уровней в
+20/20 и в 10/10 опросах. Статусы S/I пересобраны по этим прогонам; `getOrderbook` коннектора
+подтверждён против исправленного шлюза.
+
+Известные ограничения, оставшиеся после фиксов (не блокеры, P2/P3): удаление уровня `qty=-1` живьём не
+наблюдалось, а закреплённое кодирование удаления кладёт в `model.Quote.Price` накопленную цену <1
+(`native/records/quote.go`, тесты `quote_test.go`: Price=0), поэтому `terminal/feed` удаление пока
+**не применяет** (no-op, уровень переживёт до новой сессии) — нужен живой захват/RE удаления; это
+честно зафиксировано в `gateway-v1.md` и `docs/protocol/alltrades.md`; если сервер пришлёт поздний
+полный снимок без новой сессии, уровни, отсутствующие в нём, не удалятся (на практике новая подписка
+начинается со снимка, и `resetBooks()` очищает книгу); live `lotSize`/`minStep` по-прежнему из seed;
+P2/P3 из §5 (agent `last`→`"0.00"`, OZON USD против «price in RUB», и т.п.) — follow-up. Внешнее
+ограничение `market=ru` (HTTP-мост апстрима) не изменилось и вне scope PR.
+
+**Итог после закрытия: блокеров merge нет; PR 67 можно принимать после обычного код-ревью и
+обновления документации (сделано этим же деревом).**

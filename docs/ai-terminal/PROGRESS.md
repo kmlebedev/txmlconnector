@@ -541,3 +541,25 @@ T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAut
   `terminal/feed` с инкрементальными `<quotes>`), коннектор против живого шлюза — 42/42 PASS.
   Статусы `gateway-v1.md` переведены в S по матрице; полный отчёт —
   [acceptance-pr67-2026-11-06.md](acceptance-pr67-2026-11-06.md).
+
+### PR 67: блокеры живой приёмки закрыты (2026-11-06, ветка fix/pr-67-blockers)
+
+- **P1 orderbook (2 дефекта):** `terminal/feed/live.go` применяет инкрементальные `<quotes>` как
+  upsert-дельты в persistent-книге, сбрасывает её на новой сессии и сортирует стороны; удаление
+  (`qty=-1`) остаётся **I** (закреплённое кодирование даёт цену <1 — нужен живой захват/RE); в
+  `terminal/api/gateway.go` добавлена защитная сортировка bids desc / asks asc. Новые тесты TDD:
+  `TestLiveOrderBookAppliesIncrementalQuotes/ResetOnNewSession/OutputDepth`,
+  `TestGatewayOrderBookSortsLevels`.
+- **P1 хост:** коннектор: сервисы `tools`/реестры опциональны и дожидаются через `ctx.inject(...)`,
+  `output {schema, render}` у 6 `ru_*` (требование dsh-tools 0.2.x); тесты коннектора 42/42.
+- **Повторная live-приёмка (демо, 20:29–20:40 MSK, финальное дерево):** gateway **66/66 PASS**,
+  коннектор **42/42 PASS** (два прогона), стакан TQBR:SBER двусторонний 20/20 и 10/10 опросов
+  (10 bid / 10 ask), порядок сторон верный.
+- **Повторная host-приёмка (реальный dsh-trading 0.6.3, без /tmp-патчей, два прогона — в т.ч. на
+  финальной optional-`tools` версии):** **HOST-PASS** — плагин активируется, `ru/finam` в обоих
+  реестрах, 6/6 tools реально появляются через `ctx.inject(['tools'])`, агентский
+  `ru_get_ticker SBER` → `SBER.TQBR`, `source: "seed"`. Ограничение апстрима `market=ru` (HTTP-мост
+  400) остаётся внешним.
+- Доказательства: `.re-run/acceptance-pr67-live/` (повторные `gateway-summary.json`,
+  `connector-summary.json`, `orderbook-polls-fixed.log`), `.re-run/host-acceptance/recheck/REPORT.md`.
+  Отчёт — [acceptance-pr67-2026-11-06.md](acceptance-pr67-2026-11-06.md) §8.

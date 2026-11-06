@@ -18,7 +18,7 @@ Cordis-плагин, который подключает Go-шлюз `/api/gw/v1
 - Символы: канонический `SECCODE.BOARD` (`SBER.TQBR`); шлюз использует `BOARD:SECCODE` (`TQBR:SBER`).
   Голый `SBER` разрешается в единственный такой `SECCODE`; при нескольких площадках предпочитается
   `TQBR`, иначе `TRADING_UNSUPPORTED_SYMBOL` со списком кандидатов.
-- Объёмы: шлюз отдаёт лоты, коннектор переводит в штуки (10 лотов SBER при лоте 10 = `amount: 100`).
+- Объёмы: шлюз отдаёт лоты, коннектор переводит в штуки (10 лотов GAZP при лоте 10 = `amount: 100`; на демо pit SBER=1).
 - Ответы несут `source: "live"` или `"seed"` (офлайн-снимок, не реальное время).
 
 ## Требования
@@ -76,17 +76,14 @@ make connector-test        # node --test dshtrading-connector-transaq/test/
 Офлайн-приёмка (выполнена 2026-11-06): `apply()` с фейковым ctx против `bin/terminal -mode offline`
 вернул `SBER.TQBR`, `source: "seed"`, 5 часовых свечей и стакан.
 
-Живая приёмка на демо-сервере TRANSAQ (2026-11-06, PR 67): gateway v1 — 64/66 проверок, коннектор
-против живого шлюза — **42/42 PASS**: `source: "live"`, канонические символы, `volume = lots*lotSize`
-(GAZP ровно ×10), `dry-run`, `subscribeTicker`. Два live-дефекта `/orderbook` (bids по возрастанию;
-часто односторонний стакан из-за pre-existing бага `terminal/feed` с инкрементальными `<quotes>`) —
-подробности в `docs/ai-terminal/acceptance-pr67-2026-11-06.md`; поле `source`/единицы — S.
+Живая приёмка на демо-сервере TRANSAQ (2026-11-06, PR 67 + ветка `fix/pr-67-blockers`): gateway v1 —
+**66/66 PASS**, коннектор против живого шлюза — **42/42 PASS**: `source: "live"`, канонические
+символы, `volume = lots*lotSize` (GAZP ровно ×10), `dry-run`, `subscribeTicker`; `/orderbook` после
+фикса `terminal/feed` — двусторонний стакан, bids по убыванию / asks по возрастанию.
 
 Приёмка в реальном хосте dsh-trading (npm `@dshtrading/*` 0.6.3, `dsh` 0.2.2-rc.1, 2026-11-06):
-**с кодом PR как есть хост коннектор не загружает** — `inject = []` при чтении `ctx.tools` →
-`cannot get property "tools" without inject`; после `inject=['tools']` — у 6 инструментов нет
-`output { schema, render }`, требуется `dsh-tools` 0.2.x; плюс реестры читаются в `apply()` слишком
-рано и `ru/finam` молча не регистрируется. С тремя минимальными правками хост стартует, `ru/finam`
-регистрируется в обоих реестрах, 6 инструментов доступны, агентский вызов `ru_get_ticker SBER` вернул
-`SBER.TQBR` (модель — mock). Вкладки/HTTP-моста `ru` нет: апстрим отдаёт 400 `unknown market "ru"`
-(вне scope PR). Полный отчёт: `docs/ai-terminal/acceptance-pr67-2026-11-06.md`.
+**HOST-PASS** — плагин грузится как есть (сервисы `tools`/реестры опциональны и дожидаются
+через `ctx.inject`, у 6 инструментов объявлен `output {schema, render}` для dsh-tools 0.2.x); `ru/finam` регистрируется в
+обоих реестрах, 6 инструментов доступны, агентский вызов `ru_get_ticker SBER` вернул `SBER.TQBR`
+(модель — mock). Вкладки/HTTP-моста `ru` нет: апстрим отдаёт 400 `unknown market "ru"` (вне scope
+PR). Полный отчёт: `docs/ai-terminal/acceptance-pr67-2026-11-06.md`.
