@@ -114,12 +114,26 @@ TERMINAL_LLM_BASE_URL=http://127.0.0.1:8099/v1 TERMINAL_LLM_API_KEY=stub \
 ## Встраивание в DeepSeek Harness (плагин)
 
 Терминал встраивается в Web UI Harness как **основная панель**: плагин
-[`dsh-ai-terminal`](../../dsh-ai-terminal/README.md) добавляет иконку «AI-терминал» в левую панель,
-поднимает Go-бэкенд (по умолчанию `bin/terminal`) и проксирует его SPA/API/SSE под origin Harness
-(`/ai-terminal/`), поэтому отдельный порт в браузере и CORS не нужны. Панель оформлена токенами
-темы Harness (en/ru/zh), показывает статус бэкенда и кнопки «Обновить / Перезапустить / Открыть в
-браузере». Установка — `plugin_manager install_bundle` с `target = <repo>/dsh-ai-terminal`;
-конфигурация (`mode`, `port`, `repoDir`, `binaryPath`, `autoStart`) описана в README плагина.
+[`dsh-ai-terminal`](https://github.com/kmlebedev/dsh-trading-transaq) из отдельного репозитория
+[`kmlebedev/dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq) (каталог
+`dsh-ai-terminal/`) добавляет иконку «AI-терминал» в левую панель, поднимает Go-бэкенд (по
+умолчанию `bin/terminal`) и проксирует его SPA/API/SSE под origin Harness (`/ai-terminal/`),
+поэтому отдельный порт в браузере и CORS не нужны. Панель оформлена токенами темы Harness
+(en/ru/zh), показывает статус бэкенда и кнопки «Обновить / Перезапустить / Открыть в браузере».
+
+Плагин с 2026-11-06 живёт в отдельном репозитории, а Go-бэкенд (`cmd/terminal`, `bin/terminal`)
+остаётся здесь. Установка — из нового checkout'а:
+
+```bash
+git clone https://github.com/kmlebedev/dsh-trading-transaq ~/GolandProjects/dsh-trading-transaq
+make terminal   # в checkout'е txmlconnector: bin/terminal, который запускает плагин
+# в DSH-сессии: plugin_manager install_bundle с target = <dsh-trading-transaq>/dsh-ai-terminal
+```
+
+Конфигурация (`mode`, `port`, `repoDir`, `binaryPath`, `autoStart`) описана в README плагина
+нового репозитория. Если checkout `txmlconnector` не лежит рядом с checkout'ом
+`dsh-trading-transaq` (или `bin/terminal` собран в другом месте), задай `repoDir` — путь к
+checkout'у `txmlconnector` — или env `DSH_AI_TERMINAL_REPO_DIR`; иначе плагин ищет бэкенд сам.
 После изменения `terminal/web/**` нужно пересобрать `bin/terminal` (`make terminal`), потому что
 SPA вшивается в Go-бинарь.
 

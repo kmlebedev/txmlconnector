@@ -52,8 +52,11 @@ err = client.Run(ctx, native.RunOptions{RqDelay: 100 * time.Millisecond}, func(e
 ![AI Terminal — основной экран](docs/ai-terminal/screenshot-main.png)
 
 Терминал можно встроить в интерфейс DeepSeek Harness как основную панель — плагин
-[`dsh-ai-terminal`](dsh-ai-terminal/README.md) добавляет иконку в sidebar и проксирует терминал под
-origin Harness (`/ai-terminal/`).
+[`dsh-ai-terminal`](https://github.com/kmlebedev/dsh-trading-transaq) добавляет иконку в sidebar и
+проксирует терминал под origin Harness (`/ai-terminal/`). **С 2026-11-06 плагин вынесен в отдельный
+репозиторий [`kmlebedev/dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq)
+(каталог `dsh-ai-terminal/`); Go-терминал `bin/terminal` и `cmd/terminal` остаются в этом
+репозитории.**
 
 `cmd/terminal` — самодостаточный биржевой терминал-аналог Finam поверх `native.Client`:
 список инструментов, свечной график, стакан, портфель/заявки, тикет, а также встроенный AI-агент,
@@ -99,7 +102,8 @@ npx skills add github.com/kmlebedev/txmlconnector --skill trading-automation-aut
 
 Токен терминала (`TERMINAL_API_TOKEN`) и креды TRANSAQ (`TC_LOGIN`/`TC_PASSWORD`) — только в
 `.env`, никогда в чате, промпте или коммите; реальные заявки недоступны (paper-only).
-В DSH те же навыки отдаёт провайдер плагина `dsh-ai-terminal` — один источник, без копий.
+В DSH те же навыки отдаёт провайдер плагина `dsh-ai-terminal` из репозитория
+[`dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq) — один источник, без копий.
 Подробнее: [skills/README.md](skills/README.md).
 
 ## C ABI библиотека (drop-in для DLL)

@@ -1194,12 +1194,15 @@ automation импортируются агентом напрямую, без о
 7. Проверки: `gofmt -l $(git ls-files '*.go')`, `go vet ./...`, `go build ./...`,
    `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...`, `CGO_ENABLED=0 GOOS=darwin
    GOARCH=arm64 go build ./...`, `go test -race ./...`, `node --check` для JS,
-   `node --test dsh-ai-terminal/test/` (тесты Host-половины плагина), headless-Chrome
-   скриншоты 1680×1050 (Lead).
+   тесты Host-половины плагина — в репозитории
+   [`dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq) (каталог
+   `dsh-ai-terminal/`), headless-Chrome скриншоты 1680×1050 (Lead).
 8. Docs-sync (2026-11-06): `git diff --check`; проверка локальных ссылок в `docs/ai-terminal/*.md`
    и `skills/README.md`; сверка каталога инструментов с `terminal/agent/tools*.go` и REST-таблицы
    §10.1 с `terminal/api/api.go`; `go test ./skills` (frontmatter переносимых навыков) и
-   `node --test dsh-ai-terminal/test/`. Живые ресурсы (демо-сервер, ClickHouse, браузер) — не
+   тесты плагина — в репозитории
+   [`dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq) (каталог
+   `dsh-ai-terminal/`). Живые ресурсы (демо-сервер, ClickHouse, браузер) — не
    использовались, статус **I**.
 
 ## 14. Роли и границы (RTC)
@@ -1415,11 +1418,14 @@ type ToolInvoker interface {
 
 ### 15.12 DSH-плагин (фазы C/F): LLM, навыки, MCP и ночные исследования
 
-`dsh-ai-terminal` (отдельный Host-плагин, см. [`dsh-integration.md`](dsh-integration.md)) отдаёт
+`dsh-ai-terminal` (отдельный Host-плагин из репозитория
+[`dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq), см.
+[`dsh-integration.md`](dsh-integration.md)) отдаёт
 терминалу единый LLM Harness (`ctx.llm.stream`), дерегистрирует навыки из `skills/` и
 `<dataDir>/skills` (сгенерированные паттерны — только `validated`), публикует MCP-эндпоинт
 `/mcp` и клиентские панели бота/графика. Фаза F добавила планировщик автономных research-прогонов
-с бюджетом токенов (`dsh-ai-terminal/autonomy.js`, `workflows/nightly-research.js`): ночной цикл
+с бюджетом токенов (`autonomy.js`, `workflows/nightly-research.js` — в репозитории плагина
+[`dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq)): ночной цикл
 walk-forward/батчей, ledger стоимости и предложения автоматизации. Live-прогоны в DSH не
 выполнялись (**I**).
 
