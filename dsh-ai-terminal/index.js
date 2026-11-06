@@ -300,7 +300,11 @@ class TerminalBackend {
       cwd: repo,
       // The backend reads the token and the instance nonce from the
       // environment; they are generated per plugin launch and never logged.
-      env: backendEnv(this.token, this.instanceId, this.envOverrides),
+      env: backendEnv(this.token, this.instanceId, {
+        ...this.envOverrides,
+        // Use the same configured catalog as the host-side skill provider.
+        TERMINAL_DATA_DIR: this.cfg.dataDir,
+      }),
       stdio: {
         stdin: 'ignore',
         stdout: { maxBytes: 1_048_576 },
