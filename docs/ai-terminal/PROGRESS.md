@@ -478,3 +478,20 @@ T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAut
   Патч проверен `--dump-config` на копии профиля: YAML валиден, строка `workflow` присутствует,
   ошибок нет. Нужен перезапуск Desktop, после чего `terminal_nightly_research` должен увидеть
   `workflowEngine`. Fallback: восстановить бэкап или удалить последний `insert`-блок.
+### T21: исправленный патч — включён `workflow-ptc` (2026-11-06 13:15 MSK)
+
+Диагностика первой попытки: `@deepseek-ai/dsh-workflow` — это только **абстрактный** сервис
+(`WorkflowEngine`), а провайдер `workflowEngine` — пакет `@deepseek-ai/dsh-workflow-ptc`, который в
+`dsh-web-app` намеренно выключен (`- id: workflow-ptc / disabled: true`). Поэтому insert абстрактного
+`dsh-workflow` не дал сервиса.
+
+- Патч откачен к бэкапу `cordis.patch.yml.bak-20261106-130840` и вместо insert добавлена строка:
+  ```yaml
+  - id: workflow-ptc
+    disabled: false
+  ```
+- Проверено на копии профиля (base+web-app + patched user layer): `--dump-config` показывает
+  `workflow-ptc … disabled: false` без предупреждений; web boot проходит; **диагностический плагин**
+  (`inject: ['workflowEngine']`) в том же профиле печатает `WF_PROBE: workflowEngine present = object`.
+- Нужен перезапуск Desktop для активации сервиса в живом процессе; затем `terminal_nightly_research`
+  должен отработать (T21 Step 5). Fallback: восстановить бэкап и перезапустить DSH.
