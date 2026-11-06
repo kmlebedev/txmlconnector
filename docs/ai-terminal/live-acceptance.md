@@ -131,3 +131,18 @@ Claude Code OAuth в этой сессии истёк, поэтому промп
 
 Остаются: T11/T12/T22 — окно демо-сервера (фоновая приёмка перезапущена, ждёт 09:55 МСК);
 T26 dry-run — подтверждение proposal человеком + живой поток; T21 — нужен workflowEngine bundle.
+### Live-проверки host-инструментов после merge #64 (2026-11-06 10:43 MSK)
+
+Плагин активен в текущем Desktop DSH (host-половина, client-UI отключён); backend
+`127.0.0.1:18090` жив (`instanceId`, offline). Через нативные Harness-инструменты проверено:
+
+| Проверка | Результат |
+|---|---|
+| `terminal_get_quote` TQBR:SBER | S: last 293.22, bid/ask, стакан |
+| T9 `terminal_run_backtest` (sma_cross 5м, 200 бар) | S (host): artifact с metrics/equity/сделками (доходность −0.17%, 4 сделки); карточка в чате — I (client отключён) |
+| T24 `terminal_batch_backtest` GAZP/SBER/LKOH | S (host): 3 строки, buy&hold, `small_sample` warnings; карточка/графики — I (client отключён) |
+| T26 `bot_create_from_backtest` → `bot_check` → `bot_status` → `bot_start` | S (host): `bot_0001` создан (stage=check), check вернул `closed_bar` (close 293.22, RSI 0.4378), `bot_start` вернул proposal `prop_000001` (pending, ждёт подтверждения); живой dry-run — окно демо |
+| T21 `terminal_nightly_research` | I (сборка): `workflowEngine Harness недоступен` — в shipped-профилях нет `@deepseek-ai/dsh-workflow`; плагин деградирует без падения |
+
+Следующее: T11/T12/T22 — фоновая приёмка в окне демо (09:50 МСК); T9/T24/T26 UI-часть —
+контролируемое возвращение client-половины (сначала минимальный client, затем карточки) после окна.
