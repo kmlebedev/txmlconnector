@@ -407,7 +407,7 @@
 - [x] **Step 2: Write the failing Go tests** `TestMCPInitializeAndList` и `TestMCPToolCallRoundTrip`: JSON-RPC 2.0, `protocolVersion` из запроса клиента, результат `content:[{type:"text",text:<json>}]`.
 - [x] **Step 3: Implement** мост LLM, MCP-сервер, провайдер навыков и клиентские поверхности.
 - [x] **Step 4:** `make verify && node --test dsh-ai-terminal/test/` → exit 0.
-- [ ] **Step 5: Manual check.** Из Claude Code: `claude mcp add --transport http terminal http://127.0.0.1:8090/mcp --header "X-Terminal-Token: $TERMINAL_API_TOKEN"`, затем `tools/list` показывает 14+ инструментов.
+- [x] **Step 5: Manual check.** Из Claude Code: `claude mcp add --transport http terminal http://127.0.0.1:8090/mcp --header "X-Terminal-Token: $TERMINAL_API_TOKEN"`, затем `tools/list` показывает 14+ инструментов.
 - [x] **Step 6: Commit** `feat(dsh-plugin): share the Harness LLM, skills and an MCP endpoint with the terminal`
 
 ---
