@@ -329,3 +329,20 @@ app-строки плагина (он может быть привязан к sc
 Профиль `~/.dsh/profiles/desktop` восстановлен повторно (12 bundles, patch-слой, link на main,
 lockfile приведён `pnpm install`); бэкапы — `*.recovered2-*`. Проверено воспроизведением
 desktop-подобной композиции: плагин активируется, backend стартует, fatal-ошибки нет.
+### Третий инцидент (2026-11-06 10:01): client-половина плагина не активируется
+
+После фикса host-inject (`inject = ['webServer']`) DSH Desktop снова упал:
+`web boot: 1 entry did not activate @local/dsh-ai-terminal: loading` (crash 05:01:36Z).
+Bundle пользователя показал, что host-половина уже минимальная (inject = webServer),
+а в состоянии `loading` остаётся **client-модуль** плагина. Воспроизведение в реальном
+Cordis с полным набором сервисов (slots/locale/sidebarRightTabs/uiConversation) даёт
+`active` для client.js, поэтому точная причина в boot-загрузчике Desktop пока не доказана;
+под подозрением — регистрация client-модуля в web-boot Desktop (bundle URL/prefetch) и
+доступ к опциональным сервисам `sidebarRightTabs`/`uiConversation` (в client.js они уже
+переведены на дочерний `ctx.inject`/`ctx.get`, 54/54 node tests).
+
+**Временная мера:** `dsh.client` убран из `dsh-ai-terminal/package.json` — client-половина
+больше не участвует в boot Desktop. Host-половина (инструменты, backend, workflow) остаётся;
+панель/карточки UI временно не загружаются. Для аварийного отключения всего плагина добавлен
+`tools/dsh-plugin-disable.sh` (с бэкапом профиля). После стабилизации boot нужно вернуть
+`dsh.client` и проверить загрузку client-модуля отдельно.

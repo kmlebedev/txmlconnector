@@ -1191,6 +1191,36 @@ window.__ModuleLoader__.load({
         pt: en,
       }), 'ai-terminal: dictionaries');
       const t = ctx.locale.bind(NS);
+      // Optional client services are mounted through child ctx.inject(...) so a
+      // missing or late service cannot block this plugin row during web boot
+      // (Cordis throws 'cannot get property ... without inject' for bare
+      // ctx.service access; ctx.get(...) is the non-throwing probe).
+      const serviceOf = (name) => {
+        try {
+          if (typeof ctx.get === 'function') return ctx.get(name);
+        } catch { /* not injected in this context */ }
+        try {
+          return ctx[name];
+        } catch {
+          return undefined;
+        }
+      };
+      let canInjectChildren = false;
+      try {
+        canInjectChildren = typeof ctx.inject === 'function';
+      } catch {
+        canInjectChildren = false;
+      }
+      const mountOptional = (name, callback) => {
+        if (canInjectChildren) {
+          try {
+            void ctx.inject([name], (child) => callback(child[name], child));
+            return;
+          } catch { /* the child cannot be mounted in this context */ }
+        }
+        const service = serviceOf(name);
+        if (service !== undefined && service !== null) callback(service, ctx);
+      };
       ctx.slots.inject('main', () => ctx.slots.register({
         name: 'main',
         key: PANEL_ID,
@@ -1235,14 +1265,15 @@ window.__ModuleLoader__.load({
       }
 
       // Right-panel "AI terminal" tab (plan Task 10): the type is registered in
-      // ctx.sidebarRightTabs, its body through the sidebar.right.pane.tab slot.
-      if (ctx.sidebarRightTabs && typeof ctx.sidebarRightTabs.register === 'function') {
-        ctx.effect(() => ctx.sidebarRightTabs.register({
+      // sidebarRightTabs, its body through the sidebar.right.pane.tab slot.
+      mountOptional('sidebarRightTabs', (tabs, tabsCtx) => {
+        if (typeof tabs.register !== 'function') return;
+        tabsCtx.effect(() => tabs.register({
           id: TERMINAL_TAB_ID,
           kind: TERMINAL_TAB_KIND,
           title: () => t('panel'),
         }), 'ai-terminal: sidebar tab type');
-      }
+      });
       ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
         name: 'sidebar.right.pane.tab',
         key: TERMINAL_TAB_ID,
@@ -1250,13 +1281,14 @@ window.__ModuleLoader__.load({
       }, TerminalPanelTabBody));
 
       // Right-panel "Автономия" tab (plan Task 21): last run, budget, kill switch.
-      if (ctx.sidebarRightTabs && typeof ctx.sidebarRightTabs.register === 'function') {
-        ctx.effect(() => ctx.sidebarRightTabs.register({
+      mountOptional('sidebarRightTabs', (tabs, tabsCtx) => {
+        if (typeof tabs.register !== 'function') return;
+        tabsCtx.effect(() => tabs.register({
           id: AUTONOMY_TAB_ID,
           kind: AUTONOMY_TAB_KIND,
           title: () => 'Автономия',
         }), 'ai-terminal: autonomy tab type');
-      }
+      });
       ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
         name: 'sidebar.right.pane.tab',
         key: AUTONOMY_TAB_ID,
@@ -1272,10 +1304,12 @@ window.__ModuleLoader__.load({
         locale: NS,
       }, SendChartQuoteAction));
 
-      // Selected text: "Ask about the selection" through the UiConversation
+      // Selected text: "Ask about the selection" through the uiConversation
       // text-interaction registry and its keyed surface slot.
-      if (ctx.uiConversation && ctx.uiConversation.interactions && typeof ctx.uiConversation.interactions.register === 'function') {
-        ctx.effect(() => ctx.uiConversation.interactions.register({
+      mountOptional('uiConversation', (conversation, conversationCtx) => {
+        const interactions = conversation && conversation.interactions;
+        if (!interactions || typeof interactions.register !== 'function') return;
+        conversationCtx.effect(() => interactions.register({
           id: SELECTION_INTERACTION_ID,
           onInteraction(gesture) {
             const text = gesture && typeof gesture.readText === 'function' ? gesture.readText() : '';
@@ -1284,12 +1318,12 @@ window.__ModuleLoader__.load({
             if (typeof gesture.open === 'function') gesture.open();
           },
         }), 'ai-terminal: selection interaction');
-        ctx.slots.inject('conversation.chat.text-interaction', () => ctx.slots.register({
-          name: 'conversation.chat.text-interaction',
-          key: SELECTION_INTERACTION_ID,
-          locale: NS,
-        }, AskSelectionAction));
-      }
+      });
+      ctx.slots.inject('conversation.chat.text-interaction', () => ctx.slots.register({
+        name: 'conversation.chat.text-interaction',
+        key: SELECTION_INTERACTION_ID,
+        locale: NS,
+      }, AskSelectionAction));
 
       // --- Bot control room surfaces (plan Task 26) --------------------
       //
@@ -1312,13 +1346,14 @@ window.__ModuleLoader__.load({
         order: 30,
         locale: NS,
       }, BotDockCard));
-      if (ctx.sidebarRightTabs && typeof ctx.sidebarRightTabs.register === 'function') {
-        ctx.effect(() => ctx.sidebarRightTabs.register({
+      mountOptional('sidebarRightTabs', (tabs, tabsCtx) => {
+        if (typeof tabs.register !== 'function') return;
+        tabsCtx.effect(() => tabs.register({
           id: 'ai-terminal/bots',
           kind: 'ai-terminal-bots',
           title: () => 'Боты',
         }), 'ai-terminal: bots tab type');
-      }
+      });
       ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
         name: 'sidebar.right.pane.tab',
         key: 'ai-terminal/bots',
