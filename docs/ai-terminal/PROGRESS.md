@@ -164,3 +164,26 @@
 
 Остаются I только шаги, требующие живого DSH-процесса (перезапуск DSH с текущим плагином) — T9/T21/T24/T26;
 они не блокируются кодом и оформлены как manual-инструкции в `dsh-integration.md`.
+### Дополнительно проверено офлайн (2026-11-06)
+
+- **T24**: `POST /api/agent/tools/batch_backtest/invoke` на офлайн-seed — 3 ряда (GAZP/SBER/LKOH),
+  `small_sample` warnings для малых выборок, artifact `batch_backtest` с 3 charts — путь инструмента
+  end-to-end (**S**); ручной промпт в DSH-чате остаётся **I**.
+- **T24/T9 (tool path)**: `POST /api/agent/tools/backtest_rules/invoke` → `result` с metrics/equity/trades,
+  artifact `backtest`; `terminal_get_quote` через MCP — см. выше (**S** для пути инструментов).
+- **T21**: тело `dsh-ai-terminal/workflows/nightly-research.js` валидно как JS function body
+  (`new Function(...)` parse OK); живой workflow/schedule/kill-switch в DSH — **I** (нужен перезапуск DSH).
+- **T26/T9 (клиентская часть)**: карточки/слоты проверены node-тестами на fake-React; живой Harness — **I**.
+
+### Что нужно для живых DSH-шагов (T9/T21/T24/T26)
+
+Профиль DSH `~/.dsh/profiles/desktop` линкует `@local/dsh-ai-terminal` на старый worktree
+`txmlconnector/.worktrees/ai-terminal/dsh-ai-terminal` (код PR #60), а не на смёрженный main. Чтобы
+проверить живьём, нужно (действие пользователя, внешний конфиг):
+
+1. В `~/.dsh/profiles/desktop/package.json` заменить зависимость на
+   `"@local/dsh-ai-terminal": "link:/Users/whitefox/GolandProjects/txmlconnector/dsh-ai-terminal"`.
+2. Выполнить `pnpm install` в каталоге профиля (или дать DSH пересобрать зависимости).
+3. Перезапустить DSH (текущая сессия завершится).
+4. Проверить сценарии: панель «Терминал» → «Автономия» → «Боты», карточка бэктеста в чате (T9/T24),
+   кнопку «В чат» / «Спросить о выделенном», ночной workflow (T21), 7-шаговый сценарий бота (T26).
