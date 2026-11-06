@@ -444,3 +444,19 @@ T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAut
   `terminal_batch_backtest` (GAZP/SBER/LKOH), `bot_0001` create/check/status/proposal.
 - T25: живой prod-промпт через навык (Kimi Code) на неиспользуемом терминале — last 292.29,
   bid/ask 292.28/292.29 (`~/re/prod.env`, read-only); Claude Code — I (OAuth истёк).
+### T21: workflowEngine можно смонтировать (проверено, 2026-11-06 13:00 MSK)
+
+- В приложении DSH есть пакет `@deepseek-ai/dsh-workflow` (сервис `workflowEngine`), но ни один
+  shipped-bundle его не поднимает — поэтому `terminal_nightly_research` отвечает
+  «workflowEngine Harness недоступен».
+- В временном профиле (`/tmp/dsh-wf-test`, `base + web-app`) добавление в `cordis.patch.yml`
+  ```yaml
+  - insert:
+      - id: workflow
+        name: '@deepseek-ai/dsh-workflow'
+  ```
+  даёт `--dump-config` с этой строкой **без предупреждений**, а `dsh --profile wftest --host
+  127.0.0.1 --port 18151 --no-open` поднимает web без ошибок. Значит для T21 достаточно добавить
+  такую же строку в `~/.dsh/profiles/desktop/cordis.patch.yml` (с бэкапом) и перезапустить Desktop.
+- Это изменение внешнего конфига DSH — нужно явное согласие пользователя; fallback — удалить строку
+  и перезапустить. После включения можно проверить `terminal_nightly_research` живьём (T21 Step 5).
