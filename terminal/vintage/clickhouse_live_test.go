@@ -80,7 +80,7 @@ func TestLiveClickHouseReleases(t *testing.T) {
 	if len(releases) == 0 {
 		t.Skip("v_events_calendar is empty in this ClickHouse")
 	}
-	rosstat, usCPI := 0, 0
+	rosstat, usCPI, rateSummary, inflationRU := 0, 0, 0, 0
 	for _, release := range releases {
 		if release.At.Before(from) || release.At.After(to) {
 			t.Fatalf("release %q at %s is outside the window", release.Title, release.At)
@@ -103,7 +103,21 @@ func TestLiveClickHouseReleases(t *testing.T) {
 				t.Fatalf("US CPI = %+v, want us_cpi/US", release)
 			}
 		}
+		// v_cbr_publication_calendar entries: the mapping uses the CBR titles.
+		if strings.Contains(release.Title, "Резюме обсуждения ключевой ставки") {
+			rateSummary++
+			if release.Category != "cbr_rate" || release.Country != "RU" {
+				t.Fatalf("CBR rate summary = %+v, want cbr_rate/RU", release)
+			}
+		}
+		if strings.Contains(release.Title, "Инфляция в России") {
+			inflationRU++
+			if release.Category != "ru_cpi" || release.Country != "RU" {
+				t.Fatalf("CBR inflation release = %+v, want ru_cpi/RU", release)
+			}
+		}
 	}
+	t.Logf("calendar: rosstat=%d us_cpi=%d cbr_rate=%d ru_cpi=%d", rosstat, usCPI, rateSummary, inflationRU)
 	if rosstat == 0 || usCPI == 0 {
 		t.Skipf("calendar has no Rosstat/US CPI samples (rosstat=%d us=%d)", rosstat, usCPI)
 	}
