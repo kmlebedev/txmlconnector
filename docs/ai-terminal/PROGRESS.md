@@ -346,3 +346,28 @@ Cordis с полным набором сервисов (slots/locale/sidebarRigh
 панель/карточки UI временно не загружаются. Для аварийного отключения всего плагина добавлен
 `tools/dsh-plugin-disable.sh` (с бэкапом профиля). После стабилизации boot нужно вернуть
 `dsh.client` и проверить загрузку client-модуля отдельно.
+## Состояние плана и PR на 2026-11-06 10:30 MSK
+
+| PR | Состояние | Содержимое |
+|---|---|---|
+| #62 | **merged** (02:42Z) | фазы A–G, 26/26 задач плана |
+| #63 | **merged** (04:21Z) | live-проверки vintage/оракула, recorder E2E, карточные тесты, `demo-live-check.sh` |
+| #64 | **open** (`fix/plugin-boot-inject`) | стабилизация boot: host `inject = [webServer]`, tools через дочерний `ctx.inject`, client-половина временно отключена (`dsh.client` убран), `dsh-crash-bundle.sh`, `dsh-plugin-disable.sh`, `dsh-plugin-enable.sh`, `docs/ai-terminal/dsh-recovery.md` |
+
+**План:** 109/116 шагов отмечены `[x]`. Осталось **7 live/manual** шагов: T9, T11, T21, T22, T24,
+T25, T26 (T10 закрыт).
+
+- **T11/T22** — окно демо-сервера; фоновая приёмка `tools/demo-live-check.sh` перезапущена и ждёт 09:50 МСК.
+- **T9/T24/T26** — нужен client-UI плагина; сейчас client-половина отключена для стабильного boot,
+  host-часть с инструментами будет возвращена через `tools/dsh-plugin-enable.sh` после merge #64.
+- **T21** — в shipped desktop/web DSH нет сервиса `workflowEngine` (`@deepseek-ai/dsh-workflow`),
+  живой workflow невозможен без установки этого bundle; плагин деградирует graceful.
+- **T25** — установка навыка + промпт проверены через Kimi Code (S-эквивалент); Claude Code-промпт
+  остаётся I из-за истёкшей OAuth-сессии.
+
+**Текущий профиль Desktop:** safe-режим (`base + web-app`), плагин в bundles отсутствует — host-часть
+плагина не активна. Чтобы вернуть инструменты: merge #64 → `bash tools/dsh-plugin-enable.sh` →
+restart DSH. Client-UI возвращать отдельно, после изоляции причины boot-зависания.
+
+**Инструкция восстановления через CLI:** `docs/ai-terminal/dsh-recovery.md` (проверенные команды
+`/usr/local/bin/dsh` + аварийные скрипты).
