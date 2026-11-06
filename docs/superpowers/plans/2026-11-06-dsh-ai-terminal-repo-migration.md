@@ -1,6 +1,6 @@
 # План миграции `dsh-ai-terminal` в отдельный репозиторий `dsh-trading-transaq`
 
-Дата: 2026-11-06. Статус: **выполняется** (Lead: DeepSeek Harness; RTC-команда).
+Дата: 2026-11-06. Статус: **выполнен** (2026-11-06; Lead: DeepSeek Harness, RTC-команда; правки по независимому ревью внесены).
 Источник: `github.com/kmlebedev/txmlconnector`, ветка `main`, commit `dd38d93` (2026-11-06).
 Цель: `github.com/kmlebedev/dsh-trading-transaq` (публичный, пустой на момент старта).
 
@@ -11,7 +11,7 @@
 | Плагин | `dsh-ai-terminal/` — ESM-пакет `@local/dsh-ai-terminal` 0.1.0, 30 tracked-файлов, 352 KB |
 | Тесты плагина | `node --test dsh-ai-terminal/test/` → **54/54 pass** (Node v26.12.0), backend не нужен |
 | История каталога | 16 коммитов (2026-11-05 … 2026-11-06), последний `d55b9eb` |
-| Go-бэкенд | `cmd/terminal` + `terminal/` (122 Go-файла) + `native/`; **остаётся в txmlconnector** |
+| Go-бэкенд | `cmd/terminal` + `terminal/` (123 Go-файла) + `native/`; **остаётся в txmlconnector** |
 | Навыки | `skills/trading-*` — плагин отдаёт их провайдером из `<repoDir>/skills`; остаются в txmlconnector |
 | Доки | `docs/ai-terminal/` (ARCHITECTURE, PROGRESS, dsh-integration, скриншоты) — остаются в txmlconnector |
 | Установка сегодня | профиль `~/.dsh/profiles/desktop`: `dependencies["@local/dsh-ai-terminal"] = link:<txmlconnector>/dsh-ai-terminal`, эта запись есть в `dsh.profile.bundles`, строка патча `- id: ai-terminal` |
@@ -37,7 +37,7 @@
 - **Раскладка**: monorepo-стиль — пакет сохраняет путь `dsh-ai-terminal/` внутри нового репозитория.
   Это сохраняет имена, относительные импорты и тесты, а также оставляет место соседним пакетам.
 - **История**: сохраняется (filter-branch по пути `dsh-ai-terminal` в отдельном клоне; 16 коммитов,
-  сообщения и даты автора). Сверху — 2 собственных коммита: scaffolding и split-support.
+  сообщения и даты автора). Сверху — собственные коммиты: scaffolding, split-support, CI-фикс и правки по независимому ревью (P1/P2).
 - **Имя пакета**: `@local/dsh-ai-terminal` и row id `ai-terminal` **не переименовываются** (меньше
   риска для профиля и client-slot записей); repo name `dsh-trading-transaq` — имя продукта.
 - **Cutover профиля**: в этом проходе **не выполняется** (нужно согласие + рестарт DSH). Готовится
@@ -54,7 +54,7 @@
 
 ```text
 dsh-trading-transaq/
-├── .github/workflows/node-test.yml   # node --test dsh-ai-terminal/test/ (Node 24, ubuntu)
+├── .github/workflows/node-test.yml   # node --test dsh-ai-terminal/test/*.test.mjs (Node 24, ubuntu)
 ├── .gitignore                        # node_modules/, .DS_Store, .cache/, *.log, *.env
 ├── AGENTS.md                         # правила работы агентов в этом репозитории
 ├── LICENSE                           # отложено: решение владельца (см. §2)
@@ -92,7 +92,7 @@ dsh-trading-transaq/
    - README: установка из нового репозитория, требование checkout `txmlconnector` (рядом или
      `repoDir`/`binaryPath`), актуальные ссылки на скриншоты;
    - `cordis.patch.yml`: комментарии про `repoDir`/`DSH_AI_TERMINAL_REPO_DIR`.
-5. `node --test dsh-ai-terminal/test/` → все зелёные (54 + новые repo-dir).
+5. `node --test dsh-ai-terminal/test/*.test.mjs` → все зелёные (54 + новые repo-dir).
 6. Отчёт Lead: SHA коммитов, вывод тестов, `git log --oneline`, `git ls-files` count,
    `npm pack --dry-run` (или `npm pack` в /tmp) — пакет не теряет runtime-модули.
 
@@ -134,10 +134,10 @@ dsh-trading-transaq/
 
 1. `git remote add origin https://github.com/kmlebedev/dsh-trading-transaq.git`, push `main`.
 2. Проверка: `gh repo view`, дерево файлов, run CI `node-test`; README на GitHub рендерится.
-3. Cutover-инструкция в `README.md`/плане: клон в `~/GolandProjects/dsh-trading-transaq`,
-   `~/.dsh/profiles/desktop/package.json` link, `cordis.patch.yml` строка `ai-terminal` config
-   `repoDir: ~/GolandProjects/txmlconnector`, `dsh plugin --profile desktop install`, рестарт DSH,
-   smoke (иконка, панель, health), rollback (link назад на txmlconnector + `git archive` из истории).
+3. Cutover-инструкция — `docs/cutover.md` в новом репозитории: порядок clone → link/repoDir →
+   install → рестарт+smoke → только потом merge ветки. В `repoDir` — только абсолютный путь
+   (`~` и env-переменные YAML не раскрывает). Rollback: link назад на txmlconnector до merge;
+   после merge — `git archive dd38d93 -- dsh-ai-terminal` и link на восстановленный каталог.
 
 ### T5. Независимая проверка (owner: verifier)
 
@@ -149,7 +149,7 @@ dsh-trading-transaq/
 
 ## 5. Проверки (DoD)
 
-- [ ] Новый репозиторий: `node --test dsh-ai-terminal/test/` зелёный; история 16+ коммитов; CI
+- [ ] Новый репозиторий: `node --test dsh-ai-terminal/test/*.test.mjs` зелёный; история 16+ коммитов; CI
       workflow валиден; `git grep -nE 'TC_PASSWORD|TC_LOGIN' ` — без значений (только `os.Getenv`-стиль
       документации, без секретов); нет `.env`, нет абсолютных путей пользователя.
 - [ ] `README.md` плагина: инструкция установки из нового репозитория + бэкенд checkout.
