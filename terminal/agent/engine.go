@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
+	"github.com/kmlebedev/txmlconnector/terminal/bot"
 )
 
 // Defaults frozen by docs/ai-terminal/ARCHITECTURE.md §9.
@@ -38,6 +39,15 @@ type Engine struct {
 	data   DataSource
 	broker Broker
 
+	// conversations keeps the bounded history of the chat dialogs (§9.2).
+	conversations ConversationStore
+	// news is the optional recorded-news source of the get_news tool (md.news);
+	// nil means the recording pipeline is not configured.
+	news NewsStore
+	// bots is the optional rule-bot runtime attached by cmd/terminal (plan
+	// Task 22); nil means the bot_* tools report a configuration error.
+	bots *bot.Manager
+
 	// Seams over the frozen backtest package: production wiring points them at
 	// the real functions, package tests replace them with deterministic fakes.
 	backtestRun   func(backtest.Request) (backtest.Result, error)
@@ -52,6 +62,16 @@ type Engine struct {
 	backtests []backtest.Result
 	tools     []ToolInfo
 	autonomy  *autonomyRun
+
+	// proposals is the human-in-the-loop approval state of the mutating tools
+	// (§9.5). proposalMu guards the bounded ring, the executed results and the
+	// envelope auto-approval quota.
+	proposalMu      sync.Mutex
+	proposals       map[string]*Proposal
+	proposalOrder   []string
+	proposalResults map[string]ToolCall
+	proposalSeq     int64
+	autoApprovals   int
 }
 
 // New builds the agent engine. The data source is required; the paper broker
@@ -65,6 +85,8 @@ func New(cfg Config, data DataSource, broker Broker) (*Engine, error) {
 		cfg:           cfg,
 		data:          data,
 		broker:        broker,
+		conversations: newMemoryConversations(defaultConversationTurns, defaultConversationBytes),
+		news:          cfg.NewsStore,
 		llmHTTPClient: &http.Client{Timeout: cfg.LLM.Timeout},
 		backtestRun:   backtest.Run,
 		newStrategy:   backtest.NewStrategy,
@@ -79,7 +101,9 @@ func New(cfg Config, data DataSource, broker Broker) (*Engine, error) {
 			}
 			return d
 		},
-		subs: make(map[int]func(Event)),
+		subs:            make(map[int]func(Event)),
+		proposals:       make(map[string]*Proposal),
+		proposalResults: make(map[string]ToolCall),
 	}
 	e.tools = buildTools()
 	return e, nil
@@ -140,6 +164,24 @@ func withDefaults(cfg Config) Config {
 	// base URL and a key the deterministic local analyst is used.
 	llm.Enabled = llm.BaseURL != "" && llm.APIKey != ""
 	cfg.LLM = llm
+
+	// Human-in-the-loop policy (§9.5): confirm is the safe default; the
+	// envelope mode is enabled only explicitly (phase F autonomy).
+	approval := cfg.Approval
+	switch approval.Mode {
+	case ApprovalEnvelope:
+		// Explicitly enabled; unset envelope limits fall back to Config.Risk at
+		// the approval gate.
+	case "", ApprovalConfirm:
+		approval.Mode = ApprovalConfirm
+	default:
+		// An unknown mode must never silently execute mutating tools.
+		approval.Mode = ApprovalConfirm
+	}
+	if approval.MaxOrdersPerRun < 0 {
+		approval.MaxOrdersPerRun = 0
+	}
+	cfg.Approval = approval
 	return cfg
 }
 

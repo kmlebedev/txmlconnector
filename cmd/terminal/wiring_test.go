@@ -262,6 +262,51 @@ func TestLLMConfigFromEnv(t *testing.T) {
 	}
 }
 
+// TestNewsStoreFromEnv checks the optional md.news store wiring: the get_news
+// tool is enabled only when a ClickHouse endpoint is configured, and the MD_*
+// recorder variables are accepted next to the generic CLICKHOUSE_* ones.
+func TestNewsStoreFromEnv(t *testing.T) {
+	t.Setenv("MD_CLICKHOUSE_URL", "")
+	t.Setenv("CLICKHOUSE_URL", "")
+	if store := newsStoreFromEnv(); store != nil {
+		t.Fatalf("newsStoreFromEnv without a URL = %T, want nil (recording off)", store)
+	}
+	t.Setenv("CLICKHOUSE_URL", "http://127.0.0.1:8123")
+	if store := newsStoreFromEnv(); store == nil {
+		t.Fatal("newsStoreFromEnv with CLICKHOUSE_URL = nil, want the md.news store")
+	}
+	t.Setenv("MD_CLICKHOUSE_URL", "http://127.0.0.2:8123")
+	t.Setenv("MD_CLICKHOUSE_USER", "md-reader")
+	t.Setenv("MD_CLICKHOUSE_PASSWORD", "test-secret")
+	if store := newsStoreFromEnv(); store == nil {
+		t.Fatal("newsStoreFromEnv with MD_CLICKHOUSE_URL = nil, want the md.news store")
+	}
+}
+
+// TestVintageStoreFromEnv checks the point-in-time store wiring: enabled only
+// with a ClickHouse endpoint (the MD_* recorder variables win over the generic
+// CLICKHOUSE_* ones), nil otherwise so the terminal still starts offline.
+func TestVintageStoreFromEnv(t *testing.T) {
+	t.Setenv("MD_CLICKHOUSE_URL", "")
+	t.Setenv("CLICKHOUSE_URL", "")
+	if store := vintageStoreFromEnv(); store != nil {
+		t.Fatalf("vintageStoreFromEnv without a URL = %T, want nil", store)
+	}
+	t.Setenv("CLICKHOUSE_URL", "http://127.0.0.1:8123")
+	if store := vintageStoreFromEnv(); store == nil {
+		t.Fatal("vintageStoreFromEnv with CLICKHOUSE_URL = nil, want the vintage store")
+	}
+	t.Setenv("MD_CLICKHOUSE_URL", "http://127.0.0.2:8123")
+	t.Setenv("MD_CLICKHOUSE_USER", "reader")
+	t.Setenv("MD_CLICKHOUSE_PASSWORD", "test-secret")
+	if store := vintageStoreFromEnv(); store == nil {
+		t.Fatal("vintageStoreFromEnv with MD_CLICKHOUSE_URL = nil")
+	}
+	if client := chstoreFromEnv(); client == nil {
+		t.Fatal("chstoreFromEnv = nil, want the shared read-only client")
+	}
+}
+
 // TestIsLoopbackAddr checks the bind-address warning helper.
 func TestIsLoopbackAddr(t *testing.T) {
 	cases := map[string]bool{

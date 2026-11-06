@@ -372,3 +372,200 @@ func TestChatContextCancelledAborts(t *testing.T) {
 		t.Fatal("expected the context error")
 	}
 }
+
+// TestChatNoFallbackAfterMutatingTool is the R3 regression test: when the LLM
+// fails after a mutating tool already ran, the local fallback must not replay
+// the action. The response is marked partial and keeps the executed tool calls.
+func TestChatNoFallbackAfterMutatingTool(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		body, _ := io.ReadAll(r.Body)
+		var req llmChatRequest
+		_ = json.Unmarshal(body, &req)
+		if hasToolMessage(req) {
+			// The follow-up model round trip fails after the order ran.
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		writeJSONResponse(w, toolCallPayload("place_order",
+			`{"symbol":"TQBR:SBER","side":"buy","qty":10,"type":"market"}`))
+	}))
+	defer srv.Close()
+
+	e, broker := newLLMEngine(t, srv.URL, 2*time.Second)
+	// R5 gates mutating tools in the default confirm mode; this test exercises
+	// the "action already executed, then the LLM died" path, so the envelope
+	// auto-approves the small order.
+	e.cfg.Approval = ApprovalPolicy{
+		Mode:     ApprovalEnvelope,
+		Envelope: RiskLimits{MaxPositionPct: 100, MaxOrderPct: 100},
+	}
+	resp, err := e.Chat(context.Background(), ChatRequest{
+		Message: "купи 10 SBER по рынку", ConversationID: "conv-1",
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	placed := broker.placedOrders()
+	if len(placed) != 1 {
+		t.Fatalf("broker placements = %d, want exactly one order (no fallback replay)", len(placed))
+	}
+	if placed[0].ClientOrderID != "conv-1:call_1" {
+		t.Errorf("ClientOrderID = %q, want the conversation and tool call ids joined", placed[0].ClientOrderID)
+	}
+	if !resp.Partial {
+		t.Error("Partial = false, want true after a mutating tool ran")
+	}
+	if !resp.LLM {
+		t.Error("LLM = false, want the partial response to stay LLM=true")
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "place_order" {
+		t.Fatalf("tool calls = %+v, want the executed place_order", resp.ToolCalls)
+	}
+	if !strings.HasPrefix(resp.Answer, "LLM недоступен после выполнения действий") {
+		t.Errorf("answer = %q, want the partial-action prefix", resp.Answer)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Errorf("provider calls = %d, want 2 (tool round trip, then failure)", got)
+	}
+}
+
+// TestChatInjectsScreenContext is the T8 regression test: the visible screen
+// (symbol, window, selection, active tab) travels to the LLM as a separate
+// system message with UTC intervals.
+func TestChatInjectsScreenContext(t *testing.T) {
+	var mu sync.Mutex
+	var records []llmRecord
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req llmChatRequest
+		_ = json.Unmarshal(body, &req)
+		mu.Lock()
+		records = append(records, llmRecord{path: r.URL.Path, body: req})
+		mu.Unlock()
+		writeJSONResponse(w, textPayload("Пробой произошёл на повышенном объёме."))
+	}))
+	defer srv.Close()
+
+	e, _ := newLLMEngine(t, srv.URL, 2*time.Second)
+	from := time.Date(2026, 11, 5, 7, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	selFrom := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	selTo := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	resp, err := e.Chat(context.Background(), ChatRequest{
+		Message: "объясни этот пробой",
+		Context: &ScreenContext{
+			Symbol: "TQBR:SBER", PeriodSec: 300,
+			From: from, To: to,
+			Selection: &Range{From: selFrom, To: selTo},
+			ActiveTab: "chart",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if !resp.LLM {
+		t.Fatalf("LLM = false, want the configured LLM answer: %q", resp.Answer)
+	}
+
+	mu.Lock()
+	captured := append([]llmRecord(nil), records...)
+	mu.Unlock()
+	if len(captured) == 0 {
+		t.Fatal("no provider request captured")
+	}
+	screen := ""
+	for _, message := range captured[0].body.Messages {
+		if message.Role != "system" {
+			continue
+		}
+		content := contentString(message.Content)
+		if strings.Contains(content, "Текущий экран") {
+			screen = content
+		}
+	}
+	if screen == "" {
+		t.Fatalf("no screen context system message; messages = %+v", captured[0].body.Messages)
+	}
+	for _, want := range []string{
+		"TQBR:SBER", "300",
+		"2026-11-05T07:00:00Z", "2026-11-05T12:00:00Z",
+		"2026-11-05T09:00:00Z", "2026-11-05T10:00:00Z",
+		"chart",
+	} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("screen context %q lacks %q", screen, want)
+		}
+	}
+	// The screen message is ephemeral: the persisted dialog history must not
+	// contain it, so a later turn carries exactly one fresh context message.
+	if _, err := e.Chat(context.Background(), ChatRequest{
+		Message:        "а что дальше?",
+		ConversationID: resp.ConversationID,
+		Context:        &ScreenContext{Symbol: "TQBR:GAZP", PeriodSec: 300},
+	}); err != nil {
+		t.Fatalf("second Chat: %v", err)
+	}
+	mu.Lock()
+	captured = append([]llmRecord(nil), records...)
+	mu.Unlock()
+	contextMessages := 0
+	for _, message := range captured[len(captured)-1].body.Messages {
+		if message.Role == "system" && strings.Contains(contentString(message.Content), "Текущий экран") {
+			contextMessages++
+		}
+	}
+	if contextMessages != 1 {
+		t.Errorf("screen context messages in the second request = %d, want 1", contextMessages)
+	}
+	foundGazp := false
+	for _, message := range captured[len(captured)-1].body.Messages {
+		if message.Role == "system" && strings.Contains(contentString(message.Content), "TQBR:GAZP") {
+			foundGazp = true
+		}
+	}
+	if !foundGazp {
+		t.Error("the second request must carry the fresh screen context")
+	}
+}
+
+// TestChatFallsBackWhenOnlyReadToolsRan checks that a read-only tool round trip
+// still falls back to the deterministic local analyst after an LLM failure.
+func TestChatFallsBackWhenOnlyReadToolsRan(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req llmChatRequest
+		_ = json.Unmarshal(body, &req)
+		if hasToolMessage(req) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		writeJSONResponse(w, toolCallPayload("get_quote", `{"symbol":"TQBR:SBER"}`))
+	}))
+	defer srv.Close()
+
+	e, broker := newLLMEngine(t, srv.URL, 2*time.Second)
+	resp, err := e.Chat(context.Background(), ChatRequest{
+		Message: "проанализируй SBER 5м", ConversationID: "conv-2",
+	})
+	if err != nil {
+		t.Fatalf("Chat must fall back, got error: %v", err)
+	}
+	if resp.LLM {
+		t.Error("LLM = true, want the local analyst fallback")
+	}
+	if resp.Partial {
+		t.Error("Partial = true, want a complete fallback answer")
+	}
+	if !strings.Contains(resp.Answer, "LLM недоступен (http_503)") ||
+		!strings.Contains(resp.Answer, "локальный аналитик") {
+		t.Errorf("answer = %q, want the local analyst fallback text", resp.Answer)
+	}
+	if len(resp.ToolCalls) == 0 {
+		t.Error("fallback must execute the real read-only tools")
+	}
+	if len(broker.placedOrders()) != 0 {
+		t.Errorf("broker placements = %d, want 0", len(broker.placedOrders()))
+	}
+}

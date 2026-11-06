@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/native/internal/oracle"
+	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/wire"
 	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
@@ -312,5 +313,104 @@ func TestCandlesTimeUnitFollowsPeriod(t *testing.T) {
 	}
 	if !strings.Contains(got, `date="05.11.2026 18:40:00"`) {
 		t.Fatalf("XML must render 05.11.2026 18:40:00, got %s", got)
+	}
+}
+
+// emptyStartupCatalog is the session catalog before RQ_STARTUP: it knows no
+// <candlekinds>, so a period must not be guessed.
+func emptyStartupCatalog() *records.Catalog {
+	return records.NewCatalog(&model.Startup{})
+}
+
+// TestCandlesUnknownPeriodDoesNotGuessMinutes is the R8 regression: the wire
+// time unit comes from <candlekinds>, so a period absent from the dictionary
+// cannot be dated. The event carries the "unknown candle period N" warning and
+// keeps zero times instead of silently falling back to 60-second minutes (the
+// fallback dated a raw 500000 of a 300-second series in December 1970).
+func TestCandlesUnknownPeriodDoesNotGuessMinutes(t *testing.T) {
+	payload := candleRecord(t, 26, 37, 2, 0, []records.Candle{
+		{Time: 500000, Open: 2914600}, // 60 s fallback would be 04.12.1970
+		{Time: -1, Open: 2914200},
+	})
+	recs, err := records.Records(payload)
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+	part, err := records.ParseCandles(recs[0].Body)
+	if err != nil {
+		t.Fatalf("ParseCandles: %v", err)
+	}
+	ev := part.Event(emptyStartupCatalog(), 0)
+	if len(ev.Warnings) != 1 || ev.Warnings[0] != "unknown candle period 2" {
+		t.Fatalf("warnings = %v, want [unknown candle period 2]", ev.Warnings)
+	}
+	if len(ev.Items) != 2 {
+		t.Fatalf("items = %d, want 2", len(ev.Items))
+	}
+	for i, item := range ev.Items {
+		if !item.Time.IsZero() {
+			t.Fatalf("item %d time = %v, want the zero time (no guessed minutes)", i, item.Time)
+		}
+		if item.Time.Year() == 1970 {
+			t.Fatalf("item %d is dated 1970: %v (60-second fallback came back)", i, item.Time)
+		}
+	}
+}
+
+// TestCandlesPeriodOneFallsBackToMinute pins the S-observed exception: kind 1
+// is the 1-minute series, so period 1 is 60 s even before <candlekinds> arrives
+// (the live 1-minute fixtures do not depend on the dictionary).
+func TestCandlesPeriodOneFallsBackToMinute(t *testing.T) {
+	payload := candleRecord(t, 26, 37, 1, 0, []records.Candle{
+		{Time: 29896964, Open: 2914600},
+		{Time: -1, Open: 2914200},
+	})
+	recs, err := records.Records(payload)
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+	part, err := records.ParseCandles(recs[0].Body)
+	if err != nil {
+		t.Fatalf("ParseCandles: %v", err)
+	}
+	ev := part.Event(emptyStartupCatalog(), 0)
+	if len(ev.Warnings) != 0 {
+		t.Fatalf("warnings = %v, want none for the known 1-minute kind", ev.Warnings)
+	}
+	want := time.Unix(29896964*60, 0).UTC()
+	if got := ev.Items[1].Time; !got.Equal(want) {
+		t.Fatalf("last candle = %v, want %v (period 1 = 60 s)", got, want)
+	}
+}
+
+// TestCombineCandlesCarriesUnknownPeriodWarning checks the multipart path: the
+// warning of an undatable series is not lost or duplicated when parts merge.
+func TestCombineCandlesCarriesUnknownPeriodWarning(t *testing.T) {
+	var parts []records.Candles
+	for _, payload := range [][]byte{
+		candleRecord(t, 26, 37, 2, 0, []records.Candle{{Time: 500000, Open: 2914600}}),
+		candleRecord(t, 26, 37, 2, 0, []records.Candle{{Time: 499999, Open: 2914200}}),
+	} {
+		recs, err := records.Records(payload)
+		if err != nil {
+			t.Fatalf("Records: %v", err)
+		}
+		part, err := records.ParseCandles(recs[0].Body)
+		if err != nil {
+			t.Fatalf("ParseCandles: %v", err)
+		}
+		parts = append(parts, part)
+	}
+	combined := records.CombineCandles(parts, emptyStartupCatalog(), 0)
+	if len(combined.Warnings) != 1 || combined.Warnings[0] != "unknown candle period 2" {
+		t.Fatalf("combined warnings = %v, want [unknown candle period 2]", combined.Warnings)
+	}
+	if len(combined.Items) != 2 {
+		t.Fatalf("items = %d, want 2", len(combined.Items))
+	}
+	for i, item := range combined.Items {
+		if !item.Time.IsZero() {
+			t.Fatalf("item %d time = %v, want zero", i, item.Time)
+		}
 	}
 }

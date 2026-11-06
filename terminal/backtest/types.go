@@ -11,13 +11,18 @@ import (
 )
 
 // Bar is one OHLCV bar supplied by the market-data feed.
+//
+// Partial marks the still forming candle of a live feed: it is not closed yet,
+// so the backtest engine drops such bars and strategies never see them (plan
+// Global Constraint: signals are computed on closed bars only).
 type Bar struct {
-	Time   time.Time `json:"t"`
-	Open   float64   `json:"o"`
-	High   float64   `json:"h"`
-	Low    float64   `json:"l"`
-	Close  float64   `json:"c"`
-	Volume int64     `json:"v"`
+	Time    time.Time `json:"t"`
+	Open    float64   `json:"o"`
+	High    float64   `json:"h"`
+	Low     float64   `json:"l"`
+	Close   float64   `json:"c"`
+	Volume  int64     `json:"v"`
+	Partial bool      `json:"partial,omitempty"`
 }
 
 // Param describes one tunable strategy parameter for the UI and the agent.
@@ -69,6 +74,10 @@ type Request struct {
 	FeeBps      float64            `json:"feeBps,omitempty"`
 	SlippageBps float64            `json:"slippageBps,omitempty"`
 	RiskPct     float64            `json:"riskPct,omitempty"`
+	// ExplicitCosts makes FeeBps and SlippageBps literal: an explicit zero
+	// means "no fee / no slippage" instead of "use the documented default".
+	// Research batch runs set it so their no_costs warning is truthful.
+	ExplicitCosts bool `json:"explicitCosts,omitempty"`
 }
 
 // Trade is one closed round trip.
@@ -125,4 +134,5 @@ type Result struct {
 }
 
 // The implementation of the engine and the strategy catalog lives in
-// strategies.go, strategy_*.go, engine.go and metrics.go.
+// strategies.go, strategy_*.go, engine.go and metrics.go; the declarative
+// rules compiler is the rules subpackage.

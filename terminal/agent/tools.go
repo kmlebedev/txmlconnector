@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
+	"github.com/kmlebedev/txmlconnector/terminal/backtest/rules"
+	"github.com/kmlebedev/txmlconnector/terminal/bot"
+	"github.com/kmlebedev/txmlconnector/terminal/research"
 )
 
 // errLiveAutonomy is the iteration-1 guard rail: autonomy trades the paper
@@ -33,11 +36,32 @@ var toolCatalogNames = []string{
 	"stop_autonomy",
 	"get_agent_status",
 	"get_backtest_history",
+	toolNameBacktestRules,
+	toolNameBatchBacktest,
+	toolNameDetectExecutionAlgos,
+	toolNameVolForecast,
+	toolNameVolEvents,
+	toolNameGetNews,
+	toolNameWalkForward,
+	toolNameLOBBacktest,
+	toolNameProposeAutomation,
+	toolNameDraftSkillPattern,
+	toolNameListSkillPatterns,
+	// Rule-bot runtime tools (plan Task 22).
+	"bot_create_from_backtest",
+	"bot_check",
+	"bot_start",
+	"bot_promote",
+	"bot_stop",
+	"bot_status",
+	"bot_journal",
 }
 
-// buildTools returns the tool catalog with JSON schemas.
+// buildTools returns the tool catalog with JSON schemas. Research tools
+// (phases E–G) are appended from tools_research.go so the shared catalog body
+// stays small.
 func buildTools() []ToolInfo {
-	return []ToolInfo{
+	tools := []ToolInfo{
 		{
 			Name:        "list_instruments",
 			Title:       "Инструменты",
@@ -165,6 +189,11 @@ func buildTools() []ToolInfo {
 			Input:       objSchema(map[string]any{}),
 		},
 	}
+	tools = append(tools, researchToolCatalog()...)
+	tools = append(tools, botToolCatalog()...)
+	// The recorded-news tool (plan Task 12) is appended from tools_news.go so
+	// its schema and dispatch stay with the md.news implementation.
+	return append(tools, newsToolCatalog()...)
 }
 
 // Tools returns the tool catalog with JSON schemas.
@@ -174,8 +203,65 @@ func (e *Engine) Tools() []ToolInfo {
 	return out
 }
 
+// mutatingTools is the frozen set of tools with side effects. The local
+// fallback must never replay them after an LLM failure (review finding R3).
+var mutatingTools = map[string]bool{
+	"place_order":    true,
+	"cancel_order":   true,
+	"start_autonomy": true,
+	"stop_autonomy":  true,
+	// Bot lifecycle: starting a bot begins live paper trading, stopping it is
+	// the kill-switch. bot_promote only requests a proposal, so it is not gated
+	// itself (the promotion proposal is the gate).
+	"bot_start": true,
+	"bot_stop":  true,
+}
+
+// isMutatingTool reports whether a tool changes state (orders or autonomy).
+func isMutatingTool(name string) bool { return mutatingTools[name] }
+
+// toolInvocation carries the LLM call identity into tool execution so a
+// mutating tool can build an idempotent client order id. Direct tool calls
+// (the local analyst, tests) leave it empty.
+type toolInvocation struct {
+	ConversationID string
+	ToolCallID     string
+}
+
+// clientOrderID is the idempotency key of one agent order:
+// conversationID + ":" + toolCallID. Without a conversation id the tool call id
+// alone is already unique, so it is used as the key.
+func (inv toolInvocation) clientOrderID() string {
+	if inv.ToolCallID == "" {
+		return ""
+	}
+	if inv.ConversationID == "" {
+		return inv.ToolCallID
+	}
+	return inv.ConversationID + ":" + inv.ToolCallID
+}
+
 // executeToolCall runs one tool, emits SSE events and measures its duration.
 func (e *Engine) executeToolCall(ctx context.Context, name string, args map[string]any) (ToolCall, *Artifact) {
+	return e.executeToolCallFor(ctx, toolInvocation{}, name, args)
+}
+
+// executeToolCallFor runs one tool on behalf of one LLM call: mutating tools
+// receive the call identity needed for their ClientOrderID and pass through the
+// human-in-the-loop approval gate (§9.5).
+func (e *Engine) executeToolCallFor(ctx context.Context, inv toolInvocation, name string, args map[string]any) (ToolCall, *Artifact) {
+	return e.executeToolCallWith(ctx, inv, name, args, true)
+}
+
+// executeToolCallDirect runs a tool that a human already approved: it bypasses
+// the approval gate but keeps the normal tool events.
+func (e *Engine) executeToolCallDirect(ctx context.Context, inv toolInvocation, name string, args map[string]any) (ToolCall, *Artifact) {
+	return e.executeToolCallWith(ctx, inv, name, args, false)
+}
+
+// executeToolCallWith is the common tool wrapper; gate enables the approval
+// gate of the mutating tools.
+func (e *Engine) executeToolCallWith(ctx context.Context, inv toolInvocation, name string, args map[string]any, gate bool) (ToolCall, *Artifact) {
 	if args == nil {
 		args = map[string]any{}
 	}
@@ -185,7 +271,7 @@ func (e *Engine) executeToolCall(ctx context.Context, name string, args map[stri
 	start := time.Now()
 	e.publish(Event{Type: "tool_call", Data: map[string]any{"name": name, "args": args}})
 	call := ToolCall{Name: name, Args: args}
-	result, artifact, err := e.invokeTool(ctx, name, args)
+	result, artifact, err := e.invokeToolWith(ctx, inv, name, args, gate)
 	call.DurationMs = time.Since(start).Milliseconds()
 	if err != nil {
 		call.Error = err.Error()
@@ -204,9 +290,16 @@ func (e *Engine) executeToolCall(ctx context.Context, name string, args map[stri
 	return call, artifact
 }
 
-// invokeTool is the in-process tool dispatch. Panics inside a data source or a
-// tool implementation are recovered and reported as tool errors.
-func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]any) (result any, artifact *Artifact, err error) {
+// invokeTool is the in-process tool dispatch with the approval gate enabled.
+// Panics inside a data source or a tool implementation are recovered and
+// reported as tool errors.
+func (e *Engine) invokeTool(ctx context.Context, inv toolInvocation, name string, args map[string]any) (result any, artifact *Artifact, err error) {
+	return e.invokeToolWith(ctx, inv, name, args, true)
+}
+
+// invokeToolWith is the in-process tool dispatch; gate enables the approval
+// gate of the mutating tools (the approve path calls it with gate=false).
+func (e *Engine) invokeToolWith(ctx context.Context, inv toolInvocation, name string, args map[string]any, gate bool) (result any, artifact *Artifact, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			result, artifact, err = nil, nil, fmt.Errorf("agent: tool %s panicked: %v", name, r)
@@ -215,11 +308,25 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 	if err := contextErr(ctx); err != nil {
 		return nil, nil, err
 	}
+	// Research tools (declarative rules, walk-forward, batch backtests, …) are
+	// dispatched from tools_research.go; handled=false falls through.
+	if result, artifact, handled, err := e.invokeResearchTool(ctx, name, args); handled {
+		return result, artifact, err
+	}
+	// The recorded-news tool (plan Task 12) is dispatched from tools_news.go
+	// against the md.news store of the command wiring.
+	if result, artifact, handled, err := e.invokeNewsTool(ctx, e.news, name, args); handled {
+		return result, artifact, err
+	}
 	switch name {
 	case "list_instruments":
 		return e.data.Instruments(), nil, nil
 	case "get_market_hints":
-		h, err := e.Hints(ctx, argString(args, "symbol"), argInt(args, "periodSec", 0))
+		periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+		if err != nil {
+			return nil, nil, err
+		}
+		h, err := e.Hints(ctx, argString(args, "symbol"), int(periodSec))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -229,8 +336,16 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 		if symbol == "" {
 			return nil, nil, errors.New("agent: symbol is required")
 		}
-		period := e.normalizePeriod(argInt(args, "periodSec", 0))
-		count := clampCount(argInt(args, "count", maxHistoryBars), maxHistoryBars)
+		periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+		if err != nil {
+			return nil, nil, err
+		}
+		countArg, err := argIntStrict(args, "count", maxHistoryBars, minToolCount, maxBacktestBars)
+		if err != nil {
+			return nil, nil, err
+		}
+		period := e.normalizePeriod(int(periodSec))
+		count := clampCount(int(countArg), maxHistoryBars)
 		bars, err := e.data.History(ctx, symbol, period, count)
 		if err != nil {
 			return nil, nil, fmt.Errorf("agent: history for %s: %w", symbol, err)
@@ -269,9 +384,32 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 	case "get_strategies":
 		return e.strategyCatalog(), nil, nil
 	case "place_order":
-		order, err := e.toolPlaceOrder(args)
+		qty, err := argIntStrict(args, "qty", 0, minToolQty, maxToolQty)
 		if err != nil {
 			return nil, nil, err
+		}
+		// The order is validated (structure and the hard risk limits) before the
+		// approval gate: a malformed or risk-blocked order is an error, never a
+		// proposal a human could not legally approve (R5).
+		req, err := e.checkOrderRisk(
+			argString(args, "symbol"),
+			argString(args, "side"),
+			qty,
+			argString(args, "type"),
+			argFloat(args, "price", 0),
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		if gate {
+			if result, gated := e.gatePlaceOrder(args, req); gated {
+				return result, nil, nil
+			}
+		}
+		req.ClientOrderID = inv.clientOrderID()
+		order, err := e.broker.Place(req)
+		if err != nil {
+			return nil, nil, fmt.Errorf("agent: place order: %w", err)
 		}
 		return order, nil, nil
 	case "cancel_order":
@@ -282,15 +420,39 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 		if id == "" {
 			return nil, nil, errors.New("agent: orderId is required")
 		}
+		if gate {
+			if !e.orderExists(id) {
+				return nil, nil, fmt.Errorf("agent: cancel order %s: %w", id, errOrderNotFound)
+			}
+			if result, gated := e.gateMutatingTool("cancel_order", args); gated {
+				return result, nil, nil
+			}
+		}
 		order, err := e.broker.Cancel(id)
 		if err != nil {
 			return nil, nil, fmt.Errorf("agent: cancel order %s: %w", id, err)
 		}
 		return map[string]any{"order": order}, nil, nil
 	case "start_autonomy":
-		cfg := e.autonomyConfigFromArgs(args)
+		cfg, err := e.autonomyConfigFromArgs(args)
+		if err != nil {
+			return nil, nil, err
+		}
 		if cfg.Live {
 			return nil, nil, errLiveAutonomy
+		}
+		if gate {
+			// Never propose starting a runner that is already active, and never
+			// propose a configuration the engine would reject at start time.
+			if e.Status().Autonomy.Running {
+				return nil, nil, ErrAlreadyRunning
+			}
+			if _, _, _, _, err := e.prepareAutonomy(ctx, cfg); err != nil {
+				return nil, nil, err
+			}
+			if result, gated := e.gateMutatingTool("start_autonomy", args); gated {
+				return result, nil, nil
+			}
 		}
 		if err := e.StartAutonomy(ctx, cfg); err != nil {
 			return nil, nil, err
@@ -298,6 +460,8 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 		st := e.autonomyStatus()
 		return st, &Artifact{Kind: "autonomy", Payload: st}, nil
 	case "stop_autonomy":
+		// Documented exception (§9.5): the kill-switch is never delayed by a
+		// human confirmation, otherwise a bad autonomy run could not be stopped.
 		if err := e.StopAutonomy(); err != nil {
 			return nil, nil, err
 		}
@@ -307,6 +471,66 @@ func (e *Engine) invokeTool(ctx context.Context, name string, args map[string]an
 		return e.Status(), nil, nil
 	case "get_backtest_history":
 		return e.Backtests(), nil, nil
+	case "bot_create_from_backtest":
+		res, err := e.toolCreateBot(ctx, args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return res, nil, nil
+	case "bot_check":
+		manager, err := e.requireBotManager()
+		if err != nil {
+			return nil, nil, err
+		}
+		entry, err := manager.Check(ctx, argString(args, "id"))
+		if err != nil {
+			return nil, nil, err
+		}
+		return entry, nil, nil
+	case "bot_start":
+		// Starting a bot begins trading on its paper account: in the confirm
+		// mode the human approves the proposal first, the approved bot_start
+		// call bypasses this gate (R5, plan Task 22).
+		if gate {
+			if result, gated := e.gateMutatingTool("bot_start", args); gated {
+				return result, nil, nil
+			}
+		}
+		res, err := e.toolBotStart(ctx, args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return res, nil, nil
+	case "bot_promote":
+		res, err := e.toolBotPromote(args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return res, nil, nil
+	case "bot_stop":
+		// Documented exception, like stop_autonomy: the kill-switch executes at
+		// once, without a confirmation.
+		manager, err := e.requireBotManager()
+		if err != nil {
+			return nil, nil, err
+		}
+		id := argString(args, "id")
+		if err := manager.Stop(id); err != nil {
+			return nil, nil, err
+		}
+		return e.botStatusPayload(id), nil, nil
+	case "bot_status":
+		res, err := e.toolBotStatus(args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return res, nil, nil
+	case "bot_journal":
+		res, err := e.toolBotJournal(args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return res, nil, nil
 	default:
 		return nil, nil, fmt.Errorf("agent: unknown tool %q", name)
 	}
@@ -382,8 +606,20 @@ func (e *Engine) toolRunBacktest(ctx context.Context, args map[string]any) (back
 	if strategy == "" {
 		return backtest.Result{}, errors.New("agent: strategy is required")
 	}
-	period := e.normalizePeriod(argInt(args, "periodSec", 0))
-	count := clampCount(argInt(args, "count", maxHistoryBars), maxBacktestBars)
+	if strategy == backtest.StrategyRules {
+		// The rule strategy is defined by a rules.Spec, not by numeric params.
+		return backtest.Result{}, errRulesStrategyNeedsSpec
+	}
+	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+	if err != nil {
+		return backtest.Result{}, err
+	}
+	countArg, err := argIntStrict(args, "count", maxHistoryBars, minToolCount, maxBacktestBars)
+	if err != nil {
+		return backtest.Result{}, err
+	}
+	period := e.normalizePeriod(int(periodSec))
+	count := clampCount(int(countArg), maxBacktestBars)
 	bars, err := e.data.History(ctx, symbol, period, count)
 	if err != nil {
 		return backtest.Result{}, fmt.Errorf("agent: history for %s: %w", symbol, err)
@@ -409,19 +645,29 @@ func (e *Engine) toolRunBacktest(ctx context.Context, args map[string]any) (back
 	return res, nil
 }
 
-// toolCompareStrategies implements compare_strategies: every catalog strategy
-// is replayed on the same bars. Only strategies that actually traded are
-// eligible for "best" (ranked by total return, then Sharpe as tie-break);
-// zero-trade strategies are pushed to the end with a warning because their
-// zero Sharpe/drawdown must never win. When nothing traded the returned best is
-// nil and the payload says there are no signals.
+// toolCompareStrategies implements compare_strategies. Every catalog strategy is
+// first validated on a rolling out-of-sample window (walk-forward, review
+// finding R6), so the reported ranking metrics are OOS and not the in-sample fit
+// of the whole history; the returned best result is the full-period replay used
+// for the chart. Only strategies that actually traded are eligible for "best";
+// zero-trade strategies are pushed to the end with a warning because their zero
+// Sharpe/drawdown must never win. When nothing traded the returned best is nil
+// and the payload says there are no signals.
 func (e *Engine) toolCompareStrategies(ctx context.Context, args map[string]any) (compareResult, *backtest.Result, error) {
 	symbol := e.resolveSymbol(argString(args, "symbol"))
 	if symbol == "" {
 		return compareResult{}, nil, errors.New("agent: symbol is required")
 	}
-	period := e.normalizePeriod(argInt(args, "periodSec", 0))
-	count := clampCount(argInt(args, "count", maxHistoryBars), maxBacktestBars)
+	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+	if err != nil {
+		return compareResult{}, nil, err
+	}
+	countArg, err := argIntStrict(args, "count", maxHistoryBars, minToolCount, maxBacktestBars)
+	if err != nil {
+		return compareResult{}, nil, err
+	}
+	period := e.normalizePeriod(int(periodSec))
+	count := clampCount(int(countArg), maxBacktestBars)
 	bars, err := e.data.History(ctx, symbol, period, count)
 	if err != nil {
 		return compareResult{}, nil, fmt.Errorf("agent: history for %s: %w", symbol, err)
@@ -430,36 +676,62 @@ func (e *Engine) toolCompareStrategies(ctx context.Context, args map[string]any)
 		return compareResult{}, nil, fmt.Errorf("agent: not enough history for %s (%d bars)", symbol, len(bars))
 	}
 
-	results := make([]backtest.Result, 0, len(e.strategyCatalog()))
-	warnings := make([]string, 0, 1)
+	type compareEntry struct {
+		strategy string
+		metrics  backtest.Metrics
+		full     *backtest.Result
+	}
+	entries := make([]compareEntry, 0, len(e.strategyCatalog()))
+	warnings := make([]string, 0, 2)
 	var failures []string
+	trainBars, testBars, stepBars, canWalk := compareWalkForwardWindows(len(bars))
 	for _, info := range e.strategyCatalog() {
-		req := backtest.Request{
+		entry := compareEntry{strategy: info.ID}
+		if canWalk {
+			walked, walkErr := research.WalkForward(ctx, research.WalkForwardRequest{
+				Bars:        bars,
+				Strategy:    info.ID,
+				TrainBars:   trainBars,
+				TestBars:    testBars,
+				StepBars:    stepBars,
+				FeeBps:      e.feeBps(),
+				SlippageBps: 1,
+				Run:         e.walkForwardRunner(),
+			})
+			if walkErr == nil {
+				entry.metrics = walked.OOS
+				entries = append(entries, entry)
+				continue
+			}
+			warnings = append(warnings, fmt.Sprintf(
+				"%s: walk-forward недоступен (%v), ранжирование по in-sample", info.ID, walkErr))
+		}
+		res, runErr := e.runBacktest(backtest.Request{
 			Symbol:      symbol,
 			PeriodSec:   period,
 			Bars:        bars,
 			Strategy:    info.ID,
 			InitialCash: defaultBacktestCash,
 			FeeBps:      e.feeBps(),
-		}
-		res, err := e.runBacktest(req)
-		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", info.ID, err))
+		})
+		if runErr != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", info.ID, runErr))
 			continue
 		}
-		results = append(results, res)
+		entry.metrics = res.Metrics
+		entry.full = &res
+		entries = append(entries, entry)
 	}
-	if len(results) == 0 {
+	if len(entries) == 0 {
 		return compareResult{}, nil, fmt.Errorf("agent: all strategies failed: %s", strings.Join(failures, "; "))
 	}
 	if len(failures) > 0 {
 		warnings = append(warnings, "не удалось прогнать: "+strings.Join(failures, "; "))
 	}
-	sort.SliceStable(results, func(i, j int) bool {
-		a, b := results[i].Metrics, results[j].Metrics
+	sort.SliceStable(entries, func(i, j int) bool {
+		a, b := entries[i].metrics, entries[j].metrics
 		tradedA, tradedB := a.Trades > 0, b.Trades > 0
 		if tradedA != tradedB {
-			// Traded strategies always rank above zero-trade strategies.
 			return tradedA
 		}
 		if a.TotalReturnPct != b.TotalReturnPct {
@@ -471,23 +743,43 @@ func (e *Engine) toolCompareStrategies(ctx context.Context, args map[string]any)
 		if a.MaxDrawdownPct != b.MaxDrawdownPct {
 			return a.MaxDrawdownPct > b.MaxDrawdownPct
 		}
-		return results[i].Strategy < results[j].Strategy
+		return entries[i].strategy < entries[j].strategy
 	})
 
-	out := compareResult{Ranked: make([]rankedStrategy, 0, len(results))}
-	for _, res := range results {
-		row := rankedStrategy{Strategy: res.Strategy, Metrics: res.Metrics}
-		if res.Metrics.Trades <= 0 {
-			row.Warning = "нет сделок на выбранном периоде"
+	out := compareResult{
+		Ranked:   make([]rankedStrategy, 0, len(entries)),
+		Warnings: warnings,
+	}
+	for _, entry := range entries {
+		row := rankedStrategy{Strategy: entry.strategy, Metrics: entry.metrics}
+		if entry.metrics.Trades <= 0 {
+			row.Warning = "нет сделок на выбранном out-of-sample периоде"
 		}
 		out.Ranked = append(out.Ranked, row)
 	}
-	if results[0].Metrics.Trades <= 0 {
+	if entries[0].metrics.Trades <= 0 {
 		out.Warnings = append(out.Warnings,
 			"нет стратегий со сделками на выбранном периоде: сигналов нет, лучшая стратегия не выбирается")
 		return out, nil, nil
 	}
-	bestResult := results[0]
+	best := entries[0]
+	bestResult := backtest.Result{}
+	if best.full != nil {
+		bestResult = *best.full
+	} else {
+		res, runErr := e.runBacktest(backtest.Request{
+			Symbol:      symbol,
+			PeriodSec:   period,
+			Bars:        bars,
+			Strategy:    best.strategy,
+			InitialCash: defaultBacktestCash,
+			FeeBps:      e.feeBps(),
+		})
+		if runErr != nil {
+			return compareResult{}, nil, fmt.Errorf("agent: best strategy %s backtest failed: %w", best.strategy, runErr)
+		}
+		bestResult = res
+	}
 	out.Best = bestStrategy{
 		Strategy: bestResult.Strategy,
 		Params:   bestResult.Params,
@@ -526,33 +818,34 @@ func (e *Engine) toolQuote(ctx context.Context, args map[string]any) (quoteResul
 	return out, nil
 }
 
-// toolPlaceOrder implements place_order with the risk limits of §9.4.
-func (e *Engine) toolPlaceOrder(args map[string]any) (OrderView, error) {
+// errOrderNotFound is returned by the cancel_order validation when the paper
+// broker has no such order (the gate must not propose cancelling a ghost).
+var errOrderNotFound = errors.New("agent: order not found")
+
+// orderExists reports whether the paper broker knows one order id.
+func (e *Engine) orderExists(id string) bool {
 	if e.broker == nil {
-		return OrderView{}, errors.New("agent: paper broker is not configured")
+		return false
 	}
-	req, err := e.checkOrderRisk(
-		argString(args, "symbol"),
-		argString(args, "side"),
-		argInt64(args, "qty", 0),
-		argString(args, "type"),
-		argFloat(args, "price", 0),
-	)
-	if err != nil {
-		return OrderView{}, err
+	for _, order := range e.broker.Orders() {
+		if order.ID == id {
+			return true
+		}
 	}
-	order, err := e.broker.Place(req)
-	if err != nil {
-		return OrderView{}, fmt.Errorf("agent: place order: %w", err)
-	}
-	return order, nil
+	return false
 }
 
-// autonomyConfigFromArgs maps raw tool arguments to AutonomyConfig.
-func (e *Engine) autonomyConfigFromArgs(args map[string]any) AutonomyConfig {
+// autonomyConfigFromArgs maps raw tool arguments to AutonomyConfig. The
+// integer periodSec is validated strictly; an error is returned to the model
+// as a tool error.
+func (e *Engine) autonomyConfigFromArgs(args map[string]any) (AutonomyConfig, error) {
+	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+	if err != nil {
+		return AutonomyConfig{}, err
+	}
 	return AutonomyConfig{
 		Symbol:         e.resolveSymbol(argString(args, "symbol")),
-		PeriodSec:      argInt(args, "periodSec", 0),
+		PeriodSec:      int(periodSec),
 		Strategy:       argString(args, "strategy"),
 		Params:         argFloatMap(args, "params"),
 		Speed:          argFloat(args, "speed", 0),
@@ -562,6 +855,283 @@ func (e *Engine) autonomyConfigFromArgs(args map[string]any) AutonomyConfig {
 		TakeProfitPct:  argFloat(args, "takeProfitPct", 0),
 		DailyLossPct:   argFloat(args, "dailyLossPct", 0),
 		Live:           argBool(args, "live"),
+	}, nil
+}
+
+// --- rule-bot runtime (plan Task 22) --------------------------------------
+
+// SetBotManager attaches (nil clears) the rule-bot runtime of the engine. The
+// runtime is created by cmd/terminal from the feed, the paper broker and the
+// engine itself (as the approval proposer).
+func (e *Engine) SetBotManager(manager *bot.Manager) {
+	e.mu.Lock()
+	e.bots = manager
+	e.mu.Unlock()
+}
+
+// BotManager returns the attached rule-bot runtime, or nil.
+func (e *Engine) BotManager() *bot.Manager {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.bots
+}
+
+// requireBotManager reports the configuration error of the bot_* tools.
+func (e *Engine) requireBotManager() (*bot.Manager, error) {
+	manager := e.BotManager()
+	if manager == nil {
+		return nil, errors.New("agent: rule-bot runtime is not configured")
+	}
+	return manager, nil
+}
+
+// botToolCatalog is the catalog of the rule-bot runtime tools.
+func botToolCatalog() []ToolInfo {
+	rulesSchema := map[string]any{
+		"type":        "object",
+		"description": "Декларативные правила rules.Spec: indicators, entry, exit, filters, side, stopLossPct, takeProfitPct",
+	}
+	return []ToolInfo{
+		{
+			Name:        "bot_create_from_backtest",
+			Title:       "Создать бота из бэктеста",
+			Description: "Создать rule-бота из правил rules.Spec и бэктеста. Стадия check: бот ничего не торгует, сначала выполните bot_check.",
+			Input: objSchema(map[string]any{
+				"symbol":     strProp("Тикер инструмента"),
+				"periodSec":  intProp("Период свечей в секундах"),
+				"rules":      rulesSchema,
+				"qty":        intProp("Количество бумаг на сделку (целое)"),
+				"backtestId": strProp("Необязательно: номер (1..N) rules-бэктеста из get_backtest_history; иначе бэктест выполняется заново"),
+			}, "symbol", "periodSec", "rules", "qty"),
+		},
+		{
+			Name:        "bot_check",
+			Title:       "Проверить бота",
+			Description: "Один расчёт rule-бота по последним закрытым барам: close, индикаторы и сигнал. Без подписки на поток и без чтения счёта.",
+			Input:       objSchema(map[string]any{"id": strProp("ID бота")}, "id"),
+		},
+		{
+			Name:        "bot_start",
+			Title:       "Запустить бота",
+			Description: "Запустить бота на закрытых живых барах: dry_run — только журнал, paper — бумажный счёт. Требует подтверждения человеком.",
+			Input: objSchema(map[string]any{
+				"id":    strProp("ID бота"),
+				"stage": enumProp("Стадия: dry_run или paper", "dry_run", "paper"),
+			}, "id", "stage"),
+		},
+		{
+			Name:        "bot_promote",
+			Title:       "Перевести бота на бумагу",
+			Description: "Запросить перевод бота на бумажный счёт: создаётся предложение; после подтверждения выполняется bot_start со stage=paper. Live запрещён.",
+			Input: objSchema(map[string]any{
+				"id":    strProp("ID бота"),
+				"stage": enumProp("Целевая стадия", "paper", "dry_run"),
+			}, "id", "stage"),
+		},
+		{
+			Name:        "bot_stop",
+			Title:       "Остановить бота",
+			Description: "Kill-switch бота: остановка выполняется сразу, без подтверждения.",
+			Input:       objSchema(map[string]any{"id": strProp("ID бота")}, "id"),
+		},
+		{
+			Name:        "bot_status",
+			Title:       "Статус ботов",
+			Description: "Статус одного бота или список всех ботов терминала (стадия, последние записи журнала, счётчики).",
+			Input:       objSchema(map[string]any{"id": strProp("Необязательный ID бота")}),
+		},
+		{
+			Name:        "bot_journal",
+			Title:       "Журнал бота",
+			Description: "Сжатый журнал бота: последние записи (closed_bar/signal/risk_check/order/fill/reconnect/stage/error) и счётчики по видам.",
+			Input: objSchema(map[string]any{
+				"id":       strProp("ID бота"),
+				"afterSeq": intProp("Вернуть записи с Seq больше указанного"),
+				"limit":    intProp("Сколько последних записей вернуть, максимум 500"),
+			}, "id"),
+		},
+	}
+}
+
+// toolCreateBot implements bot_create_from_backtest.
+func (e *Engine) toolCreateBot(ctx context.Context, args map[string]any) (map[string]any, error) {
+	manager, err := e.requireBotManager()
+	if err != nil {
+		return nil, err
+	}
+	symbol := e.resolveSymbol(argString(args, "symbol"))
+	if symbol == "" {
+		return nil, errors.New("agent: symbol is required")
+	}
+	periodSec, err := argIntStrict(args, "periodSec", 0, minToolPeriodSec, maxToolPeriodSec)
+	if err != nil {
+		return nil, err
+	}
+	qty, err := argIntStrict(args, "qty", 0, 1, 1_000_000)
+	if err != nil {
+		return nil, err
+	}
+	spec, err := parseRulesSpec(args["rules"])
+	if err != nil {
+		return nil, err
+	}
+	var result backtest.Result
+	if backtestID := argString(args, "backtestId"); backtestID != "" {
+		result, err = e.findRulesBacktest(backtestID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		period := e.normalizePeriod(int(periodSec))
+		bars, err := e.data.History(ctx, symbol, period, maxBacktestBars)
+		if err != nil {
+			return nil, fmt.Errorf("agent: history for %s: %w", symbol, err)
+		}
+		if len(bars) < 2 {
+			return nil, fmt.Errorf("agent: not enough history for %s (%d bars)", symbol, len(bars))
+		}
+		// The numeric-param backtest path cannot carry a rules.Spec, so the
+		// compiled strategy goes through backtest.RunStrategy.
+		strategy, compileErr := rules.Compile(spec)
+		if compileErr != nil {
+			return nil, fmt.Errorf("agent: %w", compileErr)
+		}
+		result, err = backtest.RunStrategy(backtest.Request{
+			Symbol: symbol, PeriodSec: period, Bars: bars,
+			Strategy:    strategy.ID(),
+			InitialCash: defaultBacktestCash, FeeBps: e.feeBps(), SlippageBps: 1,
+		}, strategy)
+		if err != nil {
+			return nil, fmt.Errorf("agent: backtest %s on %s: %w", rules.ID, symbol, err)
+		}
+		e.recordBacktest(result)
+	}
+	definition, err := manager.CreateFromBacktest(result, spec, qty)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"bot": definition}, nil
+}
+
+// findRulesBacktest resolves a 1-based backtest id of get_backtest_history.
+func (e *Engine) findRulesBacktest(id string) (backtest.Result, error) {
+	results := e.Backtests()
+	index, err := strconv.Atoi(strings.TrimSpace(id))
+	if err != nil || index < 1 || index > len(results) {
+		return backtest.Result{}, fmt.Errorf("agent: backtest %q not found (use 1..%d from get_backtest_history)", id, len(results))
+	}
+	result := results[index-1]
+	if result.Strategy != rules.ID {
+		return backtest.Result{}, fmt.Errorf("agent: backtest %q is %q, a rule bot needs a %q backtest", id, result.Strategy, rules.ID)
+	}
+	return result, nil
+}
+
+// toolBotStart implements bot_start (dry_run|paper).
+func (e *Engine) toolBotStart(ctx context.Context, args map[string]any) (map[string]any, error) {
+	manager, err := e.requireBotManager()
+	if err != nil {
+		return nil, err
+	}
+	id := argString(args, "id")
+	if id == "" {
+		return nil, errors.New("agent: bot id is required")
+	}
+	stage := bot.Stage(strings.ToLower(strings.TrimSpace(argString(args, "stage"))))
+	if stage == "" {
+		stage = bot.StageDryRun
+	}
+	if err := manager.Start(ctx, id, stage); err != nil {
+		return nil, err
+	}
+	return e.botStatusPayload(id), nil
+}
+
+// toolBotPromote implements bot_promote: the paper stage always goes through the
+// human approval proposal (task 7).
+func (e *Engine) toolBotPromote(args map[string]any) (map[string]any, error) {
+	manager, err := e.requireBotManager()
+	if err != nil {
+		return nil, err
+	}
+	id := argString(args, "id")
+	if id == "" {
+		return nil, errors.New("agent: bot id is required")
+	}
+	stage := bot.Stage(strings.ToLower(strings.TrimSpace(argString(args, "stage"))))
+	if stage == "" {
+		stage = bot.StagePaper
+	}
+	proposalID, err := manager.Promote(id, stage)
+	if err != nil {
+		return nil, err
+	}
+	payload := e.botStatusPayload(id)
+	payload["proposalId"] = proposalID
+	return payload, nil
+}
+
+// toolBotStatus implements bot_status for one bot or the whole list.
+func (e *Engine) toolBotStatus(args map[string]any) (map[string]any, error) {
+	manager, err := e.requireBotManager()
+	if err != nil {
+		return nil, err
+	}
+	id := argString(args, "id")
+	if id == "" {
+		return map[string]any{"bots": manager.Bots()}, nil
+	}
+	payload := e.botStatusPayload(id)
+	if message, ok := payload["error"].(string); ok {
+		return nil, errors.New(message)
+	}
+	return payload, nil
+}
+
+// toolBotJournal implements the compact bot_journal response.
+func (e *Engine) toolBotJournal(args map[string]any) (map[string]any, error) {
+	manager, err := e.requireBotManager()
+	if err != nil {
+		return nil, err
+	}
+	id := argString(args, "id")
+	if id == "" {
+		return nil, errors.New("agent: bot id is required")
+	}
+	afterSeq, err := argIntStrict(args, "afterSeq", 0, 0, int64(1)<<62)
+	if err != nil {
+		return nil, err
+	}
+	limit, err := argIntStrict(args, "limit", 20, 1, 500)
+	if err != nil {
+		return nil, err
+	}
+	definition, err := manager.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	entries := manager.Journal(id, uint64(afterSeq), int(limit))
+	return map[string]any{
+		"bot":     definition,
+		"entries": entries,
+		"counts":  manager.JournalCounts(id),
+	}, nil
+}
+
+// botStatusPayload returns one bot with its recent journal.
+func (e *Engine) botStatusPayload(id string) map[string]any {
+	manager := e.BotManager()
+	if manager == nil {
+		return map[string]any{"id": id, "error": "agent: rule-bot runtime is not configured"}
+	}
+	definition, err := manager.Get(id)
+	if err != nil {
+		return map[string]any{"id": id, "error": err.Error()}
+	}
+	return map[string]any{
+		"bot":    definition,
+		"last":   manager.Journal(id, 0, 5),
+		"counts": manager.JournalCounts(id),
 	}
 }
 
@@ -652,24 +1222,6 @@ func argFloat(args map[string]any, key string, def float64) float64 {
 		}
 	}
 	return def
-}
-
-// argInt returns an integer argument or def when it is missing/unparsable.
-func argInt(args map[string]any, key string, def int) int {
-	v, ok := args[key]
-	if !ok || v == nil {
-		return def
-	}
-	return int(argFloat(args, key, float64(def)))
-}
-
-// argInt64 returns an int64 argument or def when it is missing/unparsable.
-func argInt64(args map[string]any, key string, def int64) int64 {
-	v, ok := args[key]
-	if !ok || v == nil {
-		return def
-	}
-	return int64(argFloat(args, key, float64(def)))
 }
 
 // argBool returns a boolean argument.

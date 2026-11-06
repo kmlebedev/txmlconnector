@@ -87,8 +87,8 @@ func TestLocalAnalystBestStrategy(t *testing.T) {
 	}
 }
 
-// TestLocalAnalystStartAutonomy checks "запусти/авто/торгуй" starts the paper
-// autonomy after the backtest.
+// TestLocalAnalystStartAutonomy checks that "запусти/авто/торгуй" produces a
+// pending proposal (R5) instead of starting the paper autonomy immediately.
 func TestLocalAnalystStartAutonomy(t *testing.T) {
 	e, _, _ := newTestEngine(t)
 	resp, err := e.Chat(context.Background(), ChatRequest{
@@ -101,31 +101,22 @@ func TestLocalAnalystStartAutonomy(t *testing.T) {
 	if !ok {
 		t.Fatalf("start_autonomy call is missing; tools = %v", toolNames(resp.ToolCalls))
 	}
-	if call.Error != "" {
-		t.Fatalf("start_autonomy error: %s", call.Error)
-	}
 	if call.Args["strategy"] != "sma_cross" || call.Args["periodSec"] != 300 {
 		t.Errorf("start_autonomy args = %v", call.Args)
 	}
-	if !strings.Contains(resp.Answer, "Автономия запущена") {
-		t.Errorf("answer does not report the started autonomy: %q", resp.Answer)
+	proposal := proposalOf(t, call)
+	if proposal.Tool != "start_autonomy" || proposal.Status != ProposalPending {
+		t.Fatalf("proposal = %+v, want a pending start_autonomy", proposal)
 	}
-	if !strings.Contains(resp.Answer, "Запущено по вашей команде на бумажном счёте") {
-		t.Errorf("answer lacks the action-consistent closing line: %q", resp.Answer)
+	if e.Status().Autonomy.Running {
+		t.Fatal("autonomy must not start before the human approval")
 	}
-	if strings.Contains(resp.Answer, "Рекомендация: не запускать") {
-		t.Errorf("started autonomy contradicts the closing line: %q", resp.Answer)
+	if !strings.Contains(resp.Answer, "Подготовил предложение") {
+		t.Errorf("answer does not report the proposal: %q", resp.Answer)
 	}
-	st := waitAutonomy(t, e)
-	foundStart := false
-	for _, entry := range st.Log {
-		if entry.Kind == "start" {
-			foundStart = true
-			break
-		}
-	}
-	if !foundStart {
-		t.Fatalf("autonomy log has no start entry: %+v", st.Log)
+	props := e.Proposals()
+	if len(props) != 1 || props[0].ID != proposal.ID {
+		t.Fatalf("proposals = %+v, want the one pending proposal", props)
 	}
 }
 
@@ -389,8 +380,8 @@ func fakeReturnsOverrides(returns map[string]float64, trades int) func(backtest.
 }
 
 // TestLocalAnalystExplicitCommandLosingStrategy: an explicit start command for
-// a losing (but trading) strategy really starts the runner, and the closing
-// line must agree with the action — no "Рекомендация: не запускать".
+// a losing (but trading) strategy produces a proposal, still warning that the
+// history is losing (R5: nothing runs before the human approval).
 func TestLocalAnalystExplicitCommandLosingStrategy(t *testing.T) {
 	e, _, _ := newTestEngine(t)
 	e.stepDelay = func(float64) time.Duration { return 20 * time.Millisecond }
@@ -408,25 +399,22 @@ func TestLocalAnalystExplicitCommandLosingStrategy(t *testing.T) {
 	if !ok || call.Error != "" {
 		t.Fatalf("start_autonomy = %+v", call)
 	}
-	if !e.Status().Autonomy.Running {
-		t.Fatal("autonomy must be running after the explicit command")
+	if proposal := proposalOf(t, call); proposal.Status != ProposalPending {
+		t.Fatalf("proposal = %+v, want pending", proposal)
 	}
-	if !strings.Contains(resp.Answer, "Запущено по вашей команде на бумажном счёте") {
-		t.Errorf("answer lacks the action-consistent closing line: %q", resp.Answer)
+	if e.Status().Autonomy.Running {
+		t.Fatal("autonomy must not run before the human approval")
+	}
+	if !strings.Contains(resp.Answer, "Подготовил предложение") {
+		t.Errorf("answer does not report the proposal: %q", resp.Answer)
 	}
 	if !strings.Contains(resp.Answer, "убыточна") {
 		t.Errorf("answer does not warn about the losing history: %q", resp.Answer)
 	}
-	if strings.Contains(resp.Answer, "Рекомендация: не запускать") {
-		t.Errorf("answer contradicts the started runner: %q", resp.Answer)
-	}
-	if err := e.StopAutonomy(); err != nil {
-		t.Fatalf("StopAutonomy: %v", err)
-	}
 }
 
 // TestLocalAnalystExplicitCommandWinningStrategy: the same command for a
-// strategy that beats buy&hold gets the positive action-consistent wording.
+// strategy that beats buy&hold gets the proposal wording while staying pending.
 func TestLocalAnalystExplicitCommandWinningStrategy(t *testing.T) {
 	e, _, _ := newTestEngine(t) // default fake: sma_cross +7.5% vs benchmark +1.5%
 	e.stepDelay = func(float64) time.Duration { return 20 * time.Millisecond }
@@ -438,18 +426,17 @@ func TestLocalAnalystExplicitCommandWinningStrategy(t *testing.T) {
 	if !ok || call.Error != "" {
 		t.Fatalf("start_autonomy = %+v", call)
 	}
-	if !e.Status().Autonomy.Running {
-		t.Fatal("autonomy must be running after the explicit command")
+	if proposal := proposalOf(t, call); proposal.Status != ProposalPending {
+		t.Fatalf("proposal = %+v, want pending", proposal)
 	}
-	if !strings.Contains(resp.Answer, "Запущено по вашей команде на бумажном счёте") ||
-		!strings.Contains(resp.Answer, "обгоняет buy&hold") {
-		t.Errorf("answer lacks the positive action-consistent line: %q", resp.Answer)
+	if e.Status().Autonomy.Running {
+		t.Fatal("autonomy must not run before the human approval")
 	}
-	if strings.Contains(resp.Answer, "Рекомендация: не запускать") {
-		t.Errorf("answer contradicts the started runner: %q", resp.Answer)
+	if !strings.Contains(resp.Answer, "Подготовил предложение") {
+		t.Errorf("answer does not report the proposal: %q", resp.Answer)
 	}
-	if err := e.StopAutonomy(); err != nil {
-		t.Fatalf("StopAutonomy: %v", err)
+	if strings.Contains(resp.Answer, "Автономия запущена") {
+		t.Errorf("answer must not claim the runner started: %q", resp.Answer)
 	}
 }
 

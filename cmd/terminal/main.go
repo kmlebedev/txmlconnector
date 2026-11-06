@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/kmlebedev/txmlconnector/terminal/api"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
+	"github.com/kmlebedev/txmlconnector/terminal/mcp"
 	"github.com/kmlebedev/txmlconnector/terminal/paper"
 )
 
@@ -54,6 +56,7 @@ func run(logger *log.Logger) error {
 	feeBps := flag.Float64("fee-bps", 5, "комиссия бумажных сделок, б.п.")
 	llmFlag := flag.String("llm", "", "off — принудительно выключить LLM; иначе LLM из env")
 	liveTrading := flag.Bool("live-trading", false, "разрешить реальные заявки (вместе с TERMINAL_LIVE_TRADING=1)")
+	allowedOrigins := flag.String("allowed-origins", "", "дополнительные Origin для небезопасных методов API, через запятую (API также принимает свой Origin)")
 	showVersion := flag.Bool("version", false, "печать версии и выход")
 	flag.Parse()
 
@@ -100,44 +103,70 @@ func run(logger *log.Logger) error {
 	market := newFeedAdapter(feedSvc)
 	portfolio := newPaperAdapter(broker, feedSvc)
 	engine, err := agent.New(agent.Config{
-		LLM:      llmCfg,
-		Universe: feedSvc.Universe(),
-		FeeBps:   *feeBps,
+		LLM:       llmCfg,
+		Universe:  feedSvc.Universe(),
+		FeeBps:    *feeBps,
+		NewsStore: newsStoreFromEnv(),
 	}, market, portfolio)
 	if err != nil {
 		_ = feedSvc.Close()
 		return fmt.Errorf("инициализация AI-агента: %w", err)
 	}
+	bots, err := newBotRuntime(feedSvc, broker, engine)
+	if err != nil {
+		_ = feedSvc.Close()
+		return fmt.Errorf("инициализация рантайма ботов: %w", err)
+	}
+	defer func() { _ = bots.Close() }()
 
 	liveTradingAllowed := *liveTrading && os.Getenv("TERMINAL_LIVE_TRADING") == "1"
+	// The API token and the instance nonce come only from the environment: the
+	// DSH plugin generates both per launch and the token never touches disk.
+	guardCfg := api.GuardConfig{
+		AllowedOrigins: splitList(*allowedOrigins),
+		Token:          os.Getenv("TERMINAL_API_TOKEN"),
+	}
 	apiSrv, err := api.New(api.Config{
 		Version:            version,
 		LiveTradingAllowed: liveTradingAllowed,
 		PaperInitialCash:   *paperCash,
 		SeedGeneratedAt:    feedSvc.Status().SeedGeneratedAt,
 		Web:                terminal.WebFS(),
+		Guard:              guardCfg,
+		InstanceID:         os.Getenv("TERMINAL_INSTANCE_ID"),
 	}, api.Deps{
 		Feed:     feedSvc,
 		Paper:    broker,
 		Agent:    engine,
 		Backtest: runBacktest,
+		Bots:     bots,
 	})
 	if err != nil {
 		_ = feedSvc.Close()
 		return fmt.Errorf("инициализация HTTP API: %w", err)
 	}
 
+	// MCP endpoint (plan Task 10): external MCP clients call the same Go tools
+	// over the streamable-HTTP JSON-RPC transport, guarded by the same
+	// per-launch token as the local API (X-Terminal-Token).
+	rootMux := http.NewServeMux()
+	rootMux.Handle("/", apiSrv.Handler())
+	rootMux.Handle("/mcp", api.Guard(guardCfg, mcp.NewServer(engine)))
+
 	// No global WriteTimeout: /api/events is a long-lived SSE stream. The API
 	// bounds every SSE write with a per-write deadline instead (see api/sse.go).
 	httpServer := &http.Server{
 		Addr:              *addr,
-		Handler:           apiSrv.Handler(),
+		Handler:           rootMux,
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 		WriteTimeout:      0,
 	}
 	if !isLoopbackAddr(*addr) {
-		logger.Printf("внимание: сервер слушает не только loopback (%s); API без аутентификации", *addr)
+		logger.Printf("внимание: сервер слушает не только loopback (%s)", *addr)
+	}
+	if guardCfg.Token == "" {
+		logger.Printf("TERMINAL_API_TOKEN не задан: /api/* и /mcp без токена (защита — Host/Origin/Content-Type)")
 	}
 	if liveTradingAllowed {
 		logger.Printf("реальная торговля разрешена флагами, но маршрутизация на биржу в итерации 1 не реализована (paper only)")
@@ -147,7 +176,7 @@ func run(logger *log.Logger) error {
 	go func() {
 		serveErr <- httpServer.ListenAndServe()
 	}()
-	logger.Printf("AI-терминал %s: режим=%s, %s, бумажный счёт %.0f ₽, LLM=%s",
+	logger.Printf("AI-терминал %s: режим=%s, %s (MCP /mcp), бумажный счёт %.0f ₽, LLM=%s",
 		version, mode, "http://"+*addr, *paperCash, llmModeLabel(engine.Status().LLM))
 
 	select {
@@ -180,6 +209,17 @@ func runBacktest(req backtest.Request) (backtest.Result, error) {
 	return backtest.Run(req)
 }
 
+// splitList parses a comma-separated flag value into trimmed non-empty items.
+func splitList(raw string) []string {
+	var items []string
+	for _, item := range strings.Split(raw, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
 // llmModeLabel renders a secret-free LLM status for the startup log.
 func llmModeLabel(status agent.LLMStatus) string {
 	if status.Enabled {
@@ -189,8 +229,8 @@ func llmModeLabel(status agent.LLMStatus) string {
 }
 
 // isLoopbackAddr reports whether addr binds loopback only. An empty host
-// (":8090"), "0.0.0.0" or "::" means all interfaces: the API has no
-// authentication in iteration 1, so these must warn like any public bind.
+// (":8090"), "0.0.0.0" or "::" means all interfaces: the API is then
+// reachable from the network and must warn like any public bind.
 func isLoopbackAddr(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {

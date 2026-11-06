@@ -78,6 +78,11 @@ type History struct {
 	Bars      []Bar
 	Source    string // "live" | "seed"
 	Note      string // e.g. "демо-снапшот 05.11.2026"
+	// Warnings reports a series that cannot be trusted as typed. The live
+	// source forwards "unknown candle period N" of native/records: the period
+	// was not in the session <candlekinds>, so the bars carry zero times
+	// instead of guessed minutes (R8). Empty means the series is clean.
+	Warnings []string
 }
 
 // Level is one order-book level.
@@ -111,8 +116,23 @@ type Trade struct {
 	Side  string // "buy" | "sell" | ""
 }
 
+// News is one TRANSAQ news story of the terminal news lenta. Published is the
+// exchange timestamp from the wire header; FirstSeen is the instant the feed
+// received it (the point-in-time the recorder also stores in md.news). Body is
+// empty until the body callback arrives — the live feed requests the headers
+// only, the recorder persists the bodies.
+type News struct {
+	ID        int64
+	Published time.Time
+	FirstSeen time.Time
+	Source    string
+	Title     string
+	Body      string
+}
+
 // Event is one change published to subscribers. Type is "quote" | "orderbook" |
-// "status"; Data carries the typed value (Quote, OrderBook or Status).
+// "news" | "status"; Data carries the typed value (Quote, OrderBook, News or
+// Status).
 type Event struct {
 	Type string
 	Data any
@@ -170,6 +190,8 @@ const (
 	defaultTradeLimit   = 50
 	maxTradeLimit       = 200
 	maxBookLevels       = 20
+	maxNews             = 200 // ring of the terminal news lenta
+	defaultNewsLimit    = 50
 )
 
 // historyCount normalizes count: zero or negative means the default, too large
@@ -220,6 +242,8 @@ type Service struct {
 	trades       map[string][]Trade
 	historyCache map[string]*historyEntry
 	candleKinds  map[int]int
+	news         map[int64]News
+	newsOrder    []int64 // arrival order, trimmed to maxNews
 	serverOffset time.Duration
 	exchangeTZ   string
 
@@ -266,6 +290,7 @@ func New(cfg Config) (*Service, error) {
 		books:        map[string]OrderBook{},
 		trades:       map[string][]Trade{},
 		historyCache: map[string]*historyEntry{},
+		news:         map[int64]News{},
 		subs:         map[uint64]func(Event){},
 		exchangeTZ:   exchangeZoneName(seed.ExchangeTZ),
 	}
@@ -459,6 +484,25 @@ func (s *Service) Trades(ctx context.Context, symbol string, limit int) ([]Trade
 		return s.offlineTrades(symbol, tradeLimit(limit))
 	}
 	return s.liveTrades(symbol, tradeLimit(limit))
+}
+
+// News returns the recent TRANSAQ news, newest first, first seen at or after
+// since (the zero time means all), at most limit (zero means defaultNewsLimit).
+func (s *Service) News(since time.Time, limit int) []News {
+	if limit <= 0 {
+		limit = defaultNewsLimit
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]News, 0, limit)
+	for i := len(s.newsOrder) - 1; i >= 0 && len(out) < limit; i-- {
+		item := s.news[s.newsOrder[i]]
+		if item.FirstSeen.Before(since) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // Subscribe registers a market-data event sink and returns its cancel function.

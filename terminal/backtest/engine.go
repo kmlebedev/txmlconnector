@@ -25,11 +25,12 @@ const (
 // runConfig is a normalized Request: zero defaults are resolved and the values
 // are validated.
 type runConfig struct {
-	periodSec   int
-	initialCash float64
-	feeBps      float64
-	slippageBps float64
-	riskPct     float64
+	periodSec     int
+	initialCash   float64
+	feeBps        float64
+	slippageBps   float64
+	riskPct       float64
+	explicitCosts bool
 }
 
 func normalizeRequest(req Request) (runConfig, error) {
@@ -58,11 +59,17 @@ func normalizeRequest(req Request) (runConfig, error) {
 	if cfg.initialCash == 0 {
 		cfg.initialCash = defaultInitialCash
 	}
-	if cfg.feeBps == 0 {
-		cfg.feeBps = defaultFeeBps
-	}
-	if cfg.slippageBps == 0 {
-		cfg.slippageBps = defaultSlippageBps
+	if req.ExplicitCosts {
+		// Literal costs: an explicit zero means a true zero-cost backtest (the
+		// research batch uses this and warns with no_costs).
+		cfg.explicitCosts = true
+	} else {
+		if cfg.feeBps == 0 {
+			cfg.feeBps = defaultFeeBps
+		}
+		if cfg.slippageBps == 0 {
+			cfg.slippageBps = defaultSlippageBps
+		}
 	}
 	if cfg.riskPct == 0 {
 		cfg.riskPct = defaultRiskPct
@@ -85,6 +92,29 @@ func validateBars(bars []Bar) error {
 		}
 	}
 	return nil
+}
+
+// dropPartialBars removes the still forming candles of a live feed. Their
+// provisional close and volume are not a closed bar, so neither the strategy
+// nor the metrics may use them.
+func dropPartialBars(bars []Bar) ([]Bar, int) {
+	dropped := 0
+	for _, bar := range bars {
+		if bar.Partial {
+			dropped++
+		}
+	}
+	if dropped == 0 {
+		return bars, 0
+	}
+	closed := make([]Bar, 0, len(bars)-dropped)
+	for _, bar := range bars {
+		if bar.Partial {
+			continue
+		}
+		closed = append(closed, bar)
+	}
+	return closed, dropped
 }
 
 // replayResult is the raw engine output before metrics are derived.
@@ -173,19 +203,41 @@ func replay(bars []Bar, strategy Strategy, cfg runConfig) replayResult {
 	return out
 }
 
-// Run replays bars through the strategy and returns metrics, the equity curve
-// and the closed trades. Signals are decided on the close of bar i and filled at
-// the open of bar i+1; there is no lookahead, no network and no clock access.
-// An open position at the last bar is marked to market, not force-closed.
+// Run replays bars through the named catalog strategy and returns metrics, the
+// equity curve and the closed trades. Signals are decided on the close of bar i
+// and filled at the open of bar i+1; there is no lookahead, no network and no
+// clock access. An open position at the last bar is marked to market, not
+// force-closed.
 func Run(req Request) (Result, error) {
 	strategy, err := NewStrategy(req.Strategy, req.Params)
 	if err != nil {
 		return Result{}, err
 	}
+	return runWithStrategy(req, strategy)
+}
+
+// RunStrategy replays bars through a caller-built strategy. It is the seam for
+// strategies whose definition is not the numeric Params map of the catalog —
+// declarative rules are compiled from a JSON Spec by rules.Compile and then
+// replayed here. The partial-bar rule of Run applies as well.
+func RunStrategy(req Request, strategy Strategy) (Result, error) {
+	if strategy == nil {
+		return Result{}, fmt.Errorf("backtest: nil strategy")
+	}
+	return runWithStrategy(req, strategy)
+}
+
+// runWithStrategy is the shared engine path of Run and RunStrategy.
+func runWithStrategy(req Request, strategy Strategy) (Result, error) {
 	cfg, err := normalizeRequest(req)
 	if err != nil {
 		return Result{}, err
 	}
+
+	// Signals are computed on closed bars only: drop the still forming candles
+	// of a live feed instead of trading their provisional close.
+	bars, droppedPartial := dropPartialBars(req.Bars)
+	req.Bars = bars
 
 	n := len(req.Bars)
 	result := Result{
@@ -206,6 +258,13 @@ func Run(req Request) (Result, error) {
 	}
 	if cfg.periodSec == 0 {
 		result.Warnings = append(result.Warnings, "periodSec не задан: коэффициент Шарпа не рассчитывается")
+	}
+	if droppedPartial > 0 {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("незакрытые бары отброшены: %d", droppedPartial))
+	}
+	if warning := NoCostsWarning(cfg.feeBps, cfg.slippageBps, cfg.explicitCosts); warning != "" {
+		result.Warnings = append(result.Warnings, warning)
 	}
 	if n < minBars {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("недостаточно баров: %d (нужно не менее %d)", n, minBars))

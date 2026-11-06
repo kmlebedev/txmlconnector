@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ type fakeClient struct {
 	subscribes   int
 	historyCalls int
 	histCounts   []int
+	oldNews      int
 	closed       bool
 }
 
@@ -54,6 +56,20 @@ func (f *fakeClient) History(ctx context.Context, req native.HistoryRequest) (mo
 
 func (f *fakeClient) ServerTimeDifference(ctx context.Context) (time.Duration, error) {
 	return f.diff, nil
+}
+
+// OldNews records the get_old_news requests of the live news feed.
+func (f *fakeClient) OldNews(ctx context.Context, count int) error {
+	f.mu.Lock()
+	f.oldNews++
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeClient) newsFetches() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.oldNews
 }
 
 func (f *fakeClient) ServerTZ() string { return f.tz }
@@ -270,6 +286,85 @@ func TestLiveOrderBookAndTrades(t *testing.T) {
 	}
 }
 
+// TestLiveNewsFeed checks the terminal news lenta: the live feed polls the news
+// headers (there is no news subscription on the wire), a <news_header> becomes a
+// feed.Event{Type:"news"} with the receive instant as FirstSeen, and a later
+// <news_body> updates the body without moving FirstSeen.
+func TestLiveNewsFeed(t *testing.T) {
+	headerSent := make(chan struct{})
+	bodyGate := make(chan struct{})
+	published := time.Unix(testBase-60, 0).UTC()
+	client := &fakeClient{}
+	client.runFn = func(ctx context.Context, h func([]model.Event) error) error {
+		if err := h([]model.Event{&model.NewsHeader{ID: 11, Time: published, Source: "SRC", Title: "Новость"}}); err != nil {
+			return err
+		}
+		close(headerSent)
+		select {
+		case <-bodyGate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if err := h([]model.Event{&model.NewsBody{ID: 11, Text: "Текст"}}); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	svc := newLive(t, client)
+	events := make(chan Event, 32)
+	svc.Subscribe(func(ev Event) {
+		select {
+		case events <- ev:
+		default:
+		}
+	})
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Close()
+	select {
+	case <-headerSent:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the fake session did not deliver the news header")
+	}
+	waitFor(t, "the news header in the cache", func() bool { return len(svc.News(time.Time{}, 10)) == 1 })
+	first := svc.News(time.Time{}, 10)[0]
+	if first.ID != 11 || first.Title != "Новость" || first.Source != "SRC" || !first.Published.Equal(published) {
+		t.Fatalf("news = %+v", first)
+	}
+	if first.FirstSeen.IsZero() || first.Body != "" {
+		t.Fatalf("first_seen/body = %v/%q, want a receive instant and no body yet", first.FirstSeen, first.Body)
+	}
+	firstSeen := first.FirstSeen
+	close(bodyGate)
+	waitFor(t, "the news body in the cache", func() bool {
+		news := svc.News(time.Time{}, 10)
+		return len(news) == 1 && news[0].Body == "Текст"
+	})
+	updated := svc.News(time.Time{}, 10)[0]
+	if !updated.FirstSeen.Equal(firstSeen) {
+		t.Fatalf("first_seen after the body = %v, want the header instant %v", updated.FirstSeen, firstSeen)
+	}
+	waitFor(t, "an old-news poll", func() bool { return client.newsFetches() > 0 })
+	var newsEvents int
+	deadline := time.After(2 * time.Second)
+	for newsEvents < 2 {
+		select {
+		case ev := <-events:
+			if ev.Type != "news" {
+				continue
+			}
+			if _, ok := ev.Data.(News); !ok {
+				t.Fatalf("news event data = %T, want feed.News", ev.Data)
+			}
+			newsEvents++
+		case <-deadline:
+			t.Fatalf("news events = %d, want 2 (header and body)", newsEvents)
+		}
+	}
+}
+
 // TestLiveCandlesCache checks the live history path: candle-kind resolution,
 // decimal conversion and the TTL cache.
 func TestLiveCandlesCache(t *testing.T) {
@@ -315,6 +410,60 @@ func TestLiveCandlesCache(t *testing.T) {
 	}
 	if _, err := svc.Candles(ctx, "TQBR:UNKNOWN", 60, 10); err == nil {
 		t.Fatal("unknown symbol must fail")
+	}
+}
+
+// TestLiveCandlesDictionaryNotLoaded is the R8 wire of the 503: before
+// <candlekinds> arrives nothing is known about the period, so the request must
+// be a temporary unavailable, not a bad_period (which claims the period does
+// not exist).
+func TestLiveCandlesDictionaryNotLoaded(t *testing.T) {
+	client := &fakeClient{}
+	svc := newLive(t, client) // no candleKinds: the dictionary has not arrived
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Close()
+	_, err := svc.Candles(context.Background(), "TQBR:SBER", 60, 10)
+	var ferr *Error
+	if !errors.As(err, &ferr) || ferr.Code != CodeUnavailable {
+		t.Fatalf("Candles without the period dictionary = %v, want unavailable", err)
+	}
+	if !strings.Contains(ferr.Message, "справочник периодов ещё не загружен") {
+		t.Fatalf("message = %q, want the dictionary hint", ferr.Message)
+	}
+	if _, calls := client.counts(); calls != 0 {
+		t.Fatalf("history calls = %d, want 0 (no request without a period id)", calls)
+	}
+}
+
+// TestLiveCandlesForwardsUnknownPeriodWarning checks that the native warning
+// of an undatable series reaches feed.History instead of being dropped.
+func TestLiveCandlesForwardsUnknownPeriodWarning(t *testing.T) {
+	client := &fakeClient{}
+	client.histFn = func(ctx context.Context, req native.HistoryRequest) (model.Candles, error) {
+		return model.Candles{
+			Symbol:   req.Symbol,
+			Period:   req.Period,
+			Warnings: []string{"unknown candle period 2"},
+			Items:    []model.Candle{{Open: model.Decimal{Units: 10000, Scale: 2}}},
+		}, nil
+	}
+	svc := newLive(t, client)
+	svc.candleKinds = map[int]int{60: 7}
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Close()
+	h, err := svc.Candles(context.Background(), "TQBR:SBER", 60, 10)
+	if err != nil {
+		t.Fatalf("Candles: %v", err)
+	}
+	if len(h.Warnings) != 1 || h.Warnings[0] != "unknown candle period 2" {
+		t.Fatalf("warnings = %v, want [unknown candle period 2]", h.Warnings)
+	}
+	if len(h.Bars) != 1 || !h.Bars[0].Time.IsZero() {
+		t.Fatalf("bars = %+v, want one undated bar", h.Bars)
 	}
 }
 

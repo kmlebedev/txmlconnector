@@ -57,8 +57,10 @@ origin Harness (`/ai-terminal/`).
 
 `cmd/terminal` — самодостаточный биржевой терминал-аналог Finam поверх `native.Client`:
 список инструментов, свечной график, стакан, портфель/заявки, тикет, а также встроенный AI-агент,
-который **без MCP** вызывает инструменты терминала (реальный бэктест на истории котировок,
-технические подсказки, бумажные заявки) и умеет автономно вести стратегию на бумажном счёте.
+который вызывает инструменты терминала (бэктест, декларативные правила, walk-forward с deflated
+Sharpe/PBO, оракул волатильности, новости, бумажные заявки) и умеет автономно вести стратегию и
+rule-ботов на бумажном счёте. Внешние агенты получают те же инструменты по MCP (`POST /mcp`,
+streamable HTTP, токен `X-Terminal-Token`).
 
 ```bash
 make terminal && ./bin/terminal -mode offline   # http://127.0.0.1:8090, без сети и ключей
@@ -67,13 +69,38 @@ make terminal && ./bin/terminal -mode offline   # http://127.0.0.1:8090, без 
 Офлайн-режим работает на встроенном снапшоте реальных данных демо-сервера TRANSAQ; live-режим
 подключается к TranSAQ/Finam через native-клиент (`TRANSAQ_ADDR/TRANSAQ_LOGIN/TRANSAQ_PASSWORD`).
 Подробности, скриншоты, LLM-настройка и ограничения — [docs/ai-terminal/README.md](docs/ai-terminal/README.md),
-контракты — [docs/ai-terminal/ARCHITECTURE.md](docs/ai-terminal/ARCHITECTURE.md).
+контракты — [docs/ai-terminal/ARCHITECTURE.md](docs/ai-terminal/ARCHITECTURE.md), прогресс фаз —
+[docs/ai-terminal/PROGRESS.md](docs/ai-terminal/PROGRESS.md), исследования —
+[docs/ai-terminal/research.md](docs/ai-terminal/research.md).
 
 `Run` сам опрашивает RQ_MAIN, восстанавливает соединение после обрыва
 (`connected="true" recover="true"`) и отдаёт `model.UnknownRecord`, если
 встретил неизвестную запись. Долгий read-only soak (20 валидных бумаг TQBR, Stats/RSS/latency раз в 5 минут) —
 `go run ./tools/native-soak` при `TC_SOAK=1`; `TC_SOAK_DURATION` принимает `300` и `300s`; без env он завершается сразу.
 
+
+## Переносимые навыки AI-терминала (`npx skills add`)
+
+Навыки работы с терминалом лежат в репозитории ([`skills/`](skills/README.md)) и ставятся одной
+командой в Cursor, Claude Code, Qwen Code или Codex — без DSH и без MCP:
+
+```bash
+npx skills add github.com/kmlebedev/txmlconnector --skill trading-terminal
+npx skills add github.com/kmlebedev/txmlconnector --skill trading-pattern-author
+npx skills add github.com/kmlebedev/txmlconnector --skill trading-automation-author
+```
+
+- `trading-terminal` — котировки, свечи, стакан, бэктест по `rules.Spec`, walk-forward, новости и
+  прогноз волатильности через REST (read-only скрипт `skills/trading-terminal/scripts/terminal.sh`)
+  или MCP `/mcp` запущенного `bin/terminal`.
+- `trading-pattern-author` — как оформить паттерн из исследования: out-of-sample доказательства,
+  deflated Sharpe/PBO, promotion policy; паттерны живут вне git.
+- `trading-automation-author` — превращение повторяющихся вычислений агента в задачи автоматизации.
+
+Токен терминала (`TERMINAL_API_TOKEN`) и креды TRANSAQ (`TC_LOGIN`/`TC_PASSWORD`) — только в
+`.env`, никогда в чате, промпте или коммите; реальные заявки недоступны (paper-only).
+В DSH те же навыки отдаёт провайдер плагина `dsh-ai-terminal` — один источник, без копий.
+Подробнее: [skills/README.md](skills/README.md).
 
 ## C ABI библиотека (drop-in для DLL)
 

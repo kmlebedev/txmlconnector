@@ -5,7 +5,27 @@
       # port: local address of the embedded Go terminal backend
       # repoDir / binaryPath: overrides; by default the checkout containing this
       # package and its bin/terminal are used (built with `make terminal`).
+      # llmProvider / llmModel: the Harness LLM the terminal agent uses through
+      # the plugin bridge (default deepseek-official / deepseek-flash).
+      # dataDir: optional directory of generated skill patterns (<dataDir>/skills).
       config:
         mode: offline
         port: 18090
         autoStart: true
+    # The plugin exposes the same Go tools over MCP; this client row makes them
+    # native Harness tools too. The plugin sets these env values during apply()
+    # (URL of the local MCP endpoint and the per-launch token).
+    - id: ai-terminal-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: terminal
+        transport: streamable-http
+        url: !!js process.env.DSH_AI_TERMINAL_MCP_URL
+        headers:
+          X-Terminal-Token: !!js process.env.DSH_AI_TERMINAL_MCP_TOKEN
+        failOnStartupError: false
+        reconnect:
+          enabled: true
+          initialDelayMs: 1000
+          maxDelayMs: 10000
+          maxAttempts: 60

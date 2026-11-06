@@ -10,6 +10,19 @@ AI-агент, который **без MCP** вызывает инструмен
 [автономия на бумажном счёте](screenshot-autonomy.png) · [вкладка «Аналитика»](screenshot-analytics.png) ·
 [1440×900](screenshot-main-1440.png).
 
+## Документы
+
+| Документ | Что внутри |
+|---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | замороженные контракты итерации 1 + §15 «Пакеты фаз C–G» (API, SSE, MCP, инструменты) |
+| [data.md](data.md) | ClickHouse, рекордер `md.*`, винтажи, новости |
+| [research.md](research.md) | walk-forward, deflated Sharpe/PBO, оракул волатильности, контракт T18 (`asOf` обязателен, компактный ответ + `artifactId`) |
+| [fingerprint.md](fingerprint.md) | отпечатки исполнения роботов и replay стакана |
+| [dsh-integration.md](dsh-integration.md) | DSH-плагин: общий LLM, провайдер навыков, MCP, панели, ночные исследования |
+| [PROGRESS.md](PROGRESS.md) | статус фаз, коммиты, ревью, что не проверено (**I**) |
+| [automation-backlog.md](automation-backlog.md) | сгенерированный бэклог задач автоматизации |
+| [`skills/README.md`](../../skills/README.md) | переносимые навыки `npx skills add` для Cursor/Claude Code/Qwen/Codex |
+
 ## Быстрый старт (офлайн-демо, без ключей и сети)
 
 ```bash
@@ -70,11 +83,20 @@ TERMINAL_LLM_BASE_URL=http://127.0.0.1:8099/v1 TERMINAL_LLM_API_KEY=stub \
   TERMINAL_LLM_MODEL=llm-stub ./bin/terminal -mode offline -addr 127.0.0.1:8093
 ```
 
-Встроенные инструменты агента (все — прямые Go-вызовы в процессе, без MCP; см.
-[ARCHITECTURE §9](ARCHITECTURE.md#9-пакет-terminalagent-ai-агент-tool-loop-автономия)):
-`list_instruments`, `get_market_hints`, `get_history`, `run_backtest`, `compare_strategies`,
-`get_quote`, `get_portfolio`, `get_strategies`, `place_order`, `cancel_order`, `start_autonomy`,
-`stop_autonomy`, `get_agent_status`, `get_backtest_history`.
+Встроенные инструменты агента (прямые Go-вызовы в процессе; полный JSON-каталог —
+`GET /api/agent/tools`, контракт — [ARCHITECTURE §9.1](ARCHITECTURE.md#91-инструменты-агента-tool-calling-без-mcp)):
+
+- базовые (14): `list_instruments`, `get_market_hints`, `get_history`, `run_backtest`,
+  `compare_strategies`, `get_quote`, `get_portfolio`, `get_strategies`, `place_order`,
+  `cancel_order`, `start_autonomy`, `stop_autonomy`, `get_agent_status`, `get_backtest_history`;
+- исследования (фазы E–G): `backtest_rules`, `batch_backtest`, `walk_forward`, `vol_forecast`,
+  `vol_events`, `detect_execution_algos`, `lob_backtest`, `get_news`;
+- самообучение: `draft_skill_pattern`, `list_skill_patterns`, `propose_automation`;
+- rule-боты: `bot_create_from_backtest`, `bot_check`, `bot_promote`, `bot_start`, `bot_stop`,
+  `bot_status`, `bot_journal`.
+
+Те же инструменты доступны внешним агентам через MCP `POST /mcp` (streamable HTTP, тот же токен
+`X-Terminal-Token`) и через общий invoke `POST /api/agent/tools/{name}/invoke`.
 
 **Автономия** — paper-replay: агент выбирает стратегию по бэктесту и ведёт её по историческим барам
 со скоростью 1–60 бар/с с бюджетом и риск-лимитами (max position/order, stop-loss, take-profit,
@@ -117,6 +139,31 @@ curl -X POST http://127.0.0.1:8090/api/agent/chat \
   -H 'Content-Type: application/json' -d '{"message":"протестируй лучшую стратегию на SBER"}'
 ```
 
+Research-инструменты и rule-боты (T18/T22): у research-вызовов `asOf` обязателен, полный результат
+приходит как артефакт, а модель получает компактную сводку с `artifactId`:
+
+```bash
+curl -X POST http://127.0.0.1:8090/api/agent/tools/walk_forward/invoke \
+  -H 'Content-Type: application/json' \
+  -d '{"args":{"symbol":"TQBR:SBER","strategy":"sma_cross","trainBars":200,"testBars":100,"asOf":"2026-11-05T00:00:00Z"}}'
+curl -X POST http://127.0.0.1:8090/api/agent/tools/vol_forecast/invoke \
+  -H 'Content-Type: application/json' \
+  -d '{"args":{"symbol":"TQBR:SBER","horizon":"8h","asOf":"2026-11-05T00:00:00Z"}}'
+curl http://127.0.0.1:8090/api/bots
+curl -X POST http://127.0.0.1:8090/api/bots -H 'Content-Type: application/json' \
+  -d '{"symbol":"TQBR:SBER","periodSec":300,"qty":10,"rules":{"entry":[{"left":"close","op":">","right":"0"}],"exit":[{"left":"close","op":"<","right":"0"}]}}'
+curl -X POST http://127.0.0.1:8090/api/bots/{id}/check
+```
+
+Внешние MCP-клиенты (Claude Code и другие) используют `POST /mcp` — JSON-RPC 2.0
+(`initialize` → `tools/list` → `tools/call`) с тем же токеном; контракт — [ARCHITECTURE §10](ARCHITECTURE.md#10-пакет-terminalapi-httpjson-sse).
+
+Если задан `TERMINAL_API_TOKEN` (так делает плагин DSH), добавьте к запросам
+`-H "X-Terminal-Token: $TERMINAL_API_TOKEN"`; `/api/health` открыт всегда. Без токена API
+защищён проверками Host (только loopback), Origin (свой Origin или `-allowed-origins`) и
+Content-Type (`application/json` для запросов с телом); подробно —
+[ARCHITECTURE §10.4](ARCHITECTURE.md#104-безопасность).
+
 ## Проверки и данные
 
 ```bash
@@ -126,9 +173,39 @@ go test -race ./terminal/... ./cmd/terminal/ ./tools/llm-stub/
 ```
 
 Обновление офлайн-снапшота с демо-сервера (read-only, секреты из env):
-[`tools/terminal-seed`](../tools/terminal-seed/README.md).
+[`tools/terminal-seed`](../../tools/terminal-seed/README.md).
 
-## Статус проверки (2026-11-05)
+## End-to-end offline smoke (REST + tools + bots + MCP + SSE)
+
+```bash
+make terminal_smoke                 # build + полный offline acceptance-прогон, PASS/FAIL по шагам, exit code
+SMOKE_KEEP=1 make terminal_smoke    # сохранить лог бэкенда после прогона
+```
+
+`tools/terminal-smoke.sh` поднимает `bin/terminal -mode offline` (встроенный seed, только loopback,
+без сети/DLL/ключей) на свободном порту с тестовым `TERMINAL_API_TOKEN` и
+`TERMINAL_INSTANCE_ID`, ждёт `/api/health` и проверяет замороженный контракт:
+
+- токен-guard: `/api/health` без токена — 200, `/api/instruments`, `/api/events` и `/mcp` без
+  токена — 401;
+- `/api/instruments`, `POST /api/backtest` (`sma_cross`, 300 баров);
+- каталог `/api/agent/tools` (30+ инструментов) и invoke
+  `POST /api/agent/tools/get_quote/invoke` → `result.symbol`;
+- rule-боты: `POST /api/bots` из `rules.Spec`, `GET /api/bots`, `POST /api/bots/{id}/check`;
+- MCP streamable-HTTP: `initialize` + `tools/list` (счётчик совпадает с каталогом агента);
+- SSE `/api/events`: первые кадры `quote/portfolio/status`;
+- корректное завершение по SIGTERM (exit code 0, лог «завершение работы»).
+
+Скрипт печатает `PASS`/`FAIL` по каждому шагу и возвращает ненулевой exit code при любом падении;
+живой сервер, креды и сеть не нужны. Требования: `bash`, `curl`, `python3`.
+
+## Статус проверки (2026-11-05, docs-sync 2026-11-06)
+
+- **Фазы C–G (2026-11-06, ветка `plan/ai-terminal-a`)**: MCP `/mcp`, рекордер/винтажи,
+  walk-forward/батчи/оракул/отпечатки, SKILL-паттерны, ledger и бэклог автоматизации, rule-боты —
+  проверены unit/race-тестами, `make verify` зелёный на коммитах фаз (`6248d6b`, `0f16134`,
+  `29e60fa`, `adedeac`, `ebeaddb` и др.). Живые прогоны (ClickHouse, демо-сервер TRANSAQ, живой DSH/браузер,
+  `npx skills add` в чистом Claude Code/Cursor) не выполнялись — **I** (см. PROGRESS.md).
 
 - `gofmt` пуст, `go vet ./...`, `go build ./...`, `go test -race ./...` — зелёные на HEAD ветки
   `feat/ai-terminal`; кросс-сборки терминала `CGO_ENABLED=0 linux/amd64` и `darwin/arm64` — OK.
@@ -149,6 +226,14 @@ go test -race ./terminal/... ./cmd/terminal/ ./tools/llm-stub/
 - Автономия работает на replay исторических баров, а не на живом потоке.
 - Модель T+1/маржи и корпоративные действия не моделируются; комиссия фиксированная (5 б.п.).
 - Seed — данные демо-сервера; справочные поля (например, лот) такие, какие отдал демо-каталог.
-- Сервер без аутентификации слушает loopback; запускать только локально.
+- API слушает loopback и защищён `Guard`: Host (только loopback), Origin для небезопасных
+  методов, `Content-Type: application/json` для запросов с телом и токен `TERMINAL_API_TOKEN`
+  для `/api/*` кроме `/api/health` (плагин DSH подставляет токен сам); MCP `/mcp` — под тем же
+  Guard. Запускать всё равно только локально — см. [ARCHITECTURE §10.4](ARCHITECTURE.md#104-безопасность).
+- Паттерны из `terminal/skills` видны агенту только в статусе `validated`: черновики лежат в
+  каталоге `<dataDir>/skills` вне git и доступны лишь инструменту `list_skill_patterns`; в
+  репозиторий паттерн попадает только через PR человека.
+- Rule-боты (`terminal/bot`) исполняются в `check`/`dry_run`/`paper`; live-стадия отключена
+  (`ErrLiveDisabled`), реальные заявки недоступны.
 
 Архитектура и замороженные контракты: [ARCHITECTURE.md](ARCHITECTURE.md).

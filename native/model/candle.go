@@ -21,6 +21,11 @@ type Candles struct {
 	Period int
 	Status int
 	Items  []Candle
+	// Warnings reports data that cannot be trusted as typed. The only warning
+	// today is "unknown candle period N": the wire time unit comes from
+	// <candlekinds>, so without the dictionary the candle Time is the zero
+	// instant instead of a silently guessed one (R8).
+	Warnings []string
 	// ZoneBias is the server time-zone bias (UTC = wall + bias). The items keep
 	// the UTC instants; the DLL renders the wall clock, so the renderer adds
 	// -ZoneBias to the date string.
