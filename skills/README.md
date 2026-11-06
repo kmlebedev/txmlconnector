@@ -1,8 +1,10 @@
 # Переносимые торговые навыки (npx skills add)
 
 Каталог `skills/` — единственный источник ручных навыков AI-терминала. Один и тот же `SKILL.md`
-подхватывает и DSH-плагин `dsh-ai-terminal` (провайдер навыков), и любой агент, установивший навык
-через `npx skills add`: Cursor, Claude Code, Qwen Code, Codex. Копий нет: правится один файл.
+подхватывает и DSH-плагин `dsh-ai-terminal` (провайдер навыков; репозиторий
+[`dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq)), и любой агент,
+установивший навык через `npx skills add`: Cursor, Claude Code, Qwen Code, Codex. Копий нет:
+правится один файл.
 
 ## Установка
 
@@ -76,9 +78,13 @@ sh scripts/terminal.sh vol TQBR:SBER
 
 ## DeepSeek Harness
 
-Плагин `dsh-ai-terminal` регистрирует провайдер навыков из этого каталога: в DSH навык приходит от
-провайдера, без копирования файлов. Сгенерированные агентом паттерны читаются из `<dataDir>/skills`
-и показываются только в статусе `validated` (черновики не видны агенту до promotion).
+Плагин `dsh-ai-terminal` (репозиторий
+[`dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq)) регистрирует провайдер
+навыков из этого каталога: в DSH навык приходит от провайдера, без копирования файлов. Плагин
+читает `<repoDir>/skills` checkout'а `txmlconnector` (если checkout не найден автоматически,
+укажи `repoDir` в config плагина), поэтому `skills/` остаётся единственным источником навыка.
+Сгенерированные агентом паттерны читаются из `<dataDir>/skills` и показываются только в статусе
+`validated` (черновики не видны агенту до promotion).
 
 ## Ограничения
 
