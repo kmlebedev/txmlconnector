@@ -44,6 +44,8 @@ lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -E "DeepSeek|terminal" > "$OUT/po
 
 TARBALL="$OUT.tar.gz"
 tar -czf "$TARBALL" -C "$HOME" "$(basename "$OUT")"
+printf '%s\n' "$TARBALL" > "$HOME/dsh-crash-latest.txt"
 echo "== tarball: $TARBALL"
+echo "== path saved to: $HOME/dsh-crash-latest.txt"
 echo "== send this path to the agent (paste it into the DSH chat):"
 echo "$TARBALL"
