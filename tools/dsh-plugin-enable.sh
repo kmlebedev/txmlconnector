@@ -12,8 +12,7 @@ d = json.load(open(p))
 d.setdefault("dsh", {}).setdefault("profile", {}).setdefault("bundles", [])
 if "@local/dsh-ai-terminal" not in d["dsh"]["profile"]["bundles"]:
     d["dsh"]["profile"]["bundles"].append("@local/dsh-ai-terminal")
-d.setdefault("dependencies", {})["@local/dsh-ai-terminal"] = 
-    "link:/Users/whitefox/GolandProjects/txmlconnector/dsh-ai-terminal"
+d.setdefault("dependencies", {})["@local/dsh-ai-terminal"] = "link:/Users/whitefox/GolandProjects/txmlconnector/dsh-ai-terminal"
 json.dump(d, open(p, "w"), indent=2)
 open(p, "a").write("\n")
 print("bundles:", d["dsh"]["profile"]["bundles"])

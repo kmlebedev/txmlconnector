@@ -371,3 +371,17 @@ restart DSH. Client-UI возвращать отдельно, после изо�
 
 **Инструкция восстановления через CLI:** `docs/ai-terminal/dsh-recovery.md` (проверенные команды
 `/usr/local/bin/dsh` + аварийные скрипты).
+### После merge PR #64 (2026-11-06 10:42 MSK)
+
+- main = `dd38d93` (merge PR #64), рабочая ветка продолжения — `plan/ai-terminal-remaining`.
+- Профиль Desktop был в safe-режиме (`base + web-app`, плагин отсутствовал). Host-половина
+  плагина включена обратно скриптом `tools/dsh-plugin-enable.sh`: bundles теперь
+  `base + web-app + @local/dsh-ai-terminal`; client-половина остаётся отключённой
+  (в `package.json` нет `dsh.client`) — это временная мера стабильного boot. Для активации
+  host-инструментов нужен перезапуск Desktop DSH.
+- Исправлен баг в `tools/dsh-plugin-enable.sh` (синтаксис Python-редактора ломал обновление
+  bundles; теперь скрипт проверен, bundles обновились).
+- Фоновая live-приёмка T11/T12/T22 (`bash-16540c7096714074`) ждёт окно демо-сервера (09:50 МСК).
+
+Остаток плана: T9, T11, T21, T22, T24, T25, T26 (7 live/manual шагов); после перезапуска DSH
+продолжаем host-проверки, T11/T22 закроются фоновой приёмкой.
