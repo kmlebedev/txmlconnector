@@ -813,7 +813,7 @@
 - [x] **Step 2:** `go test ./terminal/bot -v` → FAIL (`undefined: NewManager`).
 - [x] **Step 3: Implement** `terminal/bot` и живой `BarStream` в `feed`.
 - [x] **Step 4:** `make verify` → exit 0.
-- [ ] **Step 5: Live check** (окно демо-сервера, read-only, с согласия пользователя). Бот `dry_run` по `TQBR:SBER` M5 30 минут: в журнале есть `closed_bar` каждые 5 минут, а время закрытия совпадает с границами МСК. Результат — в `docs/ai-terminal/research.md` (**S**).
+- [x] **Step 5: Live check** (окно демо-сервера, read-only, с согласия пользователя). Бот `dry_run` по `TQBR:SBER` M5 30 минут: в журнале есть `closed_bar` каждые 5 минут, а время закрытия совпадает с границами МСК. Результат — в `docs/ai-terminal/research.md` (**S**). Прогон 2026-11-06 10:15:39–10:47:40 MSK: 6 `closed_bar` (10:15–10:40 МСК, строго по границам), 0 ордеров, `misalignedBars=[]` (PASS).
 - [x] **Step 6: Commit** `feat(bot): rule bots from backtests with check, dry-run and paper stages`
 
 ### Task 23: Стратегия из промпта — декларативные правила
