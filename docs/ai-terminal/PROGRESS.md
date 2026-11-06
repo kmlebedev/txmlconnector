@@ -308,3 +308,24 @@ Error: web boot: 1 entry did not activate
 `link:/Users/whitefox/GolandProjects/txmlconnector/dsh-ai-terminal`, lockfile приведён `pnpm install`;
 бэкапы рядом (`*.bak-*`, `*.recovered-*`). Проверено воспроизведением desktop-подобного профиля:
 плагин активируется, backend стартует, workflow-скрипт найден, fatal-ошибки нет.
+### Второй инцидент (2026-11-06 09:20–09:22): обязательный `tools` снова заблокировал web-boot
+
+После первого фикса (`inject = ['webServer','tools']`) DSH Desktop упал повторно с тем же
+`web boot: 1 entry did not activate @local/dsh-ai-terminal: loading` (crash-отчёты
+`crash-2026-11-06T04-20-33*` и `04-22-35*`). Симптом показал, что дело не только в
+`workflowEngine`: сервис `tools` в desktop-композиции не гарантированно виден на уровне
+app-строки плагина (он может быть привязан к scope агентской сессии), поэтому **любой** лишний
+обязательный `inject` оставляет запись в `loading`, а Desktop считает это фатальным.
+
+**Окончательный фикс (ветка `fix/plugin-boot-inject`).**
+
+- `inject` строки сведён к одному сервису — `webServer` (как в ранее рабочем плагине PR #60);
+- реестр инструментов монтируется **дочерним** `ctx.inject(['tools'], mountTools)`: если сервиса
+  нет, дочерний fiber ждёт, но строка плагина активируется и DSH стартует; при наличии —
+  регистрируются `terminal_*`-инструменты, `terminal_nightly_research` и hook бот-релея;
+- dispose дочернего контекста закрывает tool bridge и снимает регистрации;
+- тесты: `node --test` — 52/52 (включая `tools are mounted through a child ctx.inject`).
+
+Профиль `~/.dsh/profiles/desktop` восстановлен повторно (12 bundles, patch-слой, link на main,
+lockfile приведён `pnpm install`); бэкапы — `*.recovered2-*`. Проверено воспроизведением
+desktop-подобной композиции: плагин активируется, backend стартует, fatal-ошибки нет.
