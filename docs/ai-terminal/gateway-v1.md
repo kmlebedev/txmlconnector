@@ -1,6 +1,6 @@
 # Gateway v1 (`/api/gw/v1/*`)
 
-**v1 frozen; breaking change ⇒ /v2.** Статус полей: **I** (вывод из кода) до живой проверки на демо-сервере.
+**v1 frozen; breaking change ⇒ /v2.** Живая проверка на демо-сервере TRANSAQ — 2026-11-06 (PR 67): **S** — подтверждено живьём, **I** — осталось выводом/не наблюдалось, дефекты отмечены явно. Полный отчёт — [acceptance-pr67-2026-11-06.md](acceptance-pr67-2026-11-06.md).
 
 ## Общие правила
 
@@ -11,7 +11,7 @@
 - Ошибки — существующий конверт `{"error":{"code","message"}}`.
 - Символ gateway: `BOARD:SECCODE` (`TQBR:SBER`).
 
-## GET /api/gw/v1/info (I)
+## GET /api/gw/v1/info (S)
 
 ```json
 {"version":"1","market":"ru","provider":"finam","mode":"live|offline",
@@ -24,7 +24,7 @@
 - `trading.live` всегда `false`, даже при `-live-trading`.
 - `intervals`: `1m`(60), `5m`(300), `15m`(900), `1h`(3600), `1d`(86400); `maxBars` — максимум свечей за запрос.
 
-## GET /api/gw/v1/instruments (I)
+## GET /api/gw/v1/instruments (S)
 
 ```json
 {"instruments":[{"symbol":"TQBR:SBER","secCode":"SBER","board":"TQBR",
@@ -34,20 +34,20 @@
 
 `lotSize` — акций в лоте; `minStep` форматируется с `decimals` знаками.
 
-## Единицы объёма: лоты (I)
+## Единицы объёма: лоты (S)
 
 Все поля `*Lots` / `lots` — лоты TRANSAQ, делений на `lotSize` gateway не делает.
 
 | Источник | Единица | Статус |
 |---|---|---|
-| `alltrades quantity` (поле 12, `docs/protocol/alltrades.md`) | лоты | I (в `docs/protocol` единица не названа; по спецификации TXmlConnector «количество в лотах») |
-| уровни стакана `quotes buy/sell` (`alltrades.md` §стакан, `native/records`) | лоты | I |
-| `voltoday` (`<quotations>`) → `Quote.Volume` / `volumeLots` | лоты | I |
-| объём свечи `volume` (`<candles>`) → `volumeLots` | лоты | I |
+| `alltrades quantity` (поле 12, `docs/protocol/alltrades.md`) | лоты | **S** (живой прогон 2026-11-06: GAZP, `lotSize=10` — 102/130 значений ленты не кратны 10: 14, 5, 498, 224, 2…) |
+| уровни стакана `quotes buy/sell` (`alltrades.md` §стакан, `native/records`) | лоты | **S** (GAZP: 823, 302, 1315, 389, 837, 372 — не кратны 10) |
+| `voltoday` (`<quotations>`) → `Quote.Volume` / `volumeLots` | лоты | **S** (GAZP: 4268901, %10 = 1) |
+| объём свечи `volume` (`<candles>`) → `volumeLots` | лоты | **S** (GAZP 1m: 1822, 366, 4616, 445; %10 ≠ 0) |
 
-Живая сверка на демо-сервере (S) не проводилась; `terminal/feed/live.go` копирует `Buy`/`Sell`/`Quantity`/`VolToday`/`Volume` без пересчёта. Если S покажет акции, gateway должен делить на `LotSize` (одно место в `gateway.go`).
+Живая сверка выполнена 2026-11-06 — **S** (метод: некратность `lotSize` на GAZP; пример плана «SBER — лот 10» для демо неверен: pit SBER=1). `terminal/feed/live.go` копирует `Buy`/`Sell`/`Quantity`/`VolToday`/`Volume` без пересчёта, деления на `LotSize` нет — верно.
 
-## GET /api/gw/v1/quotes?symbols=TQBR:SBER,TQBR:GAZP (I)
+## GET /api/gw/v1/quotes?symbols=TQBR:SBER,TQBR:GAZP (S)
 
 ```json
 {"quotes":{"TQBR:SBER":{"last":"101.00","bid":"100.90","ask":"101.10",
@@ -59,7 +59,7 @@
 - `prevClose` берётся из инструмента, цены форматируются `decimals` инструмента; `changePct` — 2 знака.
 - `bid`, `ask`, `prevClose` — пустая строка `""`, если значения нет (нет стакана, сессия закрыта, нет seed-значения); пустая строка = значения нет.
 
-## GET /api/gw/v1/candles?symbol=&interval=1m&limit= (I)
+## GET /api/gw/v1/candles?symbol=&interval=1m&limit= (S)
 
 ```json
 {"symbol":"TQBR:SBER","interval":"1m","source":"live|seed","warnings":[],
@@ -70,16 +70,18 @@
 - `closeTime = openTime + periodSec*1000 - 1`; `limit` по умолчанию 500 (`0` или отсутствие — значение по умолчанию); фид ограничивает его сверху 5000 (`maxBars`).
 - `source` — из истории фида; `warnings` — предупреждения фида (`[]` если чисто).
 
-## GET /api/gw/v1/orderbook?symbol= (I)
+## GET /api/gw/v1/orderbook?symbol= (I — live-дефекты, см. ниже)
 
 ```json
 {"symbol":"TQBR:SBER","time":1730823840000,"source":"live|seed",
  "bids":[{"price":"306.25","lots":10}],"asks":[{"price":"306.30","lots":7}]}
 ```
 
-Bids по убыванию, asks по возрастанию (как отдаёт фид). Неизвестный символ — `404`.
+Неизвестный символ — `404`; поля/единицы/`source` — **S** (live 2026-11-06).
 
-## GET /api/gw/v1/trades?symbol=&limit=50 (I)
+**Live-дефекты (2026-11-06, P1):** (1) `bids` приходят по возрастанию — 14/14 многоуровневых сэмплов (контракт требует убывание; `gatewayLevels` копирует порядок фида, сортировки нет), asks — 45/45 возрастание; (2) стакан часто односторонний (37/45 опросов) — pre-existing баг `terminal/feed/live.go` (`applyQuotes` заменяет книгу каждым инкрементальным `<quotes>`). До фикса эндпоинт остаётся **I**.
+
+## GET /api/gw/v1/trades?symbol=&limit=50 (S)
 
 ```json
 {"symbol":"TQBR:SBER","trades":[{"id":"0@1730823780000","time":1730823780000,"price":"101.00","lots":1000,"side":"buy|sell|unknown"}]}
@@ -87,7 +89,7 @@ Bids по убыванию, asks по возрастанию (как отдаё�
 
 По возрастанию времени. `limit` по умолчанию 50 (`0` или отсутствие — значение по умолчанию); фид ограничивает его сверху 200. Фид не несёт id сделки, поэтому `id = "<индекс в ответе>@<time>"` (**I**: нестабилен между запросами). Пустая/иная сторона — `unknown`.
 
-## GET /api/gw/v1/account (I)
+## GET /api/gw/v1/account (S — поля; live-счёт пуст)
 
 Только чтение; счёт — бумажный (paper) по умолчанию. `503 unavailable`, если бумажный брокер не подключён.
 
@@ -101,3 +103,17 @@ Bids по убыванию, asks по возрастанию (как отдаё�
 - `qty`/`filled` — в **акциях** (не лотах): кэш paper двигается на `qty*price`.
 - `openOrders` — только `new`/`partial`; статусы: `partial` -> `partially_filled`, `cancelled` -> `canceled`, остальные без изменений. `side`/`type` — строки пакета paper.
 - `fills` — последние 50 по возрастанию времени. Цены — `decimals` инструмента (2, если инструмент неизвестен); `cash`, `fee`, `realizedPnl` — 2 знака.
+
+## Живая приёмка 2026-11-06 (PR 67)
+
+Демо-сервер TRANSAQ, `bin/terminal -mode live` из PR 67 (`8c36909`), только GET:
+
+- **Подтверждено (S):** `/info`, `/instruments`, `/quotes`, `/candles` (все 5 интервалов,
+  `closeTime=openTime+periodSec*1000−1`, 955 баров), `/trades` (200 сделок, asc, id-формат),
+  `/account` (paper/RUB/cash/массивы; live-счёт пуст), единицы «лоты», auth/400/404/401, лимиты.
+- **Не подтверждено:** `/orderbook` — оба live-дефекта выше (bids по возрастанию; односторонний стакан
+  из-за инкрементального `<quotes>` в `terminal/feed`). `getOrderbook` коннектора наследует дефект.
+- Осталось **I**: пустые `bid/ask/prevClose=""`, `0` для нулевого времени, непустые `warnings`,
+  `side=buy/sell` в ленте (демо отдаёт только `unknown`), непустой paper-счёт (статусы/fills-50/503),
+  `trading.live=false` при `-live-trading` (unit), `TRADING_NETWORK/UPSTREAM_ERROR`.
+- Отчёт и матрица статусов: [acceptance-pr67-2026-11-06.md](acceptance-pr67-2026-11-06.md).

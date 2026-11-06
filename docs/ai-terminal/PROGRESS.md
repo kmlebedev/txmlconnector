@@ -526,6 +526,18 @@ T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAut
 - **Офлайн-приёмка выполнена:** `bin/terminal -mode offline` на loopback-порту (18090 был занят
   плагином Desktop, использован 18191) + `apply()` с фейковым ctx. `getTicker('SBER')` ->
   `SBER.TQBR`, `source: "seed"`; `getKlines('SBER','1h',5)` -> 5 баров; `getOrderbook('SBER')` -> bids/asks
-  непустые. Процесс завершён. Это наблюдение в офлайн-режиме, не S: статусы в `gateway-v1.md` остаются **I**.
-- **Не проверено в хосте dsh-trading** (установка из npm и запуск `trading-web` требуют согласия
-  пользователя). **Живая проверка на демо-сервере не выполнялась.**
+  непустые. Процесс завершён. Это наблюдение в офлайн-режиме (S не даёт); живая проверка на
+  демо-сервере и приёмка в реальном хосте — ниже, статусы `gateway-v1.md` обновлены по матрице.
+- **Хост dsh-trading проверен (2026-11-06):** npm `@dshtrading/*` 0.6.3, `dsh` 0.2.2-rc.1 в
+  изолированном `DSH_HOME=/tmp/dsh-trading-acceptance`. С кодом PR хост коннектор **не загружает**
+  (HOST-BLOCKED): `index.js:12` `inject=[]` + `:54` чтение `ctx.tools` → `cannot get property "tools"
+  without inject`; после фикса — у 6 `ru_*` нет `output` для `dsh-tools` 0.2.x; тихая — реестры
+  читаются в `apply()` слишком рано (`MISSING`). С тремя минимальными правками — **HOST-PASS**:
+  регистрация `ru/finam` в обоих реестрах, 6 инструментов, агентский вызов `ru_get_ticker SBER` →
+  `SBER.TQBR`, `source: "seed"` (модель — mock). Живой HTTP-мост `ru` — 400 `unknown market "ru"`
+  (ограничение апстрима, вне scope PR).
+- **Живая проверка на демо-сервере выполнена (2026-11-06, PR 67):** gateway v1 — 64/66 (2 FAIL —
+  `/orderbook`: bids по возрастанию; стакан часто односторонний из-за pre-existing бага
+  `terminal/feed` с инкрементальными `<quotes>`), коннектор против живого шлюза — 42/42 PASS.
+  Статусы `gateway-v1.md` переведены в S по матрице; полный отчёт —
+  [acceptance-pr67-2026-11-06.md](acceptance-pr67-2026-11-06.md).
