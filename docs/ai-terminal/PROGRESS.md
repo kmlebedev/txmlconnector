@@ -215,3 +215,11 @@
   `/api/agent/tools/{backtest_rules,batch_backtest}/invoke` работают на живом бэкенде; карточки
   `tool.call.toolview` — node-тесты; живой DSH-чат — I.
 - **T25 (установка навыка, S)**: см. выше; промпт в Claude Code — I (OAuth).
+### T11: end-to-end пайплайн recorder → ClickHouse (S, 2026-11-06)
+
+- `native.Client` ↔ `native/testserver` (реальный протокол) → `recorder.Run` → живой ClickHouse:
+  `TestLiveRecorderWritesBookAndTradesToClickHouse` PASS — `snapshot`/`level` строки для
+  `TQBR:SBER` с `Decimal`-ценами и сделки; живая запись с демо-сервера проверяется фоновой
+  приёмкой в окне (09:55 МСК).
+- `native/testserver`: добавлен ответ на `RQ_GET_NEWS` пустым списком (recorder опрашивает новости
+  внутри Run) — заглушка не рвёт сессию; остальные native-тесты прогоняются.
