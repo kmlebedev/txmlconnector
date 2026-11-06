@@ -422,3 +422,15 @@ Host-половина стабильно работает; client-запись �
   рекордера, демо-сервер ещё держал сессию. В `tools/demo-live-check.sh` добавлен
   `T22_COOLDOWN` (по умолчанию 120 с) и режим `DEMO_CHECK_SKIP_T11=1` для повтора только T22.
   Повтор запущен: `bash-075d1eb1565f4596` (T22 1900 с, cooldown 180 с), результат будет добавлен.
+### T22 — PASS (S), 2026-11-06 10:15–10:47 MSK
+
+- Повтор после duplicate-login: backend `connected=true`, `mode=live`, instanceId `live-20261106-121234`.
+- Бот `bot_0001` (`TQBR:SBER` M5, qty 1, rules RSI) в `dry_run` 1900 с; журнал: 6 `closed_bar`,
+  3 `stage`, 0 ордеров, `misalignedBars=[]`. Бары 10:15–10:40 МСК строго по 5-минутным границам,
+  запись в пределах ~2.4 с после закрытия (детали — `research.md` §10).
+- Приёмка: `LIVE_CHECK_RESULT {"t11": "PASS", "t22": "PASS", "news": "PASS"}`,
+  `demo-live-check PASS`. T22 Step 5 отмечен `[x]`.
+
+Осталось в плане: **T9, T21, T24, T25, T26** (5 шагов). T21 — ограничение сборки DSH
+(`workflowEngine` отсутствует); T9/T24/T26 — UI-часть (нужен возврат client-половины плагина);
+T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAuth).
