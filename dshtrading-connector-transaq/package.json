@@ -1,0 +1,11 @@
+{
+  "name": "@local/dshtrading-connector-transaq",
+  "version": "0.1.0",
+  "description": "Read-only TRANSAQ market-data connector for dsh-trading, backed by the local terminal gateway v1.",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "exports": { ".": "./index.js" },
+  "dependencies": {}
+}
