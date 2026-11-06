@@ -143,3 +143,168 @@
 - PR [#62](https://github.com/kmlebedev/txmlconnector/pull/62) — draft, base `main`, head `plan/ai-terminal-a`; CI «Run Go Tests» — pass.
 - Все 26 задач плана закрыты; 8 шагов Live/Manual check остаются до согласия пользователя на живые прогоны.
 - Перевод в ready-for-review / merge — после живых Step 5 (по команде пользователя).
+
+## Live/Manual проверки (2026-11-06, ветка plan/ai-terminal-live)
+
+Пользователь дал согласие на живые проверки и указал на соседний проект
+`/Users/whitefox/GolandProjects/clickhouse-import-rosstat` (dev-ClickHouse + MCP).
+
+| Шаг | Статус | Доказательство |
+|---|---|---|
+| T9 Step 5 | **I** | живая DSH-сессия: нужен перезапуск DSH с текущим плагином; в этой сессии не выполнялось |
+| T10 Step 5 | **S (частично) / I** | Claude Code 2.1.287: `claude mcp add --transport http terminal http://127.0.0.1:<port>/mcp --header X-Terminal-Token: …` → `claude mcp list` = ✔ Connected; MCP `initialize`/`tools/list` = 32 инструмента, `tools/call` `get_quote` → `result.symbol=TQBR:SBER`; LLM-вызов инструмента из Claude Code не выполнен — OAuth-сессия Claude Code истекла (не блокер кода) |
+| T11 Step 5 | **S (схема) + live в окне демо** | `recorder.EnsureSchema` создал `md.book_events/trades/news` на живом ClickHouse, типы колонок совпадают с планом; запись 10 минут и `SELECT kind,count()` запускаются фоновой проверкой по открытию демо-окна (09:51 МСК), результат будет добавлен |
+| T12 (news live) | live в окне демо | `md.news` создана; `first_seen/published` проверяются той же фоновой записью |
+| T21 Step 5 | **I** | живой DSH/LLM: workflow/schedule/kill-switch проверены node-тестами на fake-сервисах |
+| T22 Step 5 | live в окне демо | dry-run бот M5 30 минут на демо-сервере — фоновая проверка |
+| T24 Step 5 | **I** | ручной промпт в DSH-чате; API/инструмент `batch_backtest` проверены офлайн-smoke |
+| T25 Step 5 | **S (установка) / I (промпт)** | `npx -y skills add <repo> --skill trading-terminal --agent claude-code -y` → установлен `./.claude/skills/trading-terminal` (SKILL.md + scripts/terminal.sh), «Installed 1 skill»; прогон промпта в Claude Code не выполнен из-за истёкшей OAuth-сессии |
+| T26 Step 5 | **I** | живой сценарий 7 шагов в DSH — после перезапуска DSH |
+| T13/T16 live | **S** | живые dev-витрины `clickhouse-import-rosstat`: см. `data.md` §8 и `research.md` §9; найдено и исправлено смешение категории `cpi` (RU/US) |
+
+Остаются I только шаги, требующие живого DSH-процесса (перезапуск DSH с текущим плагином) — T9/T21/T24/T26;
+они не блокируются кодом и оформлены как manual-инструкции в `dsh-integration.md`.
+### Дополнительно проверено офлайн (2026-11-06)
+
+- **T24**: `POST /api/agent/tools/batch_backtest/invoke` на офлайн-seed — 3 ряда (GAZP/SBER/LKOH),
+  `small_sample` warnings для малых выборок, artifact `batch_backtest` с 3 charts — путь инструмента
+  end-to-end (**S**); ручной промпт в DSH-чате остаётся **I**.
+- **T24/T9 (tool path)**: `POST /api/agent/tools/backtest_rules/invoke` → `result` с metrics/equity/trades,
+  artifact `backtest`; `terminal_get_quote` через MCP — см. выше (**S** для пути инструментов).
+- **T21**: тело `dsh-ai-terminal/workflows/nightly-research.js` валидно как JS function body
+  (`new Function(...)` parse OK); живой workflow/schedule/kill-switch в DSH — **I** (нужен перезапуск DSH).
+- **T26/T9 (клиентская часть)**: карточки/слоты проверены node-тестами на fake-React; живой Harness — **I**.
+
+### Что нужно для живых DSH-шагов (T9/T21/T24/T26)
+
+Профиль DSH `~/.dsh/profiles/desktop` линкует `@local/dsh-ai-terminal` на старый worktree
+`txmlconnector/.worktrees/ai-terminal/dsh-ai-terminal` (код PR #60), а не на смёрженный main. Чтобы
+проверить живьём, нужно (действие пользователя, внешний конфиг):
+
+1. В `~/.dsh/profiles/desktop/package.json` заменить зависимость на
+   `"@local/dsh-ai-terminal": "link:/Users/whitefox/GolandProjects/txmlconnector/dsh-ai-terminal"`.
+2. Выполнить `pnpm install` в каталоге профиля (или дать DSH пересобрать зависимости).
+3. Перезапустить DSH (текущая сессия завершится).
+4. Проверить сценарии: панель «Терминал» → «Автономия» → «Боты», карточка бэктеста в чате (T9/T24),
+   кнопку «В чат» / «Спросить о выделенном», ночной workflow (T21), 7-шаговый сценарий бота (T26).
+### Инструмент живой приёмки (2026-11-06)
+
+- Добавлен `tools/demo-live-check.sh` + `make terminal_live` (gated `TERMINAL_LIVE_ACCEPTANCE=1`, секреты
+  только из `~/re/demo.env`, окно демо-сервера ожидается до 09:55 МСК): T11 — 10 мин записи
+  стакана/сделок в `md.*` + `SELECT kind,count()`, T12 — проверка `md.news.first_seen/published`,
+  T22 — dry-run бот M5 30 мин с проверкой `closed_bar` по границам МСК и отсутствия заявок.
+- `DEMO_CHECK_SELFTEST=1 make terminal_live` — самопроверка без рынка (gates/env/builds/ClickHouse):
+  **PASS** (ClickHouse 26.10.1, бинарники собираются).
+- Расширены live-тесты `terminal/vintage`: кроме AsOf/Releases/News теперь проверяются путь
+  `series_publication` (качество `date`/`fallback`/`exact_time`, строгая граница) и путь latest-only
+  (FRED-ряд без публикационной истории) — `TestLiveClickHouseLatestOnlyAndPublicationPaths` PASS.
+- Фоновая проверка T11/T12/T22 перезапущена уже этим инструментом; результат появится в
+  `.re-run/live/live-summary-*.json` и будет добавлен в этот файл после окна.
+### Дополнительные проверки уровня host/backend (2026-11-06, до окна демо)
+
+- **T21 (workflow body, S)**: тело `workflows/nightly-research.js` исполнено в Node с заглушками движка
+  (`agent/phase/parallel/pipeline/log`) — 7 фаз, 6 агентских задач, JSON-сводка; промпты вызывают
+  `terminal_list_instruments/get_history/vol_forecast/walk_forward/detect_execution_algos/
+  list_skill_patterns/propose_automation` и не содержат торговых инструментов. Тест:
+  `dsh-ai-terminal/test/nightly-workflow.test.mjs` (2/2 pass). Живой `ctx.workflowEngine` — I.
+- **T26 (bot SSE + токен, S)**: на реальном offline-бэкенде открыт SSE `/api/events` с `X-Terminal-Token`,
+  создан бот из rules.Spec, выполнен `check` — в потоке получены кадры `type:"bot"` с
+  `botId`/`entry` (stage + closed_bar, `signal:"none"`). Маппинг/delivery реле в агента — node-тесты;
+  живой клиент DSH (`turnTail`, kill-switch) — I.
+- **T9/T24 (tool path, S; UI — I)**: MCP `tools/call get_quote` и REST
+  `/api/agent/tools/{backtest_rules,batch_backtest}/invoke` работают на живом бэкенде; карточки
+  `tool.call.toolview` — node-тесты; живой DSH-чат — I.
+- **T25 (установка навыка, S)**: см. выше; промпт в Claude Code — I (OAuth).
+### T11: end-to-end пайплайн recorder → ClickHouse (S, 2026-11-06)
+
+- `native.Client` ↔ `native/testserver` (реальный протокол) → `recorder.Run` → живой ClickHouse:
+  `TestLiveRecorderWritesBookAndTradesToClickHouse` PASS — `snapshot`/`level` строки для
+  `TQBR:SBER` с `Decimal`-ценами и сделки; живая запись с демо-сервера проверяется фоновой
+  приёмкой в окне (09:55 МСК).
+- `native/testserver`: добавлен ответ на `RQ_GET_NEWS` пустым списком (recorder опрашивает новости
+  внутри Run) — заглушка не рвёт сессию; остальные native-тесты прогоняются.
+### T12: news first-seen пайплайн (S локально)
+
+- Тот же live-тест recorder подаёт R_NEWS-заголовки через настоящий протокол: `md.news` получает строку
+  с `first_seen > тест-старт`, `published` из заголовка, непустыми `source`/`title`.
+  `native/testserver` теперь отвечает на `RQ_GET_NEWS` пустым списком (recorder опрашивает новости).
+### Карточки на payload'ах реального бэкенда (T9/T24/T26, S для моделей, 2026-11-06)
+
+- Взяты реальные ответы офлайн-бэкенда (детерминированный seed): `get_quote`, `backtest_rules`
+  (artifact `backtest`), `POST /api/bots` + journal (`stage`, `closed_bar`).
+- `toolPresentationMeta`/`renderToolResult` дают `kind:"quote"` и `kind:"backtest"` с метриками,
+  equity-точками, warnings и корректным текстом с дисклеймером; `parseBotFromReply`/`botCardData`/
+  `journalLine`/`isSignificantEvent`/`botRenderText` корректно отрабатывают stage (significant) и
+  closed_bar (не значимо).
+- Регрессионный тест: `dsh-ai-terminal/test/real-payload-cards.test.mjs` + фикстура
+  `test/fixtures/real-cards.json` (обезличенные данные seed, без секретов).
+- Живой Harness (фактический рендер React-компонентов и слоты) остаётся **I** до перезапуска DSH.
+### T25: промпт через навык на живом агенте (Kimi Code, S-эквивалент, 2026-11-06)
+
+Claude Code OAuth в этой сессии истёк, поэтому промпт-часть Step 5 выполнена на другом живом
+агентском CLI с тем же установленным навыком:
+
+- чистый каталог `/tmp/t25-kimi`; `npx -y skills add <repo> --skill trading-terminal --agent kimi-code-cli -y`
+  → `./.agents/skills/trading-terminal` (+ `scripts/terminal.sh`);
+- запущен офлайн-бэкенд терминала; `kimi -p "Покажи котировку SBER через навык trading-terminal: найди
+  SKILL.md, запусти scripts/terminal.sh quote TQBR:SBER..." --skills-dir .agents/skills` → агент нашёл
+  SKILL.md, выполнил `scripts/terminal.sh quote TQBR:SBER` и вернул `last=293.22`, bid/ask 293.22/293.26
+  (read-only REST, без торговых команд);
+- это подтверждает переносимый путь «SKILL.md → scripts/terminal.sh → REST» для любого агента;
+  Claude Code-специфичная часть (его OAuth-сессия) остаётся **I**, но установка навыка в `.claude/skills`
+  проверена ранее.
+### Карточки через настоящий Client-бандл (T9/T24, S для компонентов, 2026-11-06)
+
+- В `dsh-ai-terminal/test/real-payload-cards.test.mjs` добавлены тесты, загружающие реальный
+  `client.js` через фейковый `window.__ModuleLoader__` и заглушку React: находятся компоненты
+  `tool.call.toolview` для `terminal_run_backtest`/`terminal_get_quote`, рендерятся с `meta`,
+  полученной `toolPresentationMeta` из **реальных** payload'ов офлайн-бэкенда.
+- Проверено: карточка бэктеста рисует `polyline` equity, текст «Бэктест» и символ; карточка котировки —
+  символ и цену `293,22`. Это уровень настоящего React-компонента без браузера/Harness.
+- Остаётся **I**: живой Harness-слот/чат и реакция на реальный вызов инструмента моделью — после
+  перезапуска DSH.
+## Инцидент 2026-11-06: DSH предлагал backup/disable после установки плагина
+
+**Симптом.** После перезапуска DSH с новым плагином (main, PR #62) Desktop показал фатальную ошибку
+старта и предложил сделать backup патча профиля и выключить сторонние плагины. Crash-отчёты
+`~/Library/Logs/DeepSeek Harness/crash-2026-11-06T04-02-*.log` (source `web-boot`):
+
+```
+Error: web boot: 1 entry did not activate
+@local/dsh-ai-terminal: loading
+```
+
+**Причина (подтверждена crash-отчётом и воспроизведением).** `dsh-ai-terminal/index.js` объявлял в
+`inject` обязательные сервисы `workflowEngine`, `schedule`, `sessionController`, `storageDomain`,
+`agents`, но shipped desktop/web профили DSH **не монтируют** `workflowEngine` (сервис
+`@deepseek-ai/dsh-workflow`; в конфигурации web-профиля его нет). Cordis-строка плагина навсегда
+остаётся в состоянии `loading`; Desktop считает неактивированную запись фатальной ошибкой web-boot и
+предлагает восстановление (деактивировать сторонние плагины). Это не ошибка кода терминала в рантайме
+и не сбой pnpm/профиля — виновата избыточная обязательная инъекция.
+
+Дополнительно найдены и исправлены два латентных дефекта:
+
+- `workflows/nightly-research.js` читался из `repoDir/workflows`, но файл лежит в пакете плагина
+  (`dsh-ai-terminal/workflows/nightly-research.js`) → в живом DSH логировался ENOENT, workflow не
+  запускался;
+- запись `ai-terminal-mcp` в `cordis.patch.yml` вычисляла `process.env.DSH_AI_TERMINAL_MCP_*` на этапе
+  разбора конфигурации, до `apply()`, где эти env выставлялись → `ValidationError: invalid config`
+  (не фатально, но MCP-клиент в DSH не поднимался). Строка удалена; backend по-прежнему отдаёт `/mcp`
+  для внешних клиентов (Claude Code / Kimi Code — проверено).
+
+**Исправление (ветка `plan/ai-terminal-live`).**
+
+- `inject = ['webServer', 'tools']`; остальные сервисы (`llm`, `skills`, `subprocess`,
+  `workflowEngine`, `schedule`, `sessionController`, `agents`) берутся через `ctx.get(...)` и
+  деградируют явно: ночной workflow/бот-релей сообщают «сервис недоступен», не блокируя старт DSH;
+- скрипт workflow читается из `pluginDir()/workflows/nightly-research.js`;
+- MCP-client строка удалена из patch;
+- регрессионный тест `dsh-ai-terminal/test/optional-services.test.mjs`: плагин активируется на профиле
+  без optional-сервисов и с ними; `node --test` — 51/51.
+
+**Восстановление профиля.** Профиль `~/.dsh/profiles/desktop` после аварии был в safe-режиме
+(bundles = base+web-app, патч вычищен). Восстановлены: полный список 12 bundles, patch-слой
+(модели, mcp-jetbrains, worktree, plugin-market), зависимость `@local/dsh-ai-terminal` →
+`link:/Users/whitefox/GolandProjects/txmlconnector/dsh-ai-terminal`, lockfile приведён `pnpm install`;
+бэкапы рядом (`*.bak-*`, `*.recovered-*`). Проверено воспроизведением desktop-подобного профиля:
+плагин активируется, backend стартует, workflow-скрипт найден, fatal-ошибки нет.
