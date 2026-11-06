@@ -38,6 +38,13 @@ test('buildTools has no *_place_order or *_cancel_order', async () => {
       assert.equal(typeof t.execute, 'function');
       assert.equal(t.parameters.type, 'object');
       assert.ok(t.description.length > 0);
+      // dsh-tools 0.2.x refuses a tool without output { schema, render }.
+      assert.equal(typeof t.output, 'object', `${t.name}: output`);
+      assert.equal(t.output.schema.type, 'object', `${t.name}: output.schema`);
+      assert.equal(typeof t.output.render, 'function', `${t.name}: output.render`);
+      const rendered = t.output.render({}, { value: 1 });
+      assert.equal(rendered[0].type, 'text');
+      assert.ok(rendered[0].text.includes('"value": 1'));
     }
   } finally { await gw.close(); }
 });
