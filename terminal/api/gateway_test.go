@@ -274,6 +274,59 @@ func TestGatewayOrderBookLots(t *testing.T) {
 	}
 }
 
+// TestGatewayOrderBookSortsLevels checks the gateway v1 contract: bids are
+// ordered by descending price and asks by ascending price, whatever order the
+// feed carries (live <quotes> deltas are not guaranteed to be sorted). The feed
+// object passed in must not be mutated by the response encoding.
+func TestGatewayOrderBookSortsLevels(t *testing.T) {
+	deps, f, _, _ := defaultDeps()
+	inBids := []feed.Level{{Price: 305.5, Qty: 1}, {Price: 306.25, Qty: 10}, {Price: 306.0, Qty: 5}}
+	inAsks := []feed.Level{{Price: 306.5, Qty: 2}, {Price: 306.3, Qty: 7}, {Price: 306.4, Qty: 3}}
+	f.books["TQBR:SBER"] = feed.OrderBook{
+		Symbol: "TQBR:SBER", Time: time.Date(2026, 11, 5, 16, 24, 0, 0, time.UTC), Source: "live",
+		Bids: inBids, Asks: inAsks,
+	}
+	_, ts := newTestServer(t, deps, Config{})
+	var got struct {
+		Bids []struct {
+			Price string `json:"price"`
+			Lots  int64  `json:"lots"`
+		} `json:"bids"`
+		Asks []struct {
+			Price string `json:"price"`
+			Lots  int64  `json:"lots"`
+		} `json:"asks"`
+	}
+	if st := gwGet(t, ts, "/api/gw/v1/orderbook?symbol=TQBR:SBER", &got); st != http.StatusOK {
+		t.Fatalf("status %d", st)
+	}
+	wantBids := []string{"306.25", "306.00", "305.50"}
+	wantAsks := []string{"306.30", "306.40", "306.50"}
+	if len(got.Bids) != len(wantBids) || len(got.Asks) != len(wantAsks) {
+		t.Fatalf("bids/asks = %+v / %+v", got.Bids, got.Asks)
+	}
+	for i, want := range wantBids {
+		if got.Bids[i].Price != want {
+			t.Errorf("bid %d price = %q, want %q (bids %+v)", i, got.Bids[i].Price, want, got.Bids)
+		}
+	}
+	if got.Bids[1].Lots != 5 {
+		t.Errorf("bid 306.00 lots = %d, want 5", got.Bids[1].Lots)
+	}
+	for i, want := range wantAsks {
+		if got.Asks[i].Price != want {
+			t.Errorf("ask %d price = %q, want %q (asks %+v)", i, got.Asks[i].Price, want, got.Asks)
+		}
+	}
+	// The response must not reorder the feed's own slices.
+	if len(inBids) != 3 || inBids[0].Price != 305.5 || inBids[2].Price != 306.0 {
+		t.Fatalf("input bids mutated: %+v", inBids)
+	}
+	if len(inAsks) != 3 || inAsks[0].Price != 306.5 || inAsks[2].Price != 306.4 {
+		t.Fatalf("input asks mutated: %+v", inAsks)
+	}
+}
+
 func TestGatewayTradesSideUnknown(t *testing.T) {
 	deps, f, _, _ := defaultDeps()
 	f.tapes["TQBR:SBER"] = append(f.tapes["TQBR:SBER"], feed.Trade{Time: time.Date(2026, 11, 5, 16, 25, 0, 0, time.UTC), Price: 101.5, Qty: 3})

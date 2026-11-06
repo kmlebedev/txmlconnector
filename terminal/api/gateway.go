@@ -275,9 +275,20 @@ type gwLevel struct {
 	Lots  int64  `json:"lots"`
 }
 
-func gatewayLevels(levels []feed.Level, decimals int) []gwLevel {
-	out := make([]gwLevel, 0, len(levels))
-	for _, l := range levels {
+// gatewayLevels renders one side of the price ladder as the gateway v1
+// contract requires: bids by descending price, asks by ascending. The feed
+// order is not guaranteed (live <quotes> deltas are merged, not sorted), so the
+// response is sorted defensively; the input slice is copied, never mutated.
+func gatewayLevels(levels []feed.Level, decimals int, descending bool) []gwLevel {
+	ordered := append([]feed.Level(nil), levels...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if descending {
+			return ordered[i].Price > ordered[j].Price
+		}
+		return ordered[i].Price < ordered[j].Price
+	})
+	out := make([]gwLevel, 0, len(ordered))
+	for _, l := range ordered {
 		out = append(out, gwLevel{Price: formatPrice(l.Price, decimals), Lots: int64(l.Qty)})
 	}
 	return out
@@ -312,7 +323,7 @@ func (s *Server) handleGatewayOrderBook(w http.ResponseWriter, r *http.Request) 
 		Source string    `json:"source"`
 		Bids   []gwLevel `json:"bids"`
 		Asks   []gwLevel `json:"asks"`
-	}{symbol, epochMS(book.Time), source, gatewayLevels(book.Bids, in.Decimals), gatewayLevels(book.Asks, in.Decimals)})
+	}{symbol, epochMS(book.Time), source, gatewayLevels(book.Bids, in.Decimals, true), gatewayLevels(book.Asks, in.Decimals, false)})
 }
 
 type gwTrade struct {
