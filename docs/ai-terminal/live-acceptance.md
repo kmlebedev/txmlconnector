@@ -16,7 +16,7 @@
 | T21 Step 5 (ночной workflow в DSH) | **I** | workflow-body, schedule-shape, budget, kill-switch проверены node-тестами на fake-сервисах | перезапуск DSH; `make terminal_smoke`/ручной запуск workflow |
 | T22 Step 5 (dry-run бот 30 мин) | live в окне демо | код и 11 тестов зелёные; REST/SSE ботов — offline smoke | фоновая проверка `tools/demo-live-check.sh` |
 | T24 Step 5 (промпт в DSH) | **I (путь инструмента — S)** | offline: `batch_backtest` invoke → 3 ряда, `small_sample`, artifact с charts; `backtest_rules` invoke | промпт в живом DSH после перезапуска |
-| T25 Step 5 (`npx skills add`) | **S (установка) / I (промпт)** | `npx -y skills add <repo> --skill trading-terminal --agent claude-code -y` → `./.claude/skills/trading-terminal` (+ `scripts/terminal.sh`), «Installed 1 skill» | прогон промпта в Claude Code (OAuth) |
+| T25 Step 5 (`npx skills add`) | **S (установка + промпт через Kimi Code) / I (Claude Code-промпт)** | `npx -y skills add <repo> --skill trading-terminal --agent claude-code -y` → `./.claude/skills/trading-terminal` (+ `scripts/terminal.sh`), «Installed 1 skill» | прогон промпта в Claude Code (OAuth) |
 | T26 Step 5 (7-шаговый сценарий бота) | **I** | relay/UI проверены node-тестами (fake ctx/agents/SSE) | перезапуск DSH и живой сценарий |
 
 ## Команды живой приёмки
@@ -93,3 +93,17 @@ worktree `.worktrees/ai-terminal/dsh-ai-terminal` (код PR #60). Для про
 - Регрессионный тест: `dsh-ai-terminal/test/real-payload-cards.test.mjs` + фикстура
   `test/fixtures/real-cards.json` (обезличенные данные seed, без секретов).
 - Живой Harness (фактический рендер React-компонентов и слоты) остаётся **I** до перезапуска DSH.
+### T25: промпт через навык на живом агенте (Kimi Code, S-эквивалент, 2026-11-06)
+
+Claude Code OAuth в этой сессии истёк, поэтому промпт-часть Step 5 выполнена на другом живом
+агентском CLI с тем же установленным навыком:
+
+- чистый каталог `/tmp/t25-kimi`; `npx -y skills add <repo> --skill trading-terminal --agent kimi-code-cli -y`
+  → `./.agents/skills/trading-terminal` (+ `scripts/terminal.sh`);
+- запущен офлайн-бэкенд терминала; `kimi -p "Покажи котировку SBER через навык trading-terminal: найди
+  SKILL.md, запусти scripts/terminal.sh quote TQBR:SBER..." --skills-dir .agents/skills` → агент нашёл
+  SKILL.md, выполнил `scripts/terminal.sh quote TQBR:SBER` и вернул `last=293.22`, bid/ask 293.22/293.26
+  (read-only REST, без торговых команд);
+- это подтверждает переносимый путь «SKILL.md → scripts/terminal.sh → REST» для любого агента;
+  Claude Code-специфичная часть (его OAuth-сессия) остаётся **I**, но установка навыка в `.claude/skills`
+  проверена ранее.
