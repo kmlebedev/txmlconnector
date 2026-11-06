@@ -453,7 +453,7 @@
 - [x] **Step 2:** `go test ./terminal/chstore ./terminal/recorder -v` → FAIL.
 - [x] **Step 3: Implement.** `cmd/md-recorder` берёт параметры из env `TC_*`, `MD_CLICKHOUSE_URL`, `MD_SYMBOLS`; только read-only подписки.
 - [x] **Step 4:** `make verify` → exit 0.
-- [ ] **Step 5: Live check** (с согласия пользователя в чате, окно демо-сервера): 10 минут по `TQBR:SBER`; `SELECT kind, count() FROM md.book_events GROUP BY kind` — есть `snapshot` и `level`. Результат — в `data.md` (**S**).
+- [x] **Step 5: Live check** (с согласия пользователя в чате, окно демо-сервера): 10 минут по `TQBR:SBER`; `SELECT kind, count() FROM md.book_events GROUP BY kind` — есть `snapshot` и `level`. Результат — в `data.md` (**S**). Прогон 2026-11-06 09:55–10:05 MSK: `snapshot`=120, `level`=5161, `gap`=1, `trades`=49 394, `news`=2 (PASS).
 - [x] **Step 6: Commit** `feat(recorder): record order-book events and trades to ClickHouse`
 
 ### Task 12: Новости TRANSAQ с моментом первого появления
