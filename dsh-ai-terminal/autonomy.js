@@ -367,7 +367,10 @@ export function createAutonomy(options = {}) {
         render: (_args, value) => [{ type: 'text', text: summaryText(value) }],
       },
       async execute(_args, exec) {
-        const snapshot = await runNow({ trigger: 'tool', signal: exec && exec.signal });
+        // The workflow engine needs the calling agent as the run parent: child
+        // agents (agent() hooks) start inside that parent's session. Without it
+        // engine.start() fails/settles as engine-error.
+        const snapshot = await runNow({ trigger: 'tool', signal: exec && exec.signal, parent: exec && exec.agent });
         return {
           result: snapshot.lastResult,
           stopReason: snapshot.stopReason,

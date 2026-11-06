@@ -495,3 +495,12 @@ T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAut
   (`inject: ['workflowEngine']`) в том же профиле печатает `WF_PROBE: workflowEngine present = object`.
 - Нужен перезапуск Desktop для активации сервиса в живом процессе; затем `terminal_nightly_research`
   должен отработать (T21 Step 5). Fallback: восстановить бэкап и перезапустить DSH.
+### T21: workflowEngine включён, но nightly упал — не передан parent (2026-11-06 13:23 MSK)
+
+После перезапуска `terminal_nightly_research` вернул `{"result":null,"stopReason":"error",
+"reason":"engine-error"}`. Причина: наш Harness-tool вызывал `workflowEngine.start()` **без `parent`**,
+а встроенный `dsh-tool-workflow` требует `parent = exec.agent` (иначе child-агенты `agent()` не могут
+стартовать; run завершается engine-error). Исправлено в `dsh-ai-terminal/autonomy.js` — tool передаёт
+`parent: exec.agent`; тест `nightly tool ...` теперь проверяет, что parent доходит до engine.start.
+`node --test` 54/54, `make verify` exit 0. Для применения нужен перезапуск Desktop (host-JS плагина
+загружается при старте).
