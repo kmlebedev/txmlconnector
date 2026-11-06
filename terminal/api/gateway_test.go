@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
+	"github.com/kmlebedev/txmlconnector/terminal/paper"
 )
 
 func TestGatewayInfo(t *testing.T) {
@@ -292,5 +293,69 @@ func TestGatewaySeedSource(t *testing.T) {
 	gwGet(t, ts, "/api/gw/v1/candles?symbol=TQBR:SBER&interval=1m", &c)
 	if q.Quotes["TQBR:SBER"].Source != "seed" || c.Source != "seed" {
 		t.Fatalf("quote %+v candles %+v", q, c)
+	}
+}
+
+func TestGatewayAccountMapsStatuses(t *testing.T) {
+	deps, _, broker, _ := defaultDeps()
+	q := paper.QuoteView{Symbol: "TQBR:SBER", Last: 101, Bid: 100.9, Ask: 101.1, Time: time.Date(2026, 11, 5, 16, 24, 0, 0, time.UTC)}
+	if _, err := broker.Place(paper.OrderRequest{Symbol: "TQBR:SBER", Side: paper.Buy, Qty: 10, Type: paper.Market}, q); err != nil {
+		t.Fatalf("market: %v", err)
+	}
+	if _, err := broker.Place(paper.OrderRequest{Symbol: "TQBR:SBER", Side: paper.Buy, Qty: 5, Type: paper.Limit, Price: 50}, q); err != nil {
+		t.Fatalf("limit: %v", err)
+	}
+	_, ts := newTestServer(t, deps, Config{})
+	var got struct {
+		Environment string `json:"environment"`
+		Currency    string `json:"currency"`
+		Cash        string `json:"cash"`
+		Positions   []struct {
+			Symbol, Qty, AvgPrice, RealizedPnl any
+		} `json:"positions"`
+		OpenOrders []struct {
+			Symbol string `json:"symbol"`
+			Side   string `json:"side"`
+			Type   string `json:"type"`
+			Status string `json:"status"`
+			Qty    int64  `json:"qty"`
+			Price  string `json:"price"`
+			Time   int64  `json:"time"`
+		} `json:"openOrders"`
+		Fills []struct {
+			Symbol string `json:"symbol"`
+			Qty    int64  `json:"qty"`
+			Price  string `json:"price"`
+			Fee    string `json:"fee"`
+		} `json:"fills"`
+	}
+	if st := gwGet(t, ts, "/api/gw/v1/account", &got); st != http.StatusOK {
+		t.Fatalf("status %d", st)
+	}
+	if got.Environment != "paper" || got.Currency != "RUB" || got.Cash == "" || !strings.Contains(got.Cash, ".") {
+		t.Fatalf("header %+v", got)
+	}
+	if len(got.OpenOrders) != 1 || got.OpenOrders[0].Status != "new" || got.OpenOrders[0].Qty != 5 || got.OpenOrders[0].Price != "50.00" {
+		t.Fatalf("open orders %+v", got.OpenOrders)
+	}
+	if len(got.Positions) != 1 || len(got.Fills) != 1 || got.Fills[0].Qty != 10 || got.Fills[0].Price != "101.10" {
+		t.Fatalf("positions %+v fills %+v", got.Positions, got.Fills)
+	}
+}
+
+func TestGatewayAccountNoPaper(t *testing.T) {
+	deps, _, _, _ := defaultDeps()
+	deps.Paper = nil
+	_, ts := newTestServer(t, deps, Config{})
+	if st := gwGet(t, ts, "/api/gw/v1/account", nil); st != http.StatusServiceUnavailable {
+		t.Fatalf("status %d", st)
+	}
+}
+
+func TestGatewayStatusMapping(t *testing.T) {
+	for in, want := range map[paper.Status]string{paper.StatusPartial: "partially_filled", paper.StatusCancelled: "canceled", paper.StatusNew: "new", paper.StatusFilled: "filled", paper.StatusRejected: "rejected"} {
+		if got := gatewayStatus(in); got != want {
+			t.Errorf("%s -> %s, want %s", in, got, want)
+		}
 	}
 }

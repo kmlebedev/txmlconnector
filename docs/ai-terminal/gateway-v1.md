@@ -85,3 +85,18 @@ Bids по убыванию, asks по возрастанию (как отдаё�
 ```
 
 По возрастанию времени. Фид не несёт id сделки, поэтому `id = "<индекс в ответе>@<time>"` (**I**: нестабилен между запросами). Пустая/иная сторона — `unknown`.
+
+## GET /api/gw/v1/account (I)
+
+Только чтение; счёт — бумажный (paper) по умолчанию. `503 unavailable`, если бумажный брокер не подключён.
+
+```json
+{"environment":"paper","currency":"RUB","cash":"1000000.00",
+ "positions":[{"symbol":"TQBR:SBER","qty":10,"avgPrice":"101.10","realizedPnl":"0.00"}],
+ "openOrders":[{"id":"o1","symbol":"TQBR:SBER","side":"buy","type":"limit","status":"new","qty":5,"filled":0,"price":"50.00","time":1730823840000}],
+ "fills":[{"id":"t1","orderId":"o1","symbol":"TQBR:SBER","side":"buy","qty":10,"price":"101.10","fee":"0.51","time":1730823840000}]}
+```
+
+- `qty`/`filled` — в **акциях** (не лотах): кэш paper двигается на `qty*price`.
+- `openOrders` — только `new`/`partial`; статусы: `partial` -> `partially_filled`, `cancelled` -> `canceled`, остальные без изменений. `side`/`type` — строки пакета paper.
+- `fills` — последние 50 по возрастанию времени. Цены — `decimals` инструмента (2, если инструмент неизвестен); `cash`, `fee`, `realizedPnl` — 2 знака.

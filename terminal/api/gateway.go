@@ -2,11 +2,13 @@ package api
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
+	"github.com/kmlebedev/txmlconnector/terminal/paper"
 )
 
 // Gateway v1 is a read-only, versioned HTTP surface (/api/gw/v1/*) for the
@@ -32,6 +34,7 @@ func (s *Server) registerGateway(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/gw/v1/candles", s.handleGatewayCandles)
 	mux.HandleFunc("GET /api/gw/v1/orderbook", s.handleGatewayOrderBook)
 	mux.HandleFunc("GET /api/gw/v1/trades", s.handleGatewayTrades)
+	mux.HandleFunc("GET /api/gw/v1/account", s.handleGatewayAccount)
 }
 
 // formatPrice renders v with exactly decimals fractional digits; a negative
@@ -350,6 +353,106 @@ func (s *Server) handleGatewayTrades(w http.ResponseWriter, r *http.Request) {
 		out.Trades = append(out.Trades, gwTrade{
 			ID: strconv.Itoa(i) + "@" + strconv.FormatInt(ms, 10), Time: ms,
 			Price: formatPrice(t.Price, in.Decimals), Lots: t.Qty, Side: side,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// gatewayMaxFills bounds the fills list of /account.
+const gatewayMaxFills = 50
+
+// gatewayStatus maps a paper order status to its gateway name.
+func gatewayStatus(st paper.Status) string {
+	switch st {
+	case paper.StatusPartial:
+		return "partially_filled"
+	case paper.StatusCancelled:
+		return "canceled"
+	}
+	return string(st)
+}
+
+type gwPosition struct {
+	Symbol      string `json:"symbol"`
+	Qty         int64  `json:"qty"`
+	AvgPrice    string `json:"avgPrice"`
+	RealizedPnl string `json:"realizedPnl"`
+}
+
+type gwOpenOrder struct {
+	ID     string `json:"id"`
+	Symbol string `json:"symbol"`
+	Side   string `json:"side"`
+	Type   string `json:"type"`
+	Status string `json:"status"`
+	Qty    int64  `json:"qty"`
+	Filled int64  `json:"filled"`
+	Price  string `json:"price"`
+	Time   int64  `json:"time"`
+}
+
+type gwFill struct {
+	ID      string `json:"id"`
+	OrderID string `json:"orderId"`
+	Symbol  string `json:"symbol"`
+	Side    string `json:"side"`
+	Qty     int64  `json:"qty"`
+	Price   string `json:"price"`
+	Fee     string `json:"fee"`
+	Time    int64  `json:"time"`
+}
+
+// handleGatewayAccount serves GET /api/gw/v1/account: the default paper
+// account. Quantities are shares (paper cash moves by qty*price).
+func (s *Server) handleGatewayAccount(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Paper == nil {
+		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "бумажный счёт недоступен")
+		return
+	}
+	snap := s.deps.Paper.Snapshot()
+	decimals := func(symbol string) int {
+		if in, ok := s.deps.Feed.Instrument(symbol); ok && in.Decimals >= 0 {
+			return in.Decimals
+		}
+		return 2
+	}
+	out := struct {
+		Environment string        `json:"environment"`
+		Currency    string        `json:"currency"`
+		Cash        string        `json:"cash"`
+		Positions   []gwPosition  `json:"positions"`
+		OpenOrders  []gwOpenOrder `json:"openOrders"`
+		Fills       []gwFill      `json:"fills"`
+	}{
+		Environment: "paper", Currency: "RUB", Cash: formatPrice(snap.Cash, 2),
+		Positions:  make([]gwPosition, 0, len(snap.Positions)),
+		OpenOrders: []gwOpenOrder{}, Fills: []gwFill{},
+	}
+	for _, p := range snap.Positions {
+		out.Positions = append(out.Positions, gwPosition{
+			Symbol: p.Symbol, Qty: p.Qty,
+			AvgPrice: formatPrice(p.AvgPrice, decimals(p.Symbol)), RealizedPnl: formatPrice(p.RealizedPnL, 2),
+		})
+	}
+	for _, o := range snap.Orders {
+		if o.Status != paper.StatusNew && o.Status != paper.StatusPartial {
+			continue
+		}
+		out.OpenOrders = append(out.OpenOrders, gwOpenOrder{
+			ID: o.ID, Symbol: o.Symbol, Side: string(o.Side), Type: string(o.Type),
+			Status: gatewayStatus(o.Status), Qty: o.Qty, Filled: o.Filled,
+			Price: formatPrice(o.Price, decimals(o.Symbol)), Time: epochMS(o.CreatedAt),
+		})
+	}
+	trades := append([]paper.Trade(nil), snap.Trades...)
+	sort.SliceStable(trades, func(i, j int) bool { return trades[i].Time.Before(trades[j].Time) })
+	if len(trades) > gatewayMaxFills {
+		trades = trades[len(trades)-gatewayMaxFills:]
+	}
+	for _, t := range trades {
+		out.Fills = append(out.Fills, gwFill{
+			ID: t.ID, OrderID: t.OrderID, Symbol: t.Symbol, Side: string(t.Side), Qty: t.Qty,
+			Price: formatPrice(t.Price, decimals(t.Symbol)), Fee: formatPrice(t.Fee, 2), Time: epochMS(t.Time),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
