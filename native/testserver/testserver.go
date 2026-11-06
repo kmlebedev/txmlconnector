@@ -314,6 +314,11 @@ func (s *Server) serve(nc net.Conn) {
 			} else {
 				err = reply(wire.KindReply, f.Type, payload)
 			}
+		case session.RqGetNews:
+			// The recorder polls news headers from Run; the test double has no
+			// news, so an empty reply is the correct answer and keeps the
+			// session alive for the book/trade assertions.
+			err = reply(wire.KindReply, f.Type, nil)
 		case session.RqTime:
 			err = reply(wire.KindReply, f.Type, rqTimeReply)
 		case session.RqStartup:

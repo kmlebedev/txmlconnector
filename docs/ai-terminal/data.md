@@ -365,3 +365,11 @@ SQL и его аргументы проверены только на httptest-�
 `kind Enum8(...)`, `price Decimal(18, 6)`, `qty Int64`). Живая запись стакана/сделок и `SELECT
 kind,count()` — выполняются отдельной проверкой в окне демо-сервера (T11 Step 5), результат — в
 PROGRESS.md.
+**Пайплайн T11 проверен end-to-end локально (S, 2026-11-06):** реальный `native.Client` говорит с
+серверной тестовой заглушкой `native/testserver` (настоящий протокол TRANSAQ), события стакана/сделок
+декодируются клиентом, проходят через `recorder.Run` и пишутся в живой ClickHouse
+(`md.book_events`, `md.trades`). Тест `TestLiveRecorderWritesBookAndTradesToClickHouse`
+(`terminal/recorder/clickhouse_live_test.go`, env-гейт `TXML_IT_CLICKHOUSE=1`) — PASS: строки
+`snapshot`/`level` для `TQBR:SBER`, `Decimal`-цены, сделки с миллисекундами. Запись с реального
+демо-сервера (T11 Step 5) остаётся за фоновой приёмкой в окне. Для этого сценария `native/testserver`
+научился отвечать на `RQ_GET_NEWS` пустым списком (recorder опрашивает новости в Run).
