@@ -94,11 +94,13 @@ func TestLiveRecorderWritesBookAndTradesToClickHouse(t *testing.T) {
 	cl := liveClickHouse(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	start := time.Now()
 	if err := recorder.EnsureSchema(ctx, cl); err != nil {
 		t.Fatalf("EnsureSchema: %v", err)
 	}
 	baseBook := bookCounts(t, cl)
 	baseTrades := tradeCount(t, cl)
+	baseNews := newsRow(t, cl).Count
 
 	srv := testserver.New(t)
 	srv.Startup = readHexPayload(t, "startup-demo.hex")
@@ -173,6 +175,25 @@ func TestLiveRecorderWritesBookAndTradesToClickHouse(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
+	// The news headers arrive through the same event stream (R_NEWS 0x35/0x36);
+	// the recorder stamps FirstSeen from its own clock and keeps Published.
+	srv.QueueMain(readHexPayload(t, "news-inject.hex"))
+	newsDeadline := time.Now().Add(10 * time.Second)
+	for newsRow(t, cl).Count <= baseNews {
+		if time.Now().After(newsDeadline) {
+			t.Fatalf("no md.news rows after the news header")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	news := newsRow(t, cl)
+	if news.FirstMs <= 0 || news.PubMs <= 0 || news.Source == "" || news.Title == "" {
+		t.Fatalf("bad md.news row: %+v", news)
+	}
+	if news.FirstMs < start.UnixMilli() {
+		t.Fatalf("first_seen %d is before the test start %d", news.FirstMs, start.UnixMilli())
+	}
+	t.Logf("news row: source=%s title=%.40s first_seen_ms=%d published_ms=%d", news.Source, news.Title, news.FirstMs, news.PubMs)
+
 	stop()
 	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("recorder.Run: %v", err)
@@ -202,4 +223,27 @@ func TestLiveRecorderWritesBookAndTradesToClickHouse(t *testing.T) {
 		}
 	}
 	t.Logf("recorder wrote %v book rows and %d trades", bookCounts(t, cl), tradeCount(t, cl))
+}
+
+// newsRow returns the md.news counter and the latest row timestamps.
+type newsSummary struct {
+	Count   uint64 `json:"n"`
+	FirstMs int64  `json:"firstMs"`
+	PubMs   int64  `json:"pubMs"`
+	Source  string `json:"source"`
+	Title   string `json:"title"`
+}
+
+func newsRow(t *testing.T, cl *chstore.Client) newsSummary {
+	t.Helper()
+	var rows []newsSummary
+	if err := cl.Query(context.Background(),
+		"SELECT count() AS n, if(count() = 0, 0, max(toUnixTimestamp64Milli(first_seen))) AS firstMs, if(count() = 0, 0, max(toUnixTimestamp64Milli(published))) AS pubMs, argMax(source, first_seen) AS source, argMax(title, first_seen) AS title FROM md.news",
+		nil, &rows); err != nil {
+		t.Fatalf("news summary: %v", err)
+	}
+	if len(rows) == 0 {
+		return newsSummary{}
+	}
+	return rows[0]
 }
