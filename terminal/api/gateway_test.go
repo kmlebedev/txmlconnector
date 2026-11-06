@@ -193,6 +193,29 @@ func TestGatewayQuotesBatchOmitsUnknown(t *testing.T) {
 	}
 }
 
+func TestGatewayQuotesEmptyWhenAbsent(t *testing.T) {
+	deps, f, _, _ := defaultDeps()
+	f.mu.Lock()
+	for i := range f.instruments {
+		if f.instruments[i].Symbol == "TQBR:SBER" {
+			f.instruments[i].PrevClose = 0
+		}
+	}
+	f.mu.Unlock()
+	f.setQuote("TQBR:SBER", feed.Quote{Symbol: "TQBR:SBER", Last: 101, Time: time.Date(2026, 11, 5, 16, 24, 0, 0, time.UTC)})
+	_, ts := newTestServer(t, deps, Config{})
+	var got struct {
+		Quotes map[string]struct{ Last, Bid, Ask, PrevClose string } `json:"quotes"`
+	}
+	if st := gwGet(t, ts, "/api/gw/v1/quotes?symbols=TQBR:SBER", &got); st != http.StatusOK {
+		t.Fatalf("status %d", st)
+	}
+	q := got.Quotes["TQBR:SBER"]
+	if q.Last != "101.00" || q.Bid != "" || q.Ask != "" || q.PrevClose != "" {
+		t.Fatalf("want empty bid/ask/prevClose, got %+v", q)
+	}
+}
+
 func TestGatewayCandlesIntervalMapping(t *testing.T) {
 	deps, f, _, _ := defaultDeps()
 	spy := &periodSpyFeed{fakeFeed: f}

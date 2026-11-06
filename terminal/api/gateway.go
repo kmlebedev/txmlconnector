@@ -39,6 +39,14 @@ func (s *Server) registerGateway(mux *http.ServeMux) {
 
 // formatPrice renders v with exactly decimals fractional digits; a negative
 // decimals falls back to 2.
+// formatOptionalPrice is formatPrice, but "" when the value is absent (<= 0).
+func formatOptionalPrice(v float64, decimals int) string {
+	if v <= 0 {
+		return ""
+	}
+	return formatPrice(v, decimals)
+}
+
 func formatPrice(v float64, decimals int) string {
 	if decimals < 0 {
 		decimals = 2
@@ -181,8 +189,8 @@ func (s *Server) handleGatewayQuotes(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out.Quotes[sym] = gwQuote{
-			Last: formatPrice(q.Last, in.Decimals), Bid: formatPrice(q.Bid, in.Decimals),
-			Ask: formatPrice(q.Ask, in.Decimals), PrevClose: formatPrice(in.PrevClose, in.Decimals),
+			Last: formatPrice(q.Last, in.Decimals), Bid: formatOptionalPrice(q.Bid, in.Decimals),
+			Ask: formatOptionalPrice(q.Ask, in.Decimals), PrevClose: formatOptionalPrice(in.PrevClose, in.Decimals),
 			ChangePct: strconv.FormatFloat(q.ChangePct, 'f', 2, 64), VolumeLots: q.Volume,
 			Time: epochMS(q.Time), Source: source,
 		}
