@@ -115,10 +115,11 @@ export function createTradeService({ client, resolver }) {
   }
 
   async function listTradeFills(symbol, limit = 50) {
+    const n = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 50;
     const [acc, want] = await Promise.all([account(), symbol ? resolver.resolve(symbol) : undefined]);
     return (acc.fills ?? [])
       .filter((f) => !want || f.symbol === want.native)
-      .slice(0, limit)
+      .slice(-n)
       .map((f) => ({
         id: String(f.id),
         orderId: String(f.orderId),

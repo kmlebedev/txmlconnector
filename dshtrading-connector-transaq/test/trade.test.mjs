@@ -80,6 +80,17 @@ test('open orders, getOrder and fills', async () => {
   } finally { await gw.close(); }
 });
 
+test('listTradeFills returns the most recent fills ascending', async () => {
+  const { gw, trade } = await setup();
+  try {
+    const fills = Array.from({ length: 5 }, (_, i) => ({ ...ACCOUNT.fills[0], id: i + 1, time: i + 1 }));
+    gw.routes = { ...gw.routes, '/api/gw/v1/account': { ...ACCOUNT, fills } };
+    assert.deepEqual((await trade.listTradeFills('SBER', 2)).map((f) => f.id), ['4', '5']);
+    assert.equal((await trade.listTradeFills('SBER', 0)).length, 5);
+    assert.equal((await trade.listTradeFills('SBER', NaN)).length, 5);
+  } finally { await gw.close(); }
+});
+
 test('order status vocabulary passes through from gateway', async () => {
   const { gw, trade } = await setup();
   try {

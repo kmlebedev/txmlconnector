@@ -103,7 +103,14 @@ test('token resolved per request from env; credentials service preferred; throwi
     gw.setToken('two');
     services.credentials = { resolve: () => { throw new Error('boom'); } };
     await list.execute({});
+    // async credentials service is awaited
+    gw.setToken('four');
+    services.credentials = { resolve: async () => ({ value: 'four' }) };
+    const r4 = await list.execute({});
+    assert.equal(JSON.stringify(r4).includes('TRADING_AUTH_FAILED'), false, 'async credentials not awaited');
+    assert.ok(gw.calls.length > 0);
     // empty value falls back to env
+    gw.setToken('two');
     services.credentials = { resolve: () => ({ value: '' }) };
     await list.execute({});
   } finally { await gw.close(); delete process.env[ref]; }
