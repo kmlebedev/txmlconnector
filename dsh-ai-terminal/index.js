@@ -33,13 +33,18 @@ import { createSkillProvider } from './skills.js';
 import { createToolBridge } from './tools.js';
 
 /**
- * Services required by the plugin; without them the row stays inactive.
- * workflowEngine/schedule/sessionController/storageDomain are the Harness Web
- * composition services of the autonomous nightly workflow (plan Task 21,
- * docs/ai-terminal/dsh-integration.md §2.4-2.6/2.8); the plan's "storage" name
- * is the storageDomain service.
+ * Services the plugin cannot work without: the Harness Web server (routes)
+ * and the tool registry (the terminal_<name> tools). Every other capability
+ * (llm, skills, subprocess, workflowEngine, schedule, sessionController,
+ * agents) is resolved with ctx.get() and degrades gracefully.
+ *
+ * This matters for boot: a Cordis row whose required inject never appears stays
+ * pending, and the Desktop reports "1 entry did not activate" as a fatal web
+ * boot error (the shipped desktop/web profiles do not mount a workflowEngine
+ * service, plan Task 21). The nightly workflow and the bot relay therefore
+ * report "сервис недоступен" instead of preventing DSH from starting.
  */
-export const inject = ['webServer', 'tools', 'workflowEngine', 'schedule', 'sessionController', 'storageDomain', 'agents'];
+export const inject = ['webServer', 'tools'];
 
 const MOUNT = '/ai-terminal';
 const CONTROL = '/ai-terminal-ctl';
@@ -526,11 +531,6 @@ export function apply(ctx, config) {
     backend.envOverrides = {};
   }
 
-  // The MCP client row of the bundle patch resolves these env values when it
-  // loads (it follows the ai-terminal row, so apply() has already run here).
-  process.env.DSH_AI_TERMINAL_MCP_URL = 'http://127.0.0.1:' + cfg.port + '/mcp';
-  process.env.DSH_AI_TERMINAL_MCP_TOKEN = backend.token;
-
   // Skill provider: the repository skills/trading-* tree (same frontmatter as
   // "npx skills add") plus the generated patterns under <dataDir>/skills.
   const repoDir = findRepoDir(cfg.repoDir);
@@ -548,12 +548,13 @@ export function apply(ctx, config) {
   // terminal_nightly_research tool; the tool starts the workflow, the token
   // budget is enforced by intercepting ctx.llm streams, and the kill switch
   // cancels the run plus the backend autonomy runner. The script is read from
-  // workflows/nightly-research.js as text: the workflow engine executes the
-  // body in its own realm.
+  // the plugin package's workflows/nightly-research.js as text: the workflow
+  // engine executes the body in its own realm (the script is package data, not
+  // a repository checkout file).
   const resolveService = (name) => (typeof ctx.get === 'function' ? ctx.get(name) : ctx[name]);
   let nightlyScript = '';
   try {
-    nightlyScript = fs.readFileSync(path.join(repoDir, 'workflows', 'nightly-research.js'), 'utf8');
+    nightlyScript = fs.readFileSync(path.join(pluginDir(), 'workflows', 'nightly-research.js'), 'utf8');
   } catch (error) {
     console.warn('[ai-terminal] скрипт ночного workflow недоступен: '
       + (error instanceof Error ? error.message : String(error)));

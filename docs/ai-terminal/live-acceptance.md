@@ -117,3 +117,17 @@ Claude Code OAuth в этой сессии истёк, поэтому промп
   символ и цену `293,22`. Это уровень настоящего React-компонента без браузера/Harness.
 - Остаётся **I**: живой Harness-слот/чат и реакция на реальный вызов инструмента моделью — после
   перезапуска DSH.
+## Живые результаты в DSH после исправления (2026-11-06, MCP-инструменты плагина доступны сессии)
+
+После успешного перезапуска DSH плагин активен: `terminal_*`-инструменты доступны агенту, backend
+`127.0.0.1:18090` жив (instanceId, `llm.enabled=true`). Проверено вызовами из живой DSH-сессии:
+
+| Проверка | Результат |
+|---|---|
+| T9: `terminal_get_quote` / `terminal_run_backtest` (TQBR:SBER, sma_cross 5м) | **S**: котировка и полный artifact бэктеста (metrics/equity, доходность −0.17%, 4 сделки); карточка рендерится toolview-компонентом |
+| T24: `terminal_batch_backtest` (GAZP/SBER/LKOH, sma_cross) | **S**: таблица 3 строк, buy&hold, warnings `small_sample` для малых выборок, artifact с графиками |
+| T26: `terminal_bot_create_from_backtest` → `bot_check` → `bot_status` → `bot_start(dry_run)` | **S (частично)**: бот `bot_0001` создан из rules.Spec (stage=check), check вернул `closed_bar` (close=293.22, rsi=0.4378), статус-список работает; `bot_start` вернул **proposal** `prop_000001` (pending) — мутирующее действие ждёт подтверждения человека; фактический dry-run требует живого потока баров (демо-окно) |
+| T21: `terminal_nightly_research` | **I (ограничение сборки DSH)**: tool доступен, но возвращает `workflowEngine Harness недоступен` — shipped desktop/web профили не монтируют сервис workflowEngine; плагин деградирует gracefully, DSH не падает. Живой запуск workflow в этой сборке невозможен без установки bundle `@deepseek-ai/dsh-workflow` |
+
+Остаются: T11/T12/T22 — окно демо-сервера (фоновая приёмка перезапущена, ждёт 09:55 МСК);
+T26 dry-run — подтверждение proposal человеком + живой поток; T21 — нужен workflowEngine bundle.
