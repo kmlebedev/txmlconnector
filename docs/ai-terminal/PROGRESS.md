@@ -228,3 +228,14 @@
 - Тот же live-тест recorder подаёт R_NEWS-заголовки через настоящий протокол: `md.news` получает строку
   с `first_seen > тест-старт`, `published` из заголовка, непустыми `source`/`title`.
   `native/testserver` теперь отвечает на `RQ_GET_NEWS` пустым списком (recorder опрашивает новости).
+### Карточки на payload'ах реального бэкенда (T9/T24/T26, S для моделей, 2026-11-06)
+
+- Взяты реальные ответы офлайн-бэкенда (детерминированный seed): `get_quote`, `backtest_rules`
+  (artifact `backtest`), `POST /api/bots` + journal (`stage`, `closed_bar`).
+- `toolPresentationMeta`/`renderToolResult` дают `kind:"quote"` и `kind:"backtest"` с метриками,
+  equity-точками, warnings и корректным текстом с дисклеймером; `parseBotFromReply`/`botCardData`/
+  `journalLine`/`isSignificantEvent`/`botRenderText` корректно отрабатывают stage (significant) и
+  closed_bar (не значимо).
+- Регрессионный тест: `dsh-ai-terminal/test/real-payload-cards.test.mjs` + фикстура
+  `test/fixtures/real-cards.json` (обезличенные данные seed, без секретов).
+- Живой Harness (фактический рендер React-компонентов и слоты) остаётся **I** до перезапуска DSH.
