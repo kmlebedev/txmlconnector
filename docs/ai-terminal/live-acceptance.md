@@ -10,7 +10,7 @@
 |---|---|---|---|
 | T9 Step 5 (DSH-карточка `terminal_run_backtest`) | **I** | инструменты Harness + toolview проверены node-тестами и MCP-вызовами; живой DSH не запускался | перезапуск DSH с текущим плагином |
 | T10 Step 5 (Claude Code MCP) | **S** | `claude mcp add --transport http terminal http://127.0.0.1:<port>/mcp --header X-Terminal-Token: …` → `claude mcp list` = ✔ Connected; MCP `initialize`/`tools/list` = 32 инструмента; `tools/call get_quote` → `result.symbol=TQBR:SBER` | LLM-вызов инструмента из Claude Code (истекла OAuth-сессия Claude Code) — не блокер |
-| T11 Step 5 (10 мин записи → `md.book_events`) | **S (схема) / live в окне демо** | `EnsureSchema` создал `md.*` на живом ClickHouse, типы колонок совпадают с планом | фоновая проверка `tools/demo-live-check.sh` ждёт окно 09:50 МСК |
+| T11 Step 5 (10 мин записи → `md.book_events`) | **S (схема + E2E пайплайн локально) / live в окне демо** | `EnsureSchema` создал `md.*` на живом ClickHouse, типы колонок совпадают с планом | фоновая проверка `tools/demo-live-check.sh` ждёт окно 09:50 МСК |
 | T12 (news live, вне 8 шагов) | live в окне демо | `md.news` создана; `first_seen ≤ now`, `published` проверяются тем же инструментом | там же |
 | T13/T16 (vintage/оракул live, вне 8 шагов) | **S** | живые витрины: `AsOf` 107 точек (review focus 1), `Releases` 260, `News` 773, latest-only/publication paths; `Fit/Forecast` на реальных релизах/новостях (87 новостей, 276 релизов) | — |
 | T21 Step 5 (ночной workflow в DSH) | **I** | workflow-body, schedule-shape, budget, kill-switch проверены node-тестами на fake-сервисах | перезапуск DSH; `make terminal_smoke`/ручной запуск workflow |
@@ -82,3 +82,14 @@ worktree `.worktrees/ai-terminal/dsh-ai-terminal` (код PR #60). Для про
   `/api/agent/tools/{backtest_rules,batch_backtest}/invoke` работают на живом бэкенде; карточки
   `tool.call.toolview` — node-тесты; живой DSH-чат — I.
 - **T25 (установка навыка, S)**: см. выше; промпт в Claude Code — I (OAuth).
+### Карточки на payload'ах реального бэкенда (T9/T24/T26, S для моделей, 2026-11-06)
+
+- Взяты реальные ответы офлайн-бэкенда (детерминированный seed): `get_quote`, `backtest_rules`
+  (artifact `backtest`), `POST /api/bots` + journal (`stage`, `closed_bar`).
+- `toolPresentationMeta`/`renderToolResult` дают `kind:"quote"` и `kind:"backtest"` с метриками,
+  equity-точками, warnings и корректным текстом с дисклеймером; `parseBotFromReply`/`botCardData`/
+  `journalLine`/`isSignificantEvent`/`botRenderText` корректно отрабатывают stage (significant) и
+  closed_bar (не значимо).
+- Регрессионный тест: `dsh-ai-terminal/test/real-payload-cards.test.mjs` + фикстура
+  `test/fixtures/real-cards.json` (обезличенные данные seed, без секретов).
+- Живой Harness (фактический рендер React-компонентов и слоты) остаётся **I** до перезапуска DSH.

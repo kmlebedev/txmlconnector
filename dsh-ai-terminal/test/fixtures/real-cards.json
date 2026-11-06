@@ -1,0 +1,308 @@
+{
+ "quote": {
+  "result": {
+   "symbol": "TQBR:SBER",
+   "last": 293.22,
+   "bid": 293.22,
+   "ask": 293.26,
+   "changePct": 0.36,
+   "time": "2026-11-05T15:44:00Z",
+   "book": {
+    "bids": [
+     {
+      "price": 293.22,
+      "qty": 9947
+     },
+     {
+      "price": 293.16,
+      "qty": 285
+     },
+     {
+      "price": 293.15,
+      "qty": 121
+     },
+     {
+      "price": 293.14,
+      "qty": 1
+     },
+     {
+      "price": 293.13,
+      "qty": 1
+     },
+     {
+      "price": 293.12,
+      "qty": 1
+     },
+     {
+      "price": 293.11,
+      "qty": 1
+     },
+     {
+      "price": 293.09,
+      "qty": 3
+     },
+     {
+      "price": 293.08,
+      "qty": 207
+     },
+     {
+      "price": 293.07,
+      "qty": 15
+     }
+    ],
+    "asks": [
+     {
+      "price": 293.26,
+      "qty": 139
+     },
+     {
+      "price": 293.27,
+      "qty": 1277
+     },
+     {
+      "price": 293.3,
+      "qty": 207
+     },
+     {
+      "price": 293.34,
+      "qty": 207
+     },
+     {
+      "price": 293.35,
+      "qty": 207
+     },
+     {
+      "price": 293.38,
+      "qty": 1
+     },
+     {
+      "price": 293.41,
+      "qty": 2
+     },
+     {
+      "price": 293.42,
+      "qty": 13471
+     },
+     {
+      "price": 293.44,
+      "qty": 364
+     },
+     {
+      "price": 293.47,
+      "qty": 103
+     }
+    ]
+   }
+  }
+ },
+ "backtest": {
+  "result": {
+   "symbol": "TQBR:SBER",
+   "strategy": "rules",
+   "periodSec": 300,
+   "metrics": {
+    "initialCash": 1000000,
+    "finalEquity": 1009749.5021277553,
+    "totalReturnPct": 0.9749502127755383,
+    "benchmarkReturnPct": 0.3731215554718892,
+    "maxDrawdownPct": -0.601350343938678,
+    "sharpe": 23.299753697027377,
+    "winRatePct": 100,
+    "profitFactor": 1000,
+    "avgTradePct": 0.9751575677069062,
+    "exposurePct": 56.00000000000001,
+    "trades": 1,
+    "bars": 200,
+    "from": "2026-11-04T10:50:00Z",
+    "to": "2026-11-05T15:40:00Z"
+   },
+   "warnings": []
+  },
+  "artifact": {
+   "kind": "backtest",
+   "payload": {
+    "symbol": "TQBR:SBER",
+    "strategy": "rules",
+    "periodSec": 300,
+    "params": {
+     "specHash": 8663902490825920
+    },
+    "metrics": {
+     "initialCash": 1000000,
+     "finalEquity": 1009749.5021277553,
+     "totalReturnPct": 0.9749502127755383,
+     "benchmarkReturnPct": 0.3731215554718892,
+     "maxDrawdownPct": -0.601350343938678,
+     "sharpe": 23.299753697027377,
+     "winRatePct": 100,
+     "profitFactor": 1000,
+     "avgTradePct": 0.9751575677069062,
+     "exposurePct": 56.00000000000001,
+     "trades": 1,
+     "bars": 200,
+     "from": "2026-11-04T10:50:00Z",
+     "to": "2026-11-05T15:40:00Z"
+    },
+    "equity": [
+     {
+      "t": "2026-11-04T10:50:00Z",
+      "value": 1000000,
+      "benchmark": 1000000,
+      "drawdownPct": 0
+     },
+     {
+      "t": "2026-11-04T10:55:00Z",
+      "value": 1000000,
+      "benchmark": 999897.3059939069,
+      "drawdownPct": 0
+     },
+     {
+      "t": "2026-11-04T11:00:00Z",
+      "value": 1000000,
+      "benchmark": 999965.7686646357,
+      "drawdownPct": 0
+     },
+     {
+      "t": "2026-11-04T11:05:00Z",
+      "value": 1000000,
+      "benchmark": 999897.3059939069,
+      "drawdownPct": 0
+     },
+     {
+      "t": "2026-11-04T11:10:00Z",
+      "value": 1000000,
+      "benchmark": 999383.835963441,
+      "drawdownPct": 0
+     },
+     {
+      "t": "2026-11-04T11:15:00Z",
+      "value": 1000000,
+      "benchmark": 999520.7613048985,
+      "drawdownPct": 0
+     },
+     {
+      "t": "2026-11-04T11:20:00Z",
+      "value": 1000000,
+      "benchmark": 999178.4479512546,
+      "drawdownPct": 0
+     },
+     {
+      "t": "2026-11-04T11:25:00Z",
+      "value": 1000000,
+      "benchmark": 999863.0746585424,
+      "drawdownPct": 0
+     },
+     {
+      "t": "2026-11-04T11:30:00Z",
+      "value": 1000000,
+      "benchmark": 999760.3806524493,
+      "drawdownPct": 0
+     },
+     {
+      "t": "2026-11-04T11:35:00Z",
+      "value": 1000000,
+      "benchmark": 999760.3806524493,
+      "drawdownPct": 0
+     },
+     {
+      "t": "2026-11-04T11:40:00Z",
+      "value": 1000000,
+      "benchmark": 1000205.3880121864,
+      "drawdownPct": 0
+     },
+     {
+      "t": "2026-11-04T11:45:00Z",
+      "value": 1000000,
+      "benchmark": 1000616.1640365592,
+      "drawdownPct": 0
+     }
+    ],
+    "trades": [
+     {
+      "entryTime": "2026-11-05T04:05:00Z",
+      "exitTime": "2026-11-05T13:25:00Z",
+      "side": "long",
+      "entryPrice": 290.069004,
+      "exitPrice": 293.19067800000005,
+      "qty": 3445,
+      "pnl": 9749.5021277553,
+      "pnlPct": 0.9751575677069062,
+      "barsHeld": 112,
+      "reason": "signal"
+     }
+    ],
+    "warnings": []
+   }
+  }
+ },
+ "botCreate": {
+  "bot": {
+   "id": "bot_0001",
+   "symbol": "TQBR:SBER",
+   "periodSec": 300,
+   "spec": {
+    "indicators": {
+     "rsi": {
+      "kind": "rsi_wilder",
+      "period": 14,
+      "source": "close",
+      "scale": 0.01
+     }
+    },
+    "entry": [
+     {
+      "left": "rsi",
+      "op": "<",
+      "right": "0.2"
+     }
+    ],
+    "exit": [
+     {
+      "left": "rsi",
+      "op": ">",
+      "right": "0.8"
+     }
+    ],
+    "side": "long"
+   },
+   "qty": 1,
+   "stage": "check",
+   "fromBacktest": "rules:test",
+   "createdAt": "2026-11-06T03:11:28.92539Z"
+  }
+ },
+ "journal": {
+  "entries": [
+   {
+    "seq": 1,
+    "time": "2026-11-06T03:11:28.92539Z",
+    "barTime": "0001-01-01T00:00:00Z",
+    "kind": "stage",
+    "signal": "none",
+    "message": "бот создан из бэктеста rules:001ec7c5fe5594c0: TQBR:SBER 5м, 1 шт",
+    "data": {
+     "fromBacktest": "rules:test",
+     "periodSec": 300,
+     "qty": 1,
+     "symbol": "TQBR:SBER"
+    }
+   },
+   {
+    "seq": 2,
+    "time": "2026-11-06T03:11:28.948803Z",
+    "barTime": "2026-11-05T15:40:00Z",
+    "kind": "closed_bar",
+    "close": 293.22,
+    "indicators": {
+     "rsi": 0.43780932283737756
+    },
+    "signal": "none",
+    "message": "close=293.22 rsi=0.4378 signal=none",
+    "data": {
+     "bars": 300,
+     "check": true
+    }
+   }
+  ]
+ }
+}
