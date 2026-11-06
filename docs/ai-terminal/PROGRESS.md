@@ -263,3 +263,48 @@ Claude Code OAuth в этой сессии истёк, поэтому промп
   символ и цену `293,22`. Это уровень настоящего React-компонента без браузера/Harness.
 - Остаётся **I**: живой Harness-слот/чат и реакция на реальный вызов инструмента моделью — после
   перезапуска DSH.
+## Инцидент 2026-11-06: DSH предлагал backup/disable после установки плагина
+
+**Симптом.** После перезапуска DSH с новым плагином (main, PR #62) Desktop показал фатальную ошибку
+старта и предложил сделать backup патча профиля и выключить сторонние плагины. Crash-отчёты
+`~/Library/Logs/DeepSeek Harness/crash-2026-11-06T04-02-*.log` (source `web-boot`):
+
+```
+Error: web boot: 1 entry did not activate
+@local/dsh-ai-terminal: loading
+```
+
+**Причина (подтверждена crash-отчётом и воспроизведением).** `dsh-ai-terminal/index.js` объявлял в
+`inject` обязательные сервисы `workflowEngine`, `schedule`, `sessionController`, `storageDomain`,
+`agents`, но shipped desktop/web профили DSH **не монтируют** `workflowEngine` (сервис
+`@deepseek-ai/dsh-workflow`; в конфигурации web-профиля его нет). Cordis-строка плагина навсегда
+остаётся в состоянии `loading`; Desktop считает неактивированную запись фатальной ошибкой web-boot и
+предлагает восстановление (деактивировать сторонние плагины). Это не ошибка кода терминала в рантайме
+и не сбой pnpm/профиля — виновата избыточная обязательная инъекция.
+
+Дополнительно найдены и исправлены два латентных дефекта:
+
+- `workflows/nightly-research.js` читался из `repoDir/workflows`, но файл лежит в пакете плагина
+  (`dsh-ai-terminal/workflows/nightly-research.js`) → в живом DSH логировался ENOENT, workflow не
+  запускался;
+- запись `ai-terminal-mcp` в `cordis.patch.yml` вычисляла `process.env.DSH_AI_TERMINAL_MCP_*` на этапе
+  разбора конфигурации, до `apply()`, где эти env выставлялись → `ValidationError: invalid config`
+  (не фатально, но MCP-клиент в DSH не поднимался). Строка удалена; backend по-прежнему отдаёт `/mcp`
+  для внешних клиентов (Claude Code / Kimi Code — проверено).
+
+**Исправление (ветка `plan/ai-terminal-live`).**
+
+- `inject = ['webServer', 'tools']`; остальные сервисы (`llm`, `skills`, `subprocess`,
+  `workflowEngine`, `schedule`, `sessionController`, `agents`) берутся через `ctx.get(...)` и
+  деградируют явно: ночной workflow/бот-релей сообщают «сервис недоступен», не блокируя старт DSH;
+- скрипт workflow читается из `pluginDir()/workflows/nightly-research.js`;
+- MCP-client строка удалена из patch;
+- регрессионный тест `dsh-ai-terminal/test/optional-services.test.mjs`: плагин активируется на профиле
+  без optional-сервисов и с ними; `node --test` — 51/51.
+
+**Восстановление профиля.** Профиль `~/.dsh/profiles/desktop` после аварии был в safe-режиме
+(bundles = base+web-app, патч вычищен). Восстановлены: полный список 12 bundles, patch-слой
+(модели, mcp-jetbrains, worktree, plugin-market), зависимость `@local/dsh-ai-terminal` →
+`link:/Users/whitefox/GolandProjects/txmlconnector/dsh-ai-terminal`, lockfile приведён `pnpm install`;
+бэкапы рядом (`*.bak-*`, `*.recovered-*`). Проверено воспроизведением desktop-подобного профиля:
+плагин активируется, backend стартует, workflow-скрипт найден, fatal-ошибки нет.

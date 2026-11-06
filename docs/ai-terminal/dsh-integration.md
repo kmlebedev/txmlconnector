@@ -586,3 +586,15 @@ dsh-client-ui-conversation/lib/client.js:15340-15375.
 - T26: `exec.agent.id` как sessionId подтверждён кодом (S: dsh-agent-loop/lib/index.js:1275-1281,
   dsh-agent/lib/index.js:726), но живой вызов `terminal_bot_*` из агента с доставкой inject не
   прогонялся (I); fallback `sessionController.prompt` — тот же статус.
+
+## 9. Живой DSH: optional-сервисы и MCP-клиент (инцидент 2026-11-06)
+
+Плагин объявляет обязательными только `webServer` и `tools`; `llm`, `skills`, `subprocess`,
+`workflowEngine`, `schedule`, `sessionController`, `agents` берутся через `ctx.get(...)`. Причина:
+shipped desktop/web профили DSH не монтируют `workflowEngine`; обязательная инъекция оставляла
+Cordis-строку в `loading`, и Desktop аварийно завершал web-boot («1 entry did not activate»).
+Автоматическая MCP-client строка (`ai-terminal-mcp`) удалена из `cordis.patch.yml`: её `!!js`-конфиг
+вычислялся до `apply()`, env ещё не были заданы (`ValidationError: invalid config`). Backend плагина
+по-прежнему отдаёт `/mcp` для внешних MCP-клиентов (Claude Code/Kimi Code) — это проверено отдельно.
+Ночной workflow в текущей сборке DSH недоступен (`workflowEngine Harness недоступен`) — нужен bundle
+`@deepseek-ai/dsh-workflow`; плагин при этом активируется и не блокирует старт.
