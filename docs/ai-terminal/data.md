@@ -373,3 +373,9 @@ PROGRESS.md.
 `snapshot`/`level` для `TQBR:SBER`, `Decimal`-цены, сделки с миллисекундами. Запись с реального
 демо-сервера (T11 Step 5) остаётся за фоновой приёмкой в окне. Для этого сценария `native/testserver`
 научился отвечать на `RQ_GET_NEWS` пустым списком (recorder опрашивает новости в Run).
+**T12 (news → `md.news`) проверен end-to-end локально (S, 2026-11-06):** тот же тест
+`TestLiveRecorderWritesBookAndTradesToClickHouse` подаёт в поток реальные R_NEWS-заголовки
+(`news-inject.hex`, обезличенные `TESTNEWSSOURCE`/`Test news title`), recorder пишет строку в
+`md.news` с `FirstSeen` от собственных часов (строго после старта теста), `Published` из заголовка,
+source/title непустые. Живой news-поток с демо-сервера (HTTP-проверка `md.news.first_seen`) остаётся
+за фоновой приёмкой в окне.
