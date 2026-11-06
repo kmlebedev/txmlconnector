@@ -67,3 +67,18 @@ worktree `.worktrees/ai-terminal/dsh-ai-terminal` (код PR #60). Для про
    - T26: сценарий «бэктест → dry-run → бумага → kill-switch», карточки ботов в чате.
 
 Скриншоты живых проверок не создавались/не фальсифицировались; статусы I в этой таблице — честные.
+### Дополнительные проверки уровня host/backend (2026-11-06, до окна демо)
+
+- **T21 (workflow body, S)**: тело `workflows/nightly-research.js` исполнено в Node с заглушками движка
+  (`agent/phase/parallel/pipeline/log`) — 7 фаз, 6 агентских задач, JSON-сводка; промпты вызывают
+  `terminal_list_instruments/get_history/vol_forecast/walk_forward/detect_execution_algos/
+  list_skill_patterns/propose_automation` и не содержат торговых инструментов. Тест:
+  `dsh-ai-terminal/test/nightly-workflow.test.mjs` (2/2 pass). Живой `ctx.workflowEngine` — I.
+- **T26 (bot SSE + токен, S)**: на реальном offline-бэкенде открыт SSE `/api/events` с `X-Terminal-Token`,
+  создан бот из rules.Spec, выполнен `check` — в потоке получены кадры `type:"bot"` с
+  `botId`/`entry` (stage + closed_bar, `signal:"none"`). Маппинг/delivery реле в агента — node-тесты;
+  живой клиент DSH (`turnTail`, kill-switch) — I.
+- **T9/T24 (tool path, S; UI — I)**: MCP `tools/call get_quote` и REST
+  `/api/agent/tools/{backtest_rules,batch_backtest}/invoke` работают на живом бэкенде; карточки
+  `tool.call.toolview` — node-тесты; живой DSH-чат — I.
+- **T25 (установка навыка, S)**: см. выше; промпт в Claude Code — I (OAuth).
