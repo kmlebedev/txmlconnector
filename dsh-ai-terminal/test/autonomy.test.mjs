@@ -192,10 +192,11 @@ test('nightly tool is registered and runs the workflow', async () => {
   const ctx = fakeCtx();
   const run = fakeRun();
   const registered = [];
+  const started = [];
   const autonomy = makeAutonomy({
     ctx,
     cfg: { enabled: true },
-    workflowEngine: { start: () => run },
+    workflowEngine: { start: (request) => { started.push(request); return run; } },
   });
   const dispose = autonomy.registerTool({
     register(definition) { registered.push(definition); return () => {}; },
@@ -204,9 +205,12 @@ test('nightly tool is registered and runs the workflow', async () => {
   const definition = registered[0];
   assert.equal(definition.name, NIGHTLY_TOOL_NAME);
   assert.equal(definition.parameters.type, 'object');
-  const result = definition.execute({}, {});
+  const parent = { id: 'agent-1', session: { id: 'session-1' } };
+  const result = definition.execute({}, { agent: parent });
   assert.ok(result && typeof result.then === 'function', 'the tool execute must be async');
   await tick();
+  assert.equal(started.length, 1);
+  assert.equal(started[0].parent, parent, 'the calling agent must be the workflow parent');
   assert.equal(run.cancelReason, null);
   run.cancel('test-finish');
   const value = await result;
