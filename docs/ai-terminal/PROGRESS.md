@@ -308,3 +308,66 @@ Error: web boot: 1 entry did not activate
 `link:/Users/whitefox/GolandProjects/txmlconnector/dsh-ai-terminal`, lockfile приведён `pnpm install`;
 бэкапы рядом (`*.bak-*`, `*.recovered-*`). Проверено воспроизведением desktop-подобного профиля:
 плагин активируется, backend стартует, workflow-скрипт найден, fatal-ошибки нет.
+### Второй инцидент (2026-11-06 09:20–09:22): обязательный `tools` снова заблокировал web-boot
+
+После первого фикса (`inject = ['webServer','tools']`) DSH Desktop упал повторно с тем же
+`web boot: 1 entry did not activate @local/dsh-ai-terminal: loading` (crash-отчёты
+`crash-2026-11-06T04-20-33*` и `04-22-35*`). Симптом показал, что дело не только в
+`workflowEngine`: сервис `tools` в desktop-композиции не гарантированно виден на уровне
+app-строки плагина (он может быть привязан к scope агентской сессии), поэтому **любой** лишний
+обязательный `inject` оставляет запись в `loading`, а Desktop считает это фатальным.
+
+**Окончательный фикс (ветка `fix/plugin-boot-inject`).**
+
+- `inject` строки сведён к одному сервису — `webServer` (как в ранее рабочем плагине PR #60);
+- реестр инструментов монтируется **дочерним** `ctx.inject(['tools'], mountTools)`: если сервиса
+  нет, дочерний fiber ждёт, но строка плагина активируется и DSH стартует; при наличии —
+  регистрируются `terminal_*`-инструменты, `terminal_nightly_research` и hook бот-релея;
+- dispose дочернего контекста закрывает tool bridge и снимает регистрации;
+- тесты: `node --test` — 52/52 (включая `tools are mounted through a child ctx.inject`).
+
+Профиль `~/.dsh/profiles/desktop` восстановлен повторно (12 bundles, patch-слой, link на main,
+lockfile приведён `pnpm install`); бэкапы — `*.recovered2-*`. Проверено воспроизведением
+desktop-подобной композиции: плагин активируется, backend стартует, fatal-ошибки нет.
+### Третий инцидент (2026-11-06 10:01): client-половина плагина не активируется
+
+После фикса host-inject (`inject = ['webServer']`) DSH Desktop снова упал:
+`web boot: 1 entry did not activate @local/dsh-ai-terminal: loading` (crash 05:01:36Z).
+Bundle пользователя показал, что host-половина уже минимальная (inject = webServer),
+а в состоянии `loading` остаётся **client-модуль** плагина. Воспроизведение в реальном
+Cordis с полным набором сервисов (slots/locale/sidebarRightTabs/uiConversation) даёт
+`active` для client.js, поэтому точная причина в boot-загрузчике Desktop пока не доказана;
+под подозрением — регистрация client-модуля в web-boot Desktop (bundle URL/prefetch) и
+доступ к опциональным сервисам `sidebarRightTabs`/`uiConversation` (в client.js они уже
+переведены на дочерний `ctx.inject`/`ctx.get`, 54/54 node tests).
+
+**Временная мера:** `dsh.client` убран из `dsh-ai-terminal/package.json` — client-половина
+больше не участвует в boot Desktop. Host-половина (инструменты, backend, workflow) остаётся;
+панель/карточки UI временно не загружаются. Для аварийного отключения всего плагина добавлен
+`tools/dsh-plugin-disable.sh` (с бэкапом профиля). После стабилизации boot нужно вернуть
+`dsh.client` и проверить загрузку client-модуля отдельно.
+## Состояние плана и PR на 2026-11-06 10:30 MSK
+
+| PR | Состояние | Содержимое |
+|---|---|---|
+| #62 | **merged** (02:42Z) | фазы A–G, 26/26 задач плана |
+| #63 | **merged** (04:21Z) | live-проверки vintage/оракула, recorder E2E, карточные тесты, `demo-live-check.sh` |
+| #64 | **open** (`fix/plugin-boot-inject`) | стабилизация boot: host `inject = [webServer]`, tools через дочерний `ctx.inject`, client-половина временно отключена (`dsh.client` убран), `dsh-crash-bundle.sh`, `dsh-plugin-disable.sh`, `dsh-plugin-enable.sh`, `docs/ai-terminal/dsh-recovery.md` |
+
+**План:** 109/116 шагов отмечены `[x]`. Осталось **7 live/manual** шагов: T9, T11, T21, T22, T24,
+T25, T26 (T10 закрыт).
+
+- **T11/T22** — окно демо-сервера; фоновая приёмка `tools/demo-live-check.sh` перезапущена и ждёт 09:50 МСК.
+- **T9/T24/T26** — нужен client-UI плагина; сейчас client-половина отключена для стабильного boot,
+  host-часть с инструментами будет возвращена через `tools/dsh-plugin-enable.sh` после merge #64.
+- **T21** — в shipped desktop/web DSH нет сервиса `workflowEngine` (`@deepseek-ai/dsh-workflow`),
+  живой workflow невозможен без установки этого bundle; плагин деградирует graceful.
+- **T25** — установка навыка + промпт проверены через Kimi Code (S-эквивалент); Claude Code-промпт
+  остаётся I из-за истёкшей OAuth-сессии.
+
+**Текущий профиль Desktop:** safe-режим (`base + web-app`), плагин в bundles отсутствует — host-часть
+плагина не активна. Чтобы вернуть инструменты: merge #64 → `bash tools/dsh-plugin-enable.sh` →
+restart DSH. Client-UI возвращать отдельно, после изоляции причины boot-зависания.
+
+**Инструкция восстановления через CLI:** `docs/ai-terminal/dsh-recovery.md` (проверенные команды
+`/usr/local/bin/dsh` + аварийные скрипты).
