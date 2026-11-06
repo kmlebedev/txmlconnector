@@ -460,3 +460,21 @@ T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAut
   такую же строку в `~/.dsh/profiles/desktop/cordis.patch.yml` (с бэкапом) и перезапустить Desktop.
 - Это изменение внешнего конфига DSH — нужно явное согласие пользователя; fallback — удалить строку
   и перезапустить. После включения можно проверить `terminal_nightly_research` живьём (T21 Step 5).
+### UI-панель плагина подтверждена, workflowEngine-патч применён (2026-11-06 13:08 MSK)
+
+- После перезапуска Desktop с `dsh.client = {"platform":"web"}` плагин виден в интерфейсе:
+  в левой панели DSH присутствует пункт **AI terminal**; скриншот —
+  [screenshot-dsh-panel.png](screenshot-dsh-panel.png) (root DSH-окна, без чужих окон).
+- В текущем чате выполнены host-вызовы T9 (`terminal_run_backtest`), T24
+  (`terminal_batch_backtest` GAZP/SBER/LKOH) и T26 (`bot_0001` create/check/status/proposal).
+  Карточки в транскрипте рендерятся после завершения хода; их скриншоты — следующий шаг.
+- Для T21 в `~/.dsh/profiles/desktop/cordis.patch.yml` добавлена (с бэкапом
+  `cordis.patch.yml.bak-20261106-130840`) строка:
+  ```yaml
+  - insert:
+      - id: workflow
+        name: '@deepseek-ai/dsh-workflow'
+  ```
+  Патч проверен `--dump-config` на копии профиля: YAML валиден, строка `workflow` присутствует,
+  ошибок нет. Нужен перезапуск Desktop, после чего `terminal_nightly_research` должен увидеть
+  `workflowEngine`. Fallback: восстановить бэкап или удалить последний `insert`-блок.
