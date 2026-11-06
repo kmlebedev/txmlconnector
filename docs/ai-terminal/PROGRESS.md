@@ -504,3 +504,17 @@ T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAut
 `parent: exec.agent`; тест `nightly tool ...` теперь проверяет, что parent доходит до engine.start.
 `node --test` 54/54, `make verify` exit 0. Для применения нужен перезапуск Desktop (host-JS плагина
 загружается при старте).
+### T21: workflow выполняется, но упёрся в tokenBudget=200k (2026-11-06 13:30 MSK)
+
+После parent-фикса workflow реально стартовал (agentsStarted=2), но был отменён плагином:
+`stopReason=cancelled, reason=token-budget`, `usage.total=206077 > 200000`. Это штатный лимит из
+плана T21, но для живого ручного прогона его не хватает (7 фаз × child-агенты).
+
+- В `~/.dsh/profiles/desktop/cordis.patch.yml` добавлен локальный override конфига плагина:
+  `autonomy.tokenBudget: 2000000` (mode/port/autoStart сохранены); проверено `--dump-config` на
+  копии профиля с реальным bundle — строка `ai-terminal` принимает конфиг без предупреждений.
+- В коде плагина default остаётся 200000 (как в плане); повышенный бюджет — только локальная настройка
+  для приёмки. Для применения нужен перезапуск Desktop, затем повторный `terminal_nightly_research`.
+- Карточки tool-call (T9/T24/T26) в текущем PTC-режиме сессии не рендерятся отдельными client-
+  карточками (PTC сворачивает вызовы в «Running commands»); для скриншотов нужен Standard-режим
+  сессии/новый чат в Standard, либо оставить UI-скриншоты как I.
