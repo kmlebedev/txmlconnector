@@ -1,8 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,3 +133,164 @@ func TestGatewayFormatPrice(t *testing.T) {
 }
 
 func timeZero() (t time.Time) { return }
+
+// periodSpyFeed records the candle period and count the gateway asks for.
+type periodSpyFeed struct {
+	*fakeFeed
+	period, count int
+}
+
+func (p *periodSpyFeed) Candles(ctx context.Context, symbol string, periodSec, count int) (feed.History, error) {
+	p.period, p.count = periodSec, count
+	return p.fakeFeed.Candles(ctx, symbol, periodSec, count)
+}
+
+func gwGet(t *testing.T, ts *httptest.Server, path string, out any) int {
+	t.Helper()
+	status, body := do(t, ts, http.MethodGet, path, nil)
+	if out != nil && status == http.StatusOK {
+		if err := json.Unmarshal(body, out); err != nil {
+			t.Fatalf("decode %s: %v: %s", path, err, body)
+		}
+	}
+	return status
+}
+
+func TestGatewayQuotesBatchOmitsUnknown(t *testing.T) {
+	deps, _, _, _ := defaultDeps()
+	_, ts := newTestServer(t, deps, Config{})
+	var got struct {
+		Quotes map[string]struct {
+			Last, Bid, Ask, PrevClose, ChangePct string
+			VolumeLots                           int64
+			Time                                 int64
+			Source                               string
+		} `json:"quotes"`
+	}
+	if st := gwGet(t, ts, "/api/gw/v1/quotes?symbols=TQBR:SBER,TQBR:NOPE,TQBR:GAZP", &got); st != http.StatusOK {
+		t.Fatalf("status %d", st)
+	}
+	if len(got.Quotes) != 2 {
+		t.Fatalf("quotes: %+v", got.Quotes)
+	}
+	q := got.Quotes["TQBR:SBER"]
+	if q.Last != "101.00" || q.Bid != "100.90" || q.Ask != "101.10" || q.PrevClose != "100.00" || q.VolumeLots != 12345 || q.Source != "seed" || q.Time == 0 {
+		t.Fatalf("SBER: %+v", q)
+	}
+	if q.ChangePct != "1.00" {
+		t.Fatalf("changePct: %q", q.ChangePct)
+	}
+	if st := gwGet(t, ts, "/api/gw/v1/quotes", nil); st != http.StatusBadRequest {
+		t.Fatalf("missing symbols: %d", st)
+	}
+	var syms []string
+	for i := 0; i < 201; i++ {
+		syms = append(syms, "TQBR:S"+strconv.Itoa(i))
+	}
+	if st := gwGet(t, ts, "/api/gw/v1/quotes?symbols="+strings.Join(syms, ","), nil); st != http.StatusBadRequest {
+		t.Fatalf("201 symbols: %d", st)
+	}
+}
+
+func TestGatewayCandlesIntervalMapping(t *testing.T) {
+	deps, f, _, _ := defaultDeps()
+	spy := &periodSpyFeed{fakeFeed: f}
+	deps.Feed = spy
+	_, ts := newTestServer(t, deps, Config{})
+	var got struct {
+		Symbol, Interval, Source string
+		Warnings                 []string
+		Bars                     []struct {
+			OpenTime, CloseTime    int64
+			Open, High, Low, Close string
+			VolumeLots             int64
+		} `json:"bars"`
+	}
+	if st := gwGet(t, ts, "/api/gw/v1/candles?symbol=TQBR:SBER&interval=1h&limit=2", &got); st != http.StatusOK {
+		t.Fatalf("status %d", st)
+	}
+	if spy.period != 3600 || spy.count != 2 {
+		t.Fatalf("feed called with %d/%d", spy.period, spy.count)
+	}
+	if got.Symbol != "TQBR:SBER" || got.Interval != "1h" || got.Source != "seed" || got.Warnings == nil || len(got.Bars) != 2 {
+		t.Fatalf("resp: %+v", got)
+	}
+	b := got.Bars[0]
+	if b.CloseTime-b.OpenTime != 3_599_999 || b.Open != "100.50" || b.VolumeLots != 20 {
+		t.Fatalf("bar: %+v", b)
+	}
+	if st := gwGet(t, ts, "/api/gw/v1/candles?symbol=TQBR:SBER&interval=2h", nil); st != http.StatusBadRequest {
+		t.Fatalf("2h: %d", st)
+	}
+	if st := gwGet(t, ts, "/api/gw/v1/candles?symbol=TQBR:NOPE&interval=1m", nil); st != http.StatusNotFound {
+		t.Fatalf("unknown symbol: %d", st)
+	}
+}
+
+func TestGatewayOrderBookLots(t *testing.T) {
+	deps, f, _, _ := defaultDeps()
+	f.books["TQBR:SBER"] = feed.OrderBook{
+		Symbol: "TQBR:SBER", Time: time.Date(2026, 11, 5, 16, 24, 0, 0, time.UTC), Source: "live",
+		Bids: []feed.Level{{Price: 306.25, Qty: 10}},
+		Asks: []feed.Level{{Price: 306.3, Qty: 7}},
+	}
+	_, ts := newTestServer(t, deps, Config{})
+	status, body := do(t, ts, http.MethodGet, "/api/gw/v1/orderbook?symbol=TQBR:SBER", nil)
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	s := string(body)
+	for _, want := range []string{`"price":"306.25"`, `"lots":10`, `"price":"306.30"`, `"lots":7`, `"source":"live"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %s in %s", want, s)
+		}
+	}
+	if st := gwGet(t, ts, "/api/gw/v1/orderbook?symbol=TQBR:NOPE", nil); st != http.StatusNotFound {
+		t.Fatalf("unknown: %d", st)
+	}
+}
+
+func TestGatewayTradesSideUnknown(t *testing.T) {
+	deps, f, _, _ := defaultDeps()
+	f.tapes["TQBR:SBER"] = append(f.tapes["TQBR:SBER"], feed.Trade{Time: time.Date(2026, 11, 5, 16, 25, 0, 0, time.UTC), Price: 101.5, Qty: 3})
+	_, ts := newTestServer(t, deps, Config{})
+	var got struct {
+		Symbol string
+		Trades []struct {
+			ID    string
+			Time  int64
+			Price string
+			Lots  int64
+			Side  string
+		}
+	}
+	if st := gwGet(t, ts, "/api/gw/v1/trades?symbol=TQBR:SBER", &got); st != http.StatusOK {
+		t.Fatalf("status %d", st)
+	}
+	if len(got.Trades) != 3 {
+		t.Fatalf("trades: %+v", got.Trades)
+	}
+	if got.Trades[0].Side != "buy" || got.Trades[1].Side != "sell" || got.Trades[2].Side != "unknown" {
+		t.Fatalf("sides: %+v", got.Trades)
+	}
+	if got.Trades[2].Price != "101.50" || got.Trades[2].Lots != 3 || got.Trades[0].Time >= got.Trades[2].Time {
+		t.Fatalf("trade: %+v", got.Trades[2])
+	}
+	if got.Trades[2].ID != "2@"+strconv.FormatInt(got.Trades[2].Time, 10) {
+		t.Fatalf("id: %q", got.Trades[2].ID)
+	}
+}
+
+func TestGatewaySeedSource(t *testing.T) {
+	deps, _, _, _ := defaultDeps() // offline fake
+	_, ts := newTestServer(t, deps, Config{})
+	var q struct {
+		Quotes map[string]struct{ Source string } `json:"quotes"`
+	}
+	gwGet(t, ts, "/api/gw/v1/quotes?symbols=TQBR:SBER", &q)
+	var c struct{ Source string }
+	gwGet(t, ts, "/api/gw/v1/candles?symbol=TQBR:SBER&interval=1m", &c)
+	if q.Quotes["TQBR:SBER"].Source != "seed" || c.Source != "seed" {
+		t.Fatalf("quote %+v candles %+v", q, c)
+	}
+}

@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
@@ -27,6 +28,10 @@ var gatewayIntervals = map[int]string{60: "1m", 300: "5m", 900: "15m", 3600: "1h
 func (s *Server) registerGateway(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/gw/v1/info", s.handleGatewayInfo)
 	mux.HandleFunc("GET /api/gw/v1/instruments", s.handleGatewayInstruments)
+	mux.HandleFunc("GET /api/gw/v1/quotes", s.handleGatewayQuotes)
+	mux.HandleFunc("GET /api/gw/v1/candles", s.handleGatewayCandles)
+	mux.HandleFunc("GET /api/gw/v1/orderbook", s.handleGatewayOrderBook)
+	mux.HandleFunc("GET /api/gw/v1/trades", s.handleGatewayTrades)
 }
 
 // formatPrice renders v with exactly decimals fractional digits; a negative
@@ -118,6 +123,233 @@ func (s *Server) handleGatewayInstruments(w http.ResponseWriter, r *http.Request
 			Name: in.Name, ShortName: in.ShortName, Currency: in.Currency,
 			Decimals: in.Decimals, LotSize: in.LotSize,
 			MinStep: formatPrice(in.MinStep, in.Decimals),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// gatewayMaxQuoteSymbols bounds one /quotes batch.
+const gatewayMaxQuoteSymbols = 200
+
+// gatewaySource is the data-origin label implied by the feed mode.
+func (s *Server) gatewaySource() string {
+	if s.feedStatus().Mode == feed.ModeOffline {
+		return "seed"
+	}
+	return "live"
+}
+
+type gwQuote struct {
+	Last       string `json:"last"`
+	Bid        string `json:"bid"`
+	Ask        string `json:"ask"`
+	PrevClose  string `json:"prevClose"`
+	ChangePct  string `json:"changePct"`
+	VolumeLots int64  `json:"volumeLots"`
+	Time       int64  `json:"time"`
+	Source     string `json:"source"`
+}
+
+// handleGatewayQuotes serves GET /api/gw/v1/quotes?symbols=A,B. Unknown
+// symbols are omitted from the result.
+func (s *Server) handleGatewayQuotes(w http.ResponseWriter, r *http.Request) {
+	raw := strings.TrimSpace(r.URL.Query().Get("symbols"))
+	if raw == "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "не указаны инструменты (symbols)")
+		return
+	}
+	symbols := strings.Split(raw, ",")
+	if len(symbols) > gatewayMaxQuoteSymbols {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "слишком много инструментов: максимум "+strconv.Itoa(gatewayMaxQuoteSymbols))
+		return
+	}
+	source := s.gatewaySource()
+	out := struct {
+		Quotes map[string]gwQuote `json:"quotes"`
+	}{Quotes: make(map[string]gwQuote, len(symbols))}
+	for _, sym := range symbols {
+		sym = strings.TrimSpace(sym)
+		in, ok := s.deps.Feed.Instrument(sym)
+		if !ok {
+			continue
+		}
+		q, ok := s.deps.Feed.Quote(sym)
+		if !ok {
+			continue
+		}
+		out.Quotes[sym] = gwQuote{
+			Last: formatPrice(q.Last, in.Decimals), Bid: formatPrice(q.Bid, in.Decimals),
+			Ask: formatPrice(q.Ask, in.Decimals), PrevClose: formatPrice(in.PrevClose, in.Decimals),
+			ChangePct: strconv.FormatFloat(q.ChangePct, 'f', 2, 64), VolumeLots: q.Volume,
+			Time: epochMS(q.Time), Source: source,
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type gwBar struct {
+	OpenTime   int64  `json:"openTime"`
+	CloseTime  int64  `json:"closeTime"`
+	Open       string `json:"open"`
+	High       string `json:"high"`
+	Low        string `json:"low"`
+	Close      string `json:"close"`
+	VolumeLots int64  `json:"volumeLots"`
+}
+
+// handleGatewayCandles serves GET /api/gw/v1/candles.
+func (s *Server) handleGatewayCandles(w http.ResponseWriter, r *http.Request) {
+	symbol := strings.TrimSpace(r.URL.Query().Get("symbol"))
+	if symbol == "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "не указан инструмент (symbol)")
+		return
+	}
+	name := r.URL.Query().Get("interval")
+	periodSec := 0
+	for p, n := range gatewayIntervals {
+		if n == name {
+			periodSec = p
+		}
+	}
+	if periodSec == 0 {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "неподдерживаемый интервал свечей (допустимы 1m, 5m, 15m, 1h, 1d)")
+		return
+	}
+	limit, ok := intParam(r, "limit", 500)
+	if !ok {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "некорректное количество свечей")
+		return
+	}
+	in, found := s.deps.Feed.Instrument(symbol)
+	if !found {
+		writeError(w, http.StatusNotFound, codeNotFound, "инструмент не найден: "+symbol)
+		return
+	}
+	ctx, cancel := requestContext(r, candlesRequestTimeout)
+	defer cancel()
+	h, err := s.deps.Feed.Candles(ctx, symbol, periodSec, limit)
+	if err != nil {
+		s.mapError(w, err)
+		return
+	}
+	source := h.Source
+	if source == "" {
+		source = s.gatewaySource()
+	}
+	warnings := h.Warnings
+	if warnings == nil {
+		warnings = []string{}
+	}
+	out := struct {
+		Symbol   string   `json:"symbol"`
+		Interval string   `json:"interval"`
+		Source   string   `json:"source"`
+		Warnings []string `json:"warnings"`
+		Bars     []gwBar  `json:"bars"`
+	}{Symbol: symbol, Interval: name, Source: source, Warnings: warnings, Bars: make([]gwBar, 0, len(h.Bars))}
+	for _, b := range h.Bars {
+		open := epochMS(b.Time)
+		out.Bars = append(out.Bars, gwBar{
+			OpenTime: open, CloseTime: open + int64(periodSec)*1000 - 1,
+			Open: formatPrice(b.Open, in.Decimals), High: formatPrice(b.High, in.Decimals),
+			Low: formatPrice(b.Low, in.Decimals), Close: formatPrice(b.Close, in.Decimals),
+			VolumeLots: b.Volume,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type gwLevel struct {
+	Price string `json:"price"`
+	Lots  int64  `json:"lots"`
+}
+
+func gatewayLevels(levels []feed.Level, decimals int) []gwLevel {
+	out := make([]gwLevel, 0, len(levels))
+	for _, l := range levels {
+		out = append(out, gwLevel{Price: formatPrice(l.Price, decimals), Lots: int64(l.Qty)})
+	}
+	return out
+}
+
+// handleGatewayOrderBook serves GET /api/gw/v1/orderbook.
+func (s *Server) handleGatewayOrderBook(w http.ResponseWriter, r *http.Request) {
+	symbol := strings.TrimSpace(r.URL.Query().Get("symbol"))
+	if symbol == "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "не указан инструмент (symbol)")
+		return
+	}
+	in, found := s.deps.Feed.Instrument(symbol)
+	if !found {
+		writeError(w, http.StatusNotFound, codeNotFound, "инструмент не найден: "+symbol)
+		return
+	}
+	ctx, cancel := requestContext(r, candlesRequestTimeout)
+	defer cancel()
+	book, err := s.deps.Feed.OrderBook(ctx, symbol)
+	if err != nil {
+		s.mapError(w, err)
+		return
+	}
+	source := book.Source
+	if source == "" {
+		source = s.gatewaySource()
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Symbol string    `json:"symbol"`
+		Time   int64     `json:"time"`
+		Source string    `json:"source"`
+		Bids   []gwLevel `json:"bids"`
+		Asks   []gwLevel `json:"asks"`
+	}{symbol, epochMS(book.Time), source, gatewayLevels(book.Bids, in.Decimals), gatewayLevels(book.Asks, in.Decimals)})
+}
+
+type gwTrade struct {
+	ID    string `json:"id"`
+	Time  int64  `json:"time"`
+	Price string `json:"price"`
+	Lots  int64  `json:"lots"`
+	Side  string `json:"side"`
+}
+
+// handleGatewayTrades serves GET /api/gw/v1/trades. The feed carries no trade
+// id, so id is "<index>@<time>" (index within the returned page).
+func (s *Server) handleGatewayTrades(w http.ResponseWriter, r *http.Request) {
+	symbol := strings.TrimSpace(r.URL.Query().Get("symbol"))
+	if symbol == "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "не указан инструмент (symbol)")
+		return
+	}
+	limit, ok := intParam(r, "limit", 50)
+	if !ok {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "некорректный limit")
+		return
+	}
+	in, found := s.deps.Feed.Instrument(symbol)
+	if !found {
+		writeError(w, http.StatusNotFound, codeNotFound, "инструмент не найден: "+symbol)
+		return
+	}
+	ctx, cancel := requestContext(r, candlesRequestTimeout)
+	defer cancel()
+	trades, err := s.deps.Feed.Trades(ctx, symbol, limit)
+	if err != nil {
+		s.mapError(w, err)
+		return
+	}
+	out := struct {
+		Symbol string    `json:"symbol"`
+		Trades []gwTrade `json:"trades"`
+	}{Symbol: symbol, Trades: make([]gwTrade, 0, len(trades))}
+	for i, t := range trades {
+		side := t.Side
+		if side != "buy" && side != "sell" {
+			side = "unknown"
+		}
+		ms := epochMS(t.Time)
+		out.Trades = append(out.Trades, gwTrade{
+			ID: strconv.Itoa(i) + "@" + strconv.FormatInt(ms, 10), Time: ms,
+			Price: formatPrice(t.Price, in.Decimals), Lots: t.Qty, Side: side,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
