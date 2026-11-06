@@ -239,3 +239,17 @@
 - Регрессионный тест: `dsh-ai-terminal/test/real-payload-cards.test.mjs` + фикстура
   `test/fixtures/real-cards.json` (обезличенные данные seed, без секретов).
 - Живой Harness (фактический рендер React-компонентов и слоты) остаётся **I** до перезапуска DSH.
+### T25: промпт через навык на живом агенте (Kimi Code, S-эквивалент, 2026-11-06)
+
+Claude Code OAuth в этой сессии истёк, поэтому промпт-часть Step 5 выполнена на другом живом
+агентском CLI с тем же установленным навыком:
+
+- чистый каталог `/tmp/t25-kimi`; `npx -y skills add <repo> --skill trading-terminal --agent kimi-code-cli -y`
+  → `./.agents/skills/trading-terminal` (+ `scripts/terminal.sh`);
+- запущен офлайн-бэкенд терминала; `kimi -p "Покажи котировку SBER через навык trading-terminal: найди
+  SKILL.md, запусти scripts/terminal.sh quote TQBR:SBER..." --skills-dir .agents/skills` → агент нашёл
+  SKILL.md, выполнил `scripts/terminal.sh quote TQBR:SBER` и вернул `last=293.22`, bid/ask 293.22/293.26
+  (read-only REST, без торговых команд);
+- это подтверждает переносимый путь «SKILL.md → scripts/terminal.sh → REST» для любого агента;
+  Claude Code-специфичная часть (его OAuth-сессия) остаётся **I**, но установка навыка в `.claude/skills`
+  проверена ранее.
