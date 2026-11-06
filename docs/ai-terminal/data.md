@@ -320,3 +320,48 @@ SQL и его аргументы проверены только на httptest-�
 (код + ARCHITECTURE §6), а не из живого сервера — расхождение с фактической базой возможно и
 выяснится при первом живом прогоне. Имена рядов/категорий в реальных данных не сверялись.
 
+
+## 8. Живая проверка SQL на dev-витринах clickhouse-import-rosstat (S, 2026-11-06)
+
+Источник: локальный dev-ClickHouse проекта `clickhouse-import-rosstat` (server 26.10.1, HTTP
+`127.0.0.1:8123`); его же MCP-конфиг (`.kimi-code/mcp.json` проекта) указывает на эту БД (сервер
+`clickhouse`, stdio, витрины `v_*`). Проверка выполнена с согласия пользователя, только `SELECT`.
+
+Что проверено:
+
+- Все объекты, которые использует `terminal/vintage`, существуют и отвечают: `v_point_in_time_asof`
+  (View, вход `as_of = 'YYYY-MM-DD'`), `series_publication` (DateTime `Europe/Moscow`),
+  `v_events_calendar`, `v_cbr_publication_calendar`, `v_news_events`, `news_annotation`.
+- `AsOf("unemployment_sa", 2024-02-07)` → 107 точек, последняя 2023-11-30 = 2.885274, опубликована
+  2024-02-06 (строгая граница `published_at < asOf`) — Review Focus 1 подтверждён на живых данных.
+- `Releases(2026-10-01 .. 2027-01-01)` → 260 событий; `News(2026-10-01 .. 2026-11-06)` → 773 новости;
+  nullable-тональность и теги `dimension:tag:direction` декодируются (sentiment NULL → 0 = «не размечено»).
+- Живые интеграционные тесты: `TXML_IT_CLICKHOUSE=1 TXML_CLICKHOUSE_URL=http://localhost:8123
+  go test ./terminal/vintage ./terminal/volatility -run Live -v` (без env — `t.Skip`, сеть в unit-тестах
+  по-прежнему запрещена). Файлы: `terminal/vintage/clickhouse_live_test.go`,
+  `terminal/volatility/clickhouse_live_test.go`.
+
+Найдено и исправлено по живым данным:
+
+- `v_events_calendar.category = 'cpi'` смешивает недельный ИПЦ Росстата и CPI США. Маппинг по одной
+  категории ошибался; теперь категория уточняется по заголовку: «недельный ИПЦ/Росстат» → `ru_cpi`/RU,
+  «CPI США» → `us_cpi`/US (unit-тест `TestReleasesCPICategoryDisambiguation` + live-проверка).
+- `v_point_in_time_asof.published_at` — тип `Date` (не DateTime): `PublishedAt` точки = полночь UTC
+  даты публикации; это задокументировано, для point-in-time семантики достаточно.
+
+Остаточные ограничения (I):
+
+- `event_time` в `v_events_calendar` у US-релизов зимой выглядит как фиксированные ET+7 (например,
+  «CPI США…» 2026-12-10 15:30 MSK), а не ET с переходом на зимнее время (ожидалось 16:30 MSK).
+  Точные времена US-релизов — задача Phase X2 (автоматизация календаря FOMC/BLS); до неё окна
+  релизов в оракуле волатильности для зимних US-событий могут быть смещены на час.
+- `us_alfred_vintage`/ALFRED-винтажей в dev-БД нет (в соседнем проекте только актуальные ряды FRED:
+  `v_fred_macro`) — Phase X1 остаётся внешней задачей.
+
+### 8.1. Схема записи md (T11) на живом ClickHouse (S)
+
+`recorder.EnsureSchema` прогнан на живом ClickHouse: созданы `md.book_events`, `md.trades`, `md.news`;
+типы колонок совпадают с планом (`ts DateTime64(3,'UTC')`, `recv_ts DateTime64(6,'UTC')`,
+`kind Enum8(...)`, `price Decimal(18, 6)`, `qty Int64`). Живая запись стакана/сделок и `SELECT
+kind,count()` — выполняются отдельной проверкой в окне демо-сервера (T11 Step 5), результат — в
+PROGRESS.md.

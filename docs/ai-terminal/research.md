@@ -239,3 +239,18 @@ make verify
 go test -race ./terminal/agent -run 'ResearchTools|ToolResultCompact|PointInTime'
 ```
 
+
+## 9. Живая проверка оракула на реальных макро/новостных данных (S, 2026-11-06)
+
+Бэктест-бары для проверки синтетические (живой intraday-источник — только демо-сервер и не в
+unit-тестах), но релизы и новости взяты из живых point-in-time-витрин `clickhouse-import-rosstat`
+(см. `data.md` §8):
+
+- `TXML_IT_CLICKHOUSE=1 TXML_CLICKHOUSE_URL=http://localhost:8123 go test ./terminal/volatility -run Live -v`
+  → `TestLiveOracleFitWithRealMacro` PASS: 90 синтетических торговых дней (по 30 десятиминутных баров),
+  ~276 релизов из живого календаря и 87 новостей за 7 дней; `Fit` строит модель, `Forecast` даёт
+  конечные `SigmaPct`/`Multiplier`, режим из контракта и объяснимые `Drivers`.
+- Это подтверждает путь «сырые витрины → `vintage.Store` → `volatility.Fit/Forecast`» на живых
+  макро/новостных данных (S); качество прогноза (QLIKE против наивного HAR) на живых барах остаётся
+  **I** — нужен живой intraday-ряд демо-сервера.
+- Тест помечен env-гейтом `TXML_IT_CLICKHOUSE=1`; без него — `t.Skip`.

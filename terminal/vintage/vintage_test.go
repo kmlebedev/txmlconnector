@@ -352,6 +352,43 @@ func TestReleasesReadsEventsCalendar(t *testing.T) {
 	}
 }
 
+// TestReleasesCPICategoryDisambiguation covers the live data shape of the
+// rosstat layer (2026-11-06): v_events_calendar.category = 'cpi' is shared by
+// the weekly Rosstat CPI and the US CPI releases, so the title decides the
+// contract category and the country.
+func TestReleasesCPICategoryDisambiguation(t *testing.T) {
+	_, srv := newStub(t, func(query string, params url.Values) string {
+		if !strings.Contains(query, "v_events_calendar") {
+			return ""
+		}
+		return `{"event_date":"2026-12-09","event_time":null,"category":"cpi","title":"Росстат: недельный ИПЦ (по средам)","emergency":0}
+{"event_date":"2026-12-10","event_time":"15:30","category":"cpi","title":"CPI США за ноябрь 2026","emergency":0}`
+	})
+	store := newStore(srv)
+	releases, err := store.Releases(context.Background(), day(2026, time.December, 1), day(2026, time.December, 31))
+	if err != nil {
+		t.Fatalf("Releases: %v", err)
+	}
+	if len(releases) != 2 {
+		t.Fatalf("releases = %+v, want 2", releases)
+	}
+	byTitle := map[string]vintage.Release{}
+	for _, release := range releases {
+		byTitle[release.Title] = release
+	}
+	ru := byTitle["Росстат: недельный ИПЦ (по средам)"]
+	if ru.Category != "ru_cpi" || ru.Country != "RU" || ru.Exact {
+		t.Fatalf("Rosstat weekly CPI = %+v, want ru_cpi/RU/exact=false", ru)
+	}
+	us := byTitle["CPI США за ноябрь 2026"]
+	if us.Category != "us_cpi" || us.Country != "US" || !us.Exact {
+		t.Fatalf("US CPI = %+v, want us_cpi/US/exact=true", us)
+	}
+	if want := dayClock(2026, time.December, 10, 12, 30); !us.At.Equal(want) {
+		t.Fatalf("US CPI at = %s, want %s (15:30 MSK)", us.At.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+}
+
 // TestNewsFiltersAndDecodes checks the news feed path: the UTC window and the
 // source list are query parameters, the nullable LLM sentiment and the tag
 // tuples are decoded into the contract type.

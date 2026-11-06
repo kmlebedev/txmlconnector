@@ -142,7 +142,7 @@ func releaseFromEvent(row eventCalendarRow, msk *time.Location) (Release, bool) 
 		return Release{}, false
 	}
 	at, exact := releaseInstant(date, row.EventTime, msk)
-	category := eventCategory(row.Category)
+	category := refineEventCategory(eventCategory(row.Category), row.Title)
 	country := "RU"
 	if usEventCategories[category] {
 		country = "US"
@@ -204,6 +204,25 @@ func eventCategory(category string) string {
 		return mapped
 	}
 	return key
+}
+
+// refineEventCategory disambiguates the source categories that mix countries.
+// v_events_calendar.category='cpi' is used both by the weekly Rosstat CPI (RU)
+// and by the US CPI releases, so the title decides the contract name; the same
+// is true for the other US releases that share a generic source category.
+func refineEventCategory(category, title string) string {
+	if category != "us_cpi" {
+		return category
+	}
+	lower := strings.ToLower(title)
+	switch {
+	case strings.Contains(lower, "сша") || strings.Contains(lower, " us "):
+		return "us_cpi"
+	case strings.Contains(lower, "росстат"), strings.Contains(lower, "ипц"),
+		strings.Contains(lower, "инфляц"):
+		return "ru_cpi"
+	}
+	return category
 }
 
 // publicationCategory maps the CBR topic/title onto the contract name.
