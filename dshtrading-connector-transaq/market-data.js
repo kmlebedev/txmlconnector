@@ -61,8 +61,9 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
     for (const input of symbols) {
       try {
         resolved.push({ input, ...(await resolver.resolve(input)) });
-      } catch {
-        // unresolvable inputs are omitted
+      } catch (err) {
+        // unresolvable inputs are omitted; outages and auth errors propagate
+        if (err?.code !== 'TRADING_SYMBOL_NOT_FOUND' && err?.code !== 'TRADING_UNSUPPORTED_SYMBOL') throw err;
       }
     }
     const out = {};

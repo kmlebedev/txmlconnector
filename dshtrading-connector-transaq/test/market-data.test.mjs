@@ -46,6 +46,16 @@ test('getTickers keeps input keys and omits unknown', async () => {
   } finally { await gw.close(); }
 });
 
+for (const [status, code] of [[503, 'TRADING_UPSTREAM_ERROR'], [401, 'TRADING_AUTH_FAILED']]) {
+  test(`getTickers surfaces gateway ${status} after one /instruments call`, async () => {
+    const { gw, svc } = await setup({ '/api/gw/v1/instruments': () => ({ status, body: { error: { code: 'x', message: 'down' } } }) });
+    try {
+      await assert.rejects(svc.getTickers(['SBER', 'GAZP']), { code });
+      assert.equal(gw.calls.filter((c) => c.startsWith('/api/gw/v1/instruments')).length, 1);
+    } finally { await gw.close(); }
+  });
+}
+
 test('getKlines rejects 2h before network', async () => {
   const { gw, svc } = await setup({});
   try {

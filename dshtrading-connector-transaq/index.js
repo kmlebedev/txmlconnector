@@ -20,9 +20,9 @@ export function apply(ctx, rawConfig) {
   if (!config.enabled) return;
 
   // Resolved on every request so rotated tokens are picked up without a restart.
-  const resolveToken = () => {
+  const resolveToken = async () => {
     try {
-      const v = ctx.get?.('credentials', false)?.resolve(config.tokenRef)?.value;
+      const v = (await ctx.get?.('credentials', false)?.resolve(config.tokenRef))?.value;
       if (typeof v === 'string' && v !== '') return v;
     } catch {
       // fall back to the environment
