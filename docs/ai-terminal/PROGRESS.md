@@ -400,3 +400,13 @@ restart DSH. Client-UI возвращать отдельно, после изо�
 
 Следующее: T11/T12/T22 — фоновая приёмка в окне демо (09:50 МСК); T9/T24/T26 UI-часть —
 контролируемое возвращение client-половины (сначала минимальный client, затем карточки) после окна.
+### Эксперимент: возврат client-половины (2026-11-06 10:48 MSK)
+
+Host-половина стабильно работает; client-запись висела в `loading` при `dsh.client =
+{platform: web, immediately: true, inject: [5 UI-модулей]}`. Рабочие сторонние плагины
+(`dsh-session-stats`, `dsh-tools`) объявляют только `{"platform":"web"}`. Гипотеза: для локального
+`link:`-плагина расширенный module-graph (`immediately` + `inject`-список) в Desktop-загрузчике
+не завершается; поэтому `dsh.client` упрощён до `{"platform":"web"}`, а client.js уже
+закалён (опциональные сервисы через дочерний `ctx.inject`/`ctx.get`, 54/54 тестов).
+Проверка требует одного перезапуска Desktop; при падении — `tools/dsh-plugin-disable.sh` +
+`tools/dsh-crash-bundle.sh` (инструкция в `docs/ai-terminal/dsh-recovery.md`).
