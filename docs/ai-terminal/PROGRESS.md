@@ -187,3 +187,16 @@
 3. Перезапустить DSH (текущая сессия завершится).
 4. Проверить сценарии: панель «Терминал» → «Автономия» → «Боты», карточка бэктеста в чате (T9/T24),
    кнопку «В чат» / «Спросить о выделенном», ночной workflow (T21), 7-шаговый сценарий бота (T26).
+### Инструмент живой приёмки (2026-11-06)
+
+- Добавлен `tools/demo-live-check.sh` + `make terminal_live` (gated `TERMINAL_LIVE_ACCEPTANCE=1`, секреты
+  только из `~/re/demo.env`, окно демо-сервера ожидается до 09:55 МСК): T11 — 10 мин записи
+  стакана/сделок в `md.*` + `SELECT kind,count()`, T12 — проверка `md.news.first_seen/published`,
+  T22 — dry-run бот M5 30 мин с проверкой `closed_bar` по границам МСК и отсутствия заявок.
+- `DEMO_CHECK_SELFTEST=1 make terminal_live` — самопроверка без рынка (gates/env/builds/ClickHouse):
+  **PASS** (ClickHouse 26.10.1, бинарники собираются).
+- Расширены live-тесты `terminal/vintage`: кроме AsOf/Releases/News теперь проверяются путь
+  `series_publication` (качество `date`/`fallback`/`exact_time`, строгая граница) и путь latest-only
+  (FRED-ряд без публикационной истории) — `TestLiveClickHouseLatestOnlyAndPublicationPaths` PASS.
+- Фоновая проверка T11/T12/T22 перезапущена уже этим инструментом; результат появится в
+  `.re-run/live/live-summary-*.json` и будет добавлен в этот файл после окна.

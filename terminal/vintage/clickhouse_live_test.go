@@ -140,3 +140,51 @@ func TestLiveClickHouseNews(t *testing.T) {
 		}
 	}
 }
+
+// TestLiveClickHouseLatestOnlyAndPublicationPaths covers the other two AsOf
+// code paths on the real marts: a FRED series that has no publication history
+// (latest-only) and a CBR series that has series_publication rows (the
+// published version with its quality marker).
+func TestLiveClickHouseLatestOnlyAndPublicationPaths(t *testing.T) {
+	store := liveStore(t)
+	ctx := context.Background()
+
+	// Path 3: DGS10 lives in macro_series but has no series_publication rows.
+	latest, err := store.AsOf(ctx, "DGS10", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("AsOf latest-only: %v", err)
+	}
+	if len(latest) == 0 {
+		t.Skip("series DGS10 is not a latest-only series in this ClickHouse")
+	}
+	for i, point := range latest {
+		if !vintage.IsLatestOnly(point) {
+			t.Fatalf("point %d of a latest-only series has vintage %q", i, point.Vintage)
+		}
+	}
+	if warning := vintage.LatestOnlyWarning("DGS10"); !strings.Contains(warning, "latest-only") {
+		t.Fatalf("latest-only warning = %q", warning)
+	}
+
+	// Path 2: the CBR survey series has publication dates in Europe/Moscow.
+	published, err := store.AsOf(ctx, "price_expectations_sa", time.Date(2024, time.February, 7, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("AsOf publication path: %v", err)
+	}
+	if len(published) == 0 {
+		t.Skip("series with series_publication rows is not in this ClickHouse")
+	}
+	for i, point := range published {
+		if vintage.IsLatestOnly(point) {
+			t.Fatalf("point %d of a publication-path series is latest-only", i)
+		}
+		switch point.Vintage {
+		case "date", "fallback", "exact_time":
+		default:
+			t.Fatalf("point %d has an unexpected quality %q", i, point.Vintage)
+		}
+		if !point.PublishedAt.Before(time.Date(2024, time.February, 7, 0, 0, 0, 0, time.UTC)) {
+			t.Fatalf("point %d published at %s, want strictly before asOf", i, point.PublishedAt)
+		}
+	}
+}
