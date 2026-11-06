@@ -29,9 +29,14 @@ for f in package.json cordis.patch.yml cordis.yml pnpm-lock.yaml; do
   if [ -f "$PROFILE/$f" ]; then cp "$PROFILE/$f" "$OUT/profile/"; fi
 done
 readlink "$PROFILE/node_modules/@local/dsh-ai-terminal" > "$OUT/profile/plugin-link.txt" 2>&1 || true
-if [ -f "$REPO/dsh-ai-terminal/index.js" ]; then
-  shasum -a 256 "$REPO/dsh-ai-terminal/index.js" > "$OUT/profile/plugin-index.sha256" 2>&1 || true
-  grep -n "export const inject" "$REPO/dsh-ai-terminal/index.js" > "$OUT/profile/plugin-inject.txt" 2>&1 || true
+PLUGIN_DIR="${DSH_AI_TERMINAL_DIR:-$HOME/GolandProjects/dsh-trading-transaq/dsh-ai-terminal}"
+if [ ! -f "$PLUGIN_DIR/index.js" ] && [ -f "$REPO/dsh-ai-terminal/index.js" ]; then
+  PLUGIN_DIR="$REPO/dsh-ai-terminal" # fallback: pre-split checkout
+fi
+if [ -f "$PLUGIN_DIR/index.js" ]; then
+  printf '%s\n' "$PLUGIN_DIR" > "$OUT/profile/plugin-dir.txt" 2>&1 || true
+  shasum -a 256 "$PLUGIN_DIR/index.js" > "$OUT/profile/plugin-index.sha256" 2>&1 || true
+  grep -n "export const inject" "$PLUGIN_DIR/index.js" > "$OUT/profile/plugin-inject.txt" 2>&1 || true
 fi
 if [ -d "$REPO/.git" ]; then
   git -C "$REPO" status --short > "$OUT/repo/git-status.txt" 2>&1 || true
