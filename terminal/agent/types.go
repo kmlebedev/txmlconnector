@@ -37,14 +37,22 @@ type RiskLimits struct {
 
 // Config configures the agent engine.
 type Config struct {
-	LLM              LLMConfig        `json:"llm"`
-	Universe         []string         `json:"universe"`
-	DefaultSymbol    string           `json:"defaultSymbol"`
-	DefaultPeriodSec int              `json:"defaultPeriodSec"`
-	Risk             RiskLimits       `json:"risk"`
-	FeeBps           float64          `json:"feeBps"`
-	BacktestHistory  int              `json:"backtestHistory"`
-	Now              func() time.Time `json:"-"`
+	LLM              LLMConfig  `json:"llm"`
+	Universe         []string   `json:"universe"`
+	DefaultSymbol    string     `json:"defaultSymbol"`
+	DefaultPeriodSec int        `json:"defaultPeriodSec"`
+	Risk             RiskLimits `json:"risk"`
+	FeeBps           float64    `json:"feeBps"`
+	BacktestHistory  int        `json:"backtestHistory"`
+	// Approval is the human-in-the-loop policy of the mutating tools (§9.5):
+	// confirm (default) or an explicitly enabled envelope.
+	Approval ApprovalPolicy   `json:"approval"`
+	Now      func() time.Time `json:"-"`
+	// NewsStore is the optional recorded-news source of the get_news tool: the
+	// md.news table written by cmd/md-recorder. It is not part of the JSON
+	// contract; nil means the news recording pipeline is off and get_news
+	// reports a clear configuration error.
+	NewsStore NewsStore `json:"-"`
 }
 
 // InstrumentRef is the agent's view of a tradable instrument.
@@ -94,6 +102,10 @@ type PlaceOrder struct {
 	Qty    int64   `json:"qty"`
 	Type   string  `json:"type"`
 	Price  float64 `json:"price"`
+	// ClientOrderID is the idempotency key of one agent order:
+	// conversationID + ":" + toolCallID. The paper broker rejects a repeated id,
+	// so a failed LLM round trip can never execute the same order twice.
+	ClientOrderID string `json:"clientOrderId,omitempty"`
 }
 
 // OrderView is the agent-facing paper order.
@@ -121,18 +133,40 @@ type PositionView struct {
 	ProfitPct float64 `json:"profitPct"`
 }
 
-// PortfolioView is the paper portfolio snapshot.
+// AccountView is one paper sub-account of the broker: cash, marked positions
+// and realized PnL. The autonomy runner trades the "autonomy" account.
+type AccountView struct {
+	Cash        float64        `json:"cash"`
+	TotalValue  float64        `json:"totalValue"`
+	RealizedPnL float64        `json:"realizedPnl"`
+	Positions   []PositionView `json:"positions"`
+	Orders      int            `json:"orders"`
+	Trades      int            `json:"trades"`
+}
+
+// PortfolioView is the paper portfolio snapshot. The top-level fields describe
+// the main account (the terminal portfolio); Accounts is the per-account view,
+// including the "autonomy" sub-account after an autonomy run.
 type PortfolioView struct {
-	TotalValue   float64        `json:"totalValue"`
-	Cash         float64        `json:"cash"`
-	DayChange    float64        `json:"dayChange"`
-	DayChangePct float64        `json:"dayChangePct"`
-	Positions    []PositionView `json:"positions"`
+	TotalValue   float64                `json:"totalValue"`
+	Cash         float64                `json:"cash"`
+	DayChange    float64                `json:"dayChange"`
+	DayChangePct float64                `json:"dayChangePct"`
+	Positions    []PositionView         `json:"positions"`
+	Accounts     map[string]AccountView `json:"accounts,omitempty"`
 }
 
 // Broker is implemented by the cmd/terminal paper adapter.
 type Broker interface {
 	Place(PlaceOrder) (OrderView, error)
+	// PlaceAt executes an order at the explicit replay quote and instant on the
+	// named paper account ("" means the main account). The autonomy replay uses
+	// it so every fill goes through the paper broker instead of a private cash
+	// simulation.
+	PlaceAt(req PlaceOrder, fill Quote, at time.Time, account string) (OrderView, error)
+	// Allocate moves amount from the main account to the named sub-account; the
+	// autonomy runner uses it to reserve its budget out of the main cash.
+	Allocate(account string, amount float64) error
 	Cancel(id string) (OrderView, error)
 	Orders() []OrderView
 	Portfolio() PortfolioView
@@ -162,10 +196,32 @@ type Artifact struct {
 	Payload any    `json:"payload"`
 }
 
+// Range is one chart interval in UTC (a selection or the visible window).
+type Range struct {
+	From time.Time `json:"from"`
+	To   time.Time `json:"to"`
+}
+
+// ScreenContext is the terminal screen the user is looking at; the UI sends it
+// with a chat request so the model can answer questions about the visible chart
+// (plan Task 8). It travels to the LLM as a separate ephemeral system message,
+// never as part of the persisted dialog history.
+type ScreenContext struct {
+	Symbol    string    `json:"symbol,omitempty"`
+	PeriodSec int       `json:"periodSec,omitempty"`
+	From      time.Time `json:"from,omitempty"`
+	To        time.Time `json:"to,omitempty"`
+	Selection *Range    `json:"selection,omitempty"`
+	ActiveTab string    `json:"activeTab,omitempty"`
+}
+
 // ChatRequest is one user message to the agent.
 type ChatRequest struct {
 	Message        string `json:"message"`
 	ConversationID string `json:"conversationId,omitempty"`
+	// Context is the visible terminal screen (chart window/selection and the
+	// active tab) attached by the UI.
+	Context *ScreenContext `json:"context,omitempty"`
 }
 
 // ChatResponse is the final agent answer plus the executed tool calls.
@@ -174,7 +230,14 @@ type ChatResponse struct {
 	ToolCalls []ToolCall `json:"toolCalls"`
 	Artifacts []Artifact `json:"artifacts"`
 	LLM       bool       `json:"llm"`
-	ElapsedMs int64      `json:"elapsedMs"`
+	// ConversationID is the dialog id of the bounded history (§9.2): the
+	// request may carry it, and a request without one gets a generated id back.
+	ConversationID string `json:"conversationId,omitempty"`
+	// Partial marks an incomplete answer: the LLM failed after a mutating tool
+	// already ran, so the local fallback was skipped to avoid replaying the
+	// side effects. ToolCalls still lists what was executed.
+	Partial   bool  `json:"partial"`
+	ElapsedMs int64 `json:"elapsedMs"`
 }
 
 // Event is one agent SSE event.

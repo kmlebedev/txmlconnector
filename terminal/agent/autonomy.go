@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +14,39 @@ import (
 // ErrAlreadyRunning is returned by StartAutonomy when a paper runner is
 // already active. It is exported so the HTTP API can map it to 409 conflict.
 var ErrAlreadyRunning = errors.New("agent: autonomy is already running")
+
+// autonomyAccount is the paper sub-account the replay trades. Its budget is
+// transferred from the main account by StartAutonomy via Broker.Allocate, so
+// the autonomy never keeps a private cash balance of its own (review R7).
+const autonomyAccount = "autonomy"
+
+// moscowOnce guards the lazy Europe/Moscow location used by the trading-day
+// accounting.
+var (
+	moscowOnce sync.Once
+	moscowLoc  *time.Location
+)
+
+// moscowLocation returns the exchange trading-day location. Moscow has no DST
+// since 2014, so a fixed +03:00 zone is a safe fallback when the host has no
+// zoneinfo database.
+func moscowLocation() *time.Location {
+	moscowOnce.Do(func() {
+		if loc, err := time.LoadLocation("Europe/Moscow"); err == nil {
+			moscowLoc = loc
+			return
+		}
+		moscowLoc = time.FixedZone("MSK", 3*60*60)
+	})
+	return moscowLoc
+}
+
+// moscowTradingDay returns the Moscow calendar day of t as a UTC midnight
+// instant, so two instants of the same trading day compare equal.
+func moscowTradingDay(t time.Time) time.Time {
+	year, month, day := t.In(moscowLocation()).Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+}
 
 // autonomyRun is the mutable state of one paper replay run. The status is
 // guarded by mu so Status()/snapshot() are safe while the replay goroutine
@@ -75,15 +109,20 @@ func (r *autonomyRun) appendLog(entry LogEntry) {
 }
 
 // StartAutonomy starts the paper replay runner. It is non-blocking: the bars
-// are loaded and the strategy is built synchronously, then the replay runs in
-// its own goroutine. Live autonomy is rejected.
+// are loaded and the strategy is built synchronously, the run budget is
+// reserved on the paper broker, then the replay runs in its own goroutine.
+// Live autonomy is rejected.
+//
+// Known limitation (iteration 1): the "autonomy" paper account is not reset
+// between runs. A repeated start adds the new budget to the balance left by the
+// previous replay and keeps any position it left open, so the effective trading
+// equity of the second run may exceed its Config.Budget.
 func (e *Engine) StartAutonomy(ctx context.Context, cfg AutonomyConfig) error {
-	cfg, bars, strategy, err := e.prepareAutonomy(ctx, cfg)
+	cfg, riskBlocks, bars, strategy, err := e.prepareAutonomy(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	startedAt := e.now()
-	run := newAutonomyRun(cfg, startedAt)
 
 	e.mu.Lock()
 	prev := e.autonomy
@@ -91,8 +130,25 @@ func (e *Engine) StartAutonomy(ctx context.Context, cfg AutonomyConfig) error {
 		e.mu.Unlock()
 		return ErrAlreadyRunning
 	}
+	// Reserve the run budget on the "autonomy" paper account: the replay fills
+	// are executed by the broker against this balance, never by a private cash
+	// simulation (review R7). The transfer is inside the start critical section
+	// so a rejected repeat start cannot move money twice.
+	if err := e.broker.Allocate(autonomyAccount, cfg.Budget); err != nil {
+		e.mu.Unlock()
+		return fmt.Errorf("agent: autonomy budget: %w", err)
+	}
+	run := newAutonomyRun(cfg, startedAt)
 	e.autonomy = run
 	e.mu.Unlock()
+
+	// Every value reduced by the engine risk ceilings is logged as risk_block
+	// before the "start" line, so the UI explains the effective limits of the
+	// run instead of only showing the model's request.
+	for _, entry := range riskBlocks {
+		run.appendLog(entry)
+		e.publish(Event{Type: "log", Data: entry})
+	}
 
 	// Seed Running/StartedAt/LastActionAt and the "start" log entry
 	// synchronously: the API and the UI must see a started runner immediately
@@ -102,7 +158,7 @@ func (e *Engine) StartAutonomy(ctx context.Context, cfg AutonomyConfig) error {
 		Kind: "start",
 		Message: fmt.Sprintf("автономия запущена: %s, стратегия %s, период %s, бюджет %.0f ₽, скорость %.0f бар/с",
 			cfg.Symbol, cfg.Strategy, periodLabel(cfg.PeriodSec), cfg.Budget, cfg.Speed),
-		Data: map[string]any{"strategy": cfg.Strategy, "params": cfg.Params, "budget": cfg.Budget, "speed": cfg.Speed},
+		Data: map[string]any{"strategy": cfg.Strategy, "params": cfg.Params, "budget": cfg.Budget, "speed": cfg.Speed, "account": autonomyAccount},
 	}
 	run.appendLog(startEntry)
 	e.publish(Event{Type: "log", Data: startEntry})
@@ -132,23 +188,32 @@ func (e *Engine) StopAutonomy() error {
 	return nil
 }
 
-// prepareAutonomy validates the config, applies defaults and loads the replay
-// bars and strategy. It runs synchronously so validation errors are returned
-// from StartAutonomy instead of being lost in the goroutine.
-func (e *Engine) prepareAutonomy(ctx context.Context, cfg AutonomyConfig) (AutonomyConfig, []backtest.Bar, backtest.Strategy, error) {
+// prepareAutonomy validates the config, applies defaults, clamps it to the
+// engine risk limits and loads the replay bars and strategy. It runs
+// synchronously so validation errors are returned from StartAutonomy instead of
+// being lost in the goroutine.
+//
+// The returned riskBlocks are risk_block log entries for every value that
+// clampAutonomy had to reduce. The autonomy run object does not exist yet while
+// the config is prepared, so StartAutonomy appends these entries to the run log
+// and emits them over SSE before the "start" line (review finding R2).
+func (e *Engine) prepareAutonomy(ctx context.Context, cfg AutonomyConfig) (AutonomyConfig, []LogEntry, []backtest.Bar, backtest.Strategy, error) {
 	if cfg.Live {
-		return AutonomyConfig{}, nil, nil, errLiveAutonomy
+		return AutonomyConfig{}, nil, nil, nil, errLiveAutonomy
+	}
+	if e.broker == nil {
+		return AutonomyConfig{}, nil, nil, nil, errors.New("agent: paper broker is not configured for autonomy")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	cfg.Symbol = e.resolveSymbol(cfg.Symbol)
 	if cfg.Symbol == "" {
-		return AutonomyConfig{}, nil, nil, errors.New("agent: autonomy symbol is required")
+		return AutonomyConfig{}, nil, nil, nil, errors.New("agent: autonomy symbol is required")
 	}
 	cfg.PeriodSec = e.normalizePeriod(cfg.PeriodSec)
 	if cfg.Strategy == "" {
-		return AutonomyConfig{}, nil, nil, errors.New("agent: autonomy strategy is required")
+		return AutonomyConfig{}, nil, nil, nil, errors.New("agent: autonomy strategy is required")
 	}
 	if cfg.Speed <= 0 {
 		cfg.Speed = defaultAutonomySpeed
@@ -177,33 +242,46 @@ func (e *Engine) prepareAutonomy(ctx context.Context, cfg AutonomyConfig) (Auton
 	if cfg.Params == nil {
 		cfg.Params = map[string]float64{}
 	}
+	// Risk limits are ceilings: the model may ask for a stricter run but never
+	// for a looser one. The free cash of the main paper account bounds the
+	// budget reserved for the autonomy account.
+	cfg, warnings := clampAutonomy(cfg, e.cfg.Risk, e.broker.Cash())
+	riskBlocks := make([]LogEntry, 0, len(warnings))
+	for _, warning := range warnings {
+		riskBlocks = append(riskBlocks, LogEntry{Time: e.now(), Kind: "risk_block", Message: warning})
+	}
 	strategy, err := e.newBacktestStrategy(cfg.Strategy, cfg.Params)
 	if err != nil {
-		return AutonomyConfig{}, nil, nil, fmt.Errorf("agent: strategy %q: %w", cfg.Strategy, err)
+		return AutonomyConfig{}, nil, nil, nil, fmt.Errorf("agent: strategy %q: %w", cfg.Strategy, err)
 	}
 	bars, err := e.data.History(ctx, cfg.Symbol, cfg.PeriodSec, autonomyBars)
 	if err != nil {
-		return AutonomyConfig{}, nil, nil, fmt.Errorf("agent: autonomy history for %s: %w", cfg.Symbol, err)
+		return AutonomyConfig{}, nil, nil, nil, fmt.Errorf("agent: autonomy history for %s: %w", cfg.Symbol, err)
 	}
 	if len(bars) < 2 {
-		return AutonomyConfig{}, nil, nil, fmt.Errorf("agent: not enough history for %s (%d bars)", cfg.Symbol, len(bars))
+		return AutonomyConfig{}, nil, nil, nil, fmt.Errorf("agent: not enough history for %s (%d bars)", cfg.Symbol, len(bars))
 	}
-	return cfg, bars, strategy, nil
+	return cfg, riskBlocks, bars, strategy, nil
 }
 
 // runAutonomy replays the bars: the strategy decides on the close of bar i and
-// the paper fill happens at the open of bar i+1. Risk limits are enforced
-// before every entry; DailyLossPct stops the run automatically.
+// the paper fill happens at the open of bar i+1. Every fill is executed by the
+// paper broker on the "autonomy" account, so positions, cash and fees are the
+// broker's state and the fills are visible in the portfolio/orders views. Risk
+// limits are enforced before every entry; the DailyLossPct limit is measured
+// from the equity at the start of the Moscow trading day and stops the run.
 func (e *Engine) runAutonomy(run *autonomyRun, bars []backtest.Bar, strategy backtest.Strategy) {
 	defer close(run.done)
 
 	cfg := run.snapshot().Config
 	delay := e.stepDelay(cfg.Speed)
 
-	initial := cfg.Budget
-	cash := initial
-	var position int64
-	var entryPrice, entryFee float64
+	// initial is the account equity when the replay starts (after the budget
+	// was reserved); the total PnL of the run is measured against it.
+	initial := e.autonomyEquityAt(bars[0].Open)
+	if initial <= 0 {
+		initial = 1
+	}
 	var trades int
 	tradeTimes := make([]time.Time, 0, 8)
 	lastPrice := bars[0].Close
@@ -212,6 +290,11 @@ func (e *Engine) runAutonomy(run *autonomyRun, bars []backtest.Bar, strategy bac
 	// future bar after an early kill-switch/autostop.
 	lastProcessedTime := bars[0].Time
 	pending := backtest.Hold
+
+	// dayStartEquity is the equity at the start of the current Moscow trading
+	// day; the daily loss limit is measured against it (review R7).
+	day := moscowTradingDay(bars[0].Time)
+	dayStartEquity := initial
 
 	stopKind := "stop"
 	stopMessage := "replay исторических баров завершён"
@@ -228,28 +311,36 @@ replay:
 		bar := bars[i]
 
 		// Fill the decision made on the close of the previous bar at this
-		// bar's open.
+		// bar's open through the paper broker.
 		switch pending {
 		case backtest.Buy:
-			if position == 0 && bar.Open > 0 {
-				cash, position, entryPrice, entryFee = e.autonomyBuy(run, cash, bar.Open, cfg, bar.Time)
+			if qty, _ := e.autonomyPosition(cfg.Symbol); qty == 0 && bar.Open > 0 {
+				e.autonomyBuy(run, cfg, bar.Open, bar.Time)
 			}
 		case backtest.Sell:
-			if position > 0 && bar.Open > 0 {
-				cash, _ = e.autonomySell(run, cash, position, entryPrice, entryFee, bar.Open, cfg, bar.Time)
-				position = 0
-				trades++
-				tradeTimes = append(tradeTimes, bar.Time)
+			if qty, avg := e.autonomyPosition(cfg.Symbol); qty > 0 && bar.Open > 0 {
+				if e.autonomySell(run, cfg.Symbol, qty, avg, bar.Open, bar.Time) {
+					trades++
+					tradeTimes = append(tradeTimes, bar.Time)
+				}
 			}
 		}
 		pending = backtest.Hold
 		lastPrice = bar.Close
 		lastProcessedTime = bar.Time
 
+		// The first bar of a new Moscow trading day resets the daily loss
+		// reference to the equity at that trading day's start.
+		if barDay := moscowTradingDay(bar.Time); !barDay.Equal(day) {
+			day = barDay
+			dayStartEquity = e.autonomyEquityAt(bar.Open)
+		}
+
 		// Strategy decision on the bar close, overridden by risk exits.
 		action := strategy.OnBar(bars, i)
-		if position > 0 && entryPrice > 0 {
-			changePct := (bar.Close - entryPrice) / entryPrice * 100
+		qty, avg := e.autonomyPosition(cfg.Symbol)
+		if qty > 0 && avg > 0 {
+			changePct := (bar.Close - avg) / avg * 100
 			switch {
 			case changePct <= -cfg.StopLossPct:
 				e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block",
@@ -261,7 +352,7 @@ replay:
 				action = backtest.Sell
 			}
 		}
-		if action == backtest.Buy && position == 0 {
+		if action == backtest.Buy && qty == 0 {
 			// MaxTradesPerHour lives in Config.Risk: AutonomyConfig has no such field.
 			tradeTimes = pruneTradeTimes(tradeTimes, bar.Time.Add(-time.Hour))
 			if limit := int(e.cfg.Risk.MaxTradesPerHour); limit > 0 && len(tradeTimes) >= limit {
@@ -270,13 +361,13 @@ replay:
 				action = backtest.Hold
 			}
 		}
-		if action == backtest.Sell && position == 0 {
+		if action == backtest.Sell && qty == 0 {
 			action = backtest.Hold
 		}
 		pending = action
 
-		// Mark-to-market PnL of the current position.
-		equity := cash + float64(position)*bar.Close
+		// Mark-to-market PnL of the autonomy account.
+		equity := e.autonomyEquityAt(bar.Close)
 		pnl := equity - initial
 		pnlPct := pnl / initial * 100
 		run.update(func(st *AutonomyStatus) {
@@ -290,40 +381,43 @@ replay:
 			PeriodSec: cfg.PeriodSec,
 			Time:      bar.Time,
 			Price:     bar.Close,
-			Position:  position,
+			Position:  qty,
 			Trades:    trades,
 			PnL:       pnl,
 			PnLPct:    pnlPct,
 		}})
 
-		// Automatic kill-switch on the daily loss limit (from the initial
-		// equity, as frozen by §9.4). The decision is taken on the close of
-		// bar i, so the position is closed at open[i+1] like every other
-		// replay action; the last bar falls back to its close explicitly.
-		if pnlPct <= -cfg.DailyLossPct {
+		// Automatic kill-switch on the daily loss of the Moscow trading day.
+		// The decision is taken on the close of bar i, so the position is
+		// closed at open[i+1] like every other replay action; the last bar
+		// falls back to its close explicitly.
+		dailyPct := 0.0
+		if dayStartEquity > 0 {
+			dailyPct = (equity - dayStartEquity) / dayStartEquity * 100
+		}
+		if dailyPct <= -cfg.DailyLossPct {
 			e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block",
-				Message: fmt.Sprintf("автостоп: убыток %.2f%% достиг лимита %.2f%%", pnlPct, cfg.DailyLossPct),
-				Data:    map[string]any{"equity": equity}})
-			if position > 0 {
+				Message: fmt.Sprintf("автостоп: дневной убыток %.2f%% от начала торгового дня (МСК) достиг лимита %.2f%%",
+					dailyPct, cfg.DailyLossPct),
+				Data: map[string]any{"equity": equity, "dayStartEquity": dayStartEquity}})
+			if qty > 0 {
+				fillPrice, fillTime := bar.Close, bar.Time
 				if i+1 < len(bars) {
-					fillPrice := bars[i+1].Open
-					fillTime := bars[i+1].Time
-					cash, _ = e.autonomySell(run, cash, position, entryPrice, entryFee, fillPrice, cfg, fillTime)
-					lastPrice = fillPrice
-					lastProcessedTime = fillTime
+					fillPrice, fillTime = bars[i+1].Open, bars[i+1].Time
 				} else {
 					e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block",
 						Message: fmt.Sprintf("нет следующего бара — закрытие позиции по close последнего бара %.2f ₽", bar.Close)})
-					cash, _ = e.autonomySell(run, cash, position, entryPrice, entryFee, bar.Close, cfg, bar.Time)
-					lastPrice = bar.Close
-					lastProcessedTime = bar.Time
 				}
-				position = 0
-				trades++
-				tradeTimes = append(tradeTimes, lastProcessedTime)
+				if e.autonomySell(run, cfg.Symbol, qty, avg, fillPrice, fillTime) {
+					trades++
+					tradeTimes = append(tradeTimes, fillTime)
+				}
+				lastPrice = fillPrice
+				lastProcessedTime = fillTime
 			}
 			stopKind = "stopped_by_risk"
-			stopMessage = fmt.Sprintf("остановлено по дневному убытку %.2f%%", pnlPct)
+			stopMessage = fmt.Sprintf("остановлено по дневному убытку %.2f%% (лимит %.2f%% на торговый день МСК)",
+				dailyPct, cfg.DailyLossPct)
 			break replay
 		}
 
@@ -344,18 +438,20 @@ replay:
 	// there is no fictitious closing trade and no extra commission. Trades
 	// counts only closed round trips.
 	var unrealized float64
-	if position > 0 {
-		unrealized = (lastPrice-entryPrice)*float64(position) - entryFee
+	qty, avg := e.autonomyPosition(cfg.Symbol)
+	if qty > 0 {
+		unrealized = (lastPrice - avg) * float64(qty)
 		e.logAutonomy(run, LogEntry{
 			Time: e.now(),
 			Kind: "mark_to_market",
 			Message: fmt.Sprintf("позиция %d шт оценена mark-to-market по %.2f ₽: нереализованный PnL %+.2f ₽",
-				position, lastPrice, unrealized),
-			Data: map[string]any{"qty": position, "price": lastPrice, "unrealizedPnl": unrealized, "barTime": lastProcessedTime},
+				qty, lastPrice, unrealized),
+			Data: map[string]any{"qty": qty, "price": lastPrice, "unrealizedPnl": unrealized, "barTime": lastProcessedTime},
 		})
 	}
 
-	finalEquity := cash + float64(position)*lastPrice
+	view := e.autonomyAccountView()
+	finalEquity := e.autonomyEquityAt(lastPrice)
 	pnl := finalEquity - initial
 	pnlPct := pnl / initial * 100
 	run.update(func(st *AutonomyStatus) {
@@ -369,8 +465,8 @@ replay:
 	})
 	e.logAutonomy(run, LogEntry{Time: e.now(), Kind: stopKind, Message: stopMessage,
 		Data: map[string]any{
-			"pnl": pnl, "pnlPct": pnlPct, "trades": trades, "cash": cash,
-			"position": position, "unrealizedPnl": unrealized, "equity": finalEquity,
+			"pnl": pnl, "pnlPct": pnlPct, "trades": trades, "cash": view.Cash,
+			"position": qty, "unrealizedPnl": unrealized, "equity": finalEquity, "account": autonomyAccount,
 		}})
 	e.publish(Event{Type: "autonomy", Data: autonomyTick{
 		Running:   false,
@@ -378,12 +474,55 @@ replay:
 		PeriodSec: cfg.PeriodSec,
 		Time:      lastProcessedTime,
 		Price:     lastPrice,
-		Position:  position,
+		Position:  qty,
 		Trades:    trades,
 		PnL:       pnl,
 		PnLPct:    pnlPct,
 		Final:     true,
 	}})
+}
+
+// autonomyAccountView returns the paper sub-account state of the autonomy run.
+func (e *Engine) autonomyAccountView() AccountView {
+	if e.broker == nil {
+		return AccountView{}
+	}
+	portfolio := e.broker.Portfolio()
+	if portfolio.Accounts == nil {
+		return AccountView{}
+	}
+	return portfolio.Accounts[autonomyAccount]
+}
+
+// autonomyEquityAt returns the autonomy account equity at the given price:
+// cash plus the mark-to-market value of its positions.
+func (e *Engine) autonomyEquityAt(price float64) float64 {
+	view := e.autonomyAccountView()
+	equity := view.Cash
+	for _, pos := range view.Positions {
+		equity += float64(pos.Qty) * price
+	}
+	return equity
+}
+
+// autonomyPosition returns the quantity and average entry price of one symbol
+// on the autonomy account.
+func (e *Engine) autonomyPosition(symbol string) (qty int64, avg float64) {
+	for _, pos := range e.autonomyAccountView().Positions {
+		if strings.EqualFold(pos.Symbol, symbol) {
+			return pos.Qty, pos.AvgPrice
+		}
+	}
+	return 0, 0
+}
+
+// autonomyOrder routes one replay fill through the paper broker: the quote is
+// the historical bar price, so cash, positions and fees stay broker-owned.
+func (e *Engine) autonomyOrder(symbol, side string, qty int64, price float64, at time.Time) (OrderView, error) {
+	return e.broker.PlaceAt(
+		PlaceOrder{Symbol: symbol, Side: side, Qty: qty, Type: "market"},
+		Quote{Symbol: symbol, Last: price, Time: at},
+		at, autonomyAccount)
 }
 
 // autonomyTick is the SSE payload of one replay step.
@@ -400,10 +539,16 @@ type autonomyTick struct {
 	Final     bool      `json:"final,omitempty"`
 }
 
-// autonomyBuy sizes one paper entry with the frozen risk limits, spends the
-// cash, charges the commission and logs the order. It returns the new cash and
-// position (position stays zero when the order was blocked).
-func (e *Engine) autonomyBuy(run *autonomyRun, cash, price float64, cfg AutonomyConfig, barTime time.Time) (newCash float64, position int64, entryPrice, entryFee float64) {
+// autonomyBuy sizes one paper entry with the frozen risk limits, routes the
+// order through the paper broker and logs it. It returns the filled quantity
+// (zero when the entry was blocked or rejected).
+func (e *Engine) autonomyBuy(run *autonomyRun, cfg AutonomyConfig, price float64, barTime time.Time) int64 {
+	cash := e.autonomyAccountView().Cash
+	if cash <= 0 {
+		e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block",
+			Message: "недостаточно средств: кэш счёта автономии пуст"})
+		return 0
+	}
 	// MaxOrderPct lives in Config.Risk: AutonomyConfig has no such field.
 	notionalLimit := cash * e.cfg.Risk.MaxOrderPct / 100
 	if cfg.MaxPositionPct > 0 {
@@ -418,33 +563,50 @@ func (e *Engine) autonomyBuy(run *autonomyRun, cash, price float64, cfg Autonomy
 	if qty < 1 {
 		e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block",
 			Message: fmt.Sprintf("недостаточно средств: лимит заявки %.2f ₽ меньше цены %.2f ₽", notionalLimit, price)})
-		return cash, 0, 0, 0
+		return 0
 	}
-	notional := price * float64(qty)
+	order, err := e.autonomyOrder(cfg.Symbol, "buy", qty, price, barTime)
+	if err != nil {
+		e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block",
+			Message: fmt.Sprintf("заявка на покупку отклонена: %v", err)})
+		return 0
+	}
+	if order.Filled <= 0 {
+		e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block", Message: "заявка на покупку не исполнена"})
+		return 0
+	}
+	notional := order.AvgFillPrice * float64(order.Filled)
 	fee := notional * e.feeBps() / 10000
-	if notional+fee > cash {
-		e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block", Message: "недостаточно кэша с учётом комиссии"})
-		return cash, 0, 0, 0
-	}
 	e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "order",
-		Message: fmt.Sprintf("покупка %d шт по %.2f ₽ (комиссия %.2f ₽)", qty, price, fee),
-		Data:    map[string]any{"side": "buy", "qty": qty, "price": price, "fee": fee, "barTime": barTime}})
+		Message: fmt.Sprintf("покупка %d шт по %.2f ₽ (комиссия %.2f ₽)", order.Filled, order.AvgFillPrice, fee),
+		Data:    map[string]any{"side": "buy", "qty": order.Filled, "price": order.AvgFillPrice, "fee": fee, "barTime": barTime}})
 	run.update(func(st *AutonomyStatus) { st.LastActionAt = e.now() })
-	return cash - notional - fee, qty, price, fee
+	return order.Filled
 }
 
-// autonomySell closes the paper position, charges the commission and logs the
-// realized trade. It returns the new cash and the realized PnL of the round
-// trip (entry commission included).
-func (e *Engine) autonomySell(run *autonomyRun, cash float64, position int64, entryPrice, entryFee, price float64, cfg AutonomyConfig, barTime time.Time) (newCash, realized float64) {
-	notional := price * float64(position)
-	fee := notional * e.feeBps() / 10000
-	realized = (price-entryPrice)*float64(position) - entryFee - fee
+// autonomySell closes the paper position through the broker and logs the
+// realized trade. It returns true when the position was actually closed.
+func (e *Engine) autonomySell(run *autonomyRun, symbol string, qty int64, avgPrice, price float64, barTime time.Time) bool {
+	if qty <= 0 {
+		return false
+	}
+	order, err := e.autonomyOrder(symbol, "sell", qty, price, barTime)
+	if err != nil {
+		e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block",
+			Message: fmt.Sprintf("заявка на продажу отклонена: %v", err)})
+		return false
+	}
+	if order.Filled <= 0 {
+		e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "risk_block", Message: "заявка на продажу не исполнена"})
+		return false
+	}
+	realized := (order.AvgFillPrice - avgPrice) * float64(order.Filled)
+	fee := order.AvgFillPrice * float64(order.Filled) * e.feeBps() / 10000
 	e.logAutonomy(run, LogEntry{Time: e.now(), Kind: "fill",
-		Message: fmt.Sprintf("продажа %d шт по %.2f ₽: PnL %+.2f ₽ (комиссия %.2f ₽)", position, price, realized, fee),
-		Data:    map[string]any{"side": "sell", "qty": position, "price": price, "fee": fee, "pnl": realized, "barTime": barTime}})
+		Message: fmt.Sprintf("продажа %d шт по %.2f ₽: PnL %+.2f ₽ (комиссия %.2f ₽)", order.Filled, order.AvgFillPrice, realized, fee),
+		Data:    map[string]any{"side": "sell", "qty": order.Filled, "price": order.AvgFillPrice, "fee": fee, "pnl": realized, "barTime": barTime}})
 	run.update(func(st *AutonomyStatus) { st.LastActionAt = e.now() })
-	return cash + notional - fee, realized
+	return true
 }
 
 // logAutonomy appends an entry to the bounded log ring and emits it as an SSE

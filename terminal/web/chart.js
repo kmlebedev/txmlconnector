@@ -1,6 +1,22 @@
 // chart.js — dependency-free canvas rendering: candles + volume + grid + axes +
 // crosshair + last-price marker for the main chart, equity curves for backtest
 // cards, and tiny sparklines for the watchlist.
+//
+// Backtest overlay contract (setOverlay(result)):
+//   result.equity  [{t|time, value|equity, benchmark}] - equity/benchmark lines;
+//   result.trades  [{entryTime, exitTime, pnl}]        - markers and the
+//                                                         "in position" shading;
+//   result.series  {name: number[]}  (optional)        - indicator panel data,
+//                                                         aligned with candles,
+//                                                         NaN/null on warm-up;
+//   result.levels  {name: number[]}  (optional)        - indicator thresholds.
+//
+// Volatility oracle overlay contract (setVolatility(payload), plan Task 16):
+//   payload.sigmaPct    expected standard deviation of the horizon return, %;
+//   payload.horizonSec  forecast horizon, seconds;
+//   payload.multiplier  variance multiplier over the HAR baseline;
+//   payload.regime      calm|normal|event|stress (colors the cone and markers);
+//   payload.events      [{at: RFC3339, category, title, exact}] release markers.
 
 import {
   clamp, fmtDate, fmtDayMonth, fmtHM, fmtNum, fmtPrice, fmtVolume,
@@ -20,7 +36,54 @@ const COLORS = {
   overlayDark: '#1b1f24',
   benchmark: '#9aa2ac',
   bg: '#ffffff',
+  positionFill: 'rgba(15, 157, 107, 0.10)',
+  indicator: '#3b82f6',
+  indicatorLevel: '#a9b6c6',
 };
+
+// Volatility oracle overlay palette: the regime colors the expected-volatility
+// cone, its chip and the release markers.
+const VOLATILITY_COLORS = {
+  calm: { fill: 'rgba(15, 157, 107, 0.10)', line: '#0f9d6b', chip: '#0f9d6b', marker: 'rgba(15, 157, 107, 0.60)' },
+  normal: { fill: 'rgba(59, 130, 246, 0.10)', line: '#3b82f6', chip: '#3b82f6', marker: 'rgba(59, 130, 246, 0.60)' },
+  event: { fill: 'rgba(217, 154, 0, 0.14)', line: '#d99a00', chip: '#b07d00', marker: 'rgba(217, 154, 0, 0.80)' },
+  stress: { fill: 'rgba(229, 72, 77, 0.14)', line: '#e5484d', chip: '#e5484d', marker: 'rgba(229, 72, 77, 0.80)' },
+};
+
+function volatilityColor(regime) {
+  return VOLATILITY_COLORS[regime] || VOLATILITY_COLORS.normal;
+}
+
+/** Formats the forecast horizon for the overlay chip (8ч, 90м, 1д). */
+function formatHorizon(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  if (seconds % 86400 === 0) return Math.round(seconds / 86400) + 'д';
+  if (seconds % 3600 === 0) return Math.round(seconds / 3600) + 'ч';
+  return Math.round(seconds / 60) + 'м';
+}
+
+/** Short release label of the marker (the tool category is the contract key). */
+function shortReleaseLabel(category) {
+  const labels = {
+    cbr_rate: 'CBR', fomc: 'FOMC', us_cpi: 'US CPI', us_nfp: 'US NFP', us_eia: 'EIA', us_wgc: 'WGC',
+    ru_cpi: 'CPI РФ', ru_gdp: 'ВВП', ru_gov: 'Правительство', moex_rebalance: 'MOEX', bank_results: 'Отчёты',
+  };
+  const key = String(category || '');
+  if (labels[key]) return labels[key];
+  return key ? key.slice(0, 8).toUpperCase() : 'EVENT';
+}
+
+/** Nearest candle index of a Unix-seconds instant (the candles are evenly spaced). */
+function nearestCandleIndex(candles, seconds) {
+  if (!candles.length) return -1;
+  let low = 0;
+  let high = candles.length - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >> 1;
+    if (candles[middle].t <= seconds) low = middle; else high = middle;
+  }
+  return Math.abs(candles[low].t - seconds) <= Math.abs(candles[high].t - seconds) ? low : high;
+}
 
 function dpr() {
   return Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
@@ -59,6 +122,7 @@ export class CandleChart {
     this.instrument = null;
     this.periodSec = 300;
     this.overlay = null;
+    this.volatility = null;
     this.crosshair = null;
     this.hoverIndex = -1;
     this.layout = null;
@@ -68,8 +132,17 @@ export class CandleChart {
       ? new ResizeObserver(() => this.resize())
       : null;
     if (this.resizeObserver && canvas.parentElement) this.resizeObserver.observe(canvas.parentElement);
+    this.selection = null; // { from, to, fromIndex, toIndex } in candle seconds
+    this.selectionDraft = null; // { startIndex, endIndex } while shift+dragging
+    this.onSelectionChange = null;
     canvas.addEventListener('mousemove', (event) => this.onMove(event));
     canvas.addEventListener('mouseleave', () => this.onLeave());
+    canvas.addEventListener('mousedown', (event) => this.onDown(event));
+    canvas.addEventListener('mouseup', () => this.onUp());
+    window.addEventListener('mouseup', () => this.onUp());
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && this.selection) this.clearSelection();
+    });
     window.addEventListener('resize', () => this.resize());
   }
 
@@ -80,6 +153,11 @@ export class CandleChart {
     if (overlay !== undefined) this.overlay = overlay;
     this.crosshair = null;
     this.hideTooltip();
+    if (this.selection || this.selectionDraft) {
+      this.selection = null;
+      this.selectionDraft = null;
+      this.notifySelection();
+    }
     this.draw();
   }
 
@@ -90,6 +168,27 @@ export class CandleChart {
 
   clearOverlay() {
     this.overlay = null;
+    this.draw();
+  }
+
+  /**
+   * Volatility oracle overlay contract (setVolatility(payload)):
+   *   payload.sigmaPct    expected standard deviation of the horizon return, %;
+   *   payload.horizonSec  forecast horizon, seconds;
+   *   payload.multiplier  variance multiplier over the HAR baseline;
+   *   payload.regime      calm|normal|event|stress (colors the cone and markers);
+   *   payload.events      [{at: RFC3339, category, title, exact}] release markers.
+   * The cone projects the expected move from the last close to the right edge,
+   * the markers sit on the release instants (future releases are pinned to the
+   * right edge with an arrow).
+   */
+  setVolatility(payload) {
+    this.volatility = payload || null;
+    this.draw();
+  }
+
+  clearVolatility() {
+    this.volatility = null;
     this.draw();
   }
 
@@ -122,6 +221,14 @@ export class CandleChart {
 
   onMove(event) {
     if (!this.layout || !this.candles.length) return;
+    if (this.selectionDraft) {
+      const index = this.indexAt(event);
+      if (index >= 0) {
+        this.selectionDraft.endIndex = index;
+        this.draw();
+      }
+      return;
+    }
     const rect = this.canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -134,6 +241,74 @@ export class CandleChart {
     this.crosshair = { x, y, index };
     this.draw();
     this.showTooltip(index, x, y);
+  }
+
+  // ---- shift+drag range selection ("ask AI about this range") -----------
+
+  /** Candle index under the pointer, or -1 outside the plot. */
+  indexAt(event) {
+    if (!this.layout) return -1;
+    const rect = this.canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const { plotLeft, plotWidth, count } = this.layout;
+    if (x < plotLeft || x > plotLeft + plotWidth || y < this.pad.top || y > this.layout.plotBottom) {
+      return -1;
+    }
+    return clamp(Math.floor(((x - plotLeft) / plotWidth) * count), 0, count - 1);
+  }
+
+  onDown(event) {
+    if (!event.shiftKey || !this.layout || !this.candles.length) return;
+    const index = this.indexAt(event);
+    if (index < 0) return;
+    this.selectionDraft = { startIndex: index, endIndex: index };
+    this.crosshair = null;
+    this.hideTooltip();
+    this.draw();
+    event.preventDefault();
+  }
+
+  onUp() {
+    const draft = this.selectionDraft;
+    if (!draft) return;
+    this.selectionDraft = null;
+    const fromIndex = Math.min(draft.startIndex, draft.endIndex);
+    const toIndex = Math.max(draft.startIndex, draft.endIndex);
+    this.selection = {
+      from: this.candles[fromIndex].t,
+      to: this.candles[toIndex].t,
+      fromIndex,
+      toIndex,
+    };
+    this.draw();
+    this.notifySelection();
+  }
+
+  /** Removes the selected range and notifies the owner. */
+  clearSelection() {
+    this.selection = null;
+    this.selectionDraft = null;
+    this.draw();
+    this.notifySelection();
+  }
+
+  /** Selected candle range in bar seconds, or null. */
+  getSelection() {
+    if (!this.selection) return null;
+    return { from: this.selection.from, to: this.selection.to };
+  }
+
+  /** Full candle window shown on the chart in bar seconds, or null. */
+  getVisibleRange() {
+    const n = this.candles.length;
+    if (!n) return null;
+    return { from: this.candles[0].t, to: this.candles[n - 1].t };
+  }
+
+  notifySelection() {
+    const selection = this.getSelection();
+    if (typeof this.onSelectionChange === 'function') this.onSelectionChange(selection);
   }
 
   showTooltip(index, x, y) {
@@ -198,12 +373,17 @@ export class CandleChart {
     const plotBottom = this.height - padBottom;
     const plotWidth = Math.max(10, plotRight - plotLeft);
     const plotHeight = Math.max(40, plotBottom - plotTop);
+    const indicator = this.indicatorPanel();
     const volumeHeight = Math.round(plotHeight * 0.18);
-    const priceHeight = plotHeight - volumeHeight - 8;
+    const indicatorHeight = indicator ? Math.max(34, Math.round(plotHeight * 0.16)) : 0;
+    const priceHeight = plotHeight - volumeHeight - 8 - (indicatorHeight ? indicatorHeight + 8 : 0);
     const priceTop = plotTop;
     const priceBottom = plotTop + priceHeight;
     const volumeTop = priceBottom + 8;
-    const volumeBottom = plotBottom;
+    const volumeBottom = volumeTop + volumeHeight;
+    const indicatorTop = indicator ? volumeBottom + 8 : 0;
+    const indicatorBottom = plotBottom;
+    const axisBottom = indicator ? indicatorBottom : volumeBottom;
 
     let high = -Infinity;
     let low = Infinity;
@@ -224,6 +404,7 @@ export class CandleChart {
     this.layout = {
       plotLeft, plotRight, plotTop, plotBottom, plotWidth, plotHeight,
       priceTop, priceBottom, stepX, count: n, high, low, decimals,
+      volumeTop, volumeBottom, indicatorTop, indicatorBottom,
     };
 
     const yPrice = (price) => priceTop + ((high - price) / fullRange) * priceHeight;
@@ -261,7 +442,7 @@ export class CandleChart {
       const x = crisp(plotLeft + (i + 0.5) * stepX);
       ctx.beginPath();
       ctx.moveTo(x, plotTop);
-      ctx.lineTo(x, volumeBottom);
+      ctx.lineTo(x, axisBottom);
       ctx.stroke();
       const dayKey = fmtDayMonth(this.candles[i].t * 1000);
       if (twoLineAxis) {
@@ -277,6 +458,11 @@ export class CandleChart {
       }
       previousDay = dayKey;
     }
+
+    // position shading: entry..exit intervals behind the candles
+    this.drawPositionBands(ctx, { n, stepX, plotLeft, priceTop, priceBottom });
+    // volatility oracle: expected-volatility cone behind the candles
+    this.drawVolatilityBand(ctx, { plotLeft, plotRight, priceTop, priceBottom, yPrice, bodyWidth, stepX });
 
     // volume bars
     for (let i = 0; i < n; i += 1) {
@@ -341,6 +527,13 @@ export class CandleChart {
     }
     }
 
+    // indicator panel of a rules backtest (or any overlay with a series)
+    if (indicator) {
+      this.drawIndicatorPanel(ctx, indicator, {
+        n, stepX, plotLeft, plotRight, indicatorTop, indicatorBottom,
+      });
+    }
+
     // last price marker + dashed line
     const lastBar = this.candles[n - 1];
     const lastColor = lastBar.c >= lastBar.o ? COLORS.up : COLORS.down;
@@ -368,12 +561,18 @@ export class CandleChart {
     ctx.textBaseline = 'middle';
     ctx.fillText(label, labelX + 6, labelY + labelHeight / 2 + 0.5);
 
+    // volatility oracle: release markers on top of the candles
+    this.drawVolatilityMarkers(ctx, { plotLeft, plotRight, plotTop, priceTop, priceBottom, stepX });
+
     // overlay: equity line + benchmark + trade markers (own vertical scale)
     if (this.overlay) {
       this.drawOverlay(ctx, {
         n, stepX, plotLeft, priceTop, priceBottom, high, low, yPrice,
       });
     }
+
+    // shift+drag range selection (ask-AI screen context)
+    this.drawSelection(ctx, { plotLeft, plotRight, plotTop, plotBottom, stepX });
 
     // crosshair
     if (this.crosshair) {
@@ -426,6 +625,284 @@ export class CandleChart {
         ctx.fillText(marker, plotRight + 10, clamp(y - 8, priceTop, priceBottom - 16) + 8);
       }
     }
+  }
+
+  /**
+   * First indicator series of the overlay, or null. The data contract is
+   * documented at the top of this file: overlay.series maps an indicator name to
+   * values aligned with this.candles; overlay.levels maps the same name to
+   * optional threshold values.
+   */
+  indicatorPanel() {
+    const series = this.overlay && this.overlay.series;
+    if (!series || typeof series !== 'object') return null;
+    for (const name of Object.keys(series)) {
+      const values = series[name];
+      if (!Array.isArray(values) || !values.length) continue;
+      const levelSource = this.overlay.levels;
+      const levels = levelSource && Array.isArray(levelSource[name])
+        ? levelSource[name].filter((value) => Number.isFinite(Number(value))).map(Number)
+        : [];
+      return { name, values, levels };
+    }
+    return null;
+  }
+
+  /**
+   * Draws the expected-volatility cone of the oracle to the right of the last
+   * candle: the band expands as sqrt(time) up to sigmaPct at the horizon edge,
+   * clamped to the price area so a stress forecast stays readable.
+   */
+  drawVolatilityBand(ctx, { plotLeft, plotRight, priceTop, priceBottom, yPrice, bodyWidth, stepX }) {
+    const forecast = this.volatility;
+    if (!forecast) return;
+    const sigmaPct = Number(forecast.sigmaPct);
+    if (!Number.isFinite(sigmaPct) || sigmaPct <= 0) return;
+    const n = this.candles.length;
+    if (!n) return;
+    const lastClose = Number(this.candles[n - 1].c);
+    if (!(lastClose > 0)) return;
+    const sigma = sigmaPct / 100;
+    const lastX = plotLeft + (n - 0.5) * stepX;
+    const xStart = clamp(lastX + Math.max(1, bodyWidth) / 2, plotLeft, plotRight);
+    const xEnd = plotRight;
+    if (xEnd - xStart < 8) return;
+    const steps = 24;
+    const upper = [];
+    const lower = [];
+    for (let i = 0; i <= steps; i += 1) {
+      const fraction = i / steps;
+      const x = xStart + (xEnd - xStart) * fraction;
+      const move = sigma * Math.sqrt(fraction);
+      upper.push([x, clamp(yPrice(lastClose * (1 + move)), priceTop + 1, priceBottom - 1)]);
+      lower.push([x, clamp(yPrice(lastClose * (1 - move)), priceTop + 1, priceBottom - 1)]);
+    }
+    const color = volatilityColor(forecast.regime);
+    const baseY = clamp(yPrice(lastClose), priceTop + 1, priceBottom - 1);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(xStart, baseY);
+    for (const point of upper) ctx.lineTo(point[0], point[1]);
+    for (let i = lower.length - 1; i >= 0; i -= 1) ctx.lineTo(lower[i][0], lower[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = color.fill;
+    ctx.fill();
+    ctx.strokeStyle = color.line;
+    ctx.globalAlpha = 0.85;
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    for (const path of [upper, lower]) {
+      ctx.beginPath();
+      path.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point[0], point[1]); else ctx.lineTo(point[0], point[1]);
+      });
+      ctx.stroke();
+    }
+    ctx.restore();
+    // legend chip: sigma, horizon, variance multiplier and the regime
+    const parts = ['сигма ' + sigmaPct.toFixed(2) + '%'];
+    const horizon = formatHorizon(Number(forecast.horizonSec));
+    if (horizon) parts.push(horizon);
+    const multiplier = Number(forecast.multiplier);
+    if (Number.isFinite(multiplier)) parts.push('x' + multiplier.toFixed(2));
+    if (forecast.regime) parts.push(String(forecast.regime));
+    const chip = parts.join(' ');
+    ctx.save();
+    ctx.font = '10.5px ui-monospace, SFMono-Regular, Menlo, "Segoe UI", sans-serif';
+    const width = ctx.measureText(chip).width + 12;
+    const x = clamp(plotRight - width, plotLeft, plotRight);
+    roundRect(ctx, x, priceTop + 4, width, 17, 4);
+    ctx.fillStyle = color.chip;
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(chip, x + 6, priceTop + 13);
+    ctx.restore();
+  }
+
+  /**
+   * Draws the release markers of the oracle forecast: a dashed vertical line on
+   * every release instant inside the candles; a future release is pinned to the
+   * right edge with an arrow.
+   */
+  drawVolatilityMarkers(ctx, { plotLeft, plotRight, plotTop, priceTop, priceBottom, stepX }) {
+    const forecast = this.volatility;
+    const events = forecast && Array.isArray(forecast.events) ? forecast.events : [];
+    if (!events.length || !this.candles.length) return;
+    const lastT = this.candles[this.candles.length - 1].t;
+    const color = volatilityColor(forecast.regime).marker;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.setLineDash([2, 3]);
+    ctx.lineWidth = 1;
+    ctx.font = '9.5px ui-monospace, SFMono-Regular, Menlo, "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    let labels = 0;
+    const labelX = [];
+    for (const event of events) {
+      const timestamp = Date.parse(event && event.at);
+      if (!Number.isFinite(timestamp)) continue;
+      const seconds = timestamp / 1000;
+      let x = plotRight;
+      let future = true;
+      if (seconds <= lastT) {
+        const index = nearestCandleIndex(this.candles, seconds);
+        x = plotLeft + (index + 0.5) * stepX;
+        future = false;
+      }
+      x = clamp(x, plotLeft, plotRight);
+      ctx.beginPath();
+      ctx.moveTo(crisp(x), priceTop);
+      ctx.lineTo(crisp(x), priceBottom);
+      ctx.stroke();
+      if (labels < 5 && !labelX.includes(Math.round(x))) {
+        labelX.push(Math.round(x));
+        const label = shortReleaseLabel(event.category);
+        ctx.fillText(future ? label + ' >' : label, clamp(x, plotLeft + 16, plotRight - 16), plotTop + 2 + (labels % 2) * 11);
+        labels += 1;
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Draws the selected (or being dragged) candle range over the plot. */
+  drawSelection(ctx, { plotLeft, plotRight, plotTop, plotBottom, stepX }) {
+    const draft = this.selectionDraft;
+    const selection = this.selection;
+    let fromIndex = -1;
+    let toIndex = -1;
+    if (draft) {
+      fromIndex = Math.min(draft.startIndex, draft.endIndex);
+      toIndex = Math.max(draft.startIndex, draft.endIndex);
+    } else if (selection) {
+      fromIndex = selection.fromIndex;
+      toIndex = selection.toIndex;
+    }
+    if (fromIndex < 0 || toIndex < 0) return;
+    const left = plotLeft + fromIndex * stepX;
+    const right = plotLeft + (toIndex + 1) * stepX;
+    const width = Math.max(stepX, right - left);
+    ctx.save();
+    ctx.fillStyle = 'rgba(45, 108, 223, 0.14)';
+    ctx.fillRect(left, plotTop, width, plotBottom - plotTop);
+    ctx.strokeStyle = '#2d6cdf';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(crisp(left), crisp(plotTop), width, plotBottom - plotTop);
+    ctx.setLineDash([]);
+    const chip = 'выделено';
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    const chipWidth = ctx.measureText(chip).width + 12;
+    const chipX = clamp(left, plotLeft, Math.max(plotLeft, plotRight - chipWidth));
+    roundRect(ctx, chipX, plotTop + 2, chipWidth, 15, 3);
+    ctx.fillStyle = '#2d6cdf';
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(chip, chipX + chipWidth / 2, plotTop + 9.5);
+    ctx.restore();
+  }
+
+  /** Fills the entry..exit intervals of the overlay trades behind the candles. */
+  drawPositionBands(ctx, { n, stepX, plotLeft, priceTop, priceBottom }) {
+    const trades = (this.overlay && this.overlay.trades) || [];
+    if (!trades.length || n < 1) return;
+    const startTime = this.candles[0].t;
+    const endTime = this.candles[n - 1].t;
+    const span = endTime - startTime || 1;
+    const mapIndex = (timeIso) => {
+      const seconds = (Date.parse(timeIso) || 0) / 1000;
+      return clamp((seconds - startTime) / span, 0, 1) * (n - 1);
+    };
+    ctx.save();
+    ctx.fillStyle = COLORS.positionFill;
+    for (const trade of trades) {
+      if (!trade.entryTime || !trade.exitTime) continue;
+      const from = Math.round(mapIndex(trade.entryTime));
+      const to = Math.round(mapIndex(trade.exitTime));
+      const left = plotLeft + Math.min(from, to) * stepX;
+      const width = Math.max(stepX, (Math.abs(to - from) + 1) * stepX);
+      ctx.fillRect(left, priceTop, width, priceBottom - priceTop);
+    }
+    ctx.restore();
+  }
+
+  /** Draws one indicator line with its optional threshold lines in the panel. */
+  drawIndicatorPanel(ctx, indicator, { n, stepX, plotLeft, plotRight, indicatorTop, indicatorBottom }) {
+    const values = indicator.values;
+    const offset = Math.max(0, n - values.length);
+    let high = -Infinity;
+    let low = Infinity;
+    for (let i = 0; i < values.length; i += 1) {
+      const value = Number(values[i]);
+      if (!Number.isFinite(value)) continue;
+      if (value > high) high = value;
+      if (value < low) low = value;
+    }
+    for (const level of indicator.levels) {
+      if (level > high) high = level;
+      if (level < low) low = level;
+    }
+    if (!Number.isFinite(high) || !Number.isFinite(low)) return;
+    const range = high - low || Math.abs(high) * 0.01 || 1;
+    high += range * 0.08;
+    low -= range * 0.08;
+    const fullRange = high - low || 1;
+    const yOf = (value) => indicatorBottom - ((value - low) / fullRange) * (indicatorBottom - indicatorTop);
+    ctx.save();
+    ctx.strokeStyle = COLORS.indicator;
+    ctx.lineWidth = 1.4;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < values.length; i += 1) {
+      const value = Number(values[i]);
+      if (!Number.isFinite(value)) {
+        started = false;
+        continue;
+      }
+      const x = plotLeft + (offset + i + 0.5) * stepX;
+      const y = yOf(value);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+    if (indicator.levels.length) {
+      ctx.strokeStyle = COLORS.indicatorLevel;
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1;
+      for (const level of indicator.levels) {
+        const y = crisp(yOf(level));
+        ctx.beginPath();
+        ctx.moveTo(plotLeft, y);
+        ctx.lineTo(plotRight, y);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+    let last = NaN;
+    for (let i = values.length - 1; i >= 0; i -= 1) {
+      const value = Number(values[i]);
+      if (Number.isFinite(value)) {
+        last = value;
+        break;
+      }
+    }
+    ctx.fillStyle = COLORS.axisText;
+    ctx.font = '9.5px ui-monospace, SFMono-Regular, Menlo, "Segoe UI", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const label = Number.isFinite(last) ? indicator.name + ' ' + fmtNum(last, 2) : indicator.name;
+    ctx.fillText(label, plotLeft + 2, indicatorTop + 2);
+    ctx.restore();
   }
 
   drawOverlay(ctx, { n, stepX, plotLeft, priceTop, priceBottom, high, low, yPrice }) {
@@ -506,6 +983,9 @@ export class CandleChart {
       { label: 'equity', color: COLORS.overlay, dash: [] },
       { label: 'бенчмарк', color: COLORS.benchmark, dash: [4, 4] },
     ];
+    if ((this.overlay.trades || []).length) {
+      legend.push({ label: 'в позиции', fill: COLORS.positionFill });
+    }
     ctx.save();
     ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     ctx.textAlign = 'left';
@@ -513,14 +993,19 @@ export class CandleChart {
     let x = plotLeft + 8;
     const y = priceTop + 4;
     for (const item of legend) {
-      ctx.strokeStyle = item.color;
-      ctx.lineWidth = 2;
-      ctx.setLineDash(item.dash);
-      ctx.beginPath();
-      ctx.moveTo(x, y + 5);
-      ctx.lineTo(x + 14, y + 5);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      if (item.fill) {
+        ctx.fillStyle = COLORS.positionFill;
+        ctx.fillRect(x, y + 1, 14, 9);
+      } else {
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash(item.dash);
+        ctx.beginPath();
+        ctx.moveTo(x, y + 5);
+        ctx.lineTo(x + 14, y + 5);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       ctx.fillStyle = COLORS.axisText;
       ctx.fillText(item.label, x + 18, y);
       x += 18 + ctx.measureText(item.label).width + 14;

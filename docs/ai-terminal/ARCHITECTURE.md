@@ -1,6 +1,6 @@
 # AI-терминал Finam/MOEX: архитектура и контракты (итерация 1)
 
-Дата: 2026-11-05. Ветка: `feat/ai-terminal`. Владелец: Lead. Это **единственный источник
+Дата: 2026-11-05, docs-sync 2026-11-06 (фазы C–G). Ветка: `feat/ai-terminal` → `plan/ai-terminal-a`. Владелец: Lead. Это **единственный источник
 контрактов** для команды, работающей над терминалом; пакеты и JSON-схемы ниже заморожены до
 интеграции. Если контракт невозможно выполнить — сообщить Lead, не менять его молча.
 
@@ -27,6 +27,15 @@
    реальные котировки/стаканы/история. Реальная торговля выключена по умолчанию и включается
    только флагами/env + подтверждением в запросе (§10).
 
+**Фазы C–G (2026-11-06).** После итерации 1 в ветку `plan/ai-terminal-a` добавлены (контракты —
+§9.1, §10, §15): MCP-эндпоинт `/mcp` и общий invoke-путь инструментов; ClickHouse-рекордер
+стакана/сделок/новостей и винтажный слой (point-in-time макро, календарь релизов, аннотированные
+новости); research-слой (декларативные правила, batch против buy & hold, walk-forward с deflated
+Sharpe/PBO, оракул волатильности, отпечатки исполнения, replay стакана); SKILL-паттерны с
+promotion policy, учёт токенов агента и бэклог автоматизации; рантайм rule-ботов
+check → dry-run → paper на закрытых свечах и SSE-событие `bot`. Всё — stdlib, `go.mod` не
+менялся; живые проверки (демо-сервер, ClickHouse, живой DSH) не выполнялись — статусы **I**.
+
 Не входит в итерацию 1 (честно документируется как roadmap): реальная маршрутизация ордеров на
 проде, T+1/маржинальная модель, опционы/фьючерсы в UI, live-автоторговля по стакану (автономия в
 итерации 1 работает по историческим барам), мобильная вёрстка, свечи тиков.
@@ -44,6 +53,7 @@
 | `-fee-bps` | `5` | комиссия бумажных сделок, б.п. (0.05%) |
 | `-llm` | из env | `off` принудительно выключает LLM |
 | `-live-trading` | `false` | разрешить реальные заявки (дополнительно к env) |
+| `-allowed-origins` | — | дополнительные Origin для небезопасных методов API, через запятую (свой Origin принимается всегда; §10.4) |
 | `-version` | — | печать версии и выход |
 
 Env:
@@ -58,9 +68,13 @@ Env:
 | `TERMINAL_LLM_MODEL` | модель, по умолчанию `deepseek-chat` |
 | `TERMINAL_LLM_TIMEOUT` | таймаут одного запроса, default `90s` |
 | `TERMINAL_LIVE_TRADING` | `1` — разрешить реальные заявки (вместе с флагом) |
+| `TERMINAL_API_TOKEN` | токен локального API: при заданном значении все `/api/*`, кроме `/api/health`, требуют `X-Terminal-Token` или cookie `terminal_token` (§10.4). Плагин DSH генерирует его на каждый запуск бэкенда |
+| `TERMINAL_INSTANCE_ID` | nonce запуска бэкенда: отдаётся в `/api/health` как `instanceId`; плагин DSH принимает бэкенд на порту только при совпадении (§10.4) |
+| `CLICKHOUSE_URL` | необязательный HTTP-endpoint ClickHouse: включает инструмент `get_news` (чтение `md.news`, пишет `cmd/md-recorder`); без него инструмент сообщает, что запись новостей выключена |
+| `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` | креды ClickHouse (fallback: `MD_CLICKHOUSE_USER`/`MD_CLICKHOUSE_PASSWORD`; `MD_CLICKHOUSE_URL` важнее `CLICKHOUSE_URL`) |
 
-Правила: значения секретов никогда не печатать/не логировать/не коммитить. Все тесты — без сети,
-live-проверки только у Lead с согласия пользователя.
+Правила: значения секретов, токен API и nonce запуска никогда не печатать/не логировать/не
+коммитить. Все тесты — без сети, live-проверки только у Lead с согласия пользователя.
 
 ## 3. Структура и владельцы (write scopes)
 
@@ -73,6 +87,18 @@ terminal/feed/                # live native + offline seed    — task backend-c
 terminal/paper/               # бумажный брокер               — task backend-core
 terminal/backtest/            # движок бэктеста + стратегии   — task backtest
 terminal/agent/               # LLM/tool-loop/аналитик/автономия — task agent
+terminal/mcp/                 # MCP JSON-RPC endpoint /mcp    — task backend
+terminal/chstore/             # ClickHouse HTTP-клиент         — task data
+terminal/recorder/            # рекордер стакана/сделок/новостей — task data
+terminal/vintage/             # винтажи/календарь/новости      — task data
+terminal/lobreplay/           # replay стакана, fill model     — task replay
+terminal/research/            # walk-forward/batch/DSR/PBO     — task rules
+terminal/volatility/          # оракул волатильности           — task rules
+terminal/fingerprint/         # отпечатки исполнения роботов   — task replay
+terminal/automation/          # ledger токенов/hotspots/backlog — task rules
+terminal/skills/              # SKILL-паттерны, promotion      — task agent
+terminal/bot/                 # рантайм rule-ботов             — task bot
+cmd/md-recorder/              # отдельный рекордер в ClickHouse — task data
 terminal/seeddata/embed.go    # //go:embed data/*.json.gz     — Lead
 terminal/seeddata/data/       # seed-снапшот (реальные данные) — Lead
 tools/terminal-seed/          # утилита снятия seed с демо     — Lead
@@ -232,7 +258,7 @@ type Trade struct {
 }
 
 type Event struct {
-	Type string // "quote" | "orderbook" | "portfolio" | "orders" | "status"
+	Type string // "quote" | "orderbook" | "news" | "portfolio" | "orders" | "status"
 	Data any
 }
 
@@ -498,6 +524,9 @@ type Config struct {
 	FeeBps           float64
 	BacktestHistory  int // сколько последних бэктестов хранить, default 20
 	Now              func() time.Time
+	// NewsStore — необязательный источник записанных новостей (md.news,
+	// cmd/md-recorder) для инструмента get_news; nil — запись новостей выключена.
+	NewsStore NewsStore
 }
 
 type InstrumentRef struct {
@@ -577,7 +606,7 @@ type Artifact struct {
 
 type ChatRequest struct {
 	Message string
-	ConversationID string // итерация 1: не сохраняем историю, поле для UI
+	ConversationID string // диалог; пустой -> сервер генерирует id и возвращает его в ответе
 }
 
 type ChatResponse struct {
@@ -585,6 +614,7 @@ type ChatResponse struct {
 	ToolCalls []ToolCall
 	Artifacts []Artifact
 	LLM bool
+	ConversationID string // id диалога для продолжения (сгенерирован, если запрос был без него)
 	ElapsedMs int64
 }
 
@@ -673,10 +703,42 @@ func (e *Engine) Hints(ctx context.Context, symbol string, periodSec int) (Marke
 | `stop_autonomy` | `{}` | `AutonomyStatus` |
 | `get_agent_status` | `{}` | `Status` |
 | `get_backtest_history` | `{}` | `[backtest.Result]` (без bars/equity? equity нужна UI — оставить equity) |
+| `get_news` | `{symbol?, since?, limit?}` | `{since, news:[{id,published,firstSeen,source,title,body}]}` из `md.news`; `since` — по `first_seen` (RFC3339/дата/длительность, по умолчанию 24h), `symbol` — необязательный текстовый фильтр по заголовку/тексту |
+
+**Инструменты фаз D–G** (полные JSON-схемы — `GET /api/agent/tools` и
+`terminal/agent/tools*.go`; все research-инструменты требуют `asOf` — point-in-time guard, §15):
+
+- Исследования и правила: `backtest_rules` (декларативные `rules.Spec` из промпта →
+  `backtest.Result` + warnings), `batch_backtest` (несколько тикеров против buy & hold, каждая
+  строка с `backtestId`), `walk_forward` (grid, IS/OOS-окна, `deflatedSharpe`, `pbo`,
+  `trials`), `vol_forecast`/`vol_events` (оракул волатильности и календарь релизов/новости),
+  `detect_execution_algos` (отпечатки исполняющих роботов), `lob_backtest` (replay записанного
+  стакана).
+- Самообучение и стоимость: `draft_skill_pattern` (черновик SKILL-паттерна в `<dataDir>/skills`
+  через `terminal/skills`, `status=draft`) и `list_skill_patterns` (каталог и статусы);
+  `propose_automation` (повторяющиеся последовательности инструментов из ledger токенов → задачи
+  автоматизации, бэклог `docs/ai-terminal/automation-backlog.md`).
+- Rule-боты (`terminal/bot`): `bot_create_from_backtest`, `bot_check`, `bot_promote`,
+  `bot_start`, `bot_stop`, `bot_status`, `bot_journal`. Мутации (`bot_promote`,
+  `bot_start`, `bot_stop`) проходят через предложения и подтверждение человеком (§9.5);
+  live-стадия отключена.
+
+Всего в каталоге **32 инструмента**: 14 базовых (таблица выше), 8 research-инструментов фазы
+E/G (`backtest_rules`, `batch_backtest`, `walk_forward`, `vol_forecast`, `vol_events`,
+`detect_execution_algos`, `lob_backtest`, `get_news`), 3 инструмента самообучения
+(`draft_skill_pattern`, `list_skill_patterns`, `propose_automation`) и 7 rule-ботов.
+Виды артефактов, добавленные фазами C–G: `walk_forward`, `batch_backtest`, `volatility`,
+`vol_events`, `execution_algos`, `lob_backtest`, `news`, `automation_backlog`,
+`skill_pattern`, `skill_patterns` (плюс базовые `backtest`/`autonomy`/`hints`); журнал
+ботов приходит SSE-событием `bot`, а не артефактом (§10.3).
 
 Артефакты для UI: `run_backtest`/`compare_strategies` добавляют
 `Artifact{Kind:"backtest", Payload: backtest.Result}`; `start_autonomy` —
 `Artifact{Kind:"autonomy", ...}`; `get_market_hints` — `Artifact{Kind:"hints", ...}`.
+Фазы D–G добавили артефакты `walk_forward`, `batch_backtest`, `volatility` (`vol_forecast`),
+`vol_events`, `execution_algos`, `lob_backtest`, `news`, `automation_backlog`,
+`skill_pattern` (`draft_skill_pattern`) и `skill_patterns` (`list_skill_patterns`); журнал
+ботов приходит отдельным SSE-событием `bot` (§10.3), а не артефактом.
 
 ### 9.2 LLM-режим
 
@@ -685,12 +747,25 @@ func (e *Engine) Hints(ctx context.Context, symbol string, periodSec int) (Marke
   `tool_choice:"auto"`, `temperature:0.2`, `stream:false`. Ответ — `choices[0].message.tool_calls[]`
   (`function.name`, `function.arguments` — JSON-строка). До 8 итераций tool-loop, затем финальный
   ответ без tools (если модель не вернула текст — суммаризация локальным аналитиком по артефактам).
+- Контекст экрана (plan Task 8): UI прикладывает к запросу `ChatRequest.Context`
+  (`ScreenContext`: символ, период, видимый диапазон графика, выделение, активная вкладка; времена —
+  RFC3339 UTC). Движок добавляет отдельное системное сообщение `Текущий экран: …` в payload LLM,
+  но **не** сохраняет его в ограниченной истории диалога, чтобы устаревший экран не попадал в
+  следующие ходы. В UI shift+drag по графику выделяет диапазон, кнопка «Спросить AI о выделенном»
+  открывает чат и отправляет запрос с этим контекстом.
 - Системный промпт: русский, роль — торговый аналитик терминала, только инструменты из списка,
   не выдумывать цифры, предупреждать о рисках, отвечать ≤ 200 слов, использовать реальные данные
   инструментов. Если запрос про «запусти автоторговлю» — сначала бэктест, потом предложить/запустить
   автономию на бумажном счёте.
 - Ошибка LLM/сети/таймаута → fallback на локального аналитика, поле `LLM:false`, в ответ не
   возвращать текст ошибки с секретами (`"LLM недоступен: <class>"`).
+- **Память диалога.** История хранится per `conversationId` в bounded in-memory store:
+  LRU на 64 диалога, не более 12 ходов и 64 KiB на диалог. Пустой
+  `ChatRequest.ConversationID` → сервер генерирует id (`crypto/rand`) и возвращает его в
+  `ChatResponse.ConversationID`; UI хранит id и присылает его в следующем запросе. В историю
+  попадают только успешно завершённые ходы; результаты инструментов — только в сжатом виде
+  (`toolResultForLLM`); при вытеснении системный промпт сохраняется, пары
+  `assistant(tool_calls)`/`tool` не разрываются, самый новый ход остаётся всегда.
 - Без env — `LLM.enabled=false`, UI показывает «локальный аналитик».
 
 ### 9.3 Локальный аналитик (offline fallback и детерминированный демо-режим)
@@ -722,6 +797,43 @@ func (e *Engine) Hints(ctx context.Context, symbol string, periodSec int) (Marke
   `mark_to_market`; `finalEquity = cash + qty*lastPrice`.
 - После Stop статус сохраняет итоговые PnL/лог для UI.
 
+### 9.5 Предложения действий и подтверждение человеком (R5)
+
+Мутирующие инструменты (`place_order`, `cancel_order`, `start_autonomy`) в режиме
+`confirm` (по умолчанию) не исполняются сразу: диспетчер создаёт `Proposal`
+(`pending`), брокер и автономия не вызываются, а результат инструмента для модели
+и UI — `{"proposal":{id,tool,args,summary,createdAt,expiresAt,status}}`. Исключение —
+`stop_autonomy`: kill-switch исполняется немедленно, иначе плохой прогон нельзя
+остановить. Гейт стоит после валидации аргументов: некорректная заявка (дробный
+qty, `live=true`, неизвестная сторона/тип) — ошибка, а не предложение.
+
+```go
+type Proposal struct {
+	ID, Tool string
+	Args map[string]any
+	Summary string
+	CreatedAt, ExpiresAt time.Time
+	Status string // pending|approved|rejected|expired|executed
+}
+
+type ApprovalPolicy struct {
+	Mode string          // confirm (default) | envelope (только явно)
+	Envelope RiskLimits  // лимиты авто-одобрения; незаданные поля = Config.Risk
+	MaxOrdersPerRun int  // 0 = без ограничения
+}
+```
+
+- `envelope` — режим фазы F: `place_order` внутри лимитов `Envelope` и в пределах
+  `MaxOrdersPerRun` исполняется сразу, иначе становится предложением;
+  `cancel_order`/`start_autonomy` в envelope тоже предложения.
+- Жизненный цикл (`Engine.Proposals`, `Approve`, `Reject`): `pending` →
+  `approved` → `executed`; `rejected`; старше 5 минут (`proposalTTL` по
+  `Config.Now`) — `expired`. Повторный approve/reject → `ErrProposalHandled`
+  (409), просроченный → `ErrProposalExpired` (410), неизвестный id →
+  `ErrProposalNotFound` (404). `Approve` исполняет инструмент ровно один раз,
+  обходя гейт подтверждения. Кольцо предложений ограничено 100 записями.
+- Каждый переход статуса публикует SSE-событие `proposal` (top-level, §10.3).
+
 ## 10. Пакет `terminal/api` (HTTP/JSON/SSE)
 
 ```go
@@ -732,8 +844,21 @@ type Config struct {
 	LiveTradingAllowed bool // -live-trading && TERMINAL_LIVE_TRADING=1
 	PaperInitialCash float64
 	SeedGeneratedAt  time.Time
-	Web              fs.FS // статика SPA; в main — terminal.WebFS()
+	Web              fs.FS        // статика SPA; в main — terminal.WebFS()
+	Guard            GuardConfig  // защита loopback-API (§10.4)
+	InstanceID       string       // TERMINAL_INSTANCE_ID: nonce запуска для /api/health
 }
+
+// GuardConfig и Guard живут в terminal/api/guard.go.
+type GuardConfig struct {
+	AllowedOrigins []string // -allowed-origins; собственный Origin запроса принимается всегда
+	AllowedHosts   []string // дополнительные Host (reverse proxy)
+	Token          string   // TERMINAL_API_TOKEN; пусто — токен не требуется
+}
+
+// Guard — единая точка проверок Host → Origin (небезопасные методы) →
+// Content-Type тела → токен. Server.Handler() ставит её перед mux.
+func Guard(cfg GuardConfig, next http.Handler) http.Handler
 
 // Интерфейсы объявлены в api, чтобы обработчики тестировались фейками, а
 // конкретные feed.Service/paper.Broker/agent.Engine подключались в main через
@@ -765,6 +890,10 @@ type AgentAPI interface {
 	Backtests() []backtest.Result
 	Hints(ctx context.Context, symbol string, periodSec int) (agent.MarketHints, error)
 	Tools() []agent.ToolInfo
+	// Human-in-the-loop approval of the mutating tools (§9.5).
+	Proposals() []agent.Proposal
+	Approve(ctx context.Context, id string) (agent.ToolCall, error)
+	Reject(id string) error
 }
 
 type Deps struct {
@@ -775,7 +904,7 @@ type Deps struct {
 }
 
 func New(cfg Config, deps Deps) (*Server, error)
-func (s *Server) Handler() http.Handler
+func (s *Server) Handler() http.Handler // mux, обёрнутый в Guard; первый вызов стартует event loop
 ```
 
 Все ответы — `application/json; charset=utf-8`, ошибки:
@@ -784,15 +913,18 @@ func (s *Server) Handler() http.Handler
 {"error":{"code":"bad_request","message":"что не так"}}
 ```
 
-Коды: `bad_request` 400, `not_found` 404, `conflict` 409, `unavailable` 503,
-`live_trading_disabled` 403, `internal` 500. Маппинг ошибок агента: повторный `start` при
-работающем runner → 409 `conflict`; невалидный конфиг/`live=true` → 400; нереализованное → 503.
+Коды: `bad_request` 400, `not_found` 404, `conflict` 409,
+`proposal_expired` 410, `unavailable` 503, `live_trading_disabled` 403,
+`internal` 500. Коды Guard (§10.4): `forbidden_host` 421,
+`forbidden_origin` 403, `unsupported_media_type` 415, `unauthorized` 401. Маппинг ошибок агента:
+повторный `start` при работающем runner → 409 `conflict`; невалидный конфиг/`live=true` → 400;
+нереализованное → 503.
 
 ### 10.1 REST
 
 | Метод/путь | Тело/параметры | Ответ |
 |---|---|---|
-| `GET /api/health` | — | `{ok,version,mode,connected,message,serverTime,exchangeTZ,seedGeneratedAt,llm:{enabled,model,note},trading:{paper:true,live:bool}}` |
+| `GET /api/health` | — | `{ok,version,mode,connected,message,serverTime,exchangeTZ,seedGeneratedAt,instanceId,llm:{enabled,model,note},trading:{paper:true,live:bool}}` (`instanceId` — nonce запуска, `TERMINAL_INSTANCE_ID`; пустая строка, если не задан) |
 | `GET /api/instruments` | — | `{serverTime, instruments:[Instrument]}` (см. §10.2) |
 | `GET /api/instruments/{symbol}/candles?period=300&count=500` | period sec, count ≤ 5000 | `{symbol,periodSec,source,note,candles:[{t,o,h,l,c,v}]}` |
 | `GET /api/instruments/{symbol}/orderbook` | — | `{symbol,last,time,bids,asks,source}` |
@@ -806,16 +938,40 @@ func (s *Server) Handler() http.Handler
 | `GET /api/backtest/strategies` | — | `{strategies:[StrategyInfo]}` |
 | `POST /api/backtest` | `{symbol,periodSec,strategy,params?,initialCash?,feeBps?,slippageBps?,count?}` | `{result: backtest.Result}` |
 | `GET /api/agent/tools` | — | `{tools:[{name,title,description,input}]}` |
-| `POST /api/agent/chat` | `{message,conversationId?}` | `ChatResponse` |
+| `POST /api/agent/chat` | `{message,conversationId?,context?}` — `context` = `ScreenContext` (§10.2), эфемерный контекст экрана | `ChatResponse`; если `conversationId` не передан, в ответе приходит сгенерированный id (§9.2) |
 | `GET /api/agent/status` | — | `agent.Status` + `{autonomy,llm}` |
 | `POST /api/agent/autonomy` | `{action:"start"\|"stop", config?}` | `{autonomy: AutonomyStatus}` |
 | `GET /api/agent/autonomy/log?limit=200` | — | `{log:[LogEntry]}` |
 | `GET /api/agent/backtests` | — | `{results:[backtest.Result]}` |
+| `GET /api/agent/proposals` | — | `{proposals:[Proposal]}` |
+| `POST /api/agent/proposals/{id}/approve` | — | `{proposal,result:ToolCall}`; 404/409/410 `proposal_expired` |
+| `POST /api/agent/proposals/{id}/reject` | — | `{proposal}`; 404/409/410 |
+| `POST /api/agent/tools/{name}/invoke` | `{args?:object}` | `{result?,error?,artifact?,proposal?}` — общий путь invoke (DSH-плагин, MCP и UI); неизвестный инструмент — 404, ошибка инструмента — 200 с `error` |
+| `GET /api/bots` | — | `{bots:[Bot]}` — рантайм rule-ботов (T22), `[]` если рантайм не подключён |
+| `POST /api/bots` | `{symbol,periodSec,rules,qty,initialCash?}` | 201 `{bot}` — бэктест `rules.Spec` и бот в стадии `check` |
+| `POST /api/bots/{id}/check` | — | `{bot,counts,last,entry}` — детерминированный расчёт по последним закрытым барам |
+| `POST /api/bots/{id}/start` | `{stage?:"dry_run"\|"paper"}` (по умолчанию `dry_run`) | `{bot,counts,last}`; `paper` требует подтверждённого proposal |
+| `POST /api/bots/{id}/promote` | `{stage?:"paper"}` | `{bot,counts,last,proposalId}` — переход через предложение (§9.5) |
+| `POST /api/bots/{id}/stop` | — | `{bot,counts,last}` — идемпотентный стоп |
+| `POST /api/bots/stop-all` | — | `{stopped:true}` — kill-switch всех ботов |
+| `GET /api/bots/{id}/journal?after=&limit=` | after — seq (uint64), limit ≤ журнального кольца | `{bot,counts,last,entries:[JournalEntry]}` |
 | `GET /api/events` | SSE | §10.3 |
 | `GET /` и `/assets/*` | — | SPA из `terminal.WebFS()` (index.html fallback) |
 
 `symbol` = `BOARD:SECCODE` в URL нужно кодировать (`TQBR%3ASBER`) — Go/JS `encodeURIComponent`;
 сервер обязан принимать и `TQBR:SBER` в path (роутер `r.URL.Path` split по последнему `:`).
+
+Вне `/api` смонтирован **MCP-эндпоинт** `POST /mcp` (streamable HTTP): JSON-RPC 2.0,
+методы `initialize`, `notifications/initialized`, `tools/list`, `tools/call` (и пустые
+`notifications/*`); GET отвечает 405, серверных SSE-потоков нет. Эндпоинт обёрнут тем же
+`api.Guard` (Host/Origin/Content-Type + `X-Terminal-Token`), поэтому внешний MCP-клиент
+(Claude Code и другие) вызывает те же Go-инструменты, что DSH-плагин, с тем же токеном.
+
+Запрос с телом обязан иметь `Content-Type: application/json` (иначе 415 `unsupported_media_type`);
+небезопасный метод (не GET/HEAD) с заголовком `Origin` принимается только от своего Origin или из
+`-allowed-origins` (иначе 403 `forbidden_origin`); при заданном `TERMINAL_API_TOKEN` все `/api/*`,
+кроме `/api/health`, требуют `X-Terminal-Token` или cookie `terminal_token` (иначе 401
+`unauthorized`). Политика целиком — §10.4.
 
 ### 10.2 JSON-формы
 
@@ -842,9 +998,21 @@ func (s *Server) Handler() http.Handler
 // LogEntry
 {"time":"...","kind":"signal|order|fill|risk_block|start|stop|error","message":"...","data":{}}
 
+// ScreenContext (plan Task 8): контекст видимого экрана в ChatRequest; передаётся в LLM
+// отдельным эфемерным системным сообщением и в историю диалога не попадает.
+// Range/interval times — RFC3339 UTC.
+{"symbol":"TQBR:SBER","periodSec":300,"from":"2026-11-05T07:00:00Z","to":"2026-11-05T12:00:00Z",
+ "selection":{"from":"2026-11-05T09:00:00Z","to":"2026-11-05T10:00:00Z"},"activeTab":"chart"}
+
 // ChatResponse
 {"answer":"...","toolCalls":[{"name":"run_backtest","args":{},"result":{},"error":"",
- "durationMs":12}],"artifacts":[{"kind":"backtest","payload":{}}],"llm":false,"elapsedMs":42}
+ "durationMs":12}],"artifacts":[{"kind":"backtest","payload":{}}],"llm":false,"partial":false,
+ "conversationId":"a1b2c3...","elapsedMs":42}
+
+// Proposal (§9.5). В режиме confirm результат мутирующего инструмента —
+// {"proposal": Proposal}
+{"id":"prop_000001","tool":"place_order","args":{"symbol":"TQBR:SBER","side":"buy","qty":10},
+ "summary":"Купить 10 SBER по рынку","createdAt":"...","expiresAt":"...","status":"pending"}
 ```
 
 `time` во всех JSON — RFC3339 UTC. Цены — числа; UI форматирует с `decimals` инструмента.
@@ -864,14 +1032,19 @@ data: {"type":"quote","data":{...}}
 | type | data | Частота |
 |---|---|---|
 | `quote` | `{symbol,last,change,changePct,bid,ask,volume,time}` | live: 1s / offline: 1s (последний бар) |
+| `news` | `{id,published,firstSeen,source,title,body?}` — новость TRANSAQ; `firstSeen` — момент первого появления (point-in-time), времена RFC3339 UTC | при получении заголовка/тела (live, опрос `get_old_news`) |
 | `portfolio` | `Portfolio` (полный, как GET) | при изменении/1s |
 | `orders` | `{orders:[Order]}` | при изменении |
 | `agent` | `{type:"tool_call"\|"tool_result"\|"message"\|"autonomy"\|"log"\|"backtest", ...}` | по мере событий агента |
+| `proposal` | `Proposal` (§9.5), top-level (не внутри `agent`) | создание/approve/reject/expiry предложения |
+| `bot` | `{botId,entry:JournalEntry}` — журнал rule-бота (T22): kind `closed_bar\|signal\|risk_check\|order\|fill\|reconnect\|error\|stage` | при каждом событии бота |
 | `status` | `{ok,mode,connected,message,serverTime}` | 5s |
 | `heartbeat` | `{}` | 15s |
 
-Событие агента — обёртка `{"type":"agent","data":{"type":"<agentEventType>","data":...}}`; для
-автономии в `data` приходит **частичный тик** прогресса, а не полный `AutonomyStatus`:
+Событие агента — обёртка `{"type":"agent","data":{"type":"<agentEventType>","data":...}}`.
+Исключение — предложения действий (§9.5): они публикуются как самостоятельный
+top-level тип `{"type":"proposal","data":Proposal}`.
+Для автономии в `data` приходит **частичный тик** прогресса, а не полный `AutonomyStatus`:
 `{"running":true,"symbol":"TQBR:SBER","periodSec":300,"time":"...","price":293.2,
 "position":100,"trades":1,"pnl":12.3,"pnlPct":0.01}`; полный статус (config/log/startedAt) — из
 `GET /api/agent/status`.
@@ -879,17 +1052,57 @@ data: {"type":"quote","data":{...}}
 Сервер: hub с буферизованными каналами (256), медленные клиенты отбрасываются, поддержка
 `r.Context().Done()`. Каждая SSE-запись выполняется с write-deadline (`http.ResponseController`,
 10 с): клиент, переставший читать, обрывается, а не блокирует горутину навсегда. CORS не нужен
-(same origin). `Cache-Control: no-store`.
+(same origin). `Cache-Control: no-store`. Токен проверяется как у остальных `/api/*`: браузер
+прямого доступа присылает cookie `terminal_token` (EventSource шлёт cookie сам), прокси плагина —
+заголовок `X-Terminal-Token`.
 
 ### 10.4 Безопасность
 
+Loopback-API доступен любому процессу на машине и любому сайту, открытому в браузере, поэтому
+`terminal/api/guard.go` ставит единый middleware `Guard` перед mux. Порядок проверок:
+
+1. **Host** — только loopback-имена: `127.0.0.1:*`, `localhost:*`, `[::1]:*` и всё, что
+   разрешено в `GuardConfig.AllowedHosts`; иначе 421 `forbidden_host`. Это закрывает
+   DNS-rebinding: страница со своего домена, резолвящегося в `127.0.0.1`, присылает свой `Host`.
+2. **Origin** — для небезопасных методов (не GET/HEAD) при наличии заголовка: принимается
+   собственный Origin запроса (`scheme://Host`) и значения из `-allowed-origins`; иначе 403
+   `forbidden_origin`. GET/HEAD не проверяются: безопасные методы не меняют состояние, а чтения
+   защищены токеном.
+3. **Content-Type** — при непустом теле (`ContentLength != 0`) требуется `application/json`
+   (параметры вроде `charset=utf-8` допускаются), иначе 415 `unsupported_media_type`. Это
+   закрывает CSRF через CORS «simple request»: `text/plain` и form-urlencoded уходят без
+   preflight. `DELETE /api/orders/{id}` без тела проходит.
+4. **Токен** — при заданном `TERMINAL_API_TOKEN` все `/api/*`, кроме `/api/health`, требуют токен:
+   заголовок `X-Terminal-Token` или cookie `terminal_token`, иначе 401 `unauthorized`. Cookie
+   ставится при отдаче `index.html` (`HttpOnly; SameSite=Strict; Path=/`), поэтому SPA и
+   `EventSource` прямого доступа работают без правок JS, а межсайтовые запросы cookie не несут.
+   Токен сравнивается в постоянном времени и не попадает в логи.
+   Тот же Guard оборачивает MCP-эндпоинт `/mcp` в `cmd/terminal/main.go` (`rootMux.Handle("/mcp",
+   api.Guard(guardCfg, mcp.NewServer(engine)))`): до JSON-RPC проверяются Host, Origin,
+   Content-Type и токен, поэтому внешние агенты не получают доступ к инструментам без токена.
+
+`GET /api/health` открыт (без токена): по нему плагин проверяет, что на порту его собственный
+бэкенд. Бэкенд, запущенный плагином, получает `TERMINAL_INSTANCE_ID` (nonce запуска) и отдаёт его
+в `health.instanceId`; плагин принимает бэкенд только при совпадении, иначе выставляет
+`phase=error` «порт занят чужим процессом» и не помечает бэкенд `reused`. Плагин также strip-ает
+из проксируемых запросов `cookie`, `authorization` и `x-dsh-*` (креды сессии Harness не должны
+попадать в Go-бэкенд), подставляет `X-Terminal-Token`, не отдаёт браузеру `Set-Cookie` бэкенда и
+сохраняет исходный `Host`, чтобы проверка Origin оставалась осмысленной.
+
+Граничный кейс — порт занят молчащим процессом, который не отвечает на `/api/health`: плагин не
+может отличить его от свободного порта и запускает свой бэкенд. Ребёнок падает с bind error
+(`address already in use`), обработчик завершения переводит панель в `phase=error` с текстом
+stderr; циклов перезапуска нет, ожидание ограничено `HEALTH_TIMEOUT_MS`.
+
 - Сервер слушает loopback по умолчанию; пустой host (`:8090`), `0.0.0.0` и `::` означают все
-  интерфейсы — для них печатается предупреждение (не запрещено, но API без аутентификации).
+  интерфейсы — для них печатается предупреждение. Если `TERMINAL_API_TOKEN` не задан, при старте
+  пишется предупреждение, что `/api/*` без токена (остаются Host/Origin/Content-Type).
 - Реальные заявки: разрешены только если `cfg.LiveTradingAllowed` **и** тело содержит
   `"confirm":"LIVE"`; иначе 403 `live_trading_disabled`. В итерации 1 live-ордера в API
   реализованы как заглушка с этим кодом (маршрутизация на биржу — roadmap), но UI обязан
   показывать статус «только бумага».
-- Никакой аутентификации в итерации 1 (loopback); в README явно указать запуск только локально.
+- Запускать сервер по-прежнему только локально: `-allowed-origins` не заменяет изоляцию и не
+  открывает API наружу.
 
 ## 11. Frontend (`terminal/web/`, без сборки)
 
@@ -941,7 +1154,9 @@ left rail `#23262b`, радиус панелей 8–10px, плотные таб
 `main` читает флаги/env → `feed.New` → `feed.Start` (live) → `paper.New` → `agent.New` (адаптеры:
 `feedAdapter`, `paperAdapter` в `cmd/terminal/wiring.go`) → `api.New` → `http.Server` с
 `ReadHeaderTimeout`, graceful shutdown по SIGINT/SIGTERM, лог одной строкой о режиме и URL без
-секретов. `BACKTEST`-функция для API: получает бары из feed, конвертирует в `backtest.Bar`,
+секретов. Guard собирается из `-allowed-origins`, env `TERMINAL_API_TOKEN` и
+`TERMINAL_INSTANCE_ID` и передаётся через `api.Config` (§10.4); значение токена не логируется.
+`BACKTEST`-функция для API: получает бары из feed, конвертирует в `backtest.Bar`,
 вызывает `backtest.Run`.
 
 **Отклонение (принято 2026-11-05):** HTTP `POST /api/backtest` **не** пишет результат в историю
@@ -949,6 +1164,17 @@ left rail `#23262b`, радиус панелей 8–10px, плотные таб
 агентом (чат/инструменты), а не ручные HTTP-запросы. Причина: у `Backtester`/`AgentAPI` нет
 контрактного метода записи, а смешивать «мои бэктесты» и «бэктесты агента» в одном списке без
 источника нельзя. Зафиксировано в комментарии `handlers.go`.
+
+**Фазы C–G (2026-11-06).** Wiring расширен: `main` монтирует `/mcp` под `api.Guard` в
+отдельном root-mux; `newBotRuntime` создаёт `bot.Manager` (feed — `BarStream`, paper-broker —
+`Broker`, engine — `Approver`), подключает JSONL-зеркало журнала
+`<TERMINAL_DATA_DIR>/bots/<id>.jsonl` и `engine.SetBotManager`; `chstoreFromEnv` собирает
+read-only ClickHouse-клиент из `MD_CLICKHOUSE_URL`/`CLICKHOUSE_URL` (+ `*_USER`/`*_PASSWORD`)
+для `get_news` (`newsStoreFromEnv`) и винтажных research-инструментов (`vintageStoreFromEnv`);
+рекордер `md.*` запускается отдельной командой `cmd/md-recorder`; паттерны пишутся в
+`<TERMINAL_DATA_DIR>/skills` (или `TERMINAL_SKILLS_DIR`), бэклог автоматизации —
+`docs/ai-terminal/automation-backlog.md`. Пакеты research/volatility/fingerprint/skills/
+automation импортируются агентом напрямую, без отдельных сервисов.
 
 ## 13. Проверки и демо-сценарий
 
@@ -960,13 +1186,21 @@ left rail `#23262b`, радиус панелей 8–10px, плотные таб
    за месяц» → tool-cards и equity; «запусти автоторговлю» → автономия в paper-replay, лог,
    PnL; отобразить equity/сделки на графике; портфель/заявки/история обновляются.
 4. `curl /api/instruments` — реальные цены; `curl -X POST /api/backtest` — реальная история.
+   Если задан `TERMINAL_API_TOKEN` (например, бэкенд запущен плагином), добавьте
+   `-H "X-Terminal-Token: $TERMINAL_API_TOKEN"`: `/api/*` кроме `/api/health` вернёт 401.
 5. Live read-only: `-mode live` с env биржи → те же UI-данные; реальная торговля выключена.
 6. Deep links демо (проверено): `/?view=ai`, `/?view=ai&ask=<urlencoded>`, `/?tab=analytics`,
    `/?symbol=TQBR:SBER` — детерминированные состояния UI для демонстрации и скриншотов.
 7. Проверки: `gofmt -l $(git ls-files '*.go')`, `go vet ./...`, `go build ./...`,
    `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...`, `CGO_ENABLED=0 GOOS=darwin
-   GOARCH=arm64 go build ./...`, `go test -race ./...`, `node --check` для JS, headless-Chrome
+   GOARCH=arm64 go build ./...`, `go test -race ./...`, `node --check` для JS,
+   `node --test dsh-ai-terminal/test/` (тесты Host-половины плагина), headless-Chrome
    скриншоты 1680×1050 (Lead).
+8. Docs-sync (2026-11-06): `git diff --check`; проверка локальных ссылок в `docs/ai-terminal/*.md`
+   и `skills/README.md`; сверка каталога инструментов с `terminal/agent/tools*.go` и REST-таблицы
+   §10.1 с `terminal/api/api.go`; `go test ./skills` (frontmatter переносимых навыков) и
+   `node --test dsh-ai-terminal/test/`. Живые ресурсы (демо-сервер, ClickHouse, браузер) — не
+   использовались, статус **I**.
 
 ## 14. Роли и границы (RTC)
 
@@ -980,3 +1214,220 @@ left rail `#23262b`, радиус панелей 8–10px, плотные таб
 
 Коммиты делает только Lead после проверок и отчёта владельца. Тесты не ходят в сеть и не требуют
 секретов. `go.mod` не меняется. Teammates не подключаются к демо-серверу и не запускают live-торговлю.
+
+## 15. Пакеты фаз C–G (данные, исследования, автоматизация, боты)
+
+> Обновление docs-sync 2026-11-06. Контракты §1–§14 итерации 1 не менялись; ниже — новые пакеты
+> ветки `plan/ai-terminal-a`. Детали и статусы фактов — [`data.md`](data.md),
+> [`research.md`](research.md), [`fingerprint.md`](fingerprint.md),
+> [`dsh-integration.md`](dsh-integration.md), [`automation-backlog.md`](automation-backlog.md).
+> Все пакеты — чистый Go (stdlib, без драйверов и новых зависимостей), `go.mod` не менялся;
+> живые проверки (демо-сервер, ClickHouse, живой DSH) не выполнялись — статус **I**.
+
+### 15.1 `terminal/chstore` — HTTP-клиент ClickHouse (Phase D)
+
+Минимальный клиент для рекордера и винтажных витрин: JSONEachRow вставки и запросы через
+`net/http`, без драйвера. Креды идут в заголовках `X-ClickHouse-User`/`X-ClickHouse-Key` и не
+попадают ни в URL, ни в логи; `Error` содержит статус и ограниченный фрагмент ответа сервера.
+
+```go
+func New(baseURL, user, password string, hc *http.Client) *Client // nil hc = defaultTimeout
+func (c *Client) Exec(ctx context.Context, sql string) error
+func (c *Client) Insert(ctx context.Context, table string, rows any) error // батчи ≤ 10 000
+func (c *Client) Query(ctx context.Context, sql string, params map[string]string, dst any) error
+```
+
+Конфигурация терминала: `MD_CLICKHOUSE_URL`/`CLICKHOUSE_URL` (+ `*_USER`/`*_PASSWORD`), пустой
+endpoint = ClickHouse не настроен и research-данные недоступны, остальной терминал работает.
+
+### 15.2 `terminal/recorder` + `cmd/md-recorder` (Phase D)
+
+Рекордер живого стакана, сделок и новостей в базу `md`: таблицы `md.book_events`, `md.trades`,
+`md.news`; схема версионируется в коде (`Schema`, `EnsureSchema`). Поток: `native.Client` →
+батчи → `Sink` (ClickHouse или тестовый); ошибка sink останавливает стрим, потому что потерянная
+вставка — это дыра в данных. Отдельная команда `cmd/md-recorder` пишет без агента и терминала.
+
+```go
+const Database = "md"
+func Schema() []string
+func EnsureSchema(ctx context.Context, cl *chstore.Client) error
+func Run(ctx context.Context, cl *native.Client, sink Sink, symbols []string) error
+type Sink interface { Book([]BookEvent) error; Trades([]TradeEvent) error; News([]NewsEvent) error }
+```
+
+### 15.3 `terminal/vintage` — point-in-time слой (Phase D)
+
+Винтажные макроданные, календарь релизов и аннотированные новости из read-only витрин проекта
+`clickhouse-import-rosstat` через `terminal/chstore`; все моменты нормализуются в UTC.
+`AsOf` возвращает ряд строго на момент `asOf` тремя источниками по очереди:
+`v_point_in_time_asof` → join `macro_series × series_publication` → последние известные значения
+(флаг `VintageLatestOnly`, предупреждение `LatestOnlyWarning`).
+
+```go
+type Store interface {
+    AsOf(ctx context.Context, series string, asOf time.Time) ([]Point, error)
+    Releases(ctx context.Context, from, to time.Time, categories ...string) ([]Release, error)
+    News(ctx context.Context, from, to time.Time, sources ...string) ([]NewsItem, error)
+}
+func New(client *chstore.Client) *ClickHouseStore
+```
+
+`Release{At, Category, Title, Country, Exact}` — релиз (МСК → UTC, `Exact=false` для дат без
+времени); `NewsItem{At, Source, Title, Sentiment, Tags}` — новость с LLM-аннотацией
+(`Sentiment=0` и пустые `Tags` значат «не аннотирована», а не «нейтральна»).
+
+### 15.4 `terminal/lobreplay` — replay записанного стакана (Phase D)
+
+Событийный replay строк рекордера (`snapshot`/`delta`/`trade`, JSONL-источник) через модель стакана
+`Book`; стратегии исполнения видят только видимую ликвидность и оставляют лимитные заявки
+работать. Результат — `backtest.Metrics` + equity + fills + round trips + предупреждения о
+разрывах записи (`Cancelled`, `UnfilledQty`). Используется инструментом `lob_backtest`.
+
+```go
+func Run(ctx context.Context, src Source, s Strategy, fm FillModel) (Result, error)
+type Result struct { Metrics backtest.Metrics; Equity []backtest.EquityPoint; Fills []Fill
+    RoundTrips []RoundTrip; Warnings []string; Events, Orders, Filled, Open, Cancelled int; UnfilledQty int64 }
+```
+
+### 15.5 `terminal/research` — walk-forward, DSR/PBO, batch (Phase E/G)
+
+Research-слой поверх замороженного движка `terminal/backtest`; история приходит через
+`HistoryFunc` (в wiring — `agent.DataSource.History`), поэтому пакет не знает про feed.
+`WalkForward` параллельно (≤ GOMAXPROCS) перебирает фолды: train-окно выбирает параметры grid по
+in-sample Sharpe, следующее test-окно считается out-of-sample; результат агрегирует OOS/IS-метрики,
+`DeflatedSharpe` (Bailey–López de Prado) и `PBO` (CSCV). `Batch` сравнивает несколько тикеров с
+buy & hold и присваивает каждой строке стабильный `BacktestID` (symbol, strategy/Rules hash,
+стоимость, закрытое окно данных) — по нему бот воспроизводит бэктест. `EventWindows` исключает
+окна релизов (± `ExcludeEventWindow`).
+
+```go
+func WalkForward(ctx context.Context, req WalkForwardRequest) (WalkForwardResult, error)
+func Batch(ctx context.Context, hist HistoryFunc, req BatchRequest) ([]BatchRow, error)
+func BatchDetailed(ctx context.Context, hist HistoryFunc, req BatchRequest) ([]BatchDetail, error)
+func DeflatedSharpe(bestSharpe float64, trials, observations int, skewness, kurtosis float64) float64
+func PBO(trialReturns [][]float64, blocks int) float64
+```
+
+### 15.6 `terminal/volatility` — оракул волатильности (Phase E)
+
+HAR-RV OLS по логарифмической дневной реализованной дисперсии (5-м/15-м бары) с регрессорами
+недели/месяца, dummy-окнами релизов ±2ч и экспоненциально затухающей news-intensity (τ=24ч,
+lookback 72ч). `Fit` строго point-in-time: только полные торговые дни, закончившиеся до `asOf`.
+`Forecast` не смотрит в будущее и объясняет драйверы (`release:cbr_rate`, `news:intensity`,
+`har:daily|weekly|monthly`); `QLIKE` — out-of-sample оценка качества. Режимы:
+`calm ≤0.85`, `normal`, `event ≥1.3`, `stress ≥2.0` множителя дисперсии к HAR-базе.
+
+```go
+func Fit(ctx context.Context, bars []backtest.Bar, releases []vintage.Release, news []vintage.NewsItem, asOf time.Time) (*Model, error)
+func (m *Model) Forecast(at time.Time, horizon time.Duration, upcoming []vintage.Release, recentNews []vintage.NewsItem) Forecast
+func (m *Model) QLIKE(bars []backtest.Bar, releases []vintage.Release, news []vintage.NewsItem, from, to time.Time) (float64, int)
+```
+
+`Forecast{Symbol, At, Horizon, SigmaPct, Multiplier, Drivers, Regime}` — контракт инструментов
+`vol_forecast`/`vol_events` и оверлея на графике (`terminal/web/chart.js`, `setVolatility`).
+
+### 15.7 `terminal/fingerprint` — отпечатки исполнения (Phase E)
+
+Детекторы паттернов исполнения и маржинальных ликвидаций по событиям стакана: TWAP/VWAP/iceberg/
+stop-run/margin-call; `Footprint{Kind, Symbol, Side, From, To, Confidence, Evidence}` с
+человекочитаемым evidence. `Synthesize` строит синтетический поток для тестов, `DefaultConfig` —
+пороги по умолчанию. Инструмент `detect_execution_algos` + артефакт `execution_algos`;
+`skills.MarketContext` добавляет отпечатки в контекст SKILL-паттерна.
+
+```go
+func Detect(ctx context.Context, events []lobreplay.Event, cfg Config) []Footprint
+func Synthesize(kind string, base []lobreplay.Event, params map[string]float64, seed int64) []lobreplay.Event
+```
+
+### 15.8 `terminal/automation` — стоимость токенов и бэклог автоматизации (Phase F)
+
+`Ledger` учитывает вызовы инструментов и токены LLM по диалогам; `Hotspots` находит повторяющиеся
+последовательности (дедуп вложенных), `ProposeFromHotspots` превращает их в детерминированные
+`AutomationTask` с мини-планом; `WriteBacklog` мержит задачи в
+`docs/ai-terminal/automation-backlog.md` по id, не теряя ручные статусы. Инструмент
+`propose_automation`, артефакт `automation_backlog`.
+
+```go
+type Ledger struct { ... }
+func New() *Ledger
+func (l *Ledger) Record(conv string, call ToolCall, promptTokens, completionTokens int)
+func (l *Ledger) Hotspots(minCalls int) []Hotspot
+func ProposeFromHotspots(hotspots []Hotspot, minTokens int) []AutomationTask
+func WriteBacklog(path string, tasks []AutomationTask) error
+```
+
+### 15.9 `terminal/skills` — SKILL-паттерны и promotion (Phase F)
+
+Черновик навыка из результата исследования и продвижение только по доказательствам:
+`Pattern{ID,Title,Hypothesis,Instruments,Conditions,Entry,Exit,Risk,Evidence,Status,CreatedAt}`,
+`Evidence{DataFrom,DataTo,AsOf,Source,OOS backtest.Metrics,DeflatedSharpe,PBO,Trials,OOSTrades,DataHash}`,
+`Source: bars|lob`. `WriteDraft` пишет `<dir>/<id>/SKILL.md` с Harness-frontmatter
+(`name/description/whenToUse/metadata.status/metadata.evidence`), `List` читает каталог,
+`Promote` переводит `draft → validated` по политике (30 OOS-сделок, deflated Sharpe ≥0.95,
+PBO ≤0.3, OOS-окно ≥3 мес, dataHash, source) и не меняет статус при отказе. `EvidenceFromWalkForward`/
+`EvidenceFromLOB` конвертируют результаты research/lobreplay; `MarketContext` — контекст оракула и
+отпечатков. `validated` делает навык видимым агенту, но **не включает live**; в репозиторий паттерн
+попадает только через PR человека.
+
+```go
+func WriteDraft(dir string, p Pattern) (path string, err error)
+func Promote(p *Pattern, policy PromotionPolicy) error
+func List(dir string) ([]Summary, error)
+func DefaultPromotionPolicy() PromotionPolicy
+```
+
+### 15.10 `terminal/bot` — рантайм rule-ботов (Phase G)
+
+Бэктест `rules.Spec` становится ботом со стадиями `check → dry_run → paper` (live отключён):
+`CreateFromBacktest`, `Check` (детерминированный расчёт по последним закрытым барам), `Start`
+(подписка на закрытые свечи feed), `Promote` (только через proposal человека), `Stop`/`StopAll`
+(kill-switch). Сигнал считается только на закрытом баре; paper-исполнение — через `paper.Broker` на
+счёте `bot:<id>` (бюджет `SetBudget`, по умолчанию 100 000 ₽); журнал — кольцевой + JSONL-зеркало
+`<TERMINAL_DATA_DIR>/bots/<id>.jsonl`. События `BotEvent{BotID, JournalEntry}` уходят в SSE `bot`.
+
+```go
+func NewManager(feed BarStream, broker Broker, approver Approver, now func() time.Time) *Manager
+func (m *Manager) CreateFromBacktest(res backtest.Result, spec rules.Spec, qty int64) (Bot, error)
+func (m *Manager) Check(ctx context.Context, id string) (JournalEntry, error)
+func (m *Manager) Promote(id string, to Stage) (proposalID string, err error)
+func (m *Manager) Start(ctx context.Context, id string, stage Stage) error
+func (m *Manager) Subscribe(fn func(BotEvent)) (cancel func())
+```
+
+REST — §10.1 (`/api/bots…`), SSE — §10.3 (`bot`). Журнал kinds: `closed_bar`, `signal`,
+`risk_check`, `order`, `fill`, `reconnect`, `error`, `stage`. Мутации — через proposals (§9.5).
+
+### 15.11 `terminal/mcp` — MCP-эндпоинт (Phase C)
+
+Streamable-HTTP MCP-сервер поверх того же каталога инструментов: JSON-RPC 2.0 over POST,
+`initialize` (эхо протокольной ревизии), `tools/list`, `tools/call` (результат — MCP text content,
+ошибка инструмента = успешный `tools/call` с error-текстом), пустые `notifications/*`; GET → 405.
+Endpoint монтируется в `cmd/terminal/main.go` под `api.Guard`; внешние клиенты (Claude Code и
+другие) работают с тем же токеном, что UI/DSH-плагин.
+
+```go
+func NewServer(invoker ToolInvoker) http.Handler
+type ToolInvoker interface {
+    Tools() []agent.ToolInfo
+    Invoke(ctx context.Context, name string, args map[string]any) (agent.ToolCall, *agent.Artifact)
+}
+```
+
+### 15.12 DSH-плагин (фазы C/F): LLM, навыки, MCP и ночные исследования
+
+`dsh-ai-terminal` (отдельный Host-плагин, см. [`dsh-integration.md`](dsh-integration.md)) отдаёт
+терминалу единый LLM Harness (`ctx.llm.stream`), дерегистрирует навыки из `skills/` и
+`<dataDir>/skills` (сгенерированные паттерны — только `validated`), публикует MCP-эндпоинт
+`/mcp` и клиентские панели бота/графика. Фаза F добавила планировщик автономных research-прогонов
+с бюджетом токенов (`dsh-ai-terminal/autonomy.js`, `workflows/nightly-research.js`): ночной цикл
+walk-forward/батчей, ledger стоимости и предложения автоматизации. Live-прогоны в DSH не
+выполнялись (**I**).
+
+### 15.13 Сквозные ограничения фаз C–G
+
+- Секреты: токен терминала (`TERMINAL_API_TOKEN`) и креды TRANSAQ (`TC_LOGIN`/`TC_PASSWORD`) —
+  только в `.env`, никогда в SKILL/логах/коммитах; MCP/API защищены Guard-ом (§10.4).
+- Реальные заявки и live-стадия ботов недоступны (paper-only); `validated`-паттерн не включает live.
+- Живые проверки не выполнялись: демо-сервер TRANSAQ, ClickHouse-витрины vintage, запись
+  `md.*`, живой DSH/браузер, `npx skills add` в чистом Claude Code/Cursor — статус **I** (T25 Step 5).
+- `go.mod` не менялся; все новые пакеты — stdlib; тесты не ходят в сеть и не требуют секретов.

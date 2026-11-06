@@ -18,6 +18,7 @@ import (
 
 	"github.com/kmlebedev/txmlconnector/terminal/agent"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
+	"github.com/kmlebedev/txmlconnector/terminal/bot"
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
 	"github.com/kmlebedev/txmlconnector/terminal/paper"
 )
@@ -29,6 +30,15 @@ type Config struct {
 	PaperInitialCash   float64
 	SeedGeneratedAt    time.Time
 	Web                fs.FS // SPA root; nil disables static files
+	// Guard protects the loopback API from cross-origin and DNS-rebinding
+	// requests (plan Task 1). The zero value allows loopback Hosts, same-origin
+	// unsafe requests and JSON bodies, and requires no token.
+	Guard GuardConfig
+	// InstanceID is the per-launch nonce of the DSH plugin
+	// (TERMINAL_INSTANCE_ID). The plugin accepts the backend on the port only
+	// when /api/health reports this value, so a foreign process on the port is
+	// never trusted (R10).
+	InstanceID string
 }
 
 // FeedAPI is the market-data interface the handlers use (implemented by
@@ -64,6 +74,11 @@ type AgentAPI interface {
 	Backtests() []backtest.Result
 	Hints(ctx context.Context, symbol string, periodSec int) (agent.MarketHints, error)
 	Tools() []agent.ToolInfo
+	// Proposals/Approve/Reject are the human-in-the-loop approval surface of
+	// the mutating agent tools (R5).
+	Proposals() []agent.Proposal
+	Approve(ctx context.Context, id string) (agent.ToolCall, error)
+	Reject(id string) error
 }
 
 // Deps are the backend dependencies of the HTTP layer.
@@ -72,6 +87,9 @@ type Deps struct {
 	Paper    PaperAPI
 	Agent    AgentAPI
 	Backtest func(backtest.Request) (backtest.Result, error) // HTTP backtest runner
+	// Bots is the rule-bot runtime (plan Task 22); nil disables /api/bots and
+	// the SSE "bot" events.
+	Bots *bot.Manager
 }
 
 // Server is the HTTP API server. It owns the SSE hub and the background event
@@ -127,6 +145,7 @@ const (
 	codeUnavailable         = "unavailable"
 	codeLiveTradingDisabled = "live_trading_disabled"
 	codeNotImplemented      = "not_implemented"
+	codeProposalExpired     = "proposal_expired"
 	codeInternal            = "internal"
 )
 
@@ -160,19 +179,21 @@ func (s *Server) Close() {
 
 // Handler returns the HTTP handler of the API (REST + SSE + SPA). The first
 // call starts the background event loop, so tests may adjust the publishing
-// intervals before serving.
+// intervals before serving. The mux is wrapped in Guard: no request reaches a
+// handler before the Host, Origin, Content-Type and token checks pass.
 func (s *Server) Handler() http.Handler {
 	s.startOnce.Do(func() {
 		s.wg.Add(1)
 		go s.eventLoop()
 	})
+	guarded := Guard(s.cfg.Guard, s.mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				writeError(w, http.StatusInternalServerError, codeInternal, "внутренняя ошибка сервера")
 			}
 		}()
-		s.mux.ServeHTTP(w, r)
+		guarded.ServeHTTP(w, r)
 	})
 }
 
@@ -193,11 +214,23 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/backtest/strategies", s.handleStrategies)
 	mux.HandleFunc("POST /api/backtest", s.handleBacktest)
 	mux.HandleFunc("GET /api/agent/tools", s.handleAgentTools)
+	mux.HandleFunc("POST /api/agent/tools/{name}/invoke", s.handleInvokeTool)
 	mux.HandleFunc("POST /api/agent/chat", s.handleAgentChat)
 	mux.HandleFunc("GET /api/agent/status", s.handleAgentStatus)
 	mux.HandleFunc("POST /api/agent/autonomy", s.handleAutonomy)
 	mux.HandleFunc("GET /api/agent/autonomy/log", s.handleAutonomyLog)
 	mux.HandleFunc("GET /api/agent/backtests", s.handleAgentBacktests)
+	mux.HandleFunc("GET /api/agent/proposals", s.handleAgentProposals)
+	mux.HandleFunc("POST /api/agent/proposals/{id}/approve", s.handleApproveProposal)
+	mux.HandleFunc("POST /api/agent/proposals/{id}/reject", s.handleRejectProposal)
+	mux.HandleFunc("GET /api/bots", s.handleBots)
+	mux.HandleFunc("POST /api/bots", s.handleCreateBot)
+	mux.HandleFunc("POST /api/bots/stop-all", s.handleStopAllBots)
+	mux.HandleFunc("POST /api/bots/{id}/check", s.handleCheckBot)
+	mux.HandleFunc("POST /api/bots/{id}/start", s.handleStartBot)
+	mux.HandleFunc("POST /api/bots/{id}/promote", s.handlePromoteBot)
+	mux.HandleFunc("POST /api/bots/{id}/stop", s.handleStopBot)
+	mux.HandleFunc("GET /api/bots/{id}/journal", s.handleBotJournal)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("/api/", s.handleAPINotFound)
 	mux.HandleFunc("/", s.handleSPA)
@@ -248,8 +281,15 @@ func writeUnavailable(w http.ResponseWriter, message string) {
 	writeError(w, http.StatusServiceUnavailable, codeUnavailable, message)
 }
 
-// decodeBody decodes a bounded JSON request body into dst.
+// decodeBody decodes a bounded JSON request body into dst. Guard already
+// rejects a non-JSON body; the check stays here as a second line of defence
+// for handlers exercised without the middleware.
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if r.ContentLength != 0 && !isJSONContentType(r) {
+		writeError(w, http.StatusUnsupportedMediaType, codeUnsupportedMediaType,
+			"тело запроса должно быть application/json")
+		return false
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(dst); err != nil {
@@ -380,6 +420,9 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	// A browser that opens the backend directly gets its API token with the
+	// SPA entry point; the plugin path uses the X-Terminal-Token header instead.
+	setTerminalTokenCookie(w, s.cfg.Guard.Token)
 	http.ServeFileFS(w, r, s.cfg.Web, "index.html")
 }
 

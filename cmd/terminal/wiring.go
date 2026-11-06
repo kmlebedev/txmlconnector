@@ -11,8 +11,11 @@ import (
 
 	"github.com/kmlebedev/txmlconnector/terminal/agent"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
+	"github.com/kmlebedev/txmlconnector/terminal/bot"
+	"github.com/kmlebedev/txmlconnector/terminal/chstore"
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
 	"github.com/kmlebedev/txmlconnector/terminal/paper"
+	"github.com/kmlebedev/txmlconnector/terminal/vintage"
 )
 
 // marketSource is the market-data view the adapters need (implemented by
@@ -28,6 +31,8 @@ type marketSource interface {
 // *paper.Broker).
 type brokerSource interface {
 	Place(req paper.OrderRequest, q paper.QuoteView) (paper.Order, error)
+	PlaceAt(req paper.OrderRequest, fill paper.QuoteView, at time.Time, account string) (paper.Order, error)
+	Allocate(account string, amount float64) error
 	Cancel(id string) (paper.Order, error)
 	Snapshot() paper.Snapshot
 }
@@ -37,10 +42,33 @@ type feedAdapter struct {
 	market marketSource
 }
 
+// botDataDirEnv is the environment variable of the bot journal directory: each
+// bot journal is mirrored to <dir>/bots/<id>.jsonl (plan Task 22).
+const botDataDirEnv = "TERMINAL_DATA_DIR"
+
+// newBotRuntime creates the rule-bot runtime of the terminal and attaches it to
+// the agent engine: the feed serves the live closed candles (bot.BarStream), the
+// paper broker executes the bot fills (bot.Broker) and the engine is the human
+// approval proposer (bot.Approver, R5).
+func newBotRuntime(feedSvc *feed.Service, broker *paper.Broker, engine *agent.Engine) (*bot.Manager, error) {
+	manager := bot.NewManager(feedSvc, broker, engine, time.Now)
+	if dir := strings.TrimSpace(os.Getenv(botDataDirEnv)); dir != "" {
+		if err := manager.SetJournalDir(dir); err != nil {
+			return nil, fmt.Errorf("каталог журналов ботов: %w", err)
+		}
+	}
+	engine.SetBotManager(manager)
+	return manager, nil
+}
+
 // Compile-time contract checks.
 var (
 	_ agent.DataSource = (*feedAdapter)(nil)
 	_ agent.Broker     = (*paperAdapter)(nil)
+	// The rule-bot runtime consumes the feed, the paper broker and the engine.
+	_ bot.BarStream = (*feed.Service)(nil)
+	_ bot.Broker    = (*paper.Broker)(nil)
+	_ bot.Approver  = (*agent.Engine)(nil)
 )
 
 // newFeedAdapter wraps the market feed as the agent data source.
@@ -129,19 +157,26 @@ func newPaperAdapter(broker brokerSource, market marketSource) *paperAdapter {
 	return &paperAdapter{broker: broker, market: market}
 }
 
-// Place executes one paper order for the agent.
-func (a *paperAdapter) Place(order agent.PlaceOrder) (agent.OrderView, error) {
+// paperOrderRequest maps the agent order view to the paper broker request.
+func paperOrderRequest(order agent.PlaceOrder) paper.OrderRequest {
 	req := paper.OrderRequest{
-		Symbol: order.Symbol,
-		Side:   paper.Side(order.Side),
-		Qty:    order.Qty,
-		Type:   paper.OrderType(order.Type),
-		Price:  order.Price,
-		Source: "agent",
+		Symbol:        order.Symbol,
+		Side:          paper.Side(order.Side),
+		Qty:           order.Qty,
+		Type:          paper.OrderType(order.Type),
+		Price:         order.Price,
+		Source:        "agent",
+		ClientOrderID: order.ClientOrderID,
 	}
 	if req.Type == "" {
 		req.Type = paper.Market
 	}
+	return req
+}
+
+// Place executes one paper order for the agent on the main account.
+func (a *paperAdapter) Place(order agent.PlaceOrder) (agent.OrderView, error) {
+	req := paperOrderRequest(order)
 	view := paper.QuoteView{Symbol: order.Symbol}
 	if quote, ok := a.market.Quote(order.Symbol); ok {
 		view.Last, view.Bid, view.Ask, view.Time = quote.Last, quote.Bid, quote.Ask, quote.Time
@@ -151,6 +186,28 @@ func (a *paperAdapter) Place(order agent.PlaceOrder) (agent.OrderView, error) {
 		return agent.OrderView{}, err
 	}
 	return orderView(placed), nil
+}
+
+// PlaceAt executes one replay order through the paper broker on the named
+// account: the fill quote is the historical bar price, not the live market.
+func (a *paperAdapter) PlaceAt(order agent.PlaceOrder, fill agent.Quote, at time.Time, account string) (agent.OrderView, error) {
+	req := paperOrderRequest(order)
+	placed, err := a.broker.PlaceAt(req, paper.QuoteView{
+		Symbol: order.Symbol,
+		Last:   fill.Last,
+		Bid:    fill.Bid,
+		Ask:    fill.Ask,
+		Time:   at,
+	}, at, account)
+	if err != nil {
+		return agent.OrderView{}, err
+	}
+	return orderView(placed), nil
+}
+
+// Allocate transfers the autonomy budget from the main paper account.
+func (a *paperAdapter) Allocate(account string, amount float64) error {
+	return a.broker.Allocate(account, amount)
 }
 
 // Cancel cancels a resting paper order.
@@ -209,7 +266,45 @@ func (a *paperAdapter) Portfolio() agent.PortfolioView {
 	if base := total - dayChange; base != 0 {
 		view.DayChangePct = dayChange / base * 100
 	}
+	view.Accounts = paperAccounts(snapshot, a.market)
 	return view
+}
+
+// paperAccounts maps the paper per-account snapshot to the agent account views,
+// marking the autonomy positions to the current market quotes.
+func paperAccounts(snapshot paper.Snapshot, market marketSource) map[string]agent.AccountView {
+	if len(snapshot.Accounts) == 0 {
+		return nil
+	}
+	out := make(map[string]agent.AccountView, len(snapshot.Accounts))
+	for name, acc := range snapshot.Accounts {
+		item := agent.AccountView{
+			Cash:        acc.Cash,
+			RealizedPnL: acc.RealizedPnL,
+			Orders:      len(acc.Orders),
+			Trades:      len(acc.Trades),
+		}
+		total := acc.Cash
+		for _, pos := range acc.Positions {
+			price := pos.AvgPrice
+			if quote, ok := market.Quote(pos.Symbol); ok && quote.Last > 0 {
+				price = quote.Last
+			}
+			value := price * float64(pos.Qty)
+			total += value
+			item.Positions = append(item.Positions, agent.PositionView{
+				Symbol:   pos.Symbol,
+				Qty:      pos.Qty,
+				AvgPrice: pos.AvgPrice,
+				Price:    price,
+				Value:    value,
+				Profit:   (price - pos.AvgPrice) * float64(pos.Qty),
+			})
+		}
+		item.TotalValue = total
+		out[name] = item
+	}
+	return out
 }
 
 // Cash returns the free paper cash.
@@ -291,6 +386,45 @@ func resolveMode(flagMode string, cfg exchangeConfig) (feed.Mode, error) {
 	default:
 		return "", fmt.Errorf("неизвестный режим %q: ожидается auto, offline или live", flagMode)
 	}
+}
+
+// chstoreFromEnv builds the read-only ClickHouse client of the research data
+// (the md.news recording and the point-in-time vintage views). The endpoint
+// comes from MD_CLICKHOUSE_URL or CLICKHOUSE_URL (the MD_* variables win, they
+// are the recorder naming); a nil client means "no ClickHouse configured": the
+// terminal keeps working offline and only the research data is unavailable.
+func chstoreFromEnv() *chstore.Client {
+	rawURL := firstNonEmpty(os.Getenv("MD_CLICKHOUSE_URL"), os.Getenv("CLICKHOUSE_URL"))
+	if rawURL == "" {
+		return nil
+	}
+	user := firstNonEmpty(os.Getenv("MD_CLICKHOUSE_USER"), os.Getenv("CLICKHOUSE_USER"))
+	password := firstNonEmpty(os.Getenv("MD_CLICKHOUSE_PASSWORD"), os.Getenv("CLICKHOUSE_PASSWORD"))
+	return chstore.New(rawURL, user, password, nil)
+}
+
+// newsStoreFromEnv builds the optional recorded-news source of the agent: the
+// md.news table written by cmd/md-recorder. Without an endpoint the get_news
+// tool reports that the recording pipeline is off instead of failing the whole
+// terminal.
+func newsStoreFromEnv() agent.NewsStore {
+	client := chstoreFromEnv()
+	if client == nil {
+		return nil
+	}
+	return agent.NewClickHouseNewsStore(client)
+}
+
+// vintageStoreFromEnv builds the point-in-time store of the research tasks
+// (macro vintages, release calendar and annotated news) over the same read-only
+// ClickHouse client. It is consumed by the research tasks of plan phases E–F;
+// the command wires the configuration here so the env is read in one place.
+func vintageStoreFromEnv() vintage.Store {
+	client := chstoreFromEnv()
+	if client == nil {
+		return nil
+	}
+	return vintage.New(client)
 }
 
 // llmConfigFromEnv builds the OpenAI-compatible LLM config from TERMINAL_LLM_*.

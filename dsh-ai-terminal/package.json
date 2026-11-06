@@ -13,6 +13,9 @@
   "files": [
     "index.js",
     "client.js",
+    "tools.js",
+    "skills.js",
+    "llm-bridge.js",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
@@ -25,7 +28,10 @@
       "immediately": true,
       "inject": [
         "@deepseek-ai/dsh-client-ui-layout",
-        "@deepseek-ai/dsh-client-ui-sidebar"
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-chat"
       ]
     }
   }

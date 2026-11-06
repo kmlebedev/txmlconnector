@@ -2,13 +2,17 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kmlebedev/txmlconnector/terminal/agent"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
+	"github.com/kmlebedev/txmlconnector/terminal/backtest/rules"
+	"github.com/kmlebedev/txmlconnector/terminal/bot"
 	"github.com/kmlebedev/txmlconnector/terminal/feed"
 	"github.com/kmlebedev/txmlconnector/terminal/paper"
 )
@@ -25,6 +29,7 @@ type healthResponse struct {
 	ServerTime      time.Time     `json:"serverTime"`
 	ExchangeTZ      string        `json:"exchangeTZ"`
 	SeedGeneratedAt time.Time     `json:"seedGeneratedAt"`
+	InstanceID      string        `json:"instanceId"`
 	LLM             llmStatusDTO  `json:"llm"`
 	Trading         tradingStatus `json:"trading"`
 }
@@ -206,6 +211,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		ServerTime:      utc(st.ServerTime),
 		ExchangeTZ:      st.ExchangeTZ,
 		SeedGeneratedAt: utc(st.SeedGeneratedAt),
+		InstanceID:      s.cfg.InstanceID,
 		LLM:             llmStatusDTO{Enabled: ast.LLM.Enabled, Model: ast.LLM.Model, Note: ast.LLM.Note},
 		Trading:         tradingStatus{Paper: true, Live: s.cfg.LiveTradingAllowed},
 	}
@@ -800,6 +806,375 @@ func (s *Server) handleAgentBacktests(w http.ResponseWriter, r *http.Request) {
 		results = []backtest.Result{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+// --- agent proposals (R5) --------------------------------------------------
+
+// handleAgentProposals serves GET /api/agent/proposals.
+func (s *Server) handleAgentProposals(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Agent == nil {
+		writeUnavailable(w, "AI-агент недоступен")
+		return
+	}
+	proposals := s.deps.Agent.Proposals()
+	if proposals == nil {
+		proposals = []agent.Proposal{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"proposals": proposals})
+}
+
+// proposalResponse is the reply of one proposal mutation.
+type proposalResponse struct {
+	Proposal agent.Proposal  `json:"proposal"`
+	Result   *agent.ToolCall `json:"result,omitempty"`
+}
+
+// handleApproveProposal serves POST /api/agent/proposals/{id}/approve: the
+// approved tool call executes exactly once and its result is returned.
+func (s *Server) handleApproveProposal(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Agent == nil {
+		writeUnavailable(w, "AI-агент недоступен")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	ctx, cancel := requestContext(r, agentRequestTimeout)
+	defer cancel()
+	call, err := s.deps.Agent.Approve(ctx, id)
+	if err != nil {
+		s.mapProposalError(w, err)
+		return
+	}
+	proposal, ok := findProposal(s.deps.Agent.Proposals(), id)
+	if !ok {
+		writeInternal(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, proposalResponse{Proposal: proposal, Result: &call})
+}
+
+// handleRejectProposal serves POST /api/agent/proposals/{id}/reject.
+func (s *Server) handleRejectProposal(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Agent == nil {
+		writeUnavailable(w, "AI-агент недоступен")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if err := s.deps.Agent.Reject(id); err != nil {
+		s.mapProposalError(w, err)
+		return
+	}
+	proposal, ok := findProposal(s.deps.Agent.Proposals(), id)
+	if !ok {
+		writeInternal(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, proposalResponse{Proposal: proposal})
+}
+
+// findProposal returns the proposal with the given id from a snapshot.
+func findProposal(proposals []agent.Proposal, id string) (agent.Proposal, bool) {
+	for _, proposal := range proposals {
+		if proposal.ID == id {
+			return proposal, true
+		}
+	}
+	return agent.Proposal{}, false
+}
+
+// mapProposalError maps the approval lifecycle sentinels to the API codes of
+// §10: unknown -> 404, already handled -> 409, expired -> 410 gone.
+func (s *Server) mapProposalError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, agent.ErrProposalNotFound):
+		writeError(w, http.StatusNotFound, codeNotFound, "предложение не найдено")
+	case errors.Is(err, agent.ErrProposalHandled):
+		writeError(w, http.StatusConflict, codeConflict, "предложение уже обработано")
+	case errors.Is(err, agent.ErrProposalExpired):
+		writeError(w, http.StatusGone, codeProposalExpired, "срок подтверждения предложения истёк")
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "превышено время ожидания ответа")
+	default:
+		writeInternal(w)
+	}
+}
+
+// --- rule bots (plan Task 22) ---------------------------------------------
+
+// botCreateRequest is the POST /api/bots body: the declarative spec is
+// backtested on the terminal feed and becomes a rule bot in the check stage.
+type botCreateRequest struct {
+	Symbol      string          `json:"symbol"`
+	PeriodSec   int             `json:"periodSec"`
+	Rules       json.RawMessage `json:"rules"`
+	Qty         int64           `json:"qty"`
+	InitialCash float64         `json:"initialCash,omitempty"`
+}
+
+// handleBots serves GET /api/bots.
+func (s *Server) handleBots(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Bots == nil {
+		writeUnavailable(w, "рантайм ботов недоступен")
+		return
+	}
+	bots := s.deps.Bots.Bots()
+	if bots == nil {
+		bots = []bot.Bot{}
+	}
+	out := make([]bot.Bot, len(bots))
+	for i, item := range bots {
+		out[i] = normalizeBot(item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"bots": out})
+}
+
+// handleCreateBot serves POST /api/bots: backtest the rules.Spec and create the
+// bot in the check stage.
+func (s *Server) handleCreateBot(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Bots == nil {
+		writeUnavailable(w, "рантайм ботов недоступен")
+		return
+	}
+	var req botCreateRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Symbol) == "" || req.PeriodSec <= 0 || req.Qty <= 0 || len(req.Rules) == 0 {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "нужны symbol, periodSec, qty и rules")
+		return
+	}
+	var spec rules.Spec
+	if err := json.Unmarshal(req.Rules, &spec); err != nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "некорректные правила: "+err.Error())
+		return
+	}
+	strategy, err := rules.Compile(spec)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "некорректные правила: "+err.Error())
+		return
+	}
+	initialCash := req.InitialCash
+	if initialCash <= 0 {
+		initialCash = s.cfg.PaperInitialCash
+	}
+	if initialCash <= 0 {
+		initialCash = 1_000_000
+	}
+	ctx, cancel := requestContext(r, agentRequestTimeout)
+	defer cancel()
+	history, err := s.deps.Feed.Candles(ctx, req.Symbol, req.PeriodSec, 500)
+	if err != nil {
+		s.mapError(w, err)
+		return
+	}
+	bars := make([]backtest.Bar, 0, len(history.Bars))
+	for _, bar := range history.Bars {
+		bars = append(bars, backtest.Bar{
+			Time: bar.Time, Open: bar.Open, High: bar.High, Low: bar.Low,
+			Close: bar.Close, Volume: bar.Volume,
+		})
+	}
+	if len(bars) < 2 {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "недостаточно истории для бэктеста")
+		return
+	}
+	result, err := backtest.RunStrategy(backtest.Request{
+		Symbol: req.Symbol, PeriodSec: req.PeriodSec, Bars: bars,
+		Strategy: strategy.ID(), InitialCash: initialCash, FeeBps: 5, SlippageBps: 1,
+	}, strategy)
+	if err != nil {
+		writeInternal(w)
+		return
+	}
+	created, err := s.deps.Bots.CreateFromBacktest(result, spec, req.Qty)
+	if err != nil {
+		s.mapBotError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"bot": normalizeBot(created)})
+}
+
+// botStageRequest is the POST /{id}/start and /{id}/promote body.
+type botStageRequest struct {
+	Stage string `json:"stage"`
+}
+
+// handleCheckBot serves POST /api/bots/{id}/check.
+func (s *Server) handleCheckBot(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Bots == nil {
+		writeUnavailable(w, "рантайм ботов недоступен")
+		return
+	}
+	ctx, cancel := requestContext(r, agentRequestTimeout)
+	defer cancel()
+	entry, err := s.deps.Bots.Check(ctx, r.PathValue("id"))
+	if err != nil {
+		s.mapBotError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entry": normalizeBotEntry(entry)})
+}
+
+// handleStartBot serves POST /api/bots/{id}/start with {stage}.
+func (s *Server) handleStartBot(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Bots == nil {
+		writeUnavailable(w, "рантайм ботов недоступен")
+		return
+	}
+	var req botStageRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	stage := bot.Stage(strings.ToLower(strings.TrimSpace(req.Stage)))
+	if stage == "" {
+		stage = bot.StageDryRun
+	}
+	ctx, cancel := requestContext(r, agentRequestTimeout)
+	defer cancel()
+	if err := s.deps.Bots.Start(ctx, r.PathValue("id"), stage); err != nil {
+		s.mapBotError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.botPayload(r.PathValue("id")))
+}
+
+// handlePromoteBot serves POST /api/bots/{id}/promote: dry_run -> paper only
+// through a human proposal (R5).
+func (s *Server) handlePromoteBot(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Bots == nil {
+		writeUnavailable(w, "рантайм ботов недоступен")
+		return
+	}
+	var req botStageRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	stage := bot.Stage(strings.ToLower(strings.TrimSpace(req.Stage)))
+	if stage == "" {
+		stage = bot.StagePaper
+	}
+	proposalID, err := s.deps.Bots.Promote(r.PathValue("id"), stage)
+	if err != nil {
+		s.mapBotError(w, err)
+		return
+	}
+	payload := s.botPayload(r.PathValue("id"))
+	payload["proposalId"] = proposalID
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// handleStopBot serves POST /api/bots/{id}/stop (kill-switch, no proposal).
+func (s *Server) handleStopBot(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Bots == nil {
+		writeUnavailable(w, "рантайм ботов недоступен")
+		return
+	}
+	id := r.PathValue("id")
+	if err := s.deps.Bots.Stop(id); err != nil {
+		s.mapBotError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.botPayload(id))
+}
+
+// handleStopAllBots serves POST /api/bots/stop-all.
+func (s *Server) handleStopAllBots(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Bots == nil {
+		writeUnavailable(w, "рантайм ботов недоступен")
+		return
+	}
+	if err := s.deps.Bots.StopAll(); err != nil {
+		s.mapBotError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"stopped": true})
+}
+
+// handleBotJournal serves GET /api/bots/{id}/journal?after=&limit=.
+func (s *Server) handleBotJournal(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Bots == nil {
+		writeUnavailable(w, "рантайм ботов недоступен")
+		return
+	}
+	limit, ok := intParam(r, "limit", 100)
+	if !ok || limit < 0 {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "некорректный limit")
+		return
+	}
+	var after uint64
+	if raw := strings.TrimSpace(r.URL.Query().Get("after")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, codeBadRequest, "некорректный after")
+			return
+		}
+		after = parsed
+	}
+	id := r.PathValue("id")
+	entries := s.deps.Bots.Journal(id, after, limit)
+	out := make([]bot.JournalEntry, len(entries))
+	for i, entry := range entries {
+		out[i] = normalizeBotEntry(entry)
+	}
+	payload := s.botPayload(id)
+	payload["entries"] = out
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// botPayload returns one bot with its counters and last journal entry.
+func (s *Server) botPayload(id string) map[string]any {
+	definition, err := s.deps.Bots.Get(id)
+	if err != nil {
+		return map[string]any{"id": id, "error": err.Error()}
+	}
+	return map[string]any{
+		"bot":    normalizeBot(definition),
+		"counts": s.deps.Bots.JournalCounts(id),
+		"last":   normalizeBotEntries(s.deps.Bots.Journal(id, 0, 5)),
+	}
+}
+
+// normalizeBot renders every bot time in UTC (§10.2).
+func normalizeBot(definition bot.Bot) bot.Bot {
+	definition.CreatedAt = definition.CreatedAt.UTC()
+	return definition
+}
+
+// normalizeBotEntry renders every journal time in UTC.
+func normalizeBotEntry(entry bot.JournalEntry) bot.JournalEntry {
+	entry.Time = entry.Time.UTC()
+	if !entry.BarTime.IsZero() {
+		entry.BarTime = entry.BarTime.UTC()
+	}
+	return entry
+}
+
+// normalizeBotEntries normalizes a slice of journal entries.
+func normalizeBotEntries(entries []bot.JournalEntry) []bot.JournalEntry {
+	out := make([]bot.JournalEntry, len(entries))
+	for i, entry := range entries {
+		out[i] = normalizeBotEntry(entry)
+	}
+	return out
+}
+
+// mapBotError maps the bot runtime sentinels to the API codes of §10.
+func (s *Server) mapBotError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, bot.ErrNotFound):
+		writeError(w, http.StatusNotFound, codeNotFound, "бот не найден")
+	case errors.Is(err, bot.ErrLiveDisabled):
+		writeError(w, http.StatusBadRequest, codeBadRequest, "live-стадия в итерации 1 не реализована")
+	case errors.Is(err, bot.ErrApprovalMissing):
+		writeError(w, http.StatusConflict, codeConflict, "перевод на бумагу требует подтверждения человеком")
+	case errors.Is(err, bot.ErrInvalidBot), errors.Is(err, bot.ErrInvalidStage):
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+	case errors.Is(err, bot.ErrNotConfigured):
+		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "рантайм ботов не сконфигурирован")
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		writeError(w, http.StatusServiceUnavailable, codeUnavailable, "превышено время ожидания ответа")
+	default:
+		writeInternal(w)
+	}
 }
 
 // --- paper helpers ---------------------------------------------------------

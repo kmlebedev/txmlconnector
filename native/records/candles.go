@@ -96,8 +96,14 @@ func ParseCandles(body []byte) (Candles, error) {
 
 // Event builds the typed <candles> event: prices are absolute (open, open+deltas
 // for close/high/low) with the mode decimals, time is the accumulated count of
-// candle periods (period seconds from <candlekinds>, 60 s fallback) converted to
-// a UTC instant, and the items are reversed to the DLL chronological order.
+// candle periods (period seconds from <candlekinds>; kind 1 is the 1-minute
+// series, S) converted to a UTC instant, and the items are reversed to the DLL
+// chronological order.
+//
+// When the period is not in <candlekinds> and is not kind 1, the event gets the
+// "unknown candle period N" warning and every candle Time stays the zero
+// instant: guessing 60 s dated 5-minute and daily series decades off (R8), so
+// an undated series is better than a wrong one.
 func (c Candles) Event(cat *Catalog, bias time.Duration) model.Candles {
 	ev := model.Candles{SecID: c.SecID, Period: int(c.Period), Status: c.Status, ZoneBias: bias}
 	var decimals uint8
@@ -118,17 +124,11 @@ func (c Candles) Event(cat *Catalog, bias time.Duration) model.Candles {
 	// The wire time is in units of the candle period, not always minutes: the
 	// 1-minute fixtures match minutes because their period is 60 s. The demo's
 	// 5-minute history confirms the rule (raw*300 lands on the trade date) and
-	// docs/protocol/history.md records the evidence.
-	periodSeconds := int64(60)
-	if cat != nil {
-		if startup := cat.Startup(); startup != nil {
-			for _, kind := range startup.CandleKinds {
-				if int(kind.ID) == int(c.Period) && kind.Period > 0 {
-					periodSeconds = int64(kind.Period)
-					break
-				}
-			}
-		}
+	// docs/protocol/history.md records the evidence. The multiplier comes from
+	// the session dictionary only: without it the series stays undated.
+	periodSeconds, dated := c.periodSeconds(cat)
+	if !dated {
+		ev.Warnings = append(ev.Warnings, fmt.Sprintf("unknown candle period %d", c.Period))
 	}
 	units := int64(0)
 	for i, item := range c.Items {
@@ -137,8 +137,12 @@ func (c Candles) Event(cat *Catalog, bias time.Duration) model.Candles {
 		} else {
 			units += item.Time
 		}
+		var at time.Time
+		if dated {
+			at = time.Unix(units*periodSeconds, 0).UTC().Add(bias)
+		}
 		candle := model.Candle{
-			Time:   time.Unix(units*periodSeconds, 0).UTC().Add(bias),
+			Time:   at,
 			Open:   model.Decimal{Units: item.Open, Scale: decimals},
 			Close:  model.Decimal{Units: item.Open + item.Close, Scale: decimals},
 			High:   model.Decimal{Units: item.Open + item.High, Scale: decimals},
@@ -157,6 +161,26 @@ func (c Candles) Event(cat *Catalog, bias time.Duration) model.Candles {
 	return ev
 }
 
+// periodSeconds resolves the wire time unit of the record from <candlekinds>.
+// Kind 1 is the 1-minute series (S), so its 60-second unit is known even before
+// the dictionary arrives; any other kind is unknown until then and the caller
+// must not guess.
+func (c Candles) periodSeconds(cat *Catalog) (int64, bool) {
+	if cat != nil {
+		if startup := cat.Startup(); startup != nil {
+			for _, kind := range startup.CandleKinds {
+				if int(kind.ID) == int(c.Period) && kind.Period > 0 {
+					return int64(kind.Period), true
+				}
+			}
+		}
+	}
+	if c.Period == 1 {
+		return 60, true
+	}
+	return 0, false
+}
+
 // CombineCandles merges the multipart history replies (status 2 parts followed
 // by the final status) into the single chronological <candles> callback of the
 // DLL: items are concatenated in arrival order and then reversed.
@@ -165,6 +189,7 @@ func CombineCandles(parts []Candles, cat *Catalog, bias time.Duration) model.Can
 	if len(parts) == 0 {
 		return out
 	}
+	seen := map[string]bool{}
 	for _, part := range parts {
 		ev := part.Event(cat, bias)
 		out.Symbol = ev.Symbol
@@ -172,6 +197,14 @@ func CombineCandles(parts []Candles, cat *Catalog, bias time.Duration) model.Can
 		out.Period = ev.Period
 		out.Status = ev.Status
 		out.ZoneBias = ev.ZoneBias
+		// The parts share one series, so their warnings are the same: keep each
+		// warning once and never tag the merged series with duplicates.
+		for _, warning := range ev.Warnings {
+			if !seen[warning] {
+				seen[warning] = true
+				out.Warnings = append(out.Warnings, warning)
+			}
+		}
 		// Each Event is already chronological (oldest first) and the parts
 		// arrive newest part first (status 2 parts before the final one), so
 		// concatenate the parts in reverse arrival order and never reverse the

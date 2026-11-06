@@ -163,27 +163,27 @@
   - `api.Config.Guard GuardConfig`
 - Produces: заголовок `X-Terminal-Token`. Плагин генерирует токен на запуск (`crypto.randomUUID()`), передаёт бэкенду через env `TERMINAL_API_TOKEN` и сам подставляет его в проксируемые запросы.
 
-- [ ] **Step 1: Write the failing tests** `TestGuardRejectsForeignOrigin`, `TestGuardRejectsTextPlainPost`, `TestGuardRejectsRebindHost`, `TestGuardRequiresTokenWhenSet`, `TestGuardAllowsSameOriginGET`.
+- [x] **Step 1: Write the failing tests** `TestGuardRejectsForeignOrigin`, `TestGuardRejectsTextPlainPost`, `TestGuardRejectsRebindHost`, `TestGuardRequiresTokenWhenSet`, `TestGuardAllowsSameOriginGET`.
   - Ожидание: POST с `Origin: https://evil.example` → 403 `forbidden_origin`.
   - POST `/api/orders` с `Content-Type: text/plain` → 415.
   - `Host: attacker.example:8090` → 421.
   - При заданном `Token` запрос без заголовка → 401.
   - GET `/api/health` с `Host: 127.0.0.1:8090` → 200.
-- [ ] **Step 2:** `go test ./terminal/api -run TestGuard -v` → FAIL (`undefined: Guard`).
-- [ ] **Step 3: Implement `Guard`.** Порядок проверок:
+- [x] **Step 2:** `go test ./terminal/api -run TestGuard -v` → FAIL (`undefined: Guard`).
+- [x] **Step 3: Implement `Guard`.** Порядок проверок:
   1. Host — по умолчанию `127.0.0.1:*`, `localhost:*`, `[::1]:*` плюс `AllowedHosts`.
   2. Для небезопасных методов (не GET/HEAD) — Origin, если заголовок есть.
   3. Content-Type `application/json` — только для запросов с телом (`ContentLength != 0`); `DELETE /api/orders/{id}` без тела проходит.
   4. Токен — для всех `/api/*`, кроме `/api/health`. Он принимается из заголовка `X-Terminal-Token` или из cookie `terminal_token` (`HttpOnly; SameSite=Strict; Path=/`). Cookie ставится при отдаче `index.html`, поэтому SPA и SSE работают без правок JS, а межсайтовые запросы cookie не несут.
 
   `Handler()` оборачивает mux в `Guard`. Дополнительный тест: `TestGuardAcceptsStrictCookieFromIndex`.
-- [ ] **Step 4: Write the failing node test** `proxy strips credentials and adds token`.
+- [x] **Step 4: Write the failing node test** `proxy strips credentials and adds token`.
   - Прокси удаляет `cookie`, `authorization`, `x-dsh-*` и добавляет `x-terminal-token`.
   - `health()` принимает бэкенд, только если `/api/health` вернул `instanceId`, равный nonce из env `TERMINAL_INSTANCE_ID`, который плагин передал при запуске.
   - Иначе — фаза `error` «порт занят чужим процессом».
-- [ ] **Step 5: Implement in `index.js`.** Отказаться от `reused`, если `instanceId` не совпал. Бэкенд добавляет `instanceId` в `/api/health` из env.
-- [ ] **Step 6:** `make verify && node --test dsh-ai-terminal/test/` → exit 0.
-- [ ] **Step 7: Commit** `fix(terminal): guard the local API against cross-origin and rebinding requests`
+- [x] **Step 5: Implement in `index.js`.** Отказаться от `reused`, если `instanceId` не совпал. Бэкенд добавляет `instanceId` в `/api/health` из env.
+- [x] **Step 6:** `make verify && node --test dsh-ai-terminal/test/` → exit 0.
+- [x] **Step 7: Commit** `fix(terminal): guard the local API against cross-origin and rebinding requests`
 
 ### Task 2: Потолки риск-лимитов и строгие аргументы инструментов (R2, R9)
 
@@ -197,17 +197,17 @@
   - `func argIntStrict(args map[string]any, key string, def, min, max int64) (int64, error)`
   - `var errBadArgument = errors.New("agent: bad tool argument")`
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestClampAutonomyNeverLoosensRisk`: при `risk.StopLossPct=2` и `cfg.StopLossPct=99` получаем 2; `DailyLossPct=100` → 3; `MaxPositionPct=100` → 25.
   - `TestClampAutonomyBudgetByCash`: budget `1e12` при cash `1e6` → `1e6` и предупреждение.
   - `TestArgIntStrictRejectsFractionAndOverflow`: `2.7`, `1e30`, `NaN`, `"abc"` → `errBadArgument`.
   - `TestPlaceOrderToolRejectsFractionalQty`.
-- [ ] **Step 2:** `go test ./terminal/agent -run 'Clamp|ArgIntStrict|FractionalQty' -v` → FAIL.
-- [ ] **Step 3: Implement.** Правило для пользовательских значений: стоп-лосс, дневной убыток, доля позиции = `min(cfg, risk)`; тейк-профит = `max(cfg, 0.1)`.
+- [x] **Step 2:** `go test ./terminal/agent -run 'Clamp|ArgIntStrict|FractionalQty' -v` → FAIL.
+- [x] **Step 3: Implement.** Правило для пользовательских значений: стоп-лосс, дневной убыток, доля позиции = `min(cfg, risk)`; тейк-профит = `max(cfg, 0.1)`.
   - `prepareAutonomy` вызывает `clampAutonomy` и пишет предупреждения в лог автономии как `risk_block`.
   - Целочисленные аргументы (`qty`, `count`, `periodSec`) читаются только через `argIntStrict`. Ошибка становится ошибкой инструмента с текстом для модели.
-- [ ] **Step 4:** `make verify` → exit 0.
-- [ ] **Step 5: Commit** `fix(agent): risk limits are ceilings and tool integers are validated`
+- [x] **Step 4:** `make verify` → exit 0.
+- [x] **Step 5: Commit** `fix(agent): risk limits are ceilings and tool integers are validated`
 
 ### Task 3: Никаких повторных побочных эффектов при сбое LLM (R3)
 
@@ -222,13 +222,13 @@
   - `chatLLM` возвращает выполненные вызовы вместе с ошибкой.
   - `PlaceOrder.ClientOrderID string` (`json:"clientOrderId,omitempty"`), `paper.OrderRequest.ClientOrderID`, `var paper.ErrDuplicateClientOrderID`.
 
-- [ ] **Step 1: Write the failing test** `TestChatNoFallbackAfterMutatingTool`.
+- [x] **Step 1: Write the failing test** `TestChatNoFallbackAfterMutatingTool`.
   - Заглушка LLM: первый ответ — `place_order`, второй — HTTP 503.
   - Ожидание: брокер получил ровно один `Place`; ответ с `Partial=true`, `LLM=true`, `ToolCalls` из одного элемента; текст начинается с «LLM недоступен после выполнения действий».
-- [ ] **Step 2: Write the failing test** `TestChatFallsBackWhenOnlyReadToolsRan`. Только `get_quote`, затем 503 → локальный аналитик, как сейчас.
-- [ ] **Step 3: Implement.** Если среди выполненных вызовов есть мутирующий, fallback не запускается. Каждая заявка агента получает `ClientOrderID = conversationID + ":" + toolCallID`. Брокер отвергает повтор с тем же ID (`paper.ErrDuplicateClientOrderID`).
-- [ ] **Step 4:** `go test -race ./terminal/...` → PASS.
-- [ ] **Step 5: Commit** `fix(agent): never replay mutating tools through the local fallback`
+- [x] **Step 2: Write the failing test** `TestChatFallsBackWhenOnlyReadToolsRan`. Только `get_quote`, затем 503 → локальный аналитик, как сейчас.
+- [x] **Step 3: Implement.** Если среди выполненных вызовов есть мутирующий, fallback не запускается. Каждая заявка агента получает `ClientOrderID = conversationID + ":" + toolCallID`. Брокер отвергает повтор с тем же ID (`paper.ErrDuplicateClientOrderID`).
+- [x] **Step 4:** `go test -race ./terminal/...` → PASS.
+- [x] **Step 5: Commit** `fix(agent): never replay mutating tools through the local fallback`
 
 ### Task 4: Автономия торгует через бумажного брокера, дневной убыток по торговому дню МСК (R7)
 
@@ -243,13 +243,13 @@
   - Счёт автономии `account="autonomy"` с бюджетом, выделенным из кэша основного счёта.
   - `paper.Snapshot.Accounts map[string]AccountView`.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestAutonomyFillsVisibleInPortfolio`: после replay `/api/orders` и `Portfolio().Accounts["autonomy"]` содержат сделки автономии.
   - `TestDailyLossResetsPerMoscowDay`: −2,9 % в каждый из 3 дней при лимите 3 % → не останавливается; −3,1 % внутри одного дня → `stopped_by_risk`.
-- [ ] **Step 2:** `go test ./terminal/agent ./terminal/paper -run 'Autonomy|DailyLoss' -v` → FAIL.
-- [ ] **Step 3: Implement.** Дневной убыток считается от equity на начало торгового дня `Europe/Moscow` первого бара этого дня.
-- [ ] **Step 4:** `make verify` → exit 0.
-- [ ] **Step 5: Commit** `fix(agent): route autonomy fills through the paper broker per Moscow trading day`
+- [x] **Step 2:** `go test ./terminal/agent ./terminal/paper -run 'Autonomy|DailyLoss' -v` → FAIL.
+- [x] **Step 3: Implement.** Дневной убыток считается от equity на начало торгового дня `Europe/Moscow` первого бара этого дня.
+- [x] **Step 4:** `make verify` → exit 0.
+- [x] **Step 5: Commit** `fix(agent): route autonomy fills through the paper broker per Moscow trading day`
 
 ### Task 5: Неизвестный период свечей — ошибка, а не 60 секунд (R8)
 
@@ -261,11 +261,11 @@
 - Produces: `model.Candles.Warnings []string`. Если период не найден в `<candlekinds>` и `Period != 1` (вид 1 = 1 мин, S), события получают предупреждение `unknown candle period`, и время не вычисляется — `Time` нулевой.
 - Produces: `feed.History` пробрасывает предупреждение, `/api/.../candles` возвращает 503 `unavailable` «справочник периодов ещё не загружен».
 
-- [ ] **Step 1: Write the failing test** `TestCandlesUnknownPeriodDoesNotGuessMinutes`. Каталог без `candlekinds`, период 2 → `Warnings` содержит `unknown candle period 2`; ни у одной свечи год не 1970.
-- [ ] **Step 2:** `go test ./native/records -run UnknownPeriod -v` → FAIL.
-- [ ] **Step 3: Implement.** Обновить `history.md` пометкой **I** (поведение клиента, не DLL).
-- [ ] **Step 4:** `make verify` → exit 0.
-- [ ] **Step 5: Commit** `fix(native): refuse to date candles of an unknown period`
+- [x] **Step 1: Write the failing test** `TestCandlesUnknownPeriodDoesNotGuessMinutes`. Каталог без `candlekinds`, период 2 → `Warnings` содержит `unknown candle period 2`; ни у одной свечи год не 1970.
+- [x] **Step 2:** `go test ./native/records -run UnknownPeriod -v` → FAIL.
+- [x] **Step 3: Implement.** Обновить `history.md` пометкой **I** (поведение клиента, не DLL).
+- [x] **Step 4:** `make verify` → exit 0.
+- [x] **Step 5: Commit** `fix(native): refuse to date candles of an unknown period`
 
 ---
 
@@ -284,13 +284,13 @@
   - `ChatResponse.ConversationID string`
 - `ChatRequest.ConversationID` уже есть. Пустой ID → сервер генерирует новый и возвращает его.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestChatRemembersPreviousToolResults`: второй запрос «то же для GAZP» отправляет в LLM историю с прошлым `run_backtest`.
   - `TestConversationTrimsByBytes`: старые сообщения вытесняются, системный промпт остаётся; пары `assistant(tool_calls)`/`tool` не разрываются.
-- [ ] **Step 2:** `go test ./terminal/agent -run 'Remembers|Trims' -v` → FAIL.
-- [ ] **Step 3: Implement.** Результаты инструментов в истории — только сжатые (`toolResultForLLM`).
-- [ ] **Step 4:** `make verify` → exit 0.
-- [ ] **Step 5: Commit** `feat(agent): keep a bounded conversation history per conversationId`
+- [x] **Step 2:** `go test ./terminal/agent -run 'Remembers|Trims' -v` → FAIL.
+- [x] **Step 3: Implement.** Результаты инструментов в истории — только сжатые (`toolResultForLLM`).
+- [x] **Step 4:** `make verify` → exit 0.
+- [x] **Step 5: Commit** `feat(agent): keep a bounded conversation history per conversationId`
 
 ### Task 7: Предложения действий вместо немедленного исполнения (R5)
 
@@ -310,15 +310,15 @@
   - `POST /api/agent/proposals/{id}/reject`
 - Produces: SSE-событие `proposal`.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestMutatingToolCreatesProposalInConfirmMode`: `place_order` → брокер не вызван, результат `{proposal:{id,status:"pending"}}`.
   - `TestApproveExecutesOnce`: повторный approve → 409.
   - `TestProposalExpires`: 5 мин по `cfg.Now`.
   - `TestEnvelopeModeAutoApprovesInsideLimits`: в режиме `envelope` (для автономии фазы F) заявка внутри лимитов исполняется сразу, вне лимитов — становится предложением.
-- [ ] **Step 2:** `go test ./terminal/agent ./terminal/api -run Proposal -v` → FAIL.
-- [ ] **Step 3: Implement.** Режим по умолчанию — `confirm`; `envelope` включается только явно: конфиг или workflow фазы F.
-- [ ] **Step 4:** `make verify` → exit 0.
-- [ ] **Step 5: Commit** `feat(agent): mutating tools produce proposals that a human approves`
+- [x] **Step 2:** `go test ./terminal/agent ./terminal/api -run Proposal -v` → FAIL.
+- [x] **Step 3: Implement.** Режим по умолчанию — `confirm`; `envelope` включается только явно: конфиг или workflow фазы F.
+- [x] **Step 4:** `make verify` → exit 0.
+- [x] **Step 5: Commit** `feat(agent): mutating tools produce proposals that a human approves`
 
 ### Task 8: Контекст экрана в запросах к агенту
 
@@ -330,11 +330,11 @@
 - Produces: `type ScreenContext struct { Symbol string; PeriodSec int; From, To time.Time; Selection *Range; ActiveTab string }`, `ChatRequest.Context *ScreenContext`.
 - Контекст передаётся отдельным системным сообщением `Текущий экран: …`.
 
-- [ ] **Step 1: Write the failing test** `TestChatInjectsScreenContext`: запрос «объясни этот пробой» с `Selection` → в запросе к LLM есть системное сообщение с тикером и интервалом UTC.
-- [ ] **Step 2:** `go test ./terminal/agent -run ScreenContext -v` → FAIL.
-- [ ] **Step 3: Implement.** В UI: выделение диапазона на графике (shift+drag) и кнопка «Спросить AI о выделенном».
-- [ ] **Step 4:** `make verify` → exit 0.
-- [ ] **Step 5: Commit** `feat(agent): send the visible chart context with chat requests`
+- [x] **Step 1: Write the failing test** `TestChatInjectsScreenContext`: запрос «объясни этот пробой» с `Selection` → в запросе к LLM есть системное сообщение с тикером и интервалом UTC.
+- [x] **Step 2:** `go test ./terminal/agent -run ScreenContext -v` → FAIL.
+- [x] **Step 3: Implement.** В UI: выделение диапазона на графике (shift+drag) и кнопка «Спросить AI о выделенном».
+- [x] **Step 4:** `make verify` → exit 0.
+- [x] **Step 5: Commit** `feat(agent): send the visible chart context with chat requests`
 
 ---
 
@@ -366,17 +366,17 @@
   - Это общий путь для DSH и MCP: `func (e *Engine) Invoke(ctx context.Context, name string, args map[string]any) (ToolCall, *Artifact)` — публичная обёртка `executeToolCall`.
 - Produces: инструменты Harness `terminal_<name>` для каждого `ToolInfo`. Описание — из Go, `parameters` — JSON-schema из Go. `render` — текстовый итог плюс клиентская карточка.
 
-- [ ] **Step 1: Write the failing Go test** `TestInvokeToolEndpoint`: `get_quote` → 200 с `result.symbol`; неизвестный инструмент → 404; мутирующий в режиме `confirm` → `proposal`.
-- [ ] **Step 2: Write the failing node tests:**
+- [x] **Step 1: Write the failing Go test** `TestInvokeToolEndpoint`: `get_quote` → 200 с `result.symbol`; неизвестный инструмент → 404; мутирующий в режиме `confirm` → `proposal`.
+- [x] **Step 2: Write the failing node tests:**
   - `registers one tool per backend tool`
   - `tool bridge aborts upstream on signal` (Review Focus 5)
   - `backend down yields tool error text`
-- [ ] **Step 3: Implement.** При старте плагин запрашивает `/api/agent/tools` и регистрирует инструменты (`defineTool`, иначе объект той же формы). При рестарте бэкенда — перерегистрирует.
+- [x] **Step 3: Implement.** При старте плагин запрашивает `/api/agent/tools` и регистрирует инструменты (`defineTool`, иначе объект той же формы). При рестарте бэкенда — перерегистрирует.
 
   Проверить на живом Harness, что `@deepseek-ai/dsh-tools` импортируется из локального бандла. Если нет — описать обход в `dsh-integration.md` (статус I→S).
-- [ ] **Step 4:** `make verify && node --test dsh-ai-terminal/test/` → exit 0.
+- [x] **Step 4:** `make verify && node --test dsh-ai-terminal/test/` → exit 0.
 - [ ] **Step 5: Manual check.** В DSH-сессии модель вызывает `terminal_run_backtest`, и в чате рисуется карточка с equity. Скриншот сохранить в `docs/ai-terminal/screenshot-dsh-tools.png`.
-- [ ] **Step 6: Commit** `feat(dsh-plugin): expose terminal tools to Harness agents`
+- [x] **Step 6: Commit** `feat(dsh-plugin): expose terminal tools to Harness agents`
 
 ### Task 10: Один LLM на всё, навыки, панели и MCP
 
@@ -401,14 +401,14 @@
   - действие в шапке сессии «Отправить график в чат» — `insertQuote` с `ScreenContext` в виде JSON-цитаты;
   - пункт контекстного меню «Спросить о выделенном».
 
-- [ ] **Step 1: Write the failing node tests:**
+- [x] **Step 1: Write the failing node tests:**
   - `llm bridge maps tool_calls both ways`: OpenAI `tools` → `ctx.llm.stream({tools})` → `finish` с `tool_calls` → OpenAI `choices[0].message.tool_calls`.
   - `llm bridge rejects missing token`.
-- [ ] **Step 2: Write the failing Go tests** `TestMCPInitializeAndList` и `TestMCPToolCallRoundTrip`: JSON-RPC 2.0, `protocolVersion` из запроса клиента, результат `content:[{type:"text",text:<json>}]`.
-- [ ] **Step 3: Implement** мост LLM, MCP-сервер, провайдер навыков и клиентские поверхности.
-- [ ] **Step 4:** `make verify && node --test dsh-ai-terminal/test/` → exit 0.
+- [x] **Step 2: Write the failing Go tests** `TestMCPInitializeAndList` и `TestMCPToolCallRoundTrip`: JSON-RPC 2.0, `protocolVersion` из запроса клиента, результат `content:[{type:"text",text:<json>}]`.
+- [x] **Step 3: Implement** мост LLM, MCP-сервер, провайдер навыков и клиентские поверхности.
+- [x] **Step 4:** `make verify && node --test dsh-ai-terminal/test/` → exit 0.
 - [ ] **Step 5: Manual check.** Из Claude Code: `claude mcp add --transport http terminal http://127.0.0.1:8090/mcp --header "X-Terminal-Token: $TERMINAL_API_TOKEN"`, затем `tools/list` показывает 14+ инструментов.
-- [ ] **Step 6: Commit** `feat(dsh-plugin): share the Harness LLM, skills and an MCP endpoint with the terminal`
+- [x] **Step 6: Commit** `feat(dsh-plugin): share the Harness LLM, skills and an MCP endpoint with the terminal`
 
 ---
 
@@ -444,17 +444,17 @@
   - Время сделки — `Time` + `Millis`.
   - Снапшот стакана пишется после каждой (пере)подписки, далее — изменения уровней (`-1` → `qty=0`).
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestChstoreInsertBatchesJSONEachRow` (`httptest`)
   - `TestChstoreQueryParams`
   - `TestRecorderWritesSnapshotThenLevels`
   - `TestRecorderMarksGapOnReconnect` (Review Focus 3): событие `Reconnected` клиента → строка `kind='gap'`, затем новый `snapshot`.
   - `TestRecorderKeepsMillis`
-- [ ] **Step 2:** `go test ./terminal/chstore ./terminal/recorder -v` → FAIL.
-- [ ] **Step 3: Implement.** `cmd/md-recorder` берёт параметры из env `TC_*`, `MD_CLICKHOUSE_URL`, `MD_SYMBOLS`; только read-only подписки.
-- [ ] **Step 4:** `make verify` → exit 0.
+- [x] **Step 2:** `go test ./terminal/chstore ./terminal/recorder -v` → FAIL.
+- [x] **Step 3: Implement.** `cmd/md-recorder` берёт параметры из env `TC_*`, `MD_CLICKHOUSE_URL`, `MD_SYMBOLS`; только read-only подписки.
+- [x] **Step 4:** `make verify` → exit 0.
 - [ ] **Step 5: Live check** (с согласия пользователя в чате, окно демо-сервера): 10 минут по `TQBR:SBER`; `SELECT kind, count() FROM md.book_events GROUP BY kind` — есть `snapshot` и `level`. Результат — в `data.md` (**S**).
-- [ ] **Step 6: Commit** `feat(recorder): record order-book events and trades to ClickHouse`
+- [x] **Step 6: Commit** `feat(recorder): record order-book events and trades to ClickHouse`
 
 ### Task 12: Новости TRANSAQ с моментом первого появления
 
@@ -467,11 +467,11 @@
   - `first_seen` — момент получения рекордером: это и есть point-in-time.
 - Produces: `feed.Event{Type:"news"}` и инструмент агента `get_news(symbol?, since, limit)`.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestRecorderStoresNewsWithFirstSeen`: тело, пришедшее позже заголовка, не меняет `first_seen`.
   - `TestGetNewsToolFiltersBySince`.
-- [ ] **Step 2–4:** red → implement → `make verify`.
-- [ ] **Step 5: Commit** `feat(recorder): store TRANSAQ news with first-seen timestamps`
+- [x] **Step 2–4:** red → implement → `make verify`.
+- [x] **Step 5: Commit** `feat(recorder): store TRANSAQ news with first-seen timestamps`
 
 ### Task 13: Винтажный (point-in-time) доступ к макроданным, календарю и новостям
 
@@ -488,12 +488,12 @@
   - `type NewsItem struct { At time.Time; Source, Title string; Sentiment float64; Tags []string }`
 - Правило: `AsOf` возвращает версию, опубликованную строго до `asOf`. Ряды без винтажей отдаются со `Vintage="latest-only"` и предупреждением; бэктест может отказаться от них.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestVintageAsOfExcludesLaterRevision` (Review Focus 1): `httptest` ClickHouse с двумя релизами `unemployment_sa` за один месяц → на дату между релизами — первая версия.
   - `TestVintageLatestOnlyFlagged`.
   - `TestReleasesNormalizedToUTC`: `published_at DateTime('Europe/Moscow')` → UTC.
-- [ ] **Step 2–4:** red → implement → `make verify`.
-- [ ] **Step 5: Commit** `feat(vintage): point-in-time macro, release calendar and news access`
+- [x] **Step 2–4:** red → implement → `make verify`.
+- [x] **Step 5: Commit** `feat(vintage): point-in-time macro, release calendar and news access`
 
 ### Task 14: Event-driven replay записанного стакана
 
@@ -511,14 +511,14 @@
   - `func Run(ctx context.Context, src Source, s Strategy, fm FillModel) (Result, error)` — `Result` совместим по метрикам с `backtest.Metrics`.
 - Исполнение лимитной заявки: позиция в очереди = объём уровня в момент постановки. Заявка исполняется, когда сделки по этой цене съели очередь. Рыночная — проходит по стакану с учётом задержки.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestReplayResetsBookAfterGap` (Review Focus 3)
   - `TestLimitFillRespectsQueue`
   - `TestMarketOrderWalksBook`
   - `TestLatencyDelaysVisibility`
   - `TestReplayDeterministic`: два прогона → одинаковый `Result`.
-- [ ] **Step 2–4:** red → implement → `make verify`.
-- [ ] **Step 5: Commit** `feat(lobreplay): event-driven order-book replay with queue-aware fills`
+- [x] **Step 2–4:** red → implement → `make verify`.
+- [x] **Step 5: Commit** `feat(lobreplay): event-driven order-book replay with queue-aware fills`
 
 ---
 
@@ -539,14 +539,14 @@
 - `DeflatedSharpe` — по Bailey & López de Prado (число испытаний = размер сетки). `PBO` — CSCV на 16 блоках.
 - `Events` с `ExcludeEventWindow` позволяют сравнить результат «с окнами релизов» и «без них».
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestWalkForwardNoLookahead`: в стратегию передаётся срез только train+test текущего окна; паника при доступе за пределы.
   - `TestDeflatedSharpePenalizesTrials`
   - `TestCompareStrategiesRanksByOOS`
   - `TestEventWindowAcrossUSDST` (Review Focus 2): релиз 8:30 ET 10.03 и 03.11 → окна 15:30 и 16:30 МСК соответственно.
   - Тесты стратегий на синтетическом тренде и флэте: на тренде есть сделки, на флэте их мало.
-- [ ] **Step 2–4:** red → implement → `make verify`.
-- [ ] **Step 5: Commit** `feat(research): trend strategies with walk-forward and deflated Sharpe`
+- [x] **Step 2–4:** red → implement → `make verify`.
+- [x] **Step 5: Commit** `feat(research): trend strategies with walk-forward and deflated Sharpe`
 
 ### Task 16: Оракул волатильности по новостям и календарю статистики
 
@@ -567,12 +567,12 @@
 
   Оценка — OLS по `log RV`, обучение только на данных до `asOf`. Метрика качества — QLIKE против наивного HAR. Интерфейс `Model` позволяет заменить реализацию ML-моделью из задачи 20.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestOracleRaisesSigmaBeforeKeyRateDecision`: синтетика, где вокруг решения ЦБ RV ×3 → `Multiplier > 2` в окне решения.
   - `TestOracleFitUsesOnlyDataBeforeAsOf`
   - `TestQLIKEBeatsHARonSynthetic`
-- [ ] **Step 2–4:** red → implement → `make verify`.
-- [ ] **Step 5: Commit** `feat(volatility): event- and news-aware volatility oracle`
+- [x] **Step 2–4:** red → implement → `make verify`.
+- [x] **Step 5: Commit** `feat(volatility): event- and news-aware volatility oracle`
 
 ### Task 17: Отпечатки исполняющих роботов
 
@@ -598,13 +598,13 @@
 - Кластеризация — DBSCAN на стандартизованных признаках (собственная реализация) для `unknown_algo`.
 - Ограничение: в анонимной ленте нет `orderno`. Атрибуция вероятностная, `Confidence` обязателен, обвинительных формулировок нет.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestDetectsSyntheticTWAP` (recall ≥ 0,8 на 20 seeds)
   - `TestDetectsSyntheticIceberg`
   - `TestDetectsSyntheticMarginLiquidation`
   - `TestNoFalsePositiveOnShuffledTape`: перемешанная лента → `Confidence < 0,3`.
-- [ ] **Step 2–4:** red → implement → `make verify`.
-- [ ] **Step 5: Commit** `feat(fingerprint): detect execution algorithms and margin-call liquidations`
+- [x] **Step 2–4:** red → implement → `make verify`.
+- [x] **Step 5: Commit** `feat(fingerprint): detect execution algorithms and margin-call liquidations`
 
 ### Task 18: Инструменты исследований для агента с учётом стоимости
 
@@ -630,12 +630,12 @@
   - `type Hotspot struct { Sequence []string; Calls int; Tokens int; Example map[string]any }`
 - Токены берутся из `usage` ответа LLM (OpenAI-совместимого и моста DSH).
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestResearchToolsRequireAsOf`: без `asOf` → ошибка с подсказкой.
   - `TestToolResultCompactUnder2KB`
   - `TestLedgerFindsRepeatedSequence`: 5 диалогов `get_history→run_backtest→compare_strategies` → `Hotspot` c `Calls=5`.
-- [ ] **Step 2–4:** red → implement → `make verify`.
-- [ ] **Step 5: Commit** `feat(agent): research tools with compact results and a token ledger`
+- [x] **Step 2–4:** red → implement → `make verify`.
+- [x] **Step 5: Commit** `feat(agent): research tools with compact results and a token ledger`
 
 ---
 
@@ -659,12 +659,12 @@
 - Каталог по умолчанию — `<dataDir>/skills` вне git. В репозиторий паттерн попадает только через PR человека.
 - Каждый SKILL содержит раздел «Ограничения»: только бумажная торговля, без гарантий доходности. `Status=validated` не включает live — он лишь делает навык видимым для агента.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestSkillPromotionRequiresOOS` (Review Focus 4)
   - `TestWriteDraftFrontmatterParsesInDSHFormat`: frontmatter читается тем же разбором, что и у навыков Harness (`name`/`description` обязательны).
   - `TestSkillHasNoSecretsOrAccounts`: значения из `TC_LOGIN`/`TC_PASSWORD` в тестовом окружении не появляются в файле.
-- [ ] **Step 2–4:** red → implement → `make verify`.
-- [ ] **Step 5: Commit** `feat(skills): draft and promote evidence-backed trading pattern skills`
+- [x] **Step 2–4:** red → implement → `make verify`.
+- [x] **Step 5: Commit** `feat(skills): draft and promote evidence-backed trading pattern skills`
 
 ### Task 20: Задачи на автоматизацию вычислений вместо токенов
 
@@ -684,12 +684,12 @@
   - `func WriteBacklog(path string, tasks []AutomationTask) error` — пишет в `docs/ai-terminal/automation-backlog.md` (между маркерами `<!-- auto:begin -->`/`<!-- auto:end -->`).
 - ML-модели — тоже задачи бэклога. Например, градиентный бустинг для `fingerprint` или квантильная регрессия для `volatility`: обучение офлайн (Python в `research/` или Go), инференс через интерфейс `volatility.Model` или `fingerprint.Classifier`. В этой задаче модели не реализуются.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestProposeFromHotspotsRanksByTokens`
   - `TestWriteBacklogIsIdempotent`: повторная запись не дублирует задачи с тем же `ID`.
   - `TestBacklogPreservesManualText`: текст вне маркеров не меняется.
-- [ ] **Step 2–4:** red → implement → `make verify`.
-- [ ] **Step 5: Commit** `feat(automation): turn repeated agent computations into automation tasks`
+- [x] **Step 2–4:** red → implement → `make verify`.
+- [x] **Step 5: Commit** `feat(automation): turn repeated agent computations into automation tasks`
 
 ### Task 21: Автономный ночной цикл через DSH
 
@@ -711,13 +711,13 @@
 - Produces: конфиг плагина `autonomy: {enabled:false, tokenBudget:200000, maxWallMinutes:60, approvalMode:'confirm'}`.
   - Бюджет токенов контролируется по `usage` из моста LLM (задача 10). При превышении workflow отменяется (`run.cancel()`) с записью причины.
 
-- [ ] **Step 1: Write the failing node tests:**
+- [x] **Step 1: Write the failing node tests:**
   - `nightly workflow stops on token budget`
   - `schedule is not created when autonomy.enabled is false`
   - `kill switch cancels the running workflow and stop_autonomy`
-- [ ] **Step 2–4:** red → implement → `node --test dsh-ai-terminal/test/ && make verify`.
+- [x] **Step 2–4:** red → implement → `node --test dsh-ai-terminal/test/ && make verify`.
 - [ ] **Step 5: Manual check.** Ручной запуск workflow из Harness на офлайн-данных. В сессии появляется сводка, в `<dataDir>/skills` — черновики, в `automation-backlog.md` — задачи. Скриншот в `docs/ai-terminal/`.
-- [ ] **Step 6: Commit** `feat(dsh-plugin): scheduled autonomous research workflow with token budget`
+- [x] **Step 6: Commit** `feat(dsh-plugin): scheduled autonomous research workflow with token budget`
 
 ---
 
@@ -799,7 +799,7 @@
   - Заявка исполняется по следующей котировке `paper`; каждая заявка получает `ClientOrderID = botID + ":" + barTime`.
   - Журнал бота ограничен 5000 записями в памяти и дублируется в `<dataDir>/bots/<id>.jsonl`.
 
-- [ ] **Step 1: Write the failing tests** (фейковый `BarStream`, `cfg.Now` и брокер):
+- [x] **Step 1: Write the failing tests** (фейковый `BarStream`, `cfg.Now` и брокер):
   - `TestBotCheckDoesNotSubscribeOrReadAccount`
   - `TestBotDryRunLogsSignalsWithoutOrders`: на синтетике с RSI ниже 0,2 есть `signal=entry`, а брокер не вызван.
   - `TestBotPaperEntersOnlyFromFlat`: два сигнала входа подряд дают одну заявку.
@@ -810,11 +810,11 @@
   - `TestBotPromoteToPaperRequiresApproval`
   - `TestBotPromoteToLiveRejected`
   - `TestStopAllStopsEveryBot`
-- [ ] **Step 2:** `go test ./terminal/bot -v` → FAIL (`undefined: NewManager`).
-- [ ] **Step 3: Implement** `terminal/bot` и живой `BarStream` в `feed`.
-- [ ] **Step 4:** `make verify` → exit 0.
+- [x] **Step 2:** `go test ./terminal/bot -v` → FAIL (`undefined: NewManager`).
+- [x] **Step 3: Implement** `terminal/bot` и живой `BarStream` в `feed`.
+- [x] **Step 4:** `make verify` → exit 0.
 - [ ] **Step 5: Live check** (окно демо-сервера, read-only, с согласия пользователя). Бот `dry_run` по `TQBR:SBER` M5 30 минут: в журнале есть `closed_bar` каждые 5 минут, а время закрытия совпадает с границами МСК. Результат — в `docs/ai-terminal/research.md` (**S**).
-- [ ] **Step 6: Commit** `feat(bot): rule bots from backtests with check, dry-run and paper stages`
+- [x] **Step 6: Commit** `feat(bot): rule bots from backtests with check, dry-run and paper stages`
 
 ### Task 23: Стратегия из промпта — декларативные правила
 
@@ -837,14 +837,14 @@
 - Пример из публикации как фикстура `testdata/rsi_example.json`: `rsi_wilder(14, scale 0.01)`, вход `rsi < 0.2`, выход `rsi > 0.8`, фильтр-расширение `close > sma(200)`.
 - Агент присылает JSON-правила вместо кода: это экономит токены и даёт воспроизводимость (`Spec` сохраняется в `Result.Params` как хеш и в истории бэктестов целиком).
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestRSIWilderMatchesReference`: эталонные значения RSI(14) Уайлдера на фиксированном ряде, допуск 1e-9.
   - `TestRulesPublicationExampleSignals`: фикстура генерирует входы только при `rsi<0.2` без позиции и выходы при `rsi>0.8`.
   - `TestRulesIgnorePartialBar` (Review Focus 7)
   - `TestCompileRejectsUnknownIndicator`
   - `TestRulesNoLookahead`: значение условия на баре i не зависит от баров > i (мутация будущих баров не меняет сигнал).
-- [ ] **Step 2–4:** red → implement → `make verify`.
-- [ ] **Step 5: Commit** `feat(backtest): declarative rule strategies composed from prompts`
+- [x] **Step 2–4:** red → implement → `make verify`.
+- [x] **Step 5: Commit** `feat(backtest): declarative rule strategies composed from prompts`
 
 ### Task 24: Сравнение тикеров с buy & hold, проверка выборки и график сделок
 
@@ -868,14 +868,14 @@
   - `no_costs`: `FeeBps == 0 && SlippageBps == 0`.
 - Артефакт для графика: `Result.Trades` + ряд индикатора `Series map[string][]float64` для панели.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `TestBatchBacktestFlagsSmallSample` (Review Focus 6)
   - `TestBatchBuyHoldMatchesFirstLastClose`
   - `TestBatchWarnsNoCosts`
   - `TestBatchContinuesOnOneSymbolError`: ошибка одного тикера — строка с `Warnings:["error: …"]`, остальные посчитаны.
-- [ ] **Step 2–4:** red → implement → `make verify`.
+- [x] **Step 2–4:** red → implement → `make verify`.
 - [ ] **Step 5: Manual check.** Промпт из публикации («RSI 14 на GAZP, LKOH, SBER, сравни с buy & hold») в DSH-чате даёт таблицу, графики с заливкой и предупреждения выборки. Скриншот в `docs/ai-terminal/`.
-- [ ] **Step 6: Commit** `feat(research): multi-symbol backtests against buy-and-hold with sample checks`
+- [x] **Step 6: Commit** `feat(research): multi-symbol backtests against buy-and-hold with sample checks`
 
 ### Task 25: Переносимые навыки — `npx skills add` для любого агента
 
@@ -894,15 +894,15 @@
   - реальные заявки недоступны;
   - перед выводами — проверка выборки и стоимости сделок.
 
-- [ ] **Step 1: Write the failing test** `TestSkillsFrontmatterValid`. Каждый `skills/*/SKILL.md`:
+- [x] **Step 1: Write the failing test** `TestSkillsFrontmatterValid`. Каждый `skills/*/SKILL.md`:
   - имеет `name`, равный имени каталога, и `description` короче 1024 символов;
   - не содержит строк, похожих на токены (`[A-Za-z0-9_-]{32,}`);
   - все упомянутые скрипты существуют и исполняемы.
-- [ ] **Step 2:** `go test ./skills -v` → FAIL.
-- [ ] **Step 3: Implement** навыки, скрипт и раздел README.
-- [ ] **Step 4:** `make verify` → exit 0.
+- [x] **Step 2:** `go test ./skills -v` → FAIL.
+- [x] **Step 3: Implement** навыки, скрипт и раздел README.
+- [x] **Step 4:** `make verify` → exit 0.
 - [ ] **Step 5: Manual check.** `npx skills add <локальный путь репозитория> --skill trading-terminal` в чистом каталоге Claude Code. Затем промпт «покажи котировку SBER из терминала» выполняется через навык.
-- [ ] **Step 6: Commit** `feat(skills): portable trading skills installable with npx skills add`
+- [x] **Step 6: Commit** `feat(skills): portable trading skills installable with npx skills add`
 
 ### Task 26: Пульт бота в DSH-сессии — бэктест, запуск и наблюдение в одном окне
 
@@ -942,17 +942,17 @@
   6. «Перевести на бумагу» → подтверждение → заявка видна в карточке и в портфеле терминала.
   7. «Стоп всех ботов».
 
-- [ ] **Step 1: Write the failing node tests:**
+- [x] **Step 1: Write the failing node tests:**
   - `relay delivers signal events to the bot session agent`
   - `relay keeps closed_bar out of the agent`
   - `relay batches events above the hourly limit into one summary`
   - `relay resubscribes after backend restart and resumes from last seq` (по `afterSeq` журнала, без дублей)
   - `kill switch action calls stop-all and hides when no bot runs`
-- [ ] **Step 2:** `node --test dsh-ai-terminal/test/bot-relay.test.mjs` → FAIL.
-- [ ] **Step 3: Implement** реле, карточки и действия. Если `ctx.agents.inject` недоступен из плагина (проверить в задаче 9), запасной путь — `ctx.sessionController.prompt` с системной пометкой `[bot:<id>]`; выбор записать в `docs/ai-terminal/dsh-integration.md`.
-- [ ] **Step 4:** `node --test dsh-ai-terminal/test/ && make verify` → exit 0.
+- [x] **Step 2:** `node --test dsh-ai-terminal/test/bot-relay.test.mjs` → FAIL.
+- [x] **Step 3: Implement** реле, карточки и действия. Если `ctx.agents.inject` недоступен из плагина (проверить в задаче 9), запасной путь — `ctx.sessionController.prompt` с системной пометкой `[bot:<id>]`; выбор записать в `docs/ai-terminal/dsh-integration.md`.
+- [x] **Step 4:** `node --test dsh-ai-terminal/test/ && make verify` → exit 0.
 - [ ] **Step 5: Manual check** на офлайн-снапшоте и затем на живом read-only потоке: сценарий из 7 шагов выше в одной DSH-сессии. Скриншоты — `docs/ai-terminal/screenshot-dsh-bot-{backtest,live,signal}.png`.
-- [ ] **Step 6: Commit** `feat(dsh-plugin): bot control room inside the Harness session`
+- [x] **Step 6: Commit** `feat(dsh-plugin): bot control room inside the Harness session`
 
 ---
 
