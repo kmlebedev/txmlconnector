@@ -114,7 +114,7 @@ TERMINAL_LLM_BASE_URL=http://127.0.0.1:8099/v1 TERMINAL_LLM_API_KEY=stub \
 ## Встраивание в DeepSeek Harness (плагин)
 
 Терминал встраивается в Web UI Harness как **основная панель**: плагин
-[`dsh-ai-terminal`](https://github.com/kmlebedev/dsh-trading-transaq) из отдельного репозитория
+[`dsh-ai-terminal`](https://github.com/kmlebedev/dsh-trading-transaq/tree/main/dsh-ai-terminal#readme) из отдельного репозитория
 [`kmlebedev/dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq) (каталог
 `dsh-ai-terminal/`) добавляет иконку «AI-терминал» в левую панель, поднимает Go-бэкенд (по
 умолчанию `bin/terminal`) и проксирует его SPA/API/SSE под origin Harness (`/ai-terminal/`),
@@ -126,7 +126,7 @@ TERMINAL_LLM_BASE_URL=http://127.0.0.1:8099/v1 TERMINAL_LLM_API_KEY=stub \
 
 ```bash
 git clone https://github.com/kmlebedev/dsh-trading-transaq ~/GolandProjects/dsh-trading-transaq
-make terminal   # в checkout'е txmlconnector: bin/terminal, который запускает плагин
+make -C ~/GolandProjects/txmlconnector terminal   # bin/terminal, который запускает плагин
 # в DSH-сессии: plugin_manager install_bundle с target = <dsh-trading-transaq>/dsh-ai-terminal
 ```
 
