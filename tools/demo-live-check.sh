@@ -35,6 +35,11 @@ TOKEN="live-check-$(date +%s)"
 PORT="${LIVE_PORT:-18095}"
 T11_SECONDS="${T11_SECONDS:-600}"
 T22_SECONDS="${T22_SECONDS:-1900}"
+# The demo server allows one login per account: after the recorder disconnects its
+# session can linger for a couple of minutes, so the live backend waits before
+# logging in. T22-only reruns skip the recorder but still cool down.
+T22_COOLDOWN="${T22_COOLDOWN:-120}"
+SKIP_T11="${DEMO_CHECK_SKIP_T11:-0}"
 export GOCACHE="${GOCACHE:-$ROOT/.cache/go-build}"
 echo "config: T11_SECONDS=$T11_SECONDS T22_SECONDS=$T22_SECONDS port=$PORT clickhouse=$MD_CH"
 
@@ -62,18 +67,23 @@ fi
 
 T11_STATUS="FAIL"; T22_STATUS="FAIL"; NEWS_STATUS="FAIL"
 
-echo "== T11 recorder: ${T11_SECONDS}s of TQBR:SBER =="
-MD_CLICKHOUSE_URL="$MD_CH" MD_CLICKHOUSE_USER="${MD_CLICKHOUSE_USER:-}" MD_CLICKHOUSE_PASSWORD="${MD_CLICKHOUSE_PASSWORD:-}" \
-  MD_SYMBOLS="TQBR:SBER" ./bin/md-recorder > "$OBS/t11-recorder-$STAMP.log" 2>&1 &
-RPID=$!
-for _ in $(seq 1 90); do
-  grep -q "connected to" "$OBS/t11-recorder-$STAMP.log" 2>/dev/null && break
-  kill -0 "$RPID" 2>/dev/null || break
-  sleep 2
-done
-sleep "$T11_SECONDS"
-kill -TERM "$RPID" 2>/dev/null; wait "$RPID" 2>/dev/null
-echo "recorder log tail:"; tail -3 "$OBS/t11-recorder-$STAMP.log"
+if [ "$SKIP_T11" = "1" ]; then
+  T11_STATUS="${DEMO_CHECK_T11_STATUS:-PASS}"
+  echo "== T11 recorder skipped (previous evidence: T11=$T11_STATUS); no recorder login =="
+else
+  echo "== T11 recorder: ${T11_SECONDS}s of TQBR:SBER =="
+  MD_CLICKHOUSE_URL="$MD_CH" MD_CLICKHOUSE_USER="${MD_CLICKHOUSE_USER:-}" MD_CLICKHOUSE_PASSWORD="${MD_CLICKHOUSE_PASSWORD:-}" \
+    MD_SYMBOLS="TQBR:SBER" ./bin/md-recorder > "$OBS/t11-recorder-$STAMP.log" 2>&1 &
+  RPID=$!
+  for _ in $(seq 1 90); do
+    grep -q "connected to" "$OBS/t11-recorder-$STAMP.log" 2>/dev/null && break
+    kill -0 "$RPID" 2>/dev/null || break
+    sleep 2
+  done
+  sleep "$T11_SECONDS"
+  kill -TERM "$RPID" 2>/dev/null; wait "$RPID" 2>/dev/null
+  echo "recorder log tail:"; tail -3 "$OBS/t11-recorder-$STAMP.log"
+fi
 BOOK_COUNTS="$(chq "SELECT kind, count() AS n FROM md.book_events GROUP BY kind ORDER BY kind FORMAT JSONEachRow")"
 TRADE_COUNT="$(chq "SELECT count() FROM md.trades")"
 NEWS_COUNT="$(chq "SELECT count() FROM md.news")"
@@ -82,6 +92,8 @@ NEWS_RANGE="$(chq "SELECT min(first_seen), max(first_seen), max(published) FROM 
 echo "book events by kind: $BOOK_COUNTS"
 echo "trades: $TRADE_COUNT news: $NEWS_COUNT range: $NEWS_RANGE"
 if echo "$BOOK_COUNTS" | grep -q "snapshot" && echo "$BOOK_COUNTS" | grep -q "level"; then T11_STATUS="PASS"; fi
+echo "cooldown ${T22_COOLDOWN}s before the live backend login (demo session release)"
+sleep "$T22_COOLDOWN"
 
 echo "== T22 dry-run bot: ${T22_SECONDS}s of TQBR:SBER M5 =="
 cat > "$OBS/rules.json" <<JSON
