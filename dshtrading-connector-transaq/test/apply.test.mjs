@@ -7,13 +7,31 @@ const INST = { instruments: [{ symbol: 'TQBR:SBER', secCode: 'SBER', board: 'TQB
 
 function makeCtx({ services = {}, tools, logger } = {}) {
   const disposers = [];
+  const waiters = [];
+  let toolsSvc = tools;
+  const available = (k) => (k === 'tools' ? toolsSvc !== undefined : services[k] !== undefined);
   const ctx = {
-    get: (k) => services[k],
+    get: (k) => (k === 'tools' ? toolsSvc : services[k]),
+    // Cordis ctx.inject: run the callback once every dependency is available.
+    inject: (deps, cb) => {
+      if (deps.every(available)) cb();
+      else waiters.push({ deps, cb });
+    },
     effect: (fn) => { const d = fn(); if (typeof d === 'function') disposers.push(d); },
-    ...(tools ? { tools } : {}),
+    get tools() { return toolsSvc; },
     ...(logger ? { logger } : {}),
   };
-  return { ctx, disposers };
+  const provide = (k, v) => {
+    if (k === 'tools') toolsSvc = v;
+    else services[k] = v;
+    for (let i = waiters.length - 1; i >= 0; i--) {
+      if (waiters[i].deps.every(available)) {
+        const w = waiters.splice(i, 1)[0];
+        w.cb();
+      }
+    }
+  };
+  return { ctx, disposers, provide };
 }
 
 function registry() {
@@ -21,7 +39,7 @@ function registry() {
   return { regs, register: (market, provider, service) => { regs.push({ market, provider, service }); return () => { regs.length = 0; }; } };
 }
 
-test('exports name and empty inject', () => {
+test('exports name and no static dependencies (services are optional)', () => {
   assert.equal(entry.name, 'dsh-trading-ru-connector-transaq');
   assert.deepEqual(entry.inject, []);
 });
@@ -66,19 +84,58 @@ test('tools.register returning nothing is fine; works without ctx.effect', () =>
   assert.ok(registered.length > 0);
 });
 
-test('nothing to register warns once and does not throw (with and without logger)', () => {
+test('no services at all warns once and does not throw (with and without logger)', () => {
   const warns = [];
   const logger = (scope) => ({ warn: (m) => warns.push([scope, m]) });
-  const { ctx } = makeCtx({ logger });
-  entry.apply(ctx, {});
+  // A plain context without ctx.inject/tools/registries: nothing can ever register.
+  entry.apply({ get: () => undefined, logger }, {});
   assert.deepEqual(warns, [['transaq', 'transaq connector: no dsh-trading registries or tools service in this host']]);
-  const { ctx: bare } = makeCtx();
-  assert.doesNotThrow(() => entry.apply(bare, {}));
+  assert.doesNotThrow(() => entry.apply({ get: () => undefined }, {}));
+  // A Cordis-like context can wait for late services, so no premature warning.
+  const w2 = [];
+  const { ctx } = makeCtx({ logger: (scope) => ({ warn: (m) => w2.push([scope, m]) }) });
+  entry.apply(ctx, {});
+  assert.deepEqual(w2, []);
+});
+
+test('registries provided later still get ru/finam (no silent skip)', () => {
+  const md = registry(); const tr = registry();
+  const { ctx, provide } = makeCtx({ tools: { register: () => () => {} } });
+  entry.apply(ctx, {});
+  assert.equal(md.regs.length, 0);
+  provide('tradingMarketDataRegistry', md);
+  provide('tradingTradeRegistry', tr);
+  assert.equal(md.regs.length, 1);
+  assert.equal(md.regs[0].market, 'ru');
+  assert.equal(md.regs[0].provider, 'finam');
+  assert.equal(tr.regs.length, 1);
 });
 
 test('bad gatewayUrl propagates', () => {
   const { ctx } = makeCtx();
   assert.throws(() => entry.apply(ctx, { gatewayUrl: 'http://example.com' }), TypeError);
+});
+
+test('tools service is optional: registries register without it', () => {
+  const md = registry(); const tr = registry();
+  const warns = [];
+  const { ctx } = makeCtx({
+    services: { tradingMarketDataRegistry: md, tradingTradeRegistry: tr },
+    logger: (scope) => ({ warn: (m) => warns.push([scope, m]) }),
+  });
+  entry.apply(ctx, {});
+  assert.equal(md.regs.length, 1);
+  assert.equal(tr.regs.length, 1);
+  assert.deepEqual(warns, []);
+});
+
+test('tools service provided later still registers the tools', () => {
+  const registered = [];
+  const { ctx, provide } = makeCtx();
+  entry.apply(ctx, {});
+  assert.equal(registered.length, 0);
+  provide('tools', { register: (d) => { registered.push(d.name); return () => {}; } });
+  assert.deepEqual(registered.sort(), ['ru_get_klines', 'ru_get_orderbook', 'ru_get_paper_account', 'ru_get_ticker', 'ru_get_trades', 'ru_list_instruments']);
 });
 
 test('token resolved per request from env; credentials service preferred; throwing service falls back', async () => {
