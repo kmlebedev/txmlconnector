@@ -146,3 +146,24 @@ T26 dry-run — подтверждение proposal человеком + жив�
 
 Следующее: T11/T12/T22 — фоновая приёмка в окне демо (09:50 МСК); T9/T24/T26 UI-часть —
 контролируемое возвращение client-половины (сначала минимальный client, затем карточки) после окна.
+
+### T25: живой prod-промпт через навык (Kimi Code, 2026-11-06 12:57 MSK)
+
+Пользователь положил `~/re/prod.env` (креды неиспользуемого терминала, 4 ключа `TC_*`). На них
+поднят отдельный read-only backend (`bin/terminal -mode live`, порт 18097): `/api/health` →
+`{"mode":"live","connected":true,"message":"подключено к серверу биржи"}`. Торговых команд не
+отправлялось; backend остановлен после прогона.
+
+- Чистый каталог `/tmp/t25-prod`; `npx -y skills add /Users/whitefox/GolandProjects/txmlconnector
+  --skill trading-terminal --agent kimi-code-cli -y` → `./.agents/skills/trading-terminal`
+  (`SKILL.md` + `scripts/terminal.sh`), exit 0.
+- Промпт: «Покажи котировку SBER через навык trading-terminal…» через Kimi Code с
+  `TERMINAL_URL=http://127.0.0.1:18097` → агент нашёл `SKILL.md`, выполнил
+  `scripts/terminal.sh quote TQBR:SBER` и вернул **живую** котировку: last **292.29**, bid **292.28**,
+  ask **292.29**, timestamp `2026-11-06T07:57:41Z` (read-only, заявки не выставлялись).
+- Замечание: первый прямой вызов `scripts/terminal.sh quote` сразу после старта backend вернул
+  `{"error":"agent: no quote for TQBR:SBER"}` — котировочный поток ещё не успел наполниться;
+  агент повторил запрос и получил данные. Это же поведение полезно документировать в навыке.
+
+Claude Code-специфичная часть Step 5 остаётся **I**: `claude -p` →
+`Failed to authenticate: OAuth session expired and could not be refreshed`.

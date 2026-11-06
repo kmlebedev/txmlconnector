@@ -434,3 +434,13 @@ Host-половина стабильно работает; client-запись �
 Осталось в плане: **T9, T21, T24, T25, T26** (5 шагов). T21 — ограничение сборки DSH
 (`workflowEngine` отсутствует); T9/T24/T26 — UI-часть (нужен возврат client-половины плагина);
 T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAuth).
+### Перезапуск DSH с client-половиной прошёл (2026-11-06 12:53 MSK)
+
+- Desktop DSH перезапущен с экспериментальным `dsh.client = {"platform":"web"}` и закалённым
+  `client.js`: новых crash-bundle нет, host-половина активна (`bin/terminal -mode offline` на
+  18090, `/api/health` ok). Это подтверждает, что прежнее `loading` не повторяется при
+  минимальном manifest; визуальная проверка панели/карточек — за пользователем.
+- T9/T24/T26 host-вызовы сгенерированы в чате: `terminal_run_backtest` (sma_cross SBER M5),
+  `terminal_batch_backtest` (GAZP/SBER/LKOH), `bot_0001` create/check/status/proposal.
+- T25: живой prod-промпт через навык (Kimi Code) на неиспользуемом терминале — last 292.29,
+  bid/ask 292.28/292.29 (`~/re/prod.env`, read-only); Claude Code — I (OAuth истёк).
