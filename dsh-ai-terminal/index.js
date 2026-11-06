@@ -33,18 +33,15 @@ import { createSkillProvider } from './skills.js';
 import { createToolBridge } from './tools.js';
 
 /**
- * Services the plugin cannot work without: the Harness Web server (routes)
- * and the tool registry (the terminal_<name> tools). Every other capability
- * (llm, skills, subprocess, workflowEngine, schedule, sessionController,
- * agents) is resolved with ctx.get() and degrades gracefully.
- *
- * This matters for boot: a Cordis row whose required inject never appears stays
- * pending, and the Desktop reports "1 entry did not activate" as a fatal web
- * boot error (the shipped desktop/web profiles do not mount a workflowEngine
- * service, plan Task 21). The nightly workflow and the bot relay therefore
- * report "сервис недоступен" instead of preventing DSH from starting.
+ * The only hard requirement of the plugin row is the Harness Web server (the
+ * panel and control routes). The tool registry is mounted through a child
+ * ctx.inject(['tools']) below: a Cordis row whose required inject never appears
+ * stays in the `loading` state, and the Desktop treats that as a fatal web
+ * boot error ("1 entry did not activate"). Keeping the row's inject minimal
+ * means a profile without tools/workflowEngine/schedule/... still boots; the
+ * optional capabilities report "сервис недоступен" instead.
  */
-export const inject = ['webServer', 'tools'];
+export const inject = ['webServer'];
 
 const MOUNT = '/ai-terminal';
 const CONTROL = '/ai-terminal-ctl';
@@ -479,12 +476,10 @@ export function apply(ctx, config) {
   };
 
   // Harness tool bridge (plan Task 9): the Go agent catalog becomes native
-  // terminal_<name> tools of the agents. The bridge is inert without the tool
-  // service, and it re-registers after every backend (re)start.
-  const toolService = typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools;
-  const toolBridge = toolService && typeof toolService.register === 'function'
-    ? createToolBridge({ tools: toolService, port: cfg.port, token: backend.token })
-    : null;
+  // terminal_<name> tools of the agents. The bridge is mounted through
+  // ctx.inject(['tools']) at the end of apply(); without the tool service it
+  // simply does not exist, and the plugin row still activates.
+  let toolBridge = null;
   backend.onRunning = () => {
     if (!toolBridge) return;
     toolBridge.refresh().catch((error) => {
@@ -566,7 +561,9 @@ export function apply(ctx, config) {
     schedule: resolveService('schedule'),
     sessionController: resolveService('sessionController'),
     scriptText: nightlyScript,
-    invokeTool: toolBridge ? (name, args, signal) => toolBridge.invoke(name, args, signal) : null,
+    invokeTool: (name, args, signal) => (toolBridge
+      ? toolBridge.invoke(name, args, signal)
+      : Promise.reject(new Error('инструменты Harness недоступны'))),
     log: (level, message) => {
       const line = '[ai-terminal] ' + message;
       if (level === 'warn') console.warn(line);
@@ -574,7 +571,6 @@ export function apply(ctx, config) {
     },
   });
   own(() => autonomy.dispose());
-  own(autonomy.registerTool(toolService));
 
   own(ctx.webServer.register({
     kind: 'exact',
@@ -658,10 +654,36 @@ export function apply(ctx, config) {
     summaryBatch: cfg.relay.summaryBatch,
   });
   own(() => botRelay.dispose());
-  if (toolBridge && typeof toolBridge.setToolResultHook === 'function') {
-    toolBridge.setToolResultHook((name, args, exec, reply) => botRelay.trackToolResult(name, args, exec, reply));
-  }
   botRelay.start();
+
+  // Mount the Harness tool integration only when the registry is available.
+  // The plugin row itself does not require it (see the inject comment above):
+  // the child fiber may wait without blocking the web boot.
+  const mountTools = (toolCtx) => {
+    const tools = toolCtx && typeof toolCtx.get === 'function'
+      ? toolCtx.get('tools')
+      : (toolCtx && toolCtx.tools);
+    if (!tools || typeof tools.register !== 'function') return undefined;
+    const bridge = createToolBridge({ tools, port: cfg.port, token: backend.token });
+    toolBridge = bridge;
+    const disposeNightly = autonomy.registerTool(tools);
+    if (typeof bridge.setToolResultHook === 'function') {
+      bridge.setToolResultHook((name, args, exec, reply) => botRelay.trackToolResult(name, args, exec, reply));
+    }
+    const release = () => {
+      try { disposeNightly(); } catch { /* already unregistered */ }
+      try { bridge.close(); } catch { /* already closed */ }
+      if (toolBridge === bridge) toolBridge = null;
+    };
+    if (toolCtx && typeof toolCtx.effect === 'function') toolCtx.effect(() => release);
+    if (backend.state.phase === 'running') backend.onRunning();
+    return release;
+  };
+  if (typeof ctx.inject === 'function') {
+    void ctx.inject(['tools'], mountTools);
+  } else {
+    mountTools(ctx);
+  }
 
   own(ctx.webServer.register({
     kind: 'exact',

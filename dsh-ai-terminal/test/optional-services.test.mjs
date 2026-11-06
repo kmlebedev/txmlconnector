@@ -40,8 +40,8 @@ function minimalCtx(options = {}) {
 
 const CONFIG = { mode: "offline", autoStart: false, port: 18190 };
 
-test("the plugin requires only webServer and tools", () => {
-  assert.deepEqual(inject, ["webServer", "tools"]);
+test("the plugin row requires only webServer", () => {
+  assert.deepEqual(inject, ["webServer"]);
 });
 
 test("apply activates without workflowEngine/schedule/sessionController/agents", () => {
@@ -69,4 +69,32 @@ test("apply activates with the optional services present", () => {
   const ctx = minimalCtx({ services: { tools, schedule, workflowEngine: { start: async () => ({ id: "run-1" }) }, sessionController: { prompt() {} }, agents: { get() { return null; } } } });
   assert.doesNotThrow(() => apply(ctx, { ...CONFIG, autonomy: { enabled: false } }));
   assert.ok(registered.some((tool) => tool.name === "terminal_nightly_research"), "nightly tool must be registered");
+});
+test("tools are mounted through a child ctx.inject", () => {
+  const registered = [];
+  const tools = { register(tool) { registered.push(tool); return () => {}; } };
+  const injected = [];
+  const ctx = minimalCtx();
+  ctx.inject = (deps, callback) => {
+    injected.push(deps);
+    const child = minimalCtx({ services: { tools } });
+    child.get = (name) => (name === "tools" ? tools : undefined);
+    callback(child);
+  };
+  assert.doesNotThrow(() => apply(ctx, { ...CONFIG, autonomy: { enabled: false } }));
+  assert.deepEqual(injected, [["tools"]], "the tool registry must be mounted as an optional child");
+  assert.ok(registered.some((tool) => tool.name === "terminal_nightly_research"), "nightly tool must be registered through the child");
+});
+
+test("apply survives a deferred tools service", () => {
+  let pending = null;
+  const ctx = minimalCtx();
+  ctx.inject = (deps, callback) => {
+    assert.deepEqual(deps, ["tools"]);
+    pending = callback;
+  };
+  assert.doesNotThrow(() => apply(ctx, { ...CONFIG, autonomy: { enabled: false } }));
+  assert.equal(typeof pending, "function", "the child callback must be registered");
+  // Later, when tools still does not appear, the child callback must stay inert.
+  assert.doesNotThrow(() => pending(minimalCtx()));
 });
