@@ -81,7 +81,7 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
     return (i.intervals ?? []).map((x) => ({ interval: x.interval, maxBars: x.maxBars }));
   }
 
-  async function getKlines(symbol, interval, limit = 500) {
+  async function getKlinesWithSource(symbol, interval, limit = 500) {
     const caps = await klineCapabilities();
     if (!caps.some((c) => c.interval === interval)) {
       throw new TradingError('TRADING_UNSUPPORTED_INTERVAL', `unsupported interval ${interval}; supported: ${caps.map((c) => c.interval).join(', ')}`);
@@ -89,7 +89,7 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
     const { native, instrument } = await resolver.resolve(symbol);
     const lot = lotSizeOf(instrument);
     const res = await client.get('/candles', { symbol: native, interval, limit });
-    return (res.bars ?? []).map((b) => ({
+    const data = (res.bars ?? []).map((b) => ({
       openTime: b.openTime,
       open: Number(b.open),
       high: Number(b.high),
@@ -98,6 +98,11 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
       volume: (b.volumeLots ?? 0) * lot,
       closeTime: b.closeTime,
     }));
+    return { source: res.source, data };
+  }
+
+  async function getKlines(symbol, interval, limit) {
+    return (await getKlinesWithSource(symbol, interval, limit)).data;
   }
 
   async function listInstruments() {
@@ -110,19 +115,24 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
     }));
   }
 
-  async function getOrderbook(symbol) {
+  async function getOrderbookWithSource(symbol) {
     const { native, canonical, instrument } = await resolver.resolve(symbol);
     const lot = lotSizeOf(instrument);
     const res = await client.get('/orderbook', { symbol: native });
     const level = (l) => ({ price: Number(l.price), amount: l.lots * lot });
-    return { symbol: canonical, bids: (res.bids ?? []).map(level), asks: (res.asks ?? []).map(level), timestamp: res.time };
+    const data = { symbol: canonical, bids: (res.bids ?? []).map(level), asks: (res.asks ?? []).map(level), timestamp: res.time };
+    return { source: res.source, data };
   }
 
-  async function getRecentTrades(symbol, limit) {
+  async function getOrderbook(symbol) {
+    return (await getOrderbookWithSource(symbol)).data;
+  }
+
+  async function getRecentTradesWithSource(symbol, limit) {
     const { native, canonical, instrument } = await resolver.resolve(symbol);
     const lot = lotSizeOf(instrument);
     const res = await client.get('/trades', { symbol: native, limit });
-    return (res.trades ?? []).map((t) => ({
+    const data = (res.trades ?? []).map((t) => ({
       id: t.id,
       symbol: canonical,
       price: Number(t.price),
@@ -130,6 +140,11 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
       side: t.side === 'buy' || t.side === 'sell' ? t.side : 'unknown',
       timestamp: t.time,
     }));
+    return { source: res.source, data };
+  }
+
+  async function getRecentTrades(symbol, limit) {
+    return (await getRecentTradesWithSource(symbol, limit)).data;
   }
 
   function subscribeTicker(symbol, cb) {
@@ -158,5 +173,8 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
     };
   }
 
-  return { getTicker, getTickers, getKlines, klineCapabilities, listInstruments, getOrderbook, getRecentTrades, subscribeTicker };
+  return {
+    getTicker, getTickers, getKlines, getKlinesWithSource, klineCapabilities, listInstruments,
+    getOrderbook, getOrderbookWithSource, getRecentTrades, getRecentTradesWithSource, subscribeTicker,
+  };
 }
