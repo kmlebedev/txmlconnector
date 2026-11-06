@@ -76,7 +76,7 @@ const BACKEND_SOURCE = [
   '    res.end(JSON.stringify({ ok: true, mode: "offline", instanceId }));',
   '    return;',
   '  }',
-  '  res.end(JSON.stringify({ path: req.url, headers: req.headers, token, instanceId }));',
+  '  res.end(JSON.stringify({ path: req.url, headers: req.headers, token, instanceId, dataDir: process.env.TERMINAL_DATA_DIR }));',
   '});',
   '',
   'server.listen(port, "127.0.0.1");',
@@ -213,6 +213,7 @@ test('proxy strips credentials and adds token', async (t) => {
     port,
     autoStart: true,
     binaryPath: writeBackend(dir),
+    dataDir: path.join(dir, 'research data'),
   }, subprocess);
   const front = server.address().port;
   await waitFor(async () => (await readStatus(front)).phase === 'running', 20_000, 'backend start');
@@ -254,6 +255,8 @@ test('proxy strips credentials and adds token', async (t) => {
   assert.ok(spec, 'the plugin must spawn its own backend');
   assert.ok(spec.env.TERMINAL_API_TOKEN, 'backend must receive TERMINAL_API_TOKEN');
   assert.ok(spec.env.TERMINAL_INSTANCE_ID, 'backend must receive TERMINAL_INSTANCE_ID');
+  assert.equal(spec.env.TERMINAL_DATA_DIR, path.join(dir, 'research data'));
+  assert.equal(payload.dataDir, spec.env.TERMINAL_DATA_DIR, 'the real child must receive the configured research catalog');
   assert.equal(payload.token, spec.env.TERMINAL_API_TOKEN, 'the proxied token must be the one the backend was started with');
   assert.equal(spec.env.HOME, undefined, 'the plugin must not dump the whole Harness environment into the backend');
   assert.ok(!spec.env.PATH, 'the plugin must not forward the ambient PATH as an explicit override');
