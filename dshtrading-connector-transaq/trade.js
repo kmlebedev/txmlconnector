@@ -65,6 +65,7 @@ export function createTradeService({ client, resolver }) {
     throw new TradingError('TRADING_LIVE_TRADING_DISABLED', LIVE_OFF);
   }
 
+  // The gateway already maps paper statuses to the dsh-trading vocabulary (e.g. partially_filled, canceled); pass through.
   const toOrder = (o) => {
     const out = {
       id: String(o.id),

@@ -47,10 +47,12 @@ test('ru_get_ticker result carries source seed in offline fake', async () => {
   try {
     assert.equal((await byName.ru_get_ticker.execute({ symbol: 'SBER' }, {})).source, 'seed');
     const k = await byName.ru_get_klines.execute({ symbol: 'SBER', interval: '1m' }, {});
+    assert.equal(k.symbol, 'SBER.TQBR');
     assert.equal(k.source, 'seed');
     assert.equal(k.bars[0].volume, 30);
     assert.equal((await byName.ru_get_orderbook.execute({ symbol: 'SBER' }, {})).source, 'seed');
     const t = await byName.ru_get_trades.execute({ symbol: 'SBER' }, {});
+    assert.equal(t.symbol, 'SBER.TQBR');
     assert.equal(t.source, 'seed');
     assert.equal(t.trades[0].amount, 20);
   } finally { await gw.close(); }

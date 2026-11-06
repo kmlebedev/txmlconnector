@@ -28,8 +28,8 @@ export function buildTools({ market, trade }) {
         additionalProperties: false,
       },
       execute: async ({ symbol, interval, limit }) => {
-        const { source, data } = await market.getKlinesWithSource(symbol, interval, limit);
-        return { symbol, interval, source, bars: data };
+        const { symbol: canonical, source, data } = await market.getKlinesWithSource(symbol, interval, limit);
+        return { symbol: canonical, interval, source, bars: data };
       },
     },
     {
@@ -37,8 +37,8 @@ export function buildTools({ market, trade }) {
       description: `Order book (bids and asks) of a MOEX instrument: price in RUB, amount in shares. ${SRC}`,
       parameters: { type: 'object', properties: { symbol: SYMBOL }, required: ['symbol'], additionalProperties: false },
       execute: async ({ symbol }) => {
-        const { source, data } = await market.getOrderbookWithSource(symbol);
-        return { ...data, source };
+        const { symbol: canonical, source, data } = await market.getOrderbookWithSource(symbol);
+        return { ...data, symbol: canonical, source };
       },
     },
     {
@@ -51,8 +51,8 @@ export function buildTools({ market, trade }) {
         additionalProperties: false,
       },
       execute: async ({ symbol, limit }) => {
-        const { source, data } = await market.getRecentTradesWithSource(symbol, limit);
-        return { symbol, source, trades: data };
+        const { symbol: canonical, source, data } = await market.getRecentTradesWithSource(symbol, limit);
+        return { symbol: canonical, source, trades: data };
       },
     },
     {
