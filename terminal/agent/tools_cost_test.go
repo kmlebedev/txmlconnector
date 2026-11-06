@@ -16,6 +16,7 @@ import (
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 	"github.com/kmlebedev/txmlconnector/terminal/fingerprint"
 	"github.com/kmlebedev/txmlconnector/terminal/lobreplay"
+	"github.com/kmlebedev/txmlconnector/terminal/vintage"
 )
 
 // countToolMessages returns the number of tool-result messages of a provider
@@ -373,7 +374,160 @@ func TestPointInTimeFilters(t *testing.T) {
 	bars := []backtest.Bar{
 		{Time: testNow}, {Time: testNow.Add(time.Minute)}, {Time: testNow.Add(2 * time.Minute)},
 	}
-	if got := barsUpTo(bars, testNow.Add(time.Minute)); len(got) != 2 {
+	// Closed 1-minute bars: the first two close at or before testNow+2m.
+	if got := barsUpTo(bars, testNow.Add(2*time.Minute), 60); len(got) != 2 {
 		t.Fatalf("barsUpTo = %d bars, want 2", len(got))
+	}
+}
+
+// periodBars builds n flat OHLCV bars spaced period apart, starting at testNow.
+// The explicit spacing keeps the open/close geometry of a real feed so the
+// bar-close point-in-time rule is observable.
+func periodBars(n int, period time.Duration) []backtest.Bar {
+	bars := make([]backtest.Bar, n)
+	for i := range bars {
+		price := 100 + float64(i)*0.1
+		bars[i] = backtest.Bar{
+			Time:   testNow.Add(time.Duration(i) * period),
+			Open:   price,
+			High:   price + 0.1,
+			Low:    price - 0.1,
+			Close:  price + 0.05,
+			Volume: int64(1000 + i),
+		}
+	}
+	return bars
+}
+
+// TestBarsUpToClosedBarsOnly pins the point-in-time bar filter: a bar is known
+// only once its candle is closed (close = open + period). A mid-bar asOf, a
+// still forming candle, an unknown open time and an unknown period must all be
+// excluded, so a research tool can never train on a bar that is not finished.
+func TestBarsUpToClosedBarsOnly(t *testing.T) {
+	const periodSec = 300
+	period := time.Duration(periodSec) * time.Second
+	bars := periodBars(3, period)
+	bars[2].Partial = true
+	bars = append(bars, backtest.Bar{Time: time.Time{}, Open: 1, Close: 1})
+
+	// Mid-bar asOf: bar 0 closes at testNow+5m, bar 1 only at testNow+10m.
+	midBar := testNow.Add(period + period/2)
+	got := barsUpTo(bars, midBar, periodSec)
+	if len(got) != 1 || !got[0].Time.Equal(bars[0].Time) {
+		t.Fatalf("barsUpTo(mid-bar) = %d bars, want 1 (only the closed bar 0)", len(got))
+	}
+	// Exact close: bar 1 becomes known exactly at its close; the partial bar 2
+	// opens at the same instant but is not closed yet and stays out.
+	got = barsUpTo(bars, testNow.Add(2*period), periodSec)
+	if len(got) != 2 {
+		t.Fatalf("barsUpTo(exact close) = %d bars, want 2 (bar 0 and bar 1)", len(got))
+	}
+	for _, bar := range got {
+		if bar.Partial {
+			t.Fatalf("barsUpTo included the partial bar at %v", bar.Time)
+		}
+	}
+	// Partial must stay excluded even after its nominal close; this isolates
+	// the Partial flag from the time-based exclusion above.
+	if got := barsUpTo(bars, testNow.Add(4*period), periodSec); len(got) != 2 {
+		t.Fatalf("barsUpTo(past partial close) = %d bars, want 2", len(got))
+	}
+	// Mid-bar at the very open: the first bar is open but not closed.
+	if got := barsUpTo(bars, testNow, periodSec); len(got) != 0 {
+		t.Fatalf("barsUpTo(open) = %d bars, want 0", len(got))
+	}
+	// An unknown open time cannot be proven to be in the past: fail closed.
+	if got := barsUpTo([]backtest.Bar{{Time: time.Time{}}}, testNow.Add(time.Hour), periodSec); len(got) != 0 {
+		t.Fatalf("barsUpTo(zero time) = %d bars, want 0", len(got))
+	}
+	// An unknown period cannot prove the close: fail closed too.
+	if got := barsUpTo(periodBars(3, period), midBar, 0); len(got) != 0 {
+		t.Fatalf("barsUpTo(zero period) = %d bars, want 0", len(got))
+	}
+}
+
+// volFakeDataSource adds the vintage layer to the deterministic bar fake so
+// vol_forecast reaches the volatility oracle.
+type volFakeDataSource struct{ *fakeDataSource }
+
+func (volFakeDataSource) Releases(context.Context, time.Time, time.Time, ...string) ([]vintage.Release, error) {
+	return nil, nil
+}
+
+func (volFakeDataSource) News(context.Context, time.Time, time.Time, ...string) ([]vintage.NewsItem, error) {
+	return nil, nil
+}
+
+// TestWalkForwardPointInTimeUsesBarClose checks the walk_forward wiring of the
+// bar period: the tool hands the actual period to the point-in-time filter and
+// drops the forming candle. Eight closed 15-minute bars give exactly one fold;
+// an open-time filter (or a wrong period) lets the partial and future bars
+// through and produces more folds.
+func TestWalkForwardPointInTimeUsesBarClose(t *testing.T) {
+	e, data, _ := newTestEngine(t)
+	const periodSec = 900
+	period := time.Duration(periodSec) * time.Second
+	bars := periodBars(12, period)
+	bars[8].Partial = true
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{periodSec: bars}
+	// Mid-bar asOf: bars 0..7 are closed, bar 8 is forming, 9..11 are future.
+	asOf := testNow.Add(8*period + period/2)
+	args := map[string]any{
+		"symbol":    "TQBR:SBER",
+		"asOf":      asOf.Format(time.RFC3339),
+		"periodSec": periodSec,
+		"count":     len(bars),
+		"strategy":  "sma_cross",
+		"grid":      map[string]any{"fast": []any{2, 3}, "slow": []any{5, 8}},
+		"trainBars": 4,
+		"testBars":  2,
+		"stepBars":  3,
+	}
+	result, artifact, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameWalkForward, args)
+	if err != nil {
+		t.Fatalf("walk_forward: %v", err)
+	}
+	view, ok := result.(walkForwardView)
+	if !ok {
+		t.Fatalf("result type = %T, want walkForwardView", result)
+	}
+	if view.Folds != 1 {
+		t.Fatalf("folds = %d, want 1: only the closed bars up to asOf may reach the folds", view.Folds)
+	}
+	if view.OOS.To.After(asOf) {
+		t.Fatalf("walk-forward OOS reaches %v, after asOf %v", view.OOS.To, asOf)
+	}
+	if artifact == nil || artifact.Kind != "walk_forward" {
+		t.Fatalf("artifact = %+v, want kind walk_forward", artifact)
+	}
+}
+
+// TestVolForecastPointInTimeUsesBarClose checks the vol_forecast wiring of the
+// bar period: the oracle must be trained on the closed bars only. Ten 15-minute
+// bars with a mid-bar asOf leave seven closed bars; the fit is guaranteed to
+// fail on such a short history and the wrapped error reports the geometry the
+// tool handed to the oracle, which makes the point-in-time slice observable.
+func TestVolForecastPointInTimeUsesBarClose(t *testing.T) {
+	const periodSec = 900
+	period := time.Duration(periodSec) * time.Second
+	data := &volFakeDataSource{fakeDataSource: newFakeDataSource()}
+	bars := periodBars(10, period)
+	bars[7].Partial = true
+	data.histories["TQBR:SBER"] = map[int][]backtest.Bar{periodSec: bars}
+	e := newTestEngineWith(t, Config{DefaultSymbol: "TQBR:SBER"}, data, newFakeBroker(1_000_000))
+	// Mid-bar asOf: bars 0..6 are closed, bar 7 is forming, 8..9 are future.
+	asOf := testNow.Add(7*period + period/2)
+	args := map[string]any{
+		"symbol":    "TQBR:SBER",
+		"asOf":      asOf.Format(time.RFC3339),
+		"periodSec": periodSec,
+		"count":     len(bars),
+	}
+	_, _, err := e.invokeTool(context.Background(), toolInvocation{}, toolNameVolForecast, args)
+	if err == nil {
+		t.Fatal("vol_forecast fitted the oracle on ten 15-minute bars, want a short-history error")
+	}
+	if want := "(period 900s, 7 bars)"; !strings.Contains(err.Error(), want) {
+		t.Fatalf("fit error = %v, want it to report %q: the partial and future bars must not reach the oracle", err, want)
 	}
 }
