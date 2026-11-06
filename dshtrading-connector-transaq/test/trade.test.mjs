@@ -79,3 +79,12 @@ test('open orders, getOrder and fills', async () => {
     assert.deepEqual(fills, [{ id: '1', orderId: '7', symbol: 'SBER.TQBR', side: 'buy', price: 300, quantity: 10, fee: 0.5, timestamp: 6 }]);
   } finally { await gw.close(); }
 });
+
+test('order status vocabulary passes through from gateway', async () => {
+  const { gw, trade } = await setup();
+  try {
+    gw.routes = { ...gw.routes, '/api/gw/v1/account': { ...ACCOUNT, openOrders: [{ ...ACCOUNT.openOrders[0], status: 'partially_filled', filled: 5 }] } };
+    assert.equal((await trade.listOpenOrders())[0].status, 'partially_filled');
+    assert.equal((await trade.getOrder('SBER', '7')).status, 'partially_filled');
+  } finally { await gw.close(); }
+});

@@ -86,7 +86,7 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
     if (!caps.some((c) => c.interval === interval)) {
       throw new TradingError('TRADING_UNSUPPORTED_INTERVAL', `unsupported interval ${interval}; supported: ${caps.map((c) => c.interval).join(', ')}`);
     }
-    const { native, instrument } = await resolver.resolve(symbol);
+    const { native, canonical, instrument } = await resolver.resolve(symbol);
     const lot = lotSizeOf(instrument);
     const res = await client.get('/candles', { symbol: native, interval, limit });
     const data = (res.bars ?? []).map((b) => ({
@@ -98,7 +98,7 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
       volume: (b.volumeLots ?? 0) * lot,
       closeTime: b.closeTime,
     }));
-    return { source: res.source, data };
+    return { symbol: canonical, source: res.source, data };
   }
 
   async function getKlines(symbol, interval, limit) {
@@ -121,7 +121,7 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
     const res = await client.get('/orderbook', { symbol: native });
     const level = (l) => ({ price: Number(l.price), amount: l.lots * lot });
     const data = { symbol: canonical, bids: (res.bids ?? []).map(level), asks: (res.asks ?? []).map(level), timestamp: res.time };
-    return { source: res.source, data };
+    return { symbol: canonical, source: res.source, data };
   }
 
   async function getOrderbook(symbol) {
@@ -140,7 +140,7 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
       side: t.side === 'buy' || t.side === 'sell' ? t.side : 'unknown',
       timestamp: t.time,
     }));
-    return { source: res.source, data };
+    return { symbol: canonical, source: res.source, data };
   }
 
   async function getRecentTrades(symbol, limit) {
