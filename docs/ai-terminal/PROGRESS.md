@@ -143,3 +143,24 @@
 - PR [#62](https://github.com/kmlebedev/txmlconnector/pull/62) — draft, base `main`, head `plan/ai-terminal-a`; CI «Run Go Tests» — pass.
 - Все 26 задач плана закрыты; 8 шагов Live/Manual check остаются до согласия пользователя на живые прогоны.
 - Перевод в ready-for-review / merge — после живых Step 5 (по команде пользователя).
+
+## Live/Manual проверки (2026-11-06, ветка plan/ai-terminal-live)
+
+Пользователь дал согласие на живые проверки и указал на соседний проект
+`/Users/whitefox/GolandProjects/clickhouse-import-rosstat` (dev-ClickHouse + MCP).
+
+| Шаг | Статус | Доказательство |
+|---|---|---|
+| T9 Step 5 | **I** | живая DSH-сессия: нужен перезапуск DSH с текущим плагином; в этой сессии не выполнялось |
+| T10 Step 5 | **S (частично) / I** | Claude Code 2.1.287: `claude mcp add --transport http terminal http://127.0.0.1:<port>/mcp --header X-Terminal-Token: …` → `claude mcp list` = ✔ Connected; MCP `initialize`/`tools/list` = 32 инструмента, `tools/call` `get_quote` → `result.symbol=TQBR:SBER`; LLM-вызов инструмента из Claude Code не выполнен — OAuth-сессия Claude Code истекла (не блокер кода) |
+| T11 Step 5 | **S (схема) + live в окне демо** | `recorder.EnsureSchema` создал `md.book_events/trades/news` на живом ClickHouse, типы колонок совпадают с планом; запись 10 минут и `SELECT kind,count()` запускаются фоновой проверкой по открытию демо-окна (09:51 МСК), результат будет добавлен |
+| T12 (news live) | live в окне демо | `md.news` создана; `first_seen/published` проверяются той же фоновой записью |
+| T21 Step 5 | **I** | живой DSH/LLM: workflow/schedule/kill-switch проверены node-тестами на fake-сервисах |
+| T22 Step 5 | live в окне демо | dry-run бот M5 30 минут на демо-сервере — фоновая проверка |
+| T24 Step 5 | **I** | ручной промпт в DSH-чате; API/инструмент `batch_backtest` проверены офлайн-smoke |
+| T25 Step 5 | **S (установка) / I (промпт)** | `npx -y skills add <repo> --skill trading-terminal --agent claude-code -y` → установлен `./.claude/skills/trading-terminal` (SKILL.md + scripts/terminal.sh), «Installed 1 skill»; прогон промпта в Claude Code не выполнен из-за истёкшей OAuth-сессии |
+| T26 Step 5 | **I** | живой сценарий 7 шагов в DSH — после перезапуска DSH |
+| T13/T16 live | **S** | живые dev-витрины `clickhouse-import-rosstat`: см. `data.md` §8 и `research.md` §9; найдено и исправлено смешение категории `cpi` (RU/US) |
+
+Остаются I только шаги, требующие живого DSH-процесса (перезапуск DSH с текущим плагином) — T9/T21/T24/T26;
+они не блокируются кодом и оформлены как manual-инструкции в `dsh-integration.md`.
