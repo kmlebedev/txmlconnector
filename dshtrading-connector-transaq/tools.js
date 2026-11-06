@@ -12,6 +12,10 @@ export function buildTools({ market, trade }) {
       name: 'ru_get_ticker',
       description: `Latest quote of a MOEX instrument: price in RUB, volume in shares. ${SRC}`,
       parameters: { type: 'object', properties: { symbol: SYMBOL }, required: ['symbol'], additionalProperties: false },
+      output: {
+        schema: { type: 'object' },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      },
       execute: async ({ symbol }) => market.getTicker(symbol),
     },
     {
@@ -27,6 +31,10 @@ export function buildTools({ market, trade }) {
         required: ['symbol', 'interval'],
         additionalProperties: false,
       },
+      output: {
+        schema: { type: 'object' },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      },
       execute: async ({ symbol, interval, limit }) => {
         const { symbol: canonical, source, data } = await market.getKlinesWithSource(symbol, interval, limit);
         return { symbol: canonical, interval, source, bars: data };
@@ -36,6 +44,10 @@ export function buildTools({ market, trade }) {
       name: 'ru_get_orderbook',
       description: `Order book (bids and asks) of a MOEX instrument: price in RUB, amount in shares. ${SRC}`,
       parameters: { type: 'object', properties: { symbol: SYMBOL }, required: ['symbol'], additionalProperties: false },
+      output: {
+        schema: { type: 'object' },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      },
       execute: async ({ symbol }) => {
         const { symbol: canonical, source, data } = await market.getOrderbookWithSource(symbol);
         return { ...data, symbol: canonical, source };
@@ -50,6 +62,10 @@ export function buildTools({ market, trade }) {
         required: ['symbol'],
         additionalProperties: false,
       },
+      output: {
+        schema: { type: 'object' },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      },
       execute: async ({ symbol, limit }) => {
         const { symbol: canonical, source, data } = await market.getRecentTradesWithSource(symbol, limit);
         return { symbol: canonical, source, trades: data };
@@ -63,6 +79,10 @@ export function buildTools({ market, trade }) {
         properties: { query: { type: 'string', description: 'Case-insensitive substring of symbol or name' } },
         additionalProperties: false,
       },
+      output: {
+        schema: { type: 'object' },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      },
       execute: async ({ query } = {}) => {
         const all = await market.listInstruments();
         const q = query ? String(query).toLowerCase() : '';
@@ -74,6 +94,10 @@ export function buildTools({ market, trade }) {
       name: 'ru_get_paper_account',
       description: 'Read-only paper account: RUB balances, positions (shares), open orders and fills. Not a live brokerage account; orders cannot be placed through this connector. Data may be seed (offline demo).',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
+      output: {
+        schema: { type: 'object' },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      },
       execute: async () => {
         const [balances, positions, openOrders, fills] = await Promise.all([
           trade.getBalances(), trade.getPositions(), trade.listOpenOrders(), trade.listTradeFills(),
