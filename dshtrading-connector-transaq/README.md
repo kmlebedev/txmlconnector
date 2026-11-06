@@ -11,7 +11,7 @@ Cordis-плагин, который подключает Go-шлюз `/api/gw/v1
 ## Что делает
 
 - Регистрирует `MarketDataService` (тикер, свечи, стакан, сделки, список инструментов, `subscribeTicker`
-  поллингом) и read-only `TradeService` (бумажный счёт: балансы, позиции, заявки, сделки) в реестрах
+  поллингом) и `TradeService`: read-only просмотр бумажного счёта (балансы, позиции, заявки, сделки) и dry-run проверка заявок (см. «Ограничения») в реестрах
   `tradingMarketDataRegistry` / `tradingTradeRegistry` под ключом `ru` / `finam`.
 - Регистрирует агентские инструменты `ru_get_ticker`, `ru_get_klines`, `ru_get_orderbook`,
   `ru_get_trades`, `ru_list_instruments`, `ru_get_paper_account`.
@@ -30,7 +30,7 @@ export TERMINAL_API_TOKEN="$(openssl rand -hex 16)"
 bin/terminal -mode offline -addr 127.0.0.1:18090   # или -mode live (нужен доступ к TRANSAQ)
 ```
 
-Токен читается из переменной окружения с именем `tokenRef` (или из сервиса `credentials` хоста) на
+Токен на каждый запрос сначала запрашивается у сервиса `credentials` хоста, при его отсутствии читается из переменной окружения с именем `tokenRef`;
 каждый запрос и не попадает в логи и тексты ошибок. Переменные `TC_*` / `TRANSAQ_*` коннектор не читает.
 
 ## Подключение
@@ -59,7 +59,10 @@ bin/terminal -mode offline -addr 127.0.0.1:18090   # или -mode live (нуже
 
 - Вкладки `ru` в GUI dsh-trading нет, пока апстрим не откроет список рынков (ADR, «Что важно», п. 3):
   сервис регистрируется, но доступен через агента и API, а не через вкладку.
-- Размещения заявок нет ни live, ни paper: шлюз v1 только GET; `placeOrder` с `dryRun: false` всегда
+- Реального размещения заявок нет ни live, ни paper: шлюз v1 только GET. `placeOrder` при
+  `dryRun !== false` лишь локально проверяет заявку (кратность лоту, шаг цены, side/type) и возвращает
+  синтетический ордер `dry-<uuid>` с `dryRun: true`; `cancelOrder` принимает только такие `dry-` id.
+  Ничего не уходит в шлюз, на биржу или в бумажный счёт. `placeOrder` с `dryRun: false` всегда
   отклоняется с `TRADING_LIVE_TRADING_DISABLED`. Инструменты `ru_place_order` / `ru_cancel_order` не
   регистрируются намеренно (approval-gate dsh-trading не покрывает `ru`).
 - К MOEX агент обращается только через `ru_*`.

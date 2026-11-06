@@ -518,6 +518,7 @@ T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAut
 - Карточки tool-call (T9/T24/T26) в текущем PTC-режиме сессии не рендерятся отдельными client-
   карточками (PTC сворачивает вызовы в «Running commands»); для скриншотов нужен Standard-режим
   сессии/новый чат в Standard, либо оставить UI-скриншоты как I.
+
 ## dsh-trading connector: README и приёмка (2026-11-06)
 
 - Добавлен `dshtrading-connector-transaq/README.md` (установка, строка профиля, конфиг, ограничения);
