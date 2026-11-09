@@ -46,6 +46,25 @@ test('getTickers keeps input keys and omits unknown', async () => {
   } finally { await gw.close(); }
 });
 
+test('getTickers chunks /quotes requests by 200 symbols and merges results', async () => {
+  const instruments = Array.from({ length: 201 }, (_, i) => ({ ...SBER, symbol: `TQBR:S${i}`, secCode: `S${i}` }));
+  const seen = [];
+  const { gw, svc } = await setup({
+    '/api/gw/v1/instruments': { instruments },
+    '/api/gw/v1/quotes': (req, url) => {
+      const syms = url.searchParams.get('symbols').split(',');
+      seen.push(syms.length);
+      return { status: 200, body: { quotes: Object.fromEntries(syms.map((s) => [s, QUOTE])) } };
+    },
+  });
+  try {
+    const out = await svc.getTickers(instruments.map((i) => i.secCode));
+    assert.equal(Object.keys(out).length, 201);
+    assert.deepEqual(seen, [200, 1]);
+    assert.equal(gw.calls.filter((c) => c.startsWith('/api/gw/v1/quotes')).length, 2);
+  } finally { await gw.close(); }
+});
+
 for (const [status, code] of [[503, 'TRADING_UPSTREAM_ERROR'], [401, 'TRADING_AUTH_FAILED']]) {
   test(`getTickers surfaces gateway ${status} after one /instruments call`, async () => {
     const { gw, svc } = await setup({ '/api/gw/v1/instruments': () => ({ status, body: { error: { code: 'x', message: 'down' } } }) });

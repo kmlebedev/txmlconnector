@@ -37,7 +37,7 @@ T11_SECONDS="${T11_SECONDS:-600}"
 T22_SECONDS="${T22_SECONDS:-1900}"
 # The demo server allows one login per account: after the recorder disconnects its
 # session can linger for a couple of minutes, so the live backend waits before
-# logging in. T22-only reruns skip the recorder but still cool down.
+# logging in. T22-only reruns (DEMO_CHECK_SKIP_T11=1) have no recorder session and skip the cooldown.
 T22_COOLDOWN="${T22_COOLDOWN:-120}"
 SKIP_T11="${DEMO_CHECK_SKIP_T11:-0}"
 export GOCACHE="${GOCACHE:-$ROOT/.cache/go-build}"
@@ -68,7 +68,7 @@ fi
 T11_STATUS="FAIL"; T22_STATUS="FAIL"; NEWS_STATUS="FAIL"
 
 if [ "$SKIP_T11" = "1" ]; then
-  T11_STATUS="${DEMO_CHECK_T11_STATUS:-PASS}"
+  T11_STATUS="${DEMO_CHECK_T11_STATUS:-SKIPPED}"
   echo "== T11 recorder skipped (previous evidence: T11=$T11_STATUS); no recorder login =="
 else
   echo "== T11 recorder: ${T11_SECONDS}s of TQBR:SBER =="
@@ -92,8 +92,12 @@ NEWS_RANGE="$(chq "SELECT min(first_seen), max(first_seen), max(published) FROM 
 echo "book events by kind: $BOOK_COUNTS"
 echo "trades: $TRADE_COUNT news: $NEWS_COUNT range: $NEWS_RANGE"
 if echo "$BOOK_COUNTS" | grep -q "snapshot" && echo "$BOOK_COUNTS" | grep -q "level"; then T11_STATUS="PASS"; fi
-echo "cooldown ${T22_COOLDOWN}s before the live backend login (demo session release)"
-sleep "$T22_COOLDOWN"
+if [ "$SKIP_T11" = "1" ]; then
+  echo "no recorder session to release: skipping the ${T22_COOLDOWN}s cooldown"
+else
+  echo "cooldown ${T22_COOLDOWN}s before the live backend login (demo session release)"
+  sleep "$T22_COOLDOWN"
+fi
 
 echo "== T22 dry-run bot: ${T22_SECONDS}s of TQBR:SBER M5 =="
 cat > "$OBS/rules.json" <<JSON
