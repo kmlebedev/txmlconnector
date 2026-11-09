@@ -85,7 +85,7 @@ terminal_dev: ## Run the AI trading terminal from source (offline seed; see docs
 	$(VERIFY_GOCACHE) go run ./cmd/terminal
 
 connector-test: ## Tests of the dsh-trading TRANSAQ connector (plain Node, no deps).
-	node --test dshtrading-connector-transaq/test/
+	node --test dshtrading-connector-transaq/test/*.test.mjs
 
 terminal_smoke: ## End-to-end offline smoke of the AI terminal (build + REST/tools/bots/MCP/SSE; docs/ai-terminal/README.md).
 	$(VERIFY_GOCACHE) bash tools/terminal-smoke.sh
