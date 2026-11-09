@@ -538,11 +538,25 @@ func eventsUpTo(events []lobreplay.Event, asOf time.Time) []lobreplay.Event {
 	return out
 }
 
-// barsUpTo returns the closed bars with the open time at or before asOf.
-func barsUpTo(bars []backtest.Bar, asOf time.Time) []backtest.Bar {
+// barsUpTo returns the closed bars known at asOf, i.e. the bars whose candle is
+// already finished: close = open time + period must be at or before asOf. The
+// bar period of the request is required because the open time alone says nothing
+// about closedness. A still forming candle (Partial), a bar with an unknown open
+// time and every bar whose close cannot be derived (non-positive period) are
+// dropped: the filter fails closed instead of leaking a candle the market has
+// not confirmed yet.
+func barsUpTo(bars []backtest.Bar, asOf time.Time, periodSec int) []backtest.Bar {
 	out := make([]backtest.Bar, 0, len(bars))
+	if periodSec <= 0 {
+		return out
+	}
+	period := time.Duration(periodSec) * time.Second
 	for _, bar := range bars {
-		if bar.Time.After(asOf) {
+		if bar.Partial || bar.Time.IsZero() {
+			continue
+		}
+		// close = open + period; a bar closing after asOf was not known yet.
+		if bar.Time.Add(period).After(asOf) {
 			continue
 		}
 		out = append(out, bar)
@@ -935,8 +949,9 @@ func (e *Engine) toolWalkForward(ctx context.Context, args map[string]any) (walk
 	if err != nil {
 		return empty, nil, fmt.Errorf("agent: history for %s: %w", symbol, err)
 	}
-	// Point-in-time: bars closing after asOf were not known yet.
-	bars = barsUpTo(bars, asOf)
+	// Point-in-time: a bar is known only after its close (open + period),
+	// so bars still forming at asOf never reach the folds.
+	bars = barsUpTo(bars, asOf, period)
 	if len(bars) < 2 {
 		return empty, nil, fmt.Errorf(
 			"agent: not enough history for %s at asOf %s (%d bars up to asOf)",
@@ -1126,8 +1141,9 @@ func (e *Engine) toolVolForecast(ctx context.Context, args map[string]any) (volF
 	if err != nil {
 		return empty, emptyArtifact, fmt.Errorf("agent: history for %s: %w", symbol, err)
 	}
-	// Point-in-time: the oracle trains on the closed bars up to asOf only.
-	bars = barsUpTo(bars, asOf)
+	// Point-in-time: the oracle trains on the closed bars up to asOf only,
+	// never on the candle that is still forming at asOf.
+	bars = barsUpTo(bars, asOf, period)
 	if len(bars) == 0 {
 		return empty, emptyArtifact, fmt.Errorf("agent: no history for %s up to asOf %s", symbol, asOf.Format(time.RFC3339))
 	}

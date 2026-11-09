@@ -121,7 +121,8 @@ RSI Уайлдера 14 в шкале 0–1; вход `rsi < 0.2`, выход `r
 
 ## 8. Работа из DeepSeek Harness и MCP
 
-Когда терминал подключён к Harness плагином `dsh-ai-terminal`, те же Go-инструменты доступны
+Когда терминал подключён к Harness плагином `dsh-ai-terminal` (репозиторий
+`dsh-trading-transaq`), те же Go-инструменты доступны
 модели как нативные инструменты с префиксом `terminal_` (`terminal_run_backtest`,
 `terminal_backtest_rules`, `terminal_batch_backtest`, `terminal_get_quote`,
 `terminal_place_order` и остальные из каталога `GET /api/agent/tools`). Внешние агенты
@@ -173,8 +174,9 @@ RSI Уайлдера 14 в шкале 0–1; вход `rsi < 0.2`, выход `r
 
 ## 9. Переносимый навык: установка через npx и REST-скрипт
 
-Каталог \`skills/\` — единственный источник навыка: DSH-плагин \`dsh-ai-terminal\` отдаёт его из
-репозитория (один источник, без копий), а другие агенты ставят одной командой:
+Каталог \`skills/\` — единственный источник навыка: DSH-плагин \`dsh-ai-terminal\` (репозиторий
+\`dsh-trading-transaq\`) отдаёт его из checkout'а \`txmlconnector\` (один источник, без копий), а
+другие агенты ставят одной командой:
 
 \`\`\`
 npx skills add github.com/kmlebedev/txmlconnector --skill trading-terminal

@@ -1,5 +1,11 @@
 # Live/Manual acceptance AI-терминала (план 2026-11-05)
 
+> **Обновление 2026-11-06.** DSH-плагин `dsh-ai-terminal` вынесен в отдельный репозиторий
+> [`kmlebedev/dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq). Раздел
+> «Живой DSH-прогон» ниже — историческая инструкция эпохи txmlconnector; актуальный порядок
+> переключения профиля и откат — `docs/cutover.md` нового репозитория
+> ([ссылка](https://github.com/kmlebedev/dsh-trading-transaq/blob/main/docs/cutover.md)).
+
 Дата: 2026-11-06. Согласие пользователя на живые проверки получено; демо-креды — `~/re/demo.env`
 (вне git), dev-ClickHouse — `clickhouse-import-rosstat` (`127.0.0.1:8123`, MCP-конфиг проекта
 `.kimi-code/mcp.json` указывает на ту же БД). Секреты в логах/документах не печатаются.
@@ -54,10 +60,12 @@ claude mcp list   # → terminal: http://127.0.0.1:18091/mcp (HTTP) - ✔ Connec
 ## Живой DSH-прогон (T9/T21/T24/T26): что нужно сделать
 
 Профиль DSH `~/.dsh/profiles/desktop/package.json` линкует `@local/dsh-ai-terminal` на старый
-worktree `.worktrees/ai-terminal/dsh-ai-terminal` (код PR #60). Для проверки смёрженного кода:
+worktree `.worktrees/ai-terminal/dsh-ai-terminal` (код PR #60). Для проверки смёрженного кода
+(историческая инструкция; актуальный cutover — см. баннер выше):
 
 1. В `~/.dsh/profiles/desktop/package.json` заменить зависимость на
-   `"@local/dsh-ai-terminal": "link:/Users/whitefox/GolandProjects/txmlconnector/dsh-ai-terminal"`.
+   `"@local/dsh-ai-terminal": "link:<dsh-trading-transaq>/dsh-ai-terminal"`; в строке `ai-terminal`
+   профиля задать `repoDir` на этот checkout txmlconnector (только абсолютный путь).
 2. `pnpm install` в каталоге профиля.
 3. Перезапустить DSH (текущая сессия завершится).
 4. Проверить:
