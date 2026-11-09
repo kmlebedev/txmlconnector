@@ -139,3 +139,39 @@ Claude Code OAuth в этой сессии истёк, поэтому промп
 
 Остаются: T11/T12/T22 — окно демо-сервера (фоновая приёмка перезапущена, ждёт 09:55 МСК);
 T26 dry-run — подтверждение proposal человеком + живой поток; T21 — нужен workflowEngine bundle.
+### Live-проверки host-инструментов после merge #64 (2026-11-06 10:43 MSK)
+
+Плагин активен в текущем Desktop DSH (host-половина, client-UI отключён); backend
+`127.0.0.1:18090` жив (`instanceId`, offline). Через нативные Harness-инструменты проверено:
+
+| Проверка | Результат |
+|---|---|
+| `terminal_get_quote` TQBR:SBER | S: last 293.22, bid/ask, стакан |
+| T9 `terminal_run_backtest` (sma_cross 5м, 200 бар) | S (host): artifact с metrics/equity/сделками (доходность −0.17%, 4 сделки); карточка в чате — I (client отключён) |
+| T24 `terminal_batch_backtest` GAZP/SBER/LKOH | S (host): 3 строки, buy&hold, `small_sample` warnings; карточка/графики — I (client отключён) |
+| T26 `bot_create_from_backtest` → `bot_check` → `bot_status` → `bot_start` | S (host): `bot_0001` создан (stage=check), check вернул `closed_bar` (close 293.22, RSI 0.4378), `bot_start` вернул proposal `prop_000001` (pending, ждёт подтверждения); живой dry-run — окно демо |
+| T21 `terminal_nightly_research` | I (сборка): `workflowEngine Harness недоступен` — в shipped-профилях нет `@deepseek-ai/dsh-workflow`; плагин деградирует без падения |
+
+Следующее: T11/T12/T22 — фоновая приёмка в окне демо (09:50 МСК); T9/T24/T26 UI-часть —
+контролируемое возвращение client-половины (сначала минимальный client, затем карточки) после окна.
+
+### T25: живой prod-промпт через навык (Kimi Code, 2026-11-06 12:57 MSK)
+
+Пользователь положил `~/re/prod.env` (креды неиспользуемого терминала, 4 ключа `TC_*`). На них
+поднят отдельный read-only backend (`bin/terminal -mode live`, порт 18097): `/api/health` →
+`{"mode":"live","connected":true,"message":"подключено к серверу биржи"}`. Торговых команд не
+отправлялось; backend остановлен после прогона.
+
+- Чистый каталог `/tmp/t25-prod`; `npx -y skills add /Users/whitefox/GolandProjects/txmlconnector
+  --skill trading-terminal --agent kimi-code-cli -y` → `./.agents/skills/trading-terminal`
+  (`SKILL.md` + `scripts/terminal.sh`), exit 0.
+- Промпт: «Покажи котировку SBER через навык trading-terminal…» через Kimi Code с
+  `TERMINAL_URL=http://127.0.0.1:18097` → агент нашёл `SKILL.md`, выполнил
+  `scripts/terminal.sh quote TQBR:SBER` и вернул **живую** котировку: last **292.29**, bid **292.28**,
+  ask **292.29**, timestamp `2026-11-06T07:57:41Z` (read-only, заявки не выставлялись).
+- Замечание: первый прямой вызов `scripts/terminal.sh quote` сразу после старта backend вернул
+  `{"error":"agent: no quote for TQBR:SBER"}` — котировочный поток ещё не успел наполниться;
+  агент повторил запрос и получил данные. Это же поведение полезно документировать в навыке.
+
+Claude Code-специфичная часть Step 5 остаётся **I**: `claude -p` →
+`Failed to authenticate: OAuth session expired and could not be refreshed`.

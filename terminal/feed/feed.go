@@ -183,10 +183,13 @@ func notFound(symbol string) *Error {
 	return &Error{Code: CodeNotFound, Message: fmt.Sprintf("инструмент не найден: %s", symbol)}
 }
 
+// MaxHistoryCount is the largest candle count a single history request returns.
+const MaxHistoryCount = 5000
+
 // defaultHistoryCount clamps a candle count request into a sane range.
 const (
 	defaultHistoryCount = 500
-	maxHistoryCount     = 5000
+	maxHistoryCount     = MaxHistoryCount
 	defaultTradeLimit   = 50
 	maxTradeLimit       = 200
 	maxBookLevels       = 20

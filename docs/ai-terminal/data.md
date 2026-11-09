@@ -360,6 +360,15 @@ SQL и его аргументы проверены только на httptest-�
 
 ### 8.1. Схема записи md (T11) на живом ClickHouse (S)
 
+**Живой прогон 2026-11-06 (демо-окно 09:55–10:05 MSK, `tools/demo-live-check.sh`, S):**
+
+- `md-recorder` 10 минут по `TQBR:SBER` против `tr1-demo5.finam.ru:3939`;
+- `SELECT kind, count() AS n FROM md.book_events GROUP BY kind`: `snapshot`=120, `level`=5161, `gap`=1;
+- `md.trades` = 49 394, `md.news` = 2 (`first_seen` от 2025-11-04); ClickHouse — локальный dev
+  `127.0.0.1:8123`;
+- итог T11 — **PASS**; журнал: `.re-run/live/demo-check-20261106-103039.log`,
+  сводка: `.re-run/live/live-summary-20261106-103039.json`.
+
 `recorder.EnsureSchema` прогнан на живом ClickHouse: созданы `md.book_events`, `md.trades`, `md.news`;
 типы колонок совпадают с планом (`ts DateTime64(3,'UTC')`, `recv_ts DateTime64(6,'UTC')`,
 `kind Enum8(...)`, `price Decimal(18, 6)`, `qty Int64`). Живая запись стакана/сделок и `SELECT
