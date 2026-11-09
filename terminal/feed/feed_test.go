@@ -651,3 +651,81 @@ func TestLiveOrderBookOutputDepth(t *testing.T) {
 		t.Fatalf("stored depth = %d/%d, want <= %d", len(stored.Bids), len(stored.Asks), 4*maxBookLevels)
 	}
 }
+
+func mergeTestBook(t *testing.T, levels ...model.Quote) OrderBook {
+	t.Helper()
+	sym := model.Symbol{Board: "TQBR", SecCode: "SBER"}
+	return mergeQuotes(OrderBook{}, &model.Quotes{Symbol: sym, Levels: levels}, 0, time.Now())
+}
+
+func mergeTestDelta(prev OrderBook, levels ...model.Quote) OrderBook {
+	sym := model.Symbol{Board: "TQBR", SecCode: "SBER"}
+	return mergeQuotes(prev, &model.Quotes{Symbol: sym, Levels: levels}, 0, time.Now())
+}
+
+// TestLiveOrderBookPrunesCrossedLevels: when the market moves up, stale bids at
+// or above the new best ask are removed (deletions are not decoded yet).
+func TestLiveOrderBookPrunesCrossedLevels(t *testing.T) {
+	book := mergeTestBook(t,
+		model.Quote{Price: *dec(100.0), Buy: 1}, model.Quote{Price: *dec(99.0), Buy: 1},
+		model.Quote{Price: *dec(101.0), Sell: 1}, model.Quote{Price: *dec(102.0), Sell: 1})
+	book = mergeTestDelta(book,
+		model.Quote{Price: *dec(100.5), Buy: 3}, model.Quote{Price: *dec(101.5), Sell: 2},
+		model.Quote{Price: *dec(103.0), Sell: 2})
+	if len(book.Bids) == 0 || len(book.Asks) == 0 {
+		t.Fatalf("book = %+v", book)
+	}
+	if book.Bids[0].Price >= book.Asks[0].Price {
+		t.Fatalf("crossed book: bids %+v asks %+v", book.Bids, book.Asks)
+	}
+	// 101.0 ask is below the newest bid 100.5? No: asks <= max bid (100.5) are
+	// pruned; 101.0 stays. Bids >= min delta ask (101.5) are pruned: none.
+	if book.Asks[0].Price != 101.0 || book.Bids[0].Price != 100.5 {
+		t.Fatalf("best = %+v / %+v", book.Bids[0], book.Asks[0])
+	}
+	// Market moves up through the old asks: a bid at 102.5 prunes asks <= 102.5.
+	book = mergeTestDelta(book, model.Quote{Price: *dec(102.5), Buy: 4})
+	if book.Asks[0].Price != 103.0 || book.Bids[0].Price != 102.5 {
+		t.Fatalf("after move up: bids %+v asks %+v", book.Bids, book.Asks)
+	}
+	// Market moves down: new ask 99.5 prunes bids >= 99.5.
+	book = mergeTestDelta(book, model.Quote{Price: *dec(99.5), Sell: 1})
+	if book.Asks[0].Price != 99.5 || book.Bids[0].Price != 99.0 {
+		t.Fatalf("after move down: bids %+v asks %+v", book.Bids, book.Asks)
+	}
+}
+
+// TestLiveOrderBookPriceMigratesBetweenSides: a price updated on one side is
+// removed from the other.
+func TestLiveOrderBookPriceMigratesBetweenSides(t *testing.T) {
+	book := mergeTestBook(t,
+		model.Quote{Price: *dec(100.0), Buy: 5}, model.Quote{Price: *dec(99.0), Buy: 5},
+		model.Quote{Price: *dec(101.0), Sell: 5})
+	book = mergeTestDelta(book, model.Quote{Price: *dec(100.0), Sell: 2})
+	for _, l := range book.Bids {
+		if l.Price == 100.0 {
+			t.Fatalf("100.0 still in bids: %+v", book.Bids)
+		}
+	}
+	if len(book.Asks) != 2 || book.Asks[0] != (Level{Price: 100.0, Qty: 2}) {
+		t.Fatalf("asks = %+v", book.Asks)
+	}
+}
+
+// TestLiveOrderBookDepthCapKeepsFreshLevels: after pruning, the depth cap keeps
+// the best remaining levels, not stale ones.
+func TestLiveOrderBookDepthCapKeepsFreshLevels(t *testing.T) {
+	var snap []model.Quote
+	for i := 0; i < maxBookDepth+50; i++ {
+		snap = append(snap, model.Quote{Price: *dec(1000.0 - float64(i)*0.5), Buy: 1})
+	}
+	book := mergeTestBook(t, snap...)
+	ask := 1000.0 - 10*0.5 // prunes the ten best (stale) bids at or above it
+	book = mergeTestDelta(book, model.Quote{Price: *dec(ask), Sell: 1})
+	if len(book.Bids) == 0 || book.Bids[0].Price >= ask {
+		t.Fatalf("stale bids kept: first %+v", book.Bids[:1])
+	}
+	if book.Asks[0].Price != ask || len(book.Bids) > maxBookDepth {
+		t.Fatalf("book = bids %d asks %+v", len(book.Bids), book.Asks)
+	}
+}

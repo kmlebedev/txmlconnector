@@ -456,6 +456,8 @@ func (s *Service) applyQuotes(ev *model.Quotes) {
 func mergeQuotes(prev OrderBook, ev *model.Quotes, last float64, now time.Time) OrderBook {
 	bids := ladderSide(prev.Bids)
 	asks := ladderSide(prev.Asks)
+	var maxBid, minAsk float64
+	var haveBid, haveAsk bool
 	for _, level := range ev.Levels {
 		// Deletions (-1) are not applied: native/records/quote.go stores the
 		// accumulated wire price in model.Quote.Price, and for the pinned
@@ -467,9 +469,34 @@ func mergeQuotes(prev OrderBook, ev *model.Quotes, last float64, now time.Time) 
 		price := level.Price.Float64()
 		if level.Buy > 0 {
 			bids[price] = level.Buy
+			delete(asks, price) // a price updated on one side leaves the other
+			if !haveBid || price > maxBid {
+				maxBid, haveBid = price, true
+			}
 		}
 		if level.Sell > 0 {
 			asks[price] = level.Sell
+			delete(bids, price)
+			if !haveAsk || price < minAsk {
+				minAsk, haveAsk = price, true
+			}
+		}
+	}
+	// Deletions are not decoded, so levels the market traded through would
+	// linger and cross the book. The newest update wins: drop bids at or above
+	// the best ask of this delta and asks at or below its best bid.
+	if haveAsk {
+		for price := range bids {
+			if price >= minAsk {
+				delete(bids, price)
+			}
+		}
+	}
+	if haveBid {
+		for price := range asks {
+			if price <= maxBid {
+				delete(asks, price)
+			}
 		}
 	}
 	return OrderBook{
