@@ -5,6 +5,8 @@ Cordis-плагин, который подключает Go-шлюз `/api/gw/v1
 [dsh-trading](https://github.com/zhu1090093659/dsh-trading) как рынок `ru`, провайдер `finam`.
 Решение и обоснование — [`docs/ai-terminal/adr-dsh-trading.md`](../docs/ai-terminal/adr-dsh-trading.md) (вариант D).
 
+**Быстрый старт в DeepSeek Harness Desktop — [QUICKSTART.md](QUICKSTART.md)** (`tools/dsh-connector-enable.sh`).
+
 Пакет без зависимостей (`"dependencies": {}`, `"private": true`), код dsh-trading не копируется и не
 импортируется: совместимость только структурная (лицензия dsh-trading — PolyForm Noncommercial 1.0.0).
 
