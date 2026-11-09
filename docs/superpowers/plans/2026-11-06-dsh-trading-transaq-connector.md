@@ -1,6 +1,6 @@
 # TRANSAQ Gateway v1 + dsh-trading Connector Implementation Plan
 
-> **Note:** references to `dsh-ai-terminal/` in this plan are historical — the plugin moved to https://github.com/kmlebedev/dsh-trading-transaq (PR 69).
+> **Note:** references to `dsh-ai-terminal/` in this plan are historical — the plugin moved to https://github.com/kmlebedev/dsh-trading-transaq (PR 69). The connector package `dshtrading-connector-transaq/` and `tools/dsh-connector-enable.sh` moved to https://github.com/kmlebedev/dshtrading-connector-transaq on 2026-11-09; the gateway tasks (1–3) stay here.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

@@ -58,6 +58,11 @@ err = client.Run(ctx, native.RunOptions{RqDelay: 100 * time.Millisecond}, func(e
 (каталог `dsh-ai-terminal/`); Go-терминал `bin/terminal` и `cmd/terminal` остаются в этом
 репозитории.**
 
+Рынок MOEX для хоста [dsh-trading](https://github.com/zhu1090093659/dsh-trading) подключает коннектор
+[`kmlebedev/dshtrading-connector-transaq`](https://github.com/kmlebedev/dshtrading-connector-transaq) (вынесен отсюда 2026-11-09): он читает read-only
+шлюз `/api/gw/v1/*` этого терминала ([контракт](docs/ai-terminal/gateway-v1.md)); quick start для
+DeepSeek Harness Desktop — в [его QUICKSTART](https://github.com/kmlebedev/dshtrading-connector-transaq/blob/main/dshtrading-connector-transaq/QUICKSTART.md).
+
 `cmd/terminal` — самодостаточный биржевой терминал-аналог Finam поверх `native.Client`:
 список инструментов, свечной график, стакан, портфель/заявки, тикет, а также встроенный AI-агент,
 который вызывает инструменты терминала (бэктест, декларативные правила, walk-forward с deflated
