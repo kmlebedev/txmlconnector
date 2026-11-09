@@ -56,6 +56,8 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
     return toTicker(canonical, instrument, q);
   }
 
+  const QUOTES_CHUNK = 200;
+
   async function getTickers(symbols) {
     const resolved = [];
     for (const input of symbols) {
@@ -69,9 +71,14 @@ export function createMarketDataService({ client, resolver, pollMs = 2000 }) {
     const out = {};
     if (!resolved.length) return out;
     const natives = [...new Set(resolved.map((r) => r.native))];
-    const res = await client.get('/quotes', { symbols: natives.join(',') });
+    // the gateway rejects more than 200 symbols per /quotes call
+    const quotes = {};
+    for (let i = 0; i < natives.length; i += QUOTES_CHUNK) {
+      const res = await client.get('/quotes', { symbols: natives.slice(i, i + QUOTES_CHUNK).join(',') });
+      Object.assign(quotes, res?.quotes);
+    }
     for (const r of resolved) {
-      const q = res?.quotes?.[r.native];
+      const q = quotes[r.native];
       if (q) out[r.input] = toTicker(r.canonical, r.instrument, q);
     }
     return out;

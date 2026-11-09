@@ -1,5 +1,7 @@
 # TRANSAQ Gateway v1 + dsh-trading Connector Implementation Plan
 
+> **Note:** references to `dsh-ai-terminal/` in this plan are historical — the plugin moved to https://github.com/kmlebedev/dsh-trading-transaq (PR 69).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let the dsh-trading terminal see the Russian market (MOEX via Finam/TRANSAQ) by exposing a stable read-only gateway contract from `cmd/terminal` and a thin, dependency-free JS connector package that registers market `ru` / provider `finam` in dsh-trading's registries.

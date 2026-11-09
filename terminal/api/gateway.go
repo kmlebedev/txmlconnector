@@ -37,8 +37,6 @@ func (s *Server) registerGateway(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/gw/v1/account", s.handleGatewayAccount)
 }
 
-// formatPrice renders v with exactly decimals fractional digits; a negative
-// decimals falls back to 2.
 // formatOptionalPrice is formatPrice, but "" when the value is absent (<= 0).
 func formatOptionalPrice(v float64, decimals int) string {
 	if v <= 0 {
@@ -47,6 +45,8 @@ func formatOptionalPrice(v float64, decimals int) string {
 	return formatPrice(v, decimals)
 }
 
+// formatPrice renders v with exactly decimals fractional digits; a negative
+// decimals falls back to 2.
 func formatPrice(v float64, decimals int) string {
 	if decimals < 0 {
 		decimals = 2
@@ -277,8 +277,8 @@ type gwLevel struct {
 
 // gatewayLevels renders one side of the price ladder as the gateway v1
 // contract requires: bids by descending price, asks by ascending. The feed
-// order is not guaranteed (live <quotes> deltas are merged, not sorted), so the
-// response is sorted defensively; the input slice is copied, never mutated.
+// already returns sorted ladders (mergeQuotes sorts), so this sort is
+// defensive; the input slice is copied, never mutated.
 func gatewayLevels(levels []feed.Level, decimals int, descending bool) []gwLevel {
 	ordered := append([]feed.Level(nil), levels...)
 	sort.SliceStable(ordered, func(i, j int) bool {
