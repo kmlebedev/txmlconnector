@@ -232,6 +232,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/bots/{id}/stop", s.handleStopBot)
 	mux.HandleFunc("GET /api/bots/{id}/journal", s.handleBotJournal)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
+	s.registerGateway(mux)
 	mux.HandleFunc("/api/", s.handleAPINotFound)
 	mux.HandleFunc("/", s.handleSPA)
 	return mux

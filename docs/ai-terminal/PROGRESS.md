@@ -377,3 +377,195 @@ restart DSH. Client-UI возвращать отдельно, после изо�
 
 **Инструкция восстановления через CLI:** `docs/ai-terminal/dsh-recovery.md` (проверенные команды
 `/usr/local/bin/dsh` + аварийные скрипты).
+### После merge PR #64 (2026-11-06 10:42 MSK)
+
+- main = `dd38d93` (merge PR #64), рабочая ветка продолжения — `plan/ai-terminal-remaining`.
+- Профиль Desktop был в safe-режиме (`base + web-app`, плагин отсутствовал). Host-половина
+  плагина включена обратно скриптом `tools/dsh-plugin-enable.sh`: bundles теперь
+  `base + web-app + @local/dsh-ai-terminal`; client-половина остаётся отключённой
+  (в `package.json` нет `dsh.client`) — это временная мера стабильного boot. Для активации
+  host-инструментов нужен перезапуск Desktop DSH.
+- Исправлен баг в `tools/dsh-plugin-enable.sh` (синтаксис Python-редактора ломал обновление
+  bundles; теперь скрипт проверен, bundles обновились).
+- Фоновая live-приёмка T11/T12/T22 (`bash-16540c7096714074`) ждёт окно демо-сервера (09:50 МСК).
+
+Остаток плана: T9, T11, T21, T22, T24, T25, T26 (7 live/manual шагов); после перезапуска DSH
+продолжаем host-проверки, T11/T22 закроются фоновой приёмкой.
+### Live-проверки host-инструментов после merge #64 (2026-11-06 10:43 MSK)
+
+Плагин активен в текущем Desktop DSH (host-половина, client-UI отключён); backend
+`127.0.0.1:18090` жив (`instanceId`, offline). Через нативные Harness-инструменты проверено:
+
+| Проверка | Результат |
+|---|---|
+| `terminal_get_quote` TQBR:SBER | S: last 293.22, bid/ask, стакан |
+| T9 `terminal_run_backtest` (sma_cross 5м, 200 бар) | S (host): artifact с metrics/equity/сделками (доходность −0.17%, 4 сделки); карточка в чате — I (client отключён) |
+| T24 `terminal_batch_backtest` GAZP/SBER/LKOH | S (host): 3 строки, buy&hold, `small_sample` warnings; карточка/графики — I (client отключён) |
+| T26 `bot_create_from_backtest` → `bot_check` → `bot_status` → `bot_start` | S (host): `bot_0001` создан (stage=check), check вернул `closed_bar` (close 293.22, RSI 0.4378), `bot_start` вернул proposal `prop_000001` (pending, ждёт подтверждения); живой dry-run — окно демо |
+| T21 `terminal_nightly_research` | I (сборка): `workflowEngine Harness недоступен` — в shipped-профилях нет `@deepseek-ai/dsh-workflow`; плагин деградирует без падения |
+
+Следующее: T11/T12/T22 — фоновая приёмка в окне демо (09:50 МСК); T9/T24/T26 UI-часть —
+контролируемое возвращение client-половины (сначала минимальный client, затем карточки) после окна.
+### Эксперимент: возврат client-половины (2026-11-06 10:48 MSK)
+
+Host-половина стабильно работает; client-запись висела в `loading` при `dsh.client =
+{platform: web, immediately: true, inject: [5 UI-модулей]}`. Рабочие сторонние плагины
+(`dsh-session-stats`, `dsh-tools`) объявляют только `{"platform":"web"}`. Гипотеза: для локального
+`link:`-плагина расширенный module-graph (`immediately` + `inject`-список) в Desktop-загрузчике
+не завершается; поэтому `dsh.client` упрощён до `{"platform":"web"}`, а client.js уже
+закалён (опциональные сервисы через дочерний `ctx.inject`/`ctx.get`, 54/54 тестов).
+Проверка требует одного перезапуска Desktop; при падении — `tools/dsh-plugin-disable.sh` +
+`tools/dsh-crash-bundle.sh` (инструкция в `docs/ai-terminal/dsh-recovery.md`).
+### T11/T12 live PASS и повтор T22 (2026-11-06 10:10 MSK)
+
+- **T11 — PASS (S):** фоновая приёмка в окне демо записала 10 минут `TQBR:SBER`:
+  `snapshot`=120, `level`=5161, `gap`=1; `md.trades`=49 394, `md.news`=2
+  (`.re-run/live/demo-check-20261106-103039.log`). Шаг T11 Step 5 отмечен `[x]`,
+  доказательства — в `data.md` §8.1.
+- **T12 — PASS:** новости в той же приёмке (`news`=2, first_seen 2025-11-04).
+- **T22 — первая попытка FAIL:** `transaq login failed: code 4: Пользователь с таким
+  идентификатором уже подключен к серверу` — живой backend стартовал сразу после остановки
+  рекордера, демо-сервер ещё держал сессию. В `tools/demo-live-check.sh` добавлен
+  `T22_COOLDOWN` (по умолчанию 120 с) и режим `DEMO_CHECK_SKIP_T11=1` для повтора только T22.
+  Повтор запущен: `bash-075d1eb1565f4596` (T22 1900 с, cooldown 180 с), результат будет добавлен.
+### T22 — PASS (S), 2026-11-06 10:15–10:47 MSK
+
+- Повтор после duplicate-login: backend `connected=true`, `mode=live`, instanceId `live-20261106-121234`.
+- Бот `bot_0001` (`TQBR:SBER` M5, qty 1, rules RSI) в `dry_run` 1900 с; журнал: 6 `closed_bar`,
+  3 `stage`, 0 ордеров, `misalignedBars=[]`. Бары 10:15–10:40 МСК строго по 5-минутным границам,
+  запись в пределах ~2.4 с после закрытия (детали — `research.md` §10).
+- Приёмка: `LIVE_CHECK_RESULT {"t11": "PASS", "t22": "PASS", "news": "PASS"}`,
+  `demo-live-check PASS`. T22 Step 5 отмечен `[x]`.
+
+Осталось в плане: **T9, T21, T24, T25, T26** (5 шагов). T21 — ограничение сборки DSH
+(`workflowEngine` отсутствует); T9/T24/T26 — UI-часть (нужен возврат client-половины плагина);
+T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAuth).
+### Перезапуск DSH с client-половиной прошёл (2026-11-06 12:53 MSK)
+
+- Desktop DSH перезапущен с экспериментальным `dsh.client = {"platform":"web"}` и закалённым
+  `client.js`: новых crash-bundle нет, host-половина активна (`bin/terminal -mode offline` на
+  18090, `/api/health` ok). Это подтверждает, что прежнее `loading` не повторяется при
+  минимальном manifest; визуальная проверка панели/карточек — за пользователем.
+- T9/T24/T26 host-вызовы сгенерированы в чате: `terminal_run_backtest` (sma_cross SBER M5),
+  `terminal_batch_backtest` (GAZP/SBER/LKOH), `bot_0001` create/check/status/proposal.
+- T25: живой prod-промпт через навык (Kimi Code) на неиспользуемом терминале — last 292.29,
+  bid/ask 292.28/292.29 (`~/re/prod.env`, read-only); Claude Code — I (OAuth истёк).
+### T21: workflowEngine можно смонтировать (проверено, 2026-11-06 13:00 MSK)
+
+- В приложении DSH есть пакет `@deepseek-ai/dsh-workflow` (сервис `workflowEngine`), но ни один
+  shipped-bundle его не поднимает — поэтому `terminal_nightly_research` отвечает
+  «workflowEngine Harness недоступен».
+- В временном профиле (`/tmp/dsh-wf-test`, `base + web-app`) добавление в `cordis.patch.yml`
+  ```yaml
+  - insert:
+      - id: workflow
+        name: '@deepseek-ai/dsh-workflow'
+  ```
+  даёт `--dump-config` с этой строкой **без предупреждений**, а `dsh --profile wftest --host
+  127.0.0.1 --port 18151 --no-open` поднимает web без ошибок. Значит для T21 достаточно добавить
+  такую же строку в `~/.dsh/profiles/desktop/cordis.patch.yml` (с бэкапом) и перезапустить Desktop.
+- Это изменение внешнего конфига DSH — нужно явное согласие пользователя; fallback — удалить строку
+  и перезапустить. После включения можно проверить `terminal_nightly_research` живьём (T21 Step 5).
+### UI-панель плагина подтверждена, workflowEngine-патч применён (2026-11-06 13:08 MSK)
+
+- После перезапуска Desktop с `dsh.client = {"platform":"web"}` плагин виден в интерфейсе:
+  в левой панели DSH присутствует пункт **AI terminal**; скриншот —
+  [screenshot-dsh-panel.png](screenshot-dsh-panel.png) (root DSH-окна, без чужих окон).
+- В текущем чате выполнены host-вызовы T9 (`terminal_run_backtest`), T24
+  (`terminal_batch_backtest` GAZP/SBER/LKOH) и T26 (`bot_0001` create/check/status/proposal).
+  Карточки в транскрипте рендерятся после завершения хода; их скриншоты — следующий шаг.
+- Для T21 в `~/.dsh/profiles/desktop/cordis.patch.yml` добавлена (с бэкапом
+  `cordis.patch.yml.bak-20261106-130840`) строка:
+  ```yaml
+  - insert:
+      - id: workflow
+        name: '@deepseek-ai/dsh-workflow'
+  ```
+  Патч проверен `--dump-config` на копии профиля: YAML валиден, строка `workflow` присутствует,
+  ошибок нет. Нужен перезапуск Desktop, после чего `terminal_nightly_research` должен увидеть
+  `workflowEngine`. Fallback: восстановить бэкап или удалить последний `insert`-блок.
+### T21: исправленный патч — включён `workflow-ptc` (2026-11-06 13:15 MSK)
+
+Диагностика первой попытки: `@deepseek-ai/dsh-workflow` — это только **абстрактный** сервис
+(`WorkflowEngine`), а провайдер `workflowEngine` — пакет `@deepseek-ai/dsh-workflow-ptc`, который в
+`dsh-web-app` намеренно выключен (`- id: workflow-ptc / disabled: true`). Поэтому insert абстрактного
+`dsh-workflow` не дал сервиса.
+
+- Патч откачен к бэкапу `cordis.patch.yml.bak-20261106-130840` и вместо insert добавлена строка:
+  ```yaml
+  - id: workflow-ptc
+    disabled: false
+  ```
+- Проверено на копии профиля (base+web-app + patched user layer): `--dump-config` показывает
+  `workflow-ptc … disabled: false` без предупреждений; web boot проходит; **диагностический плагин**
+  (`inject: ['workflowEngine']`) в том же профиле печатает `WF_PROBE: workflowEngine present = object`.
+- Нужен перезапуск Desktop для активации сервиса в живом процессе; затем `terminal_nightly_research`
+  должен отработать (T21 Step 5). Fallback: восстановить бэкап и перезапустить DSH.
+### T21: workflowEngine включён, но nightly упал — не передан parent (2026-11-06 13:23 MSK)
+
+После перезапуска `terminal_nightly_research` вернул `{"result":null,"stopReason":"error",
+"reason":"engine-error"}`. Причина: наш Harness-tool вызывал `workflowEngine.start()` **без `parent`**,
+а встроенный `dsh-tool-workflow` требует `parent = exec.agent` (иначе child-агенты `agent()` не могут
+стартовать; run завершается engine-error). Исправлено в `dsh-ai-terminal/autonomy.js` — tool передаёт
+`parent: exec.agent`; тест `nightly tool ...` теперь проверяет, что parent доходит до engine.start.
+`node --test` 54/54, `make verify` exit 0. Для применения нужен перезапуск Desktop (host-JS плагина
+загружается при старте).
+### T21: workflow выполняется, но упёрся в tokenBudget=200k (2026-11-06 13:30 MSK)
+
+После parent-фикса workflow реально стартовал (agentsStarted=2), но был отменён плагином:
+`stopReason=cancelled, reason=token-budget`, `usage.total=206077 > 200000`. Это штатный лимит из
+плана T21, но для живого ручного прогона его не хватает (7 фаз × child-агенты).
+
+- В `~/.dsh/profiles/desktop/cordis.patch.yml` добавлен локальный override конфига плагина:
+  `autonomy.tokenBudget: 2000000` (mode/port/autoStart сохранены); проверено `--dump-config` на
+  копии профиля с реальным bundle — строка `ai-terminal` принимает конфиг без предупреждений.
+- В коде плагина default остаётся 200000 (как в плане); повышенный бюджет — только локальная настройка
+  для приёмки. Для применения нужен перезапуск Desktop, затем повторный `terminal_nightly_research`.
+- Карточки tool-call (T9/T24/T26) в текущем PTC-режиме сессии не рендерятся отдельными client-
+  карточками (PTC сворачивает вызовы в «Running commands»); для скриншотов нужен Standard-режим
+  сессии/новый чат в Standard, либо оставить UI-скриншоты как I.
+
+## dsh-trading connector: README и приёмка (2026-11-06)
+
+- Добавлен `dshtrading-connector-transaq/README.md` (установка, строка профиля, конфиг, ограничения);
+  ADR переведён в «принято (вариант D)».
+- **Офлайн-приёмка выполнена:** `bin/terminal -mode offline` на loopback-порту (18090 был занят
+  плагином Desktop, использован 18191) + `apply()` с фейковым ctx. `getTicker('SBER')` ->
+  `SBER.TQBR`, `source: "seed"`; `getKlines('SBER','1h',5)` -> 5 баров; `getOrderbook('SBER')` -> bids/asks
+  непустые. Процесс завершён. Это наблюдение в офлайн-режиме (S не даёт); живая проверка на
+  демо-сервере и приёмка в реальном хосте — ниже, статусы `gateway-v1.md` обновлены по матрице.
+- **Хост dsh-trading проверен (2026-11-06):** npm `@dshtrading/*` 0.6.3, `dsh` 0.2.2-rc.1 в
+  изолированном `DSH_HOME=/tmp/dsh-trading-acceptance`. С кодом PR хост коннектор **не загружает**
+  (HOST-BLOCKED): `index.js:12` `inject=[]` + `:54` чтение `ctx.tools` → `cannot get property "tools"
+  without inject`; после фикса — у 6 `ru_*` нет `output` для `dsh-tools` 0.2.x; тихая — реестры
+  читаются в `apply()` слишком рано (`MISSING`). С тремя минимальными правками — **HOST-PASS**:
+  регистрация `ru/finam` в обоих реестрах, 6 инструментов, агентский вызов `ru_get_ticker SBER` →
+  `SBER.TQBR`, `source: "seed"` (модель — mock). Живой HTTP-мост `ru` — 400 `unknown market "ru"`
+  (ограничение апстрима, вне scope PR).
+- **Живая проверка на демо-сервере выполнена (2026-11-06, PR 67):** gateway v1 — 64/66 (2 FAIL —
+  `/orderbook`: bids по возрастанию; стакан часто односторонний из-за pre-existing бага
+  `terminal/feed` с инкрементальными `<quotes>`), коннектор против живого шлюза — 42/42 PASS.
+  Статусы `gateway-v1.md` переведены в S по матрице; полный отчёт —
+  [acceptance-pr67-2026-11-06.md](acceptance-pr67-2026-11-06.md).
+
+### PR 67: блокеры живой приёмки закрыты (2026-11-06, ветка fix/pr-67-blockers)
+
+- **P1 orderbook (2 дефекта):** `terminal/feed/live.go` применяет инкрементальные `<quotes>` как
+  upsert-дельты в persistent-книге, сбрасывает её на новой сессии и сортирует стороны; удаление
+  (`qty=-1`) остаётся **I** (закреплённое кодирование даёт цену <1 — нужен живой захват/RE); в
+  `terminal/api/gateway.go` добавлена защитная сортировка bids desc / asks asc. Новые тесты TDD:
+  `TestLiveOrderBookAppliesIncrementalQuotes/ResetOnNewSession/OutputDepth`,
+  `TestGatewayOrderBookSortsLevels`.
+- **P1 хост:** коннектор: сервисы `tools`/реестры опциональны и дожидаются через `ctx.inject(...)`,
+  `output {schema, render}` у 6 `ru_*` (требование dsh-tools 0.2.x); тесты коннектора 42/42.
+- **Повторная live-приёмка (демо, 20:29–20:40 MSK, финальное дерево):** gateway **66/66 PASS**,
+  коннектор **42/42 PASS** (два прогона), стакан TQBR:SBER двусторонний 20/20 и 10/10 опросов
+  (10 bid / 10 ask), порядок сторон верный.
+- **Повторная host-приёмка (реальный dsh-trading 0.6.3, без /tmp-патчей, два прогона — в т.ч. на
+  финальной optional-`tools` версии):** **HOST-PASS** — плагин активируется, `ru/finam` в обоих
+  реестрах, 6/6 tools реально появляются через `ctx.inject(['tools'])`, агентский
+  `ru_get_ticker SBER` → `SBER.TQBR`, `source: "seed"`. Ограничение апстрима `market=ru` (HTTP-мост
+  400) остаётся внешним.
+- Доказательства: `.re-run/acceptance-pr67-live/` (повторные `gateway-summary.json`,
+  `connector-summary.json`, `orderbook-polls-fixed.log`), `.re-run/host-acceptance/recheck/REPORT.md`.
+  Отчёт — [acceptance-pr67-2026-11-06.md](acceptance-pr67-2026-11-06.md) §8.

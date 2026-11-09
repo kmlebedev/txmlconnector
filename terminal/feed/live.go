@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -157,6 +158,10 @@ func (s *Service) runLoop(client marketClient) {
 
 // runOnce subscribes the universe and polls until the session fails.
 func (s *Service) runOnce(client marketClient) error {
+	// A new session owns a fresh order book: after a reconnect the exchange
+	// sends a new snapshot, and applying deltas to the stale ladder would
+	// resurrect levels that are gone.
+	s.resetBooks()
 	if err := s.subscribeAll(s.ctx, client); err != nil {
 		return err
 	}
@@ -416,7 +421,18 @@ func quoteOf(inst Instrument, now time.Time) Quote {
 	}
 }
 
-// applyQuotes stores a full order-book snapshot and publishes it.
+// maxBookDepth bounds one side of the persistent live ladder: deeper levels are
+// dropped so a symbol's book cannot grow without bound. The API still reports at
+// most maxBookLevels (feed.go), the best levels of the side.
+const maxBookDepth = 4 * maxBookLevels
+
+// applyQuotes merges one <quotes> callback into the persistent per-symbol ladder
+// and publishes the resulting snapshot. The demo server sends one full snapshot
+// and then incremental deltas (PR 67 live acceptance): a positive quantity
+// upserts a level. A negative quantity (-1) is a level deletion, but its price
+// cannot be recovered from the pinned wire encoding yet (see mergeQuotes), so it
+// is ignored until RE resolves the deletion encoding. Replacing the whole book
+// with every callback left it one-sided.
 func (s *Service) applyQuotes(ev *model.Quotes) {
 	key := ev.Symbol.String()
 	now := time.Now().UTC()
@@ -426,31 +442,123 @@ func (s *Service) applyQuotes(ev *model.Quotes) {
 		s.mu.Unlock()
 		return
 	}
-	book := orderBookFromQuotes(ev, inst.Last, now)
+	book := mergeQuotes(s.books[key], ev, inst.Last, now)
 	s.books[key] = book
 	inst.UpdatedAt = now
 	s.status.LastEventAt = now
 	s.mu.Unlock()
-	s.publish(Event{Type: "orderbook", Data: book})
+	s.publish(Event{Type: "orderbook", Data: orderBookSnapshot(book)})
 }
 
-// orderBookFromQuotes maps a full <quotes> snapshot to a price ladder. Levels
-// with a negative quantity are deletions (-1) and are skipped: the snapshot
-// always replaces the whole book.
-func orderBookFromQuotes(ev *model.Quotes, last float64, now time.Time) OrderBook {
-	book := OrderBook{Symbol: ev.Symbol.String(), Last: last, Time: now, Source: "live"}
+// mergeQuotes applies the deltas of one <quotes> callback to the previous
+// ladder and returns a new best-first snapshot. The previous ladder is not
+// mutated, so snapshots already handed to readers and subscribers stay valid.
+func mergeQuotes(prev OrderBook, ev *model.Quotes, last float64, now time.Time) OrderBook {
+	bids := ladderSide(prev.Bids)
+	asks := ladderSide(prev.Asks)
+	var maxBid, minAsk float64
+	var haveBid, haveAsk bool
 	for _, level := range ev.Levels {
+		// Deletions (-1) are not applied: native/records/quote.go stores the
+		// accumulated wire price in model.Quote.Price, and for the pinned
+		// deletion encoding that accumulated value is < 1 (Price: 0 in
+		// native/records/quote_test.go). Deleting by such a price is a no-op,
+		// and the real level price is not recoverable without a live capture /
+		// RE of the deletion encoding. Live deletions are I; the demo server
+		// sent none during the 2026-11-06 acceptance probe.
 		price := level.Price.Float64()
-		switch {
-		case level.Buy > 0:
-			book.Bids = append(book.Bids, Level{Price: price, Qty: float64(level.Buy)})
-		case level.Sell > 0:
-			book.Asks = append(book.Asks, Level{Price: price, Qty: float64(level.Sell)})
+		if level.Buy > 0 {
+			bids[price] = level.Buy
+			delete(asks, price) // a price updated on one side leaves the other
+			if !haveBid || price > maxBid {
+				maxBid, haveBid = price, true
+			}
+		}
+		if level.Sell > 0 {
+			asks[price] = level.Sell
+			delete(bids, price)
+			if !haveAsk || price < minAsk {
+				minAsk, haveAsk = price, true
+			}
 		}
 	}
-	book.Bids = limitLevels(book.Bids)
-	book.Asks = limitLevels(book.Asks)
-	return book
+	// Deletions are not decoded, so levels the market traded through would
+	// linger and cross the book. The newest update wins: drop bids at or above
+	// the best ask of this delta and asks at or below its best bid.
+	if haveAsk {
+		for price := range bids {
+			if price >= minAsk {
+				delete(bids, price)
+			}
+		}
+	}
+	if haveBid {
+		for price := range asks {
+			if price <= maxBid {
+				delete(asks, price)
+			}
+		}
+	}
+	return OrderBook{
+		Symbol: ev.Symbol.String(),
+		Last:   last,
+		Time:   now,
+		Bids:   sortedLevels(bids, true),
+		Asks:   sortedLevels(asks, false),
+		Source: "live",
+	}
+}
+
+// orderBookFromQuotes maps one <quotes> payload to a fresh price ladder (the
+// empty-ladder form of mergeQuotes). Kept as the mapper used by the feed tests;
+// production code merges into the persistent ladder via mergeQuotes.
+func orderBookFromQuotes(ev *model.Quotes, last float64, now time.Time) OrderBook {
+	return mergeQuotes(OrderBook{}, ev, last, now)
+}
+
+// ladderSide converts a stored ladder side to a price -> quantity map.
+func ladderSide(levels []Level) map[float64]int64 {
+	side := make(map[float64]int64, len(levels))
+	for _, level := range levels {
+		side[level.Price] = int64(level.Qty)
+	}
+	return side
+}
+
+// sortedLevels converts a ladder side to the contract order (bids by descending
+// price, asks by ascending) and clamps it to maxBookDepth.
+func sortedLevels(side map[float64]int64, descending bool) []Level {
+	levels := make([]Level, 0, len(side))
+	for price, qty := range side {
+		levels = append(levels, Level{Price: price, Qty: float64(qty)})
+	}
+	sort.Slice(levels, func(i, j int) bool {
+		if descending {
+			return levels[i].Price > levels[j].Price
+		}
+		return levels[i].Price < levels[j].Price
+	})
+	if len(levels) > maxBookDepth {
+		levels = levels[:maxBookDepth]
+	}
+	return levels
+}
+
+// orderBookSnapshot deep-copies a stored ladder and clamps it to the API depth,
+// so the published/returned book shares no memory with the live state.
+func orderBookSnapshot(book OrderBook) OrderBook {
+	out := copyOrderBook(book)
+	out.Bids = limitLevels(out.Bids)
+	out.Asks = limitLevels(out.Asks)
+	return out
+}
+
+// resetBooks drops the live ladders of the finished session. The next session
+// starts from its own full snapshot.
+func (s *Service) resetBooks() {
+	s.mu.Lock()
+	s.books = map[string]OrderBook{}
+	s.mu.Unlock()
 }
 
 // applyTrade appends one anonymous trade to the per-symbol tick-tape ring.
@@ -696,7 +804,7 @@ func (s *Service) liveOrderBook(symbol string) (OrderBook, error) {
 	if !ok {
 		return OrderBook{}, &Error{Code: CodeNotFound, Message: "стакан ещё не получен с сервера: " + symbol}
 	}
-	return copyOrderBook(book), nil
+	return orderBookSnapshot(book), nil
 }
 
 // liveTrades serves the cached tick tape of a live instrument.

@@ -8,8 +8,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/kmlebedev/txmlconnector/native/model"
 )
 
 const testBase = int64(1793893440) // 2026-11-05T16:24:00Z, the seed's last bar
@@ -474,5 +477,255 @@ func TestOfflineInstrumentWithoutShortSeries(t *testing.T) {
 	// No 1m series and no snapshot tape: the synthesized tape stays empty.
 	if trades, err := svc.Trades(context.Background(), "TQBR:SBER", 10); err != nil || len(trades) != 0 {
 		t.Fatalf("trades = %+v, err %v", trades, err)
+	}
+}
+
+// TestLiveOrderBookAppliesIncrementalQuotes is the PR 67 regression: the demo
+// server sends one full <quotes> snapshot and then incremental deltas (a
+// positive quantity upserts a level; a -1 deletion marker is not applied yet —
+// see mergeQuotes and the pinned deletion encoding). The feed must merge the
+// deltas into a persistent per-symbol ladder instead of replacing the book with
+// every callback, which left it one-sided in live acceptance.
+func TestLiveOrderBookAppliesIncrementalQuotes(t *testing.T) {
+	sym := model.Symbol{Board: "TQBR", SecCode: "SBER"}
+	client := &fakeClient{}
+	client.runFn = func(ctx context.Context, h func([]model.Event) error) error {
+		if err := h([]model.Event{
+			// Full snapshot: levels deliberately out of order.
+			&model.Quotes{Symbol: sym, Levels: []model.Quote{
+				{Price: *dec(98.5), Buy: 4},
+				{Price: *dec(100.0), Buy: 10},
+				{Price: *dec(99.5), Buy: 5},
+				{Price: *dec(103.0), Sell: 2},
+				{Price: *dec(101.0), Sell: 20},
+				{Price: *dec(101.5), Sell: 7},
+			}},
+			// Incremental delta: upsert and add on both sides. Deletions use
+			// the pinned wire encoding (accumulated price < 1, price 0) and
+			// are not applied (see mergeQuotes): the level stays until RE
+			// resolves the deletion encoding.
+			&model.Quotes{Symbol: sym, Levels: []model.Quote{
+				{Price: *dec(100.0), Buy: 15},  // upsert bid quantity
+				{Price: *dec(0), Buy: -1},      // deletion marker, price not recoverable
+				{Price: *dec(99.0), Buy: 3},    // new bid
+				{Price: *dec(101.0), Sell: 25}, // upsert ask quantity
+				{Price: *dec(0), Sell: -1},     // deletion marker, price not recoverable
+				{Price: *dec(102.0), Sell: 2},  // new ask
+			}},
+		}); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	svc := newLive(t, client)
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Close()
+	waitFor(t, "the merged order book", func() bool {
+		book, err := svc.OrderBook(context.Background(), "TQBR:SBER")
+		return err == nil && len(book.Bids) == 4 && len(book.Asks) == 4
+	})
+	book, err := svc.OrderBook(context.Background(), "TQBR:SBER")
+	if err != nil {
+		t.Fatalf("OrderBook: %v", err)
+	}
+	// Deletion markers are ignored (pinned encoding, see mergeQuotes): the
+	// 99.5 bid and the 101.5 ask stay in the book.
+	wantBids := []Level{{Price: 100.0, Qty: 15}, {Price: 99.5, Qty: 5}, {Price: 99.0, Qty: 3}, {Price: 98.5, Qty: 4}}
+	wantAsks := []Level{{Price: 101.0, Qty: 25}, {Price: 101.5, Qty: 7}, {Price: 102.0, Qty: 2}, {Price: 103.0, Qty: 2}}
+	if len(book.Bids) != len(wantBids) {
+		t.Fatalf("bids = %+v, want %+v", book.Bids, wantBids)
+	}
+	for i := range wantBids {
+		if book.Bids[i] != wantBids[i] {
+			t.Errorf("bid %d = %+v, want %+v (bids %+v)", i, book.Bids[i], wantBids[i], book.Bids)
+		}
+	}
+	for i := range wantAsks {
+		if book.Asks[i] != wantAsks[i] {
+			t.Errorf("ask %d = %+v, want %+v (asks %+v)", i, book.Asks[i], wantAsks[i], book.Asks)
+		}
+	}
+	if book.Source != "live" {
+		t.Fatalf("source = %q, want live", book.Source)
+	}
+}
+
+// TestLiveOrderBookResetOnNewSession checks that a reconnect starts from a clean
+// ladder: deltas of the new session must not be applied to the stale book of the
+// previous one (a level that vanished with the old session must not survive).
+func TestLiveOrderBookResetOnNewSession(t *testing.T) {
+	sym := model.Symbol{Board: "TQBR", SecCode: "SBER"}
+	var mu sync.Mutex
+	runs := 0
+	client := &fakeClient{}
+	client.runFn = func(ctx context.Context, h func([]model.Event) error) error {
+		mu.Lock()
+		runs++
+		n := runs
+		mu.Unlock()
+		switch n {
+		case 1:
+			if err := h([]model.Event{&model.Quotes{Symbol: sym, Levels: []model.Quote{
+				{Price: *dec(100.0), Buy: 10},
+			}}}); err != nil {
+				return err
+			}
+			return errors.New("session lost")
+		case 2:
+			// A delta-only session: the new ladder must not contain the stale bid.
+			if err := h([]model.Event{&model.Quotes{Symbol: sym, Levels: []model.Quote{
+				{Price: *dec(101.0), Buy: 10},
+			}}}); err != nil {
+				return err
+			}
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	svc := newLive(t, client)
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Close()
+	waitFor(t, "a book of the fresh session", func() bool {
+		book, err := svc.OrderBook(context.Background(), "TQBR:SBER")
+		return err == nil && len(book.Bids) > 0 && book.Bids[0].Price == 101.0
+	})
+	book, err := svc.OrderBook(context.Background(), "TQBR:SBER")
+	if err != nil {
+		t.Fatalf("OrderBook: %v", err)
+	}
+	if len(book.Bids) != 1 || book.Bids[0] != (Level{Price: 101.0, Qty: 10}) {
+		t.Fatalf("bids after reconnect = %+v, want the fresh session only", book.Bids)
+	}
+}
+
+// TestLiveOrderBookOutputDepth checks that the persistent ladder is bounded: a
+// deep snapshot is clamped on output to the best maxBookLevels levels.
+func TestLiveOrderBookOutputDepth(t *testing.T) {
+	sym := model.Symbol{Board: "TQBR", SecCode: "SBER"}
+	levels := make([]model.Quote, 0, 2*maxBookLevels+10)
+	for i := 0; i < maxBookLevels+10; i++ {
+		price := 100.0 - float64(i)*0.1
+		levels = append(levels, model.Quote{Price: *dec(price), Buy: int64(i + 1)})
+	}
+	for i := 0; i < maxBookLevels+10; i++ {
+		price := 101.0 + float64(i)*0.1
+		levels = append(levels, model.Quote{Price: *dec(price), Sell: int64(i + 1)})
+	}
+	client := &fakeClient{}
+	client.runFn = func(ctx context.Context, h func([]model.Event) error) error {
+		if err := h([]model.Event{&model.Quotes{Symbol: sym, Levels: levels}}); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	svc := newLive(t, client)
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Close()
+	waitFor(t, "the deep order book", func() bool {
+		book, err := svc.OrderBook(context.Background(), "TQBR:SBER")
+		return err == nil && len(book.Bids) > 0
+	})
+	book, err := svc.OrderBook(context.Background(), "TQBR:SBER")
+	if err != nil {
+		t.Fatalf("OrderBook: %v", err)
+	}
+	if len(book.Bids) != maxBookLevels || len(book.Asks) != maxBookLevels {
+		t.Fatalf("depth = %d/%d, want %d", len(book.Bids), len(book.Asks), maxBookLevels)
+	}
+	if book.Bids[0].Price != 100.0 || book.Asks[0].Price != 101.0 {
+		t.Fatalf("best levels = %+v / %+v", book.Bids[0], book.Asks[0])
+	}
+	// The internal ladder is bounded as well (no unbounded memory growth).
+	svc.mu.RLock()
+	stored := svc.books["TQBR:SBER"]
+	svc.mu.RUnlock()
+	if len(stored.Bids) > 4*maxBookLevels || len(stored.Asks) > 4*maxBookLevels {
+		t.Fatalf("stored depth = %d/%d, want <= %d", len(stored.Bids), len(stored.Asks), 4*maxBookLevels)
+	}
+}
+
+func mergeTestBook(t *testing.T, levels ...model.Quote) OrderBook {
+	t.Helper()
+	sym := model.Symbol{Board: "TQBR", SecCode: "SBER"}
+	return mergeQuotes(OrderBook{}, &model.Quotes{Symbol: sym, Levels: levels}, 0, time.Now())
+}
+
+func mergeTestDelta(prev OrderBook, levels ...model.Quote) OrderBook {
+	sym := model.Symbol{Board: "TQBR", SecCode: "SBER"}
+	return mergeQuotes(prev, &model.Quotes{Symbol: sym, Levels: levels}, 0, time.Now())
+}
+
+// TestLiveOrderBookPrunesCrossedLevels: when the market moves up, stale bids at
+// or above the new best ask are removed (deletions are not decoded yet).
+func TestLiveOrderBookPrunesCrossedLevels(t *testing.T) {
+	book := mergeTestBook(t,
+		model.Quote{Price: *dec(100.0), Buy: 1}, model.Quote{Price: *dec(99.0), Buy: 1},
+		model.Quote{Price: *dec(101.0), Sell: 1}, model.Quote{Price: *dec(102.0), Sell: 1})
+	book = mergeTestDelta(book,
+		model.Quote{Price: *dec(100.5), Buy: 3}, model.Quote{Price: *dec(101.5), Sell: 2},
+		model.Quote{Price: *dec(103.0), Sell: 2})
+	if len(book.Bids) == 0 || len(book.Asks) == 0 {
+		t.Fatalf("book = %+v", book)
+	}
+	if book.Bids[0].Price >= book.Asks[0].Price {
+		t.Fatalf("crossed book: bids %+v asks %+v", book.Bids, book.Asks)
+	}
+	// 101.0 ask is below the newest bid 100.5? No: asks <= max bid (100.5) are
+	// pruned; 101.0 stays. Bids >= min delta ask (101.5) are pruned: none.
+	if book.Asks[0].Price != 101.0 || book.Bids[0].Price != 100.5 {
+		t.Fatalf("best = %+v / %+v", book.Bids[0], book.Asks[0])
+	}
+	// Market moves up through the old asks: a bid at 102.5 prunes asks <= 102.5.
+	book = mergeTestDelta(book, model.Quote{Price: *dec(102.5), Buy: 4})
+	if book.Asks[0].Price != 103.0 || book.Bids[0].Price != 102.5 {
+		t.Fatalf("after move up: bids %+v asks %+v", book.Bids, book.Asks)
+	}
+	// Market moves down: new ask 99.5 prunes bids >= 99.5.
+	book = mergeTestDelta(book, model.Quote{Price: *dec(99.5), Sell: 1})
+	if book.Asks[0].Price != 99.5 || book.Bids[0].Price != 99.0 {
+		t.Fatalf("after move down: bids %+v asks %+v", book.Bids, book.Asks)
+	}
+}
+
+// TestLiveOrderBookPriceMigratesBetweenSides: a price updated on one side is
+// removed from the other.
+func TestLiveOrderBookPriceMigratesBetweenSides(t *testing.T) {
+	book := mergeTestBook(t,
+		model.Quote{Price: *dec(100.0), Buy: 5}, model.Quote{Price: *dec(99.0), Buy: 5},
+		model.Quote{Price: *dec(101.0), Sell: 5})
+	book = mergeTestDelta(book, model.Quote{Price: *dec(100.0), Sell: 2})
+	for _, l := range book.Bids {
+		if l.Price == 100.0 {
+			t.Fatalf("100.0 still in bids: %+v", book.Bids)
+		}
+	}
+	if len(book.Asks) != 2 || book.Asks[0] != (Level{Price: 100.0, Qty: 2}) {
+		t.Fatalf("asks = %+v", book.Asks)
+	}
+}
+
+// TestLiveOrderBookDepthCapKeepsFreshLevels: after pruning, the depth cap keeps
+// the best remaining levels, not stale ones.
+func TestLiveOrderBookDepthCapKeepsFreshLevels(t *testing.T) {
+	var snap []model.Quote
+	for i := 0; i < maxBookDepth+50; i++ {
+		snap = append(snap, model.Quote{Price: *dec(1000.0 - float64(i)*0.5), Buy: 1})
+	}
+	book := mergeTestBook(t, snap...)
+	ask := 1000.0 - 10*0.5 // prunes the ten best (stale) bids at or above it
+	book = mergeTestDelta(book, model.Quote{Price: *dec(ask), Sell: 1})
+	if len(book.Bids) == 0 || book.Bids[0].Price >= ask {
+		t.Fatalf("stale bids kept: first %+v", book.Bids[:1])
+	}
+	if book.Asks[0].Price != ask || len(book.Bids) > maxBookDepth {
+		t.Fatalf("book = bids %d asks %+v", len(book.Bids), book.Asks)
 	}
 }
