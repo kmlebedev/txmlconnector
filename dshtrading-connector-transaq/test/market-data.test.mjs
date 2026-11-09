@@ -135,8 +135,11 @@ test('subscribeTicker recovers after gateway restart', async () => {
     assert.equal(got.length, 1);
     assert.equal(got[0].price, 101);
     sub.dispose();
+    // A poll already in flight at dispose time may still reach the fake
+    // gateway; let it land, then assert that no new poll is scheduled.
+    await new Promise((r) => setTimeout(r, 50));
     const after = gw.calls.length;
-    await new Promise((r) => setTimeout(r, 80));
+    await new Promise((r) => setTimeout(r, 100));
     assert.equal(gw.calls.length, after);
   } finally { await gw.close(); }
 });
