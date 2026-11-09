@@ -569,3 +569,12 @@ T25 — S-эквивалент через Kimi Code, Claude-промпт I (OAut
 - Доказательства: `.re-run/acceptance-pr67-live/` (повторные `gateway-summary.json`,
   `connector-summary.json`, `orderbook-polls-fixed.log`), `.re-run/host-acceptance/recheck/REPORT.md`.
   Отчёт — [acceptance-pr67-2026-11-06.md](acceptance-pr67-2026-11-06.md) §8.
+
+## 2026-11-09 — коннектор вынесен в отдельный репозиторий
+
+- `dshtrading-connector-transaq/` и `tools/dsh-connector-enable.sh` перенесены в
+  [`kmlebedev/dshtrading-connector-transaq`](https://github.com/kmlebedev/dshtrading-connector-transaq) с историей (15 коммитов, `git format-patch` по
+  путям + `git am`; файлы побайтно совпадают с `main` `f70b0f4`); там же README, AGENTS.md,
+  `make test`, CI Node 24, `docs/migration.md`.
+- Здесь удалены пакет, `make connector-test` и шаг CI с Node; шлюз `/api/gw/v1/*`, его контракт,
+  ADR, план и отчёты приёмки остаются. Ссылки — в README, `gateway-v1.md`, ADR и плане.
