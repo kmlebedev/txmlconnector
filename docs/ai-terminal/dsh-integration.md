@@ -1,5 +1,11 @@
 # Интеграция AI-терминала с DeepSeek Harness: проверенный API
 
+> **2026-11-06: пути `dsh-ai-terminal/*` в этом документе — исторические; код плагина теперь в
+> отдельном репозитории
+> [`kmlebedev/dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq)
+> (`dsh-ai-terminal/`).** Установка и конфигурация — в README плагина нового репозитория;
+> Go-бэкенд `cmd/terminal` остаётся в txmlconnector.
+>
 > Подготовка Phase C (задачи 9–10 плана). Источник — **установленный** DeepSeek Harness Desktop
 > **0.2.2-rc.1** (/Applications/DeepSeek Harness.app): app.asar (213 МБ), пакеты
 > /dsh/node_modules/@deepseek-ai/*. Код терминала и плагина в этой задаче **не менялся** —

@@ -1,5 +1,11 @@
 # Прогресс выполнения плана AI-нативного терминала
 
+> **2026-11-06: DSH-плагин `dsh-ai-terminal` вынесен в отдельный репозиторий
+> [`kmlebedev/dsh-trading-transaq`](https://github.com/kmlebedev/dsh-trading-transaq).**
+> История ниже описывает состояние на момент записи: пути `dsh-ai-terminal/*` относятся к
+> прежнему checkout'у txmlconnector; Go-терминал (`cmd/terminal`, `native/`) и `skills/`
+> остаются здесь.
+
 Источник задач: [docs/superpowers/plans/2026-11-05-ai-native-terminal.md](../superpowers/plans/2026-11-05-ai-native-terminal.md).
 Ветка: `plan/ai-terminal-a` (Фаза A), коммиты локальные, без push.
 
