@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
+	tcCommands "github.com/kmlebedev/txmlconnector-native/commands"
+	"github.com/kmlebedev/txmlconnector-native/connector"
+	nativeconnector "github.com/kmlebedev/txmlconnector-native/native"
+	"github.com/kmlebedev/txmlconnector-native/native/testserver"
 	tcClient "github.com/kmlebedev/txmlconnector/client"
-	tcCommands "github.com/kmlebedev/txmlconnector/client/commands"
-	"github.com/kmlebedev/txmlconnector/connector"
-	nativeconnector "github.com/kmlebedev/txmlconnector/native"
-	"github.com/kmlebedev/txmlconnector/native/testserver"
 	pb "github.com/kmlebedev/txmlconnector/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -170,7 +170,7 @@ func TestBackendSelection(t *testing.T) {
 // backend over the in-process testserver (no DLL/Wine): connect -> server_status.
 func TestServerRunsNativeBackend(t *testing.T) {
 	srv := testserver.New(t)
-	raw, err := os.ReadFile("../native/records/testdata/startup-demo.hex")
+	raw, err := os.ReadFile("testdata/startup-demo.hex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ const quoteServer = "\""
 // receive connected=true without the stream closing immediately (RE-4 demo EOF).
 func TestNativeBackendTCClientRE4(t *testing.T) {
 	srv := testserver.New(t)
-	raw, err := os.ReadFile("../native/records/testdata/startup-demo.hex")
+	raw, err := os.ReadFile("testdata/startup-demo.hex")
 	if err != nil {
 		t.Fatal(err)
 	}

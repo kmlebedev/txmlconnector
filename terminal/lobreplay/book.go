@@ -27,7 +27,7 @@ package lobreplay
 import (
 	"sort"
 
-	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector-native/native/model"
 )
 
 // Event kinds. The first three are the md.book_events.kind Enum8 values;

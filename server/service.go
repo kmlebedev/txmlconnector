@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/kmlebedev/txmlconnector/connector"
+	"github.com/kmlebedev/txmlconnector-native/connector"
 	pb "github.com/kmlebedev/txmlconnector/proto"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"

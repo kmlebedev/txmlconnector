@@ -30,7 +30,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native"
+	"github.com/kmlebedev/txmlconnector-native/native"
 	"github.com/kmlebedev/txmlconnector/terminal/chstore"
 	"github.com/kmlebedev/txmlconnector/terminal/recorder"
 )

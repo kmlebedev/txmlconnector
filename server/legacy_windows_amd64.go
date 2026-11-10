@@ -6,7 +6,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/kmlebedev/txmlconnector/connector"
+	"github.com/kmlebedev/txmlconnector-native/connector"
 	log "github.com/sirupsen/logrus"
 )
 

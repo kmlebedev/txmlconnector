@@ -22,10 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native"
-	"github.com/kmlebedev/txmlconnector/native/records"
-	"github.com/kmlebedev/txmlconnector/native/session"
-	"github.com/kmlebedev/txmlconnector/native/testserver"
+	"github.com/kmlebedev/txmlconnector-native/native"
+	"github.com/kmlebedev/txmlconnector-native/native/records"
+	"github.com/kmlebedev/txmlconnector-native/native/session"
+	"github.com/kmlebedev/txmlconnector-native/native/testserver"
 	"github.com/kmlebedev/txmlconnector/terminal/chstore"
 	"github.com/kmlebedev/txmlconnector/terminal/recorder"
 )
@@ -45,10 +45,10 @@ func liveClickHouse(t *testing.T) *chstore.Client {
 	return chstore.New(raw, os.Getenv("TXML_CLICKHOUSE_USER"), os.Getenv("TXML_CLICKHOUSE_PASSWORD"), nil)
 }
 
-// readHexPayload decodes a hex capture from native/records/testdata.
+// readHexPayload decodes a hex capture from testdata (copied from txmlconnector-native).
 func readHexPayload(t *testing.T, name string) []byte {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "native", "records", "testdata", name))
+	raw, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatalf("read fixture %s: %v", name, err)
 	}

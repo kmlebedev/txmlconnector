@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
+	"github.com/kmlebedev/txmlconnector-native/commands"
 	"github.com/kmlebedev/txmlconnector/client"
-	"github.com/kmlebedev/txmlconnector/client/commands"
 	log "github.com/sirupsen/logrus"
 	"os"
 	"strconv"

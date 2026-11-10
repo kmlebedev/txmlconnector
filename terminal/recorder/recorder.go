@@ -15,13 +15,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native"
-	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector-native/native"
+	"github.com/kmlebedev/txmlconnector-native/native/model"
 )
 
 // News ingestion tuning. The TRANSAQ news feed has no subscription on the wire:
 // the headers come from get_old_news polling and the bodies from get_news_body
-// requests (docs/protocol/news.md).
+// requests (docs/protocol/news.md in txmlconnector-native).
 const (
 	// defaultNewsPollInterval is how often the recorder asks for the news
 	// headers with get_old_news.

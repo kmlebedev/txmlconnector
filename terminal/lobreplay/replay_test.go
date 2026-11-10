@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector-native/native/model"
 )
 
 // fixturePath is the synthetic ten-minute SBER recording in the plan Task 11

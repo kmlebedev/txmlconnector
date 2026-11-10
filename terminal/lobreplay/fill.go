@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector-native/native/model"
 )
 
 // Order types of the replay.

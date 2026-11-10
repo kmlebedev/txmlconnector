@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	tcCommands "github.com/kmlebedev/txmlconnector-native/commands"
 	tcClient "github.com/kmlebedev/txmlconnector/client"
-	tcCommands "github.com/kmlebedev/txmlconnector/client/commands"
 )
 
 // The connected status comes after the initial load, which floods the typed

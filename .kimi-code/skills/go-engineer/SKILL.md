@@ -9,7 +9,13 @@ whenToUse: When working on connector lifecycle, native_windows_amd64 syscalls, s
 
 **Назначение.** Маршрут Go-задачи от постановки до проверенного изменения: что прочитать, какие инварианты сохранить, как реализовать и что считается готовым результатом. Скил — надстройка над README и docs, а не их замена.
 
-**Канонические документы.** [README.md](../../../README.md); [docs/architecture.md](../../../docs/architecture.md); [docs/ROADMAP-GO.md](../../../docs/ROADMAP-GO.md); [docs/TRANSAQ-SERVER-RESEARCH.md](../../../docs/TRANSAQ-SERVER-RESEARCH.md); [proto/connect.proto](../../../proto/connect.proto); [Makefile](../../../Makefile); [CI](../../../.github/workflows/go-test.yml).
+**Канонические документы.** [README.md](../../../README.md); [docs/architecture.md](../../../docs/architecture.md); [docs/ROADMAP-GO.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/ROADMAP-GO.md); [docs/TRANSAQ-SERVER-RESEARCH.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/TRANSAQ-SERVER-RESEARCH.md); [proto/connect.proto](../../../proto/connect.proto); [Makefile](../../../Makefile); [CI](../../../.github/workflows/go-test.yml).
+
+**С 2026-11-10** `connector` (Win32-адаптер DLL), `commands` (бывший `client/commands`), `native/`, C ABI и RE
+живут в [`github.com/kmlebedev/txmlconnector-native`](https://github.com/kmlebedev/txmlconnector-native) — правки
+этих пакетов делаются там (свой `go-engineer` и `dll-update`), а здесь — обновлением версии модуля в `go.mod`.
+`connector/` и `client/commands/` в этом репозитории — deprecated-алиасы; пункты ниже про Win32-адаптер
+применяются к коду нового репозитория.
 
 ## 1. Когда применять
 
@@ -20,16 +26,16 @@ whenToUse: When working on connector lifecycle, native_windows_amd64 syscalls, s
 - Makefile, CI, Docker/Wine-сборка, `examples/*`.
 - Тесты и документация для всего перечисленного.
 
-**Когда не применять:** восстановление сетевого протокола TRANSAQ, Ghidra, разбор DLL и криптографии (это M1–M3 из [ROADMAP-GO.md](../../../docs/ROADMAP-GO.md), материал — [TRANSAQ-SERVER-RESEARCH.md](../../../docs/TRANSAQ-SERVER-RESEARCH.md)); замена вендорской DLL; бизнес-логика внешнего экспортёра, который только потребляет XML.
+**Когда не применять:** восстановление сетевого протокола TRANSAQ, Ghidra, разбор DLL и криптографии (это M1–M3 из [ROADMAP-GO.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/ROADMAP-GO.md), материал — [TRANSAQ-SERVER-RESEARCH.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/TRANSAQ-SERVER-RESEARCH.md)); замена вендорской DLL; бизнес-логика внешнего экспортёра, который только потребляет XML.
 
 ## 2. Что прочитать перед стартом
 
 1. [README.md](../../../README.md) и [docs/architecture.md](../../../docs/architecture.md): компоненты, границы, lifecycle, failure policy.
-2. [docs/ROADMAP-GO.md](../../../docs/ROADMAP-GO.md): текущий этап и границы. M1–M3 — исследование; M4+ — Go-реализация. Текущий DLL-адаптер не считается нативным backend M4.
+2. [docs/ROADMAP-GO.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/ROADMAP-GO.md): текущий этап и границы. M1–M3 — исследование; M4+ — Go-реализация. Текущий DLL-адаптер не считается нативным backend M4.
 3. Затрагиваемый пакет и его тесты: `connector/`, `server/`, `client/`, `client/commands/`.
 4. При изменении контракта — [proto/connect.proto](../../../proto/connect.proto), сгенерированные `connect.pb.go` / `connect_grpc.pb.go`, потребители в `server` и `client`.
 5. [Makefile](../../../Makefile) и [.github/workflows/go-test.yml](../../../.github/workflows/go-test.yml): чем именно проверяется результат.
-6. [TRANSAQ-SERVER-RESEARCH.md](../../../docs/TRANSAQ-SERVER-RESEARCH.md) — только если задача касается поведения протокола; не превращай гипотезу в утверждение.
+6. [TRANSAQ-SERVER-RESEARCH.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/TRANSAQ-SERVER-RESEARCH.md) — только если задача касается поведения протокола; не превращай гипотезу в утверждение.
 
 ## 3. Границы роли
 
@@ -201,9 +207,9 @@ whenToUse: When working on connector lifecycle, native_windows_amd64 syscalls, s
 
 ## 12. Ссылки
 
-- [README.md](../../../README.md), [docs/architecture.md](../../../docs/architecture.md), [docs/ROADMAP-GO.md](../../../docs/ROADMAP-GO.md).
-- [docs/TRANSAQ-SERVER-RESEARCH.md](../../../docs/TRANSAQ-SERVER-RESEARCH.md), [docs/research/inspect_binary.py](../../../docs/research/inspect_binary.py).
-- [connector/connector.go](../../../connector/connector.go), [connector/native_windows_amd64.go](../../../connector/native_windows_amd64.go), [connector/native_unsupported.go](../../../connector/native_unsupported.go).
+- [README.md](../../../README.md), [docs/architecture.md](../../../docs/architecture.md), [docs/ROADMAP-GO.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/ROADMAP-GO.md).
+- [docs/TRANSAQ-SERVER-RESEARCH.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/TRANSAQ-SERVER-RESEARCH.md), [docs/research/inspect_binary.py](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/research/inspect_binary.py).
+- [connector/connector.go](../../../connector/connector.go), [connector/native_windows_amd64.go](https://github.com/kmlebedev/txmlconnector-native/blob/main/connector/native_windows_amd64.go), [connector/native_unsupported.go](https://github.com/kmlebedev/txmlconnector-native/blob/main/connector/native_unsupported.go).
 - [server/server.go](../../../server/server.go), [server/service.go](../../../server/service.go), [server/broker.go](../../../server/broker.go).
 - [client/main.go](../../../client/main.go), [client/reconnect.go](../../../client/reconnect.go), [client/response_queue.go](../../../client/response_queue.go).
 - [proto/connect.proto](../../../proto/connect.proto), [Makefile](../../../Makefile), [.github/workflows/go-test.yml](../../../.github/workflows/go-test.yml).

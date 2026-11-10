@@ -89,7 +89,7 @@ ORDER BY (news_id);
 
 | Поле | `md.book_events` | `md.trades` |
 |---|---|---|
-| `ts` | момент, когда рекордер увидел изменение книги, мс UTC; у записи R_QUOTES (0x07) **нет биржевого времени** на проводе — это ближайшая честная метка (**I**) | биржевое время сделки `model.Trade.Time` (Unix-время сервера + bias + миллисекунды из `<time>`), мс UTC (**S/D** для полей записи, см. [history.md](../protocol/alltrades.md)) |
+| `ts` | момент, когда рекордер увидел изменение книги, мс UTC; у записи R_QUOTES (0x07) **нет биржевого времени** на проводе — это ближайшая честная метка (**I**) | биржевое время сделки `model.Trade.Time` (Unix-время сервера + bias + миллисекунды из `<time>`), мс UTC (**S/D** для полей записи, см. [history.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/protocol/alltrades.md)) |
 | `recv_ts` | точный момент приёма события рекордером, мкс UTC | то же для сделки |
 | `session_id` | UUIDv4 на каждый запуск `recorder.Run` (переподключение с новым полным логином = новая сессия) | — (идентичность сделки задаёт `trade_no`) |
 | `seq` | сквозной номер строки в сессии — детерминированно упорядочивает строки, попавшие в одну миллисекунду | — |
@@ -131,7 +131,7 @@ func Run(ctx context.Context, cl *native.Client, sink Sink, symbols []string) er
   после подписки — полный снимок книги и пишется строками `kind='snapshot'`; последующие колбэки —
   изменения уровней `kind='level'`. Удаление уровня (`buy/sell = -1`) → `qty=0`. На проводе
   R_QUOTES приходит **полным снимком** при подписке; инкрементальных обновлений живьём не наблюдалось
-  (**S-негатив**, см. [alltrades.md](../protocol/alltrades.md)), поэтому трактовка «первый колбэк —
+  (**S-негатив**, см. [alltrades.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/protocol/alltrades.md)), поэтому трактовка «первый колбэк —
   snapshot, далее level» — поведение рекордера (**I**), а не подтверждённый формат потока.
 - **Разрыв записи (Review Focus 3).** При потере связи DLL отдаёт `server_status recover="true"`
   (`model.ServerStatus{Recover: true}`) — рекордер пишет по одной строке `kind='gap'`
@@ -145,7 +145,7 @@ func Run(ctx context.Context, cl *native.Client, sink Sink, symbols []string) er
 - Если сессия восстановиться не смогла, `Run` возвращает ошибку, а `cmd/md-recorder` открывает
   новую сессию (новый `session_id`) — разрыв уже отмечен строкой `gap` старой сессии.
 - **Новости (I, поведение клиента).** На проводе у новостей **нет подписки** (см.
-  [news.md](../protocol/news.md)): заголовки приходят записями RQ_MAIN только в ответ на
+  [news.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/protocol/news.md)): заголовки приходят записями RQ_MAIN только в ответ на
   `get_old_news`, тела — в ответ на `get_news_body`. Поэтому рекордер сам опрашивает их в
   горутине сессии: `OldNews` каждые 30 с (`defaultNewsPollInterval`) и `NewsBody` для каждого нового
   заголовка; данные приходят через колбэк `Run`, горутина только отправляет запросы. Ошибка опроса
@@ -249,12 +249,12 @@ make verify
 - Инкрементальные обновления стакана на проводе живьём не наблюдались (только полный снимок при
   подписке — **S-негатив**); раскладка «snapshot/level» — контракт рекордера (**I**).
 - Удаление уровня (`-1`) на живом потоке не наблюдалось (поведение из PDF 4.9/DLL — **D**,
-  см. [alltrades.md](../protocol/alltrades.md)); в рекордере покрыто юнит-тестом.
+  см. [alltrades.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/protocol/alltrades.md)); в рекордере покрыто юнит-тестом.
 - Многосессионность: `session_id` на сессию и `gap` при обрыве проверены юнит-тестами, не живым
   переподключением.
 - **Живой поток новостей не снимался**: `get_old_news`/`get_news_body` к демо-серверу в этой
   задаче не вызывались (нет согласия пользователя на живую сессию); формат заголовков/тел взят из
-  [news.md](../protocol/news.md) (**S/D/O**), а семантика `first_seen` — контракт рекордера (**I**).
+  [news.md](https://github.com/kmlebedev/txmlconnector-native/blob/main/docs/protocol/news.md) (**S/D/O**), а семантика `first_seen` — контракт рекордера (**I**).
   `get_news` против реального ClickHouse не гонялся: SQL и разбор ответа проверены на
   `httptest`-заглушке.
 

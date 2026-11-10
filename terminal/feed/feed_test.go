@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector-native/native/model"
 )
 
 const testBase = int64(1793893440) // 2026-11-05T16:24:00Z, the seed's last bar

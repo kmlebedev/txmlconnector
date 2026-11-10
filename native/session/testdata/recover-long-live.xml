@@ -1,9 +1,0 @@
-<!-- E05 long break: DLL callbacks (2026-11-04, demo server). -->
-<!-- Source: $RE_WORKDIR/last-run.out of the reference harness; account-independent lines only. -->
-<!-- Load end: -->
-<overnight status="false"/>
-<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="0" connected="true"/>
-<!-- link lost: recovery starts (120 ReConnecting attempts, ~1 s apart) -->
-<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="0" connected="true" recover="true"/>
-<!-- session_timeout (120000 ms) expired: Request timeout., DLL gives up -->
-<server_status sys_ver="626" build="4" server_tz="Russian Standard Time" id="0" connected="false"/>

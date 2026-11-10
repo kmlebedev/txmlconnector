@@ -5,11 +5,24 @@ the connector over gRPC so native Linux and macOS applications do not depend on
 Win32 calls or Wine themselves.
 
 
-## Нативный клиент (без DLL)
+## Нативный клиент (без DLL) — вынесен в [`txmlconnector-native`](https://github.com/kmlebedev/txmlconnector-native)
+
+С 2026-11-10 нативный клиент, XML-коннектор `native.Connector`, пакеты `commands` и `connector`,
+C ABI-библиотека, RE-инструменты, документация протокола и runbook обновления DLL живут в
+отдельном модуле [`github.com/kmlebedev/txmlconnector-native`](https://github.com/kmlebedev/txmlconnector-native)
+(история сохранена). Этот репозиторий импортирует его: `server` (`TC_BACKEND=native`), `terminal/`,
+`cmd/md-recorder`. Пакеты `client/commands` и `connector` здесь — deprecated-алиасы на новый модуль.
 
 Пакет `native` — типизированный Go-клиент TRANSAQ: без DLL, Wine и XML-слоя. Он
 использует тот же протокол, что и Connector, и отдаёт серверные сообщения
 Go-структурами; Connector и gRPC-сервер построены поверх него.
+
+```go
+import (
+    "github.com/kmlebedev/txmlconnector-native/native"
+    "github.com/kmlebedev/txmlconnector-native/native/model"
+)
+```
 
 ```go
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -36,9 +49,9 @@ err = client.Run(ctx, native.RunOptions{RqDelay: 100 * time.Millisecond}, func(e
     for _, ev := range events {
         switch e := ev.(type) {
         case *model.Trade:
-            log.Printf("trade %s %.2f x %d", e.Symbol, e.Price.Float64(), e.Quantity)
+            log.Printf("trade %s:%s %s x %d", e.Board, e.SecCode, e.Price, e.Quantity)
         case *model.Quotation:
-            log.Printf("quotation %s bid=%s ask=%s", e.Symbol, e.Bid, e.Ask)
+            log.Printf("quotation %s:%s %+v", e.Symbol.Board, e.Symbol.SecCode, e.Fields)
         case model.ServerStatus:
             log.Printf("server connected=%v recover=%v", e.Connected, e.Recover)
         }
@@ -84,7 +97,7 @@ make terminal && ./bin/terminal -mode offline   # http://127.0.0.1:8090, без 
 `Run` сам опрашивает RQ_MAIN, восстанавливает соединение после обрыва
 (`connected="true" recover="true"`) и отдаёт `model.UnknownRecord`, если
 встретил неизвестную запись. Долгий read-only soak (20 валидных бумаг TQBR, Stats/RSS/latency раз в 5 минут) —
-`go run ./tools/native-soak` при `TC_SOAK=1`; `TC_SOAK_DURATION` принимает `300` и `300s`; без env он завершается сразу.
+`go run github.com/kmlebedev/txmlconnector-native/tools/native-soak@latest` при `TC_SOAK=1`; `TC_SOAK_DURATION` принимает `300` и `300s`; без env он завершается сразу.
 
 
 ## Переносимые навыки AI-терминала (`npx skills add`)
@@ -113,23 +126,10 @@ npx skills add github.com/kmlebedev/txmlconnector --skill trading-automation-aut
 
 ## C ABI библиотека (drop-in для DLL)
 
-`cmd/connector` собирает `libtxmlconnector.so`, `libtxmlconnector.dylib` или
-`txmlconnector64.dll` с 9 экспортами оригинальной DLL; клиент подключает её без изменения кода.
-
-```bash
-make cabi          # текущая ОС: dylib/so; артефакты и header — в bin/
-make cabi-test     # C ABI-тест: 9 экспортов, ошибки, callback, FreeMemory
-make cabi-conformance  # C5: сценарии lifecycle/текстов против эталонной DLL (cabi_scenarios.json)
-```
-
-Публичный заголовок — [`cmd/connector/include/txmlconnector.h`](cmd/connector/include/txmlconnector.h)
-(в `bin/` копируется как `txmlconnector.h`). Релизы под linux amd64/arm64, windows amd64,
-macOS arm64/amd64 собирает GitHub Actions workflow
-[`.github/workflows/compat-release.yml`](.github/workflows/compat-release.yml): на тег `compat-v*`
-публикуется один Release с пятью архивами `txmlconnector-<target>.{tar.gz,zip}` (канонические
-библиотеки + header + VERSION.txt + README) и `SHA256SUMS`. Версия drop-in — `6.47.2.26.4`
-(override `TXC_VERSION`); точные тексты `InitializeEx`/`GetServiceInfo`/`SetLogLevel` ещё
-снимаются с DLL (RE-2), до этого — явные заглушки с TODO.
+`cmd/connector` (`libtxmlconnector.so`/`.dylib`/`txmlconnector64.dll` с 9 экспортами оригинальной
+DLL), её релизы `compat-v*` и тесты конформанса перенесены в
+[`txmlconnector-native`](https://github.com/kmlebedev/txmlconnector-native#сборка-и-проверки)
+(`make cabi`, `make cabi-test`, `make cabi-conformance`).
 
 ## Architecture
 
