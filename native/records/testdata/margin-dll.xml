@@ -1,3 +1,0 @@
-<max_buy_sell client="TESTCLIEN"><security secid="26"><market>1</market><seccode>SBER</seccode><maxbuy>13210</maxbuy><maxsell>15210</maxsell></security></max_buy_sell>
-<max_buy_sell_tplus client="TESTCLIEN"><security secid="26"><market>1</market><seccode>SBER</seccode><maxbuy>13210</maxbuy><maxsell>15210</maxsell></security></max_buy_sell_tplus>
-<cln_sec_permissions client="TESTCLIEN" secid="26"><security><seccode>SBER</seccode><market>1</market><board>TQBR</board></security><tradeable>true</tradeable><marketable>true</marketable><longable>true</longable><shortable>true</shortable><regratelong>14.28</regratelong><regrateshort>14.28</regrateshort></cln_sec_permissions>

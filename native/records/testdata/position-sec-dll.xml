@@ -1,2 +1,0 @@
-<client id="TESTCLIEN" remove="false"><market>1</market><currency>RUB</currency><type>leverage</type></client>
-<positions><sec_position><client>TESTCLIEN</client><union></union><secid>26</secid><market>1</market><shortname>Сбербанк</shortname><seccode>SBER</seccode><saldoin>30000000</saldoin><saldomin>0</saldomin><bought>0</bought><sold>0</sold><saldo>30000000</saldo><ordbuy>0</ordbuy><ordsell>0</ordsell></sec_position></positions>

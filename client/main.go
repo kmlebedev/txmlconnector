@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	. "github.com/kmlebedev/txmlconnector/client/commands"
+	. "github.com/kmlebedev/txmlconnector-native/commands"
 	pb "github.com/kmlebedev/txmlconnector/proto"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"

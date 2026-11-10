@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native"
-	"github.com/kmlebedev/txmlconnector/native/model"
-	"github.com/kmlebedev/txmlconnector/native/records"
+	"github.com/kmlebedev/txmlconnector-native/native"
+	"github.com/kmlebedev/txmlconnector-native/native/model"
+	"github.com/kmlebedev/txmlconnector-native/native/records"
 	"github.com/kmlebedev/txmlconnector/terminal/backtest"
 )
 
@@ -46,7 +46,7 @@ const (
 	// liveTradeRing is how many recent ticks are kept per symbol.
 	liveTradeRing = 500
 	// newsPollInterval is how often the live feed asks get_old_news: the news
-	// feed has no subscription on the wire (docs/protocol/news.md).
+	// feed has no subscription on the wire (docs/protocol/news.md in txmlconnector-native).
 	newsPollInterval = 30 * time.Second
 	// newsPollCount is the get_old_news count (the protocol maximum is 100).
 	newsPollCount = 100

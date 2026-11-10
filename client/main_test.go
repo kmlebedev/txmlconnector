@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/client/commands"
+	"github.com/kmlebedev/txmlconnector-native/commands"
 	pb "github.com/kmlebedev/txmlconnector/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"

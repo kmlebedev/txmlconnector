@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/client/commands"
+	"github.com/kmlebedev/txmlconnector-native/commands"
 )
 
 const (

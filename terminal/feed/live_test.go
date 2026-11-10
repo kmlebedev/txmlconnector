@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native"
-	"github.com/kmlebedev/txmlconnector/native/model"
-	"github.com/kmlebedev/txmlconnector/native/records"
+	"github.com/kmlebedev/txmlconnector-native/native"
+	"github.com/kmlebedev/txmlconnector-native/native/model"
+	"github.com/kmlebedev/txmlconnector-native/native/records"
 )
 
 // fakeClient is a marketClient fake: the live tests never touch the network.

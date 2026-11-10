@@ -14,6 +14,11 @@ The DLL has two constraints that shape this design:
 
 ## Components
 
+> Since 2026-11-10 `connector`, `commands` (formerly `client/commands`) and the
+> pure-Go `native` backend live in the module
+> [`github.com/kmlebedev/txmlconnector-native`](https://github.com/kmlebedev/txmlconnector-native);
+> `connector` and `client/commands` here are deprecated aliases of it.
+
 - `connector`: a small port owned by the application. Its Win32 adapter loads
   and validates all required procedures, owns `Initialize`/`UnInitialize`,
   serializes commands, copies callback data and releases DLL-owned memory.
@@ -25,7 +30,10 @@ The DLL has two constraints that shape this design:
   flow control from ordered XML decoding and typed message delivery. Portfolio
   snapshots are delivered through a race-safe `PortfolioUpdates` stream; the
   legacy `Data` struct is compatibility-only.
-- `client/commands`: protocol data structures and XML command encoding.
+- `commands` (txmlconnector-native; alias `client/commands`): protocol data
+  structures and XML command encoding.
+- `native` (txmlconnector-native): pure-Go TRANSAQ backend; `server` selects it
+  with `TC_BACKEND=native`.
 
 Dependencies point inward:
 

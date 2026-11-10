@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	tcCommands "github.com/kmlebedev/txmlconnector-native/commands"
 	tcClient "github.com/kmlebedev/txmlconnector/client"
-	tcCommands "github.com/kmlebedev/txmlconnector/client/commands"
 	log "github.com/sirupsen/logrus"
 )
 

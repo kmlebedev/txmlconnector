@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native"
-	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector-native/native"
+	"github.com/kmlebedev/txmlconnector-native/native/model"
 )
 
 // fakeSink collects the batches the recorder emits; no ClickHouse is involved.

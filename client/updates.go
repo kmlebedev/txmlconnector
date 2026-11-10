@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/client/commands"
+	"github.com/kmlebedev/txmlconnector-native/commands"
 )
 
 // errStreamClosed is returned when a typed send is interrupted by the response

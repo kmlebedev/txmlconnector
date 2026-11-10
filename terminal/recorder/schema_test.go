@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector-native/native/model"
 	"github.com/kmlebedev/txmlconnector/terminal/chstore"
 )
 

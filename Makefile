@@ -17,13 +17,11 @@ STAGING_REMOTE_BIN  ?= $(STAGING_BIN_DIR)/txmlconnector-server.exe
 STAGING_UNIT_TMPL   ?= deploy/txmlconnector-server.service
 
 .PHONY: compile test vet verify terminal terminal_dev terminal_smoke terminal_live server_build server queues_build queues client tgbot \
-	cabi cabi-so cabi-dylib cabi-zig cabi-test cabi-live-test cabi-conformance \
 	staging-precheck staging-prepare deploy-staging deploy-staging-binary \
 	deploy-staging-dll deploy-staging-unit deploy-staging-smoke \
 	deploy-staging-status deploy-staging-logs deploy-staging-restart rollback-staging
 compile: ## Compile the proto files.
 	protoc proto/connect.proto --go_out=. --go-grpc_out=. --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative
-	protoc proto/marketdata/trade.proto --go_out=. --go_opt=paths=source_relative
 
 test:
 	go test ./...
@@ -39,8 +37,8 @@ verify:
 	@out="$$(git ls-files '*.go' | xargs gofmt -l)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 	$(VERIFY_GOCACHE) go vet ./...
 	$(VERIFY_GOCACHE) go build ./...
-	$(VERIFY_GOCACHE) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./native/...
-	$(VERIFY_GOCACHE) CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ./native/...
+	$(VERIFY_GOCACHE) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
+	$(VERIFY_GOCACHE) CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ./...
 	$(VERIFY_GOCACHE) go test -race ./...
 
 server_build:
@@ -115,65 +113,9 @@ dev_financial:
 	docker-compose -f docker/compose/clickhouse-exporter-financial-compose.yaml -p financial up
 
 
-## C ABI compat library (docs/COMPATIBILITY.md, task-69). The wrapper is cgo;
-## native/... stays pure Go. On macOS use cabi-dylib, on Linux cabi-so;
-## "make cabi" picks the current OS.
-TXC_VERSION ?= 6.47.2.26.4
-CABI_GOARCH ?= $(shell go env GOARCH)
-CABI_LIB_BASE = bin/libtxmlconnector
-
-cabi-so:
-	mkdir -p bin
-	CGO_ENABLED=1 GOARCH=$(CABI_GOARCH) go build -buildmode=c-shared -trimpath -ldflags "-X main.defaultVersion=$(TXC_VERSION)" -o $(CABI_LIB_BASE).so ./cmd/connector
-	cp -f cmd/connector/include/txmlconnector.h bin/txmlconnector.h
-	cp -f $(CABI_LIB_BASE).so bin/libtxmlconnector64.so
-
-cabi-dylib:
-	mkdir -p bin
-	CGO_ENABLED=1 GOARCH=$(CABI_GOARCH) go build -buildmode=c-shared -trimpath -ldflags "-X main.defaultVersion=$(TXC_VERSION)" -o $(CABI_LIB_BASE).dylib ./cmd/connector
-	cp -f cmd/connector/include/txmlconnector.h bin/txmlconnector.h
-	cp -f $(CABI_LIB_BASE).dylib bin/libtxmlconnector64.dylib
-
-ifeq ($(shell go env GOOS),darwin)
-cabi: cabi-dylib
-CABI_TEST_LIB = $(CABI_LIB_BASE).dylib
-CABI_TEST_ENV = DYLD_LIBRARY_PATH=bin
-CABI_TEST_LIBS = -Lbin -ltxmlconnector
-else
-cabi: cabi-so
-CABI_TEST_LIB = $(CABI_LIB_BASE).so
-CABI_TEST_ENV = LD_LIBRARY_PATH=bin
-CABI_TEST_LIBS = -Lbin -ltxmlconnector -ldl
-endif
-
-## C9 release builds: Zig is the C toolchain for every target (zig cc -target
-## ...; Linux pinned to glibc 2.17). macOS targets need the macOS SDK, so they
-## are built on a macOS host. Output: bin/zig/<target>/.
-ifeq ($(shell go env GOOS),darwin)
-CABI_ZIG_TARGETS ?= linux-amd64 linux-arm64 windows-amd64 macos-arm64 macos-amd64
-else
-CABI_ZIG_TARGETS ?= linux-amd64 linux-arm64 windows-amd64
-endif
-cabi-zig:
-	TXC_VERSION=$(TXC_VERSION) tools/cabi/zig_build.sh bin/zig $(CABI_ZIG_TARGETS)
-
-## Live read-only C ABI test (C4): source ~/re/demo.env first. No trading commands.
-cabi-live-test: cabi
-	$(CC) -I cmd/connector/include -o bin/abi_live cmd/connector/testdata/abi_live.c $(CABI_TEST_LIBS)
-	mkdir -p $${TXC_LOG_DIR:-bin/abi-live-logs}
-	$(CABI_TEST_ENV) ./bin/abi_live $(CABI_TEST_LIB)
-
-## Portable dlopen/LoadLibrary ABI test (all 9 exports, error paths, callback).
-cabi-test: cabi
-	$(CC) -I cmd/connector/include -o bin/abi_test cmd/connector/testdata/abi_test.c $(CABI_TEST_LIBS)
-	$(CABI_TEST_ENV) ./bin/abi_test $(CABI_TEST_LIB)
-
-## C5 conformance: replay ordered local C-ABI scenarios (cmd/connector/testdata/
-## cabi_scenarios.json) against our c-shared library and compare the wrapper
-## texts/codes byte-for-byte with the reference DLL (docs/protocol/cabi.md).
-cabi-conformance: cabi
-	$(CC) -I cmd/connector/include -o bin/abi_conformance cmd/connector/testdata/abi_conformance.c
-	$(CABI_TEST_ENV) ./bin/abi_conformance $(CABI_TEST_LIB) cmd/connector/testdata/cabi_scenarios.json
+## C ABI compat library (drop-in for the DLL) and the reverse-engineering
+## toolkit moved to github.com/kmlebedev/txmlconnector-native (make cabi*,
+## make re-check, docs/dll-update.md there).
 
 ## Deploy to palmshell via SSH. See deploy/README.md for paths and overrides.
 

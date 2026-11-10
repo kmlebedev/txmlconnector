@@ -29,8 +29,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/native"
-	"github.com/kmlebedev/txmlconnector/native/model"
+	"github.com/kmlebedev/txmlconnector-native/native"
+	"github.com/kmlebedev/txmlconnector-native/native/model"
 )
 
 const defaultUniverse = "SBER,GAZP,LKOH,SMLT,PLZL,VTBR,GMKN,YDEX,T,OZON,SVCB,MOEX,ROSN,AFLT"

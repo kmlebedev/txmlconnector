@@ -11,8 +11,8 @@ import (
 	"time"
 
 	log "github.com/golang/glog"
-	. "github.com/kmlebedev/txmlconnector/client/commands"
-	"github.com/kmlebedev/txmlconnector/connector"
+	. "github.com/kmlebedev/txmlconnector-native/commands"
+	"github.com/kmlebedev/txmlconnector-native/connector"
 	"github.com/streadway/amqp"
 	"gocloud.dev/pubsub"
 	_ "gocloud.dev/pubsub/rabbitpubsub"

@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kmlebedev/txmlconnector/connector"
-	nativeconnector "github.com/kmlebedev/txmlconnector/native"
+	"github.com/kmlebedev/txmlconnector-native/connector"
+	nativeconnector "github.com/kmlebedev/txmlconnector-native/native"
 	pb "github.com/kmlebedev/txmlconnector/proto"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
