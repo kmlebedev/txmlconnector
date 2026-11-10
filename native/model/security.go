@@ -36,3 +36,15 @@ type SecurityOpMask struct {
 	ImmOrCancel   bool
 	CancelBalance bool
 }
+
+// SecuritiesAdded reports the R_SEC_NEW records of one RQ_MAIN reply that
+// arrived after Dial loaded the catalog. After a night restart the broker
+// sends the catalog in sections, so whole boards can appear minutes into a
+// session; a consumer that built its subscription from the catalog at Dial
+// uses this event to subscribe to the late securities. Run delivers it first
+// in the batch of its reply, the way the DLL emits <securities> first.
+type SecuritiesAdded struct {
+	Items []Security
+}
+
+func (*SecuritiesAdded) isEvent() {}
