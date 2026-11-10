@@ -12,6 +12,7 @@ import (
 	"github.com/kmlebedev/txmlconnector/native/model"
 	"github.com/kmlebedev/txmlconnector/native/records"
 	"github.com/kmlebedev/txmlconnector/native/session"
+	"github.com/kmlebedev/txmlconnector/native/xmlcompat"
 )
 
 // ClientConfig configures a typed session.
@@ -72,13 +73,17 @@ type Stats struct {
 
 // Client is a native TRANSAQ session with typed market data.
 type Client struct {
-	cfg      ClientConfig
-	conn     *session.Conn
-	info     *session.Info
-	catalog  *records.Catalog
-	zone     [16]byte
-	serverTZ string
-	bias     time.Duration // UTC = wall + bias
+	cfg     ClientConfig
+	conn    *session.Conn
+	info    *session.Info
+	catalog *records.Catalog
+	// secReported is how many catalog securities the load and the
+	// SecuritiesAdded events of Run have covered. It is separate from the
+	// catalog's DrainPending cursor, which belongs to the connector.
+	secReported int
+	zone        [16]byte
+	serverTZ    string
+	bias        time.Duration // UTC = wall + bias
 
 	mu         sync.Mutex
 	subs       map[model.Symbol]byte // stable board+seccode -> subscription mask
@@ -264,6 +269,9 @@ func (c *Client) load(ctx context.Context, conn *session.Conn) error {
 			c.cfg.OnLoadEvent(events)
 		}
 	}
+	c.mu.Lock()
+	c.secReported = catalog.Len()
+	c.mu.Unlock()
 	return nil
 }
 
@@ -478,6 +486,9 @@ func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) 
 				}
 				break
 			}
+			if added := c.securitiesAdded(); added != nil {
+				events = append([]model.Event{added}, events...)
+			}
 			if err := h(events); err != nil {
 				return err
 			}
@@ -486,6 +497,27 @@ func (c *Client) Run(ctx context.Context, opt RunOptions, h func([]model.Event) 
 			}
 		}
 	}
+}
+
+// securitiesAdded returns the securities Poll added to the catalog since the
+// load or the previous call, in R_SEC_NEW order; nil when there are none.
+func (c *Client) securitiesAdded() *model.SecuritiesAdded {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.catalog == nil {
+		return nil
+	}
+	n := c.catalog.Len()
+	if n <= c.secReported {
+		return nil
+	}
+	secs := c.catalog.Since(c.secReported)
+	c.secReported = n
+	added := &model.SecuritiesAdded{Items: make([]model.Security, 0, len(secs))}
+	for _, sec := range secs {
+		added.Items = append(added.Items, xmlcompat.Security(c.catalog.Startup(), sec))
+	}
+	return added
 }
 
 // symbolOf resolves the stable symbol of a decoded record through the current

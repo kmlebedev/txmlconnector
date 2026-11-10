@@ -145,6 +145,23 @@ func (c *Catalog) Decimals(secid, board uint16) (byte, bool) {
 	return 0, false
 }
 
+// Since returns the securities after the first n in R_SEC_NEW arrival order.
+func (c *Catalog) Since(n int) []SecNew {
+	if n < 0 {
+		n = 0
+	}
+	if n >= len(c.order) {
+		return nil
+	}
+	out := make([]SecNew, 0, len(c.order)-n)
+	for _, id := range c.order[n:] {
+		if s, ok := c.secs[id]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // List returns the known securities in R_SEC_NEW arrival order.
 func (c *Catalog) List() []SecNew {
 	out := make([]SecNew, 0, len(c.order))
